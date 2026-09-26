@@ -159,13 +159,16 @@ live in its track doc; fixed things leave this list.
   (`SB16.DIG`, 220h/5/1/5) gets "Digital sound hardware not found" in the
   DOS box, where Blood and Duke find the card, and works on pure DOS.
 
-- **Four checks fail at the 2026-09-25 baseline on the Linux box, none
+- **Two checks fail at the 2026-09-25 baseline on the Linux box, none
   from that day's changes:** `pit-guest` (the 15.6 ms-wait cases run the
-  guest clock at 13 %, the same on a QEMU built without patch 56),
-  `guest-G9=native` / `guest-G8=native` / `guest-F9=native` (the XP
-  frame against the native render), and `icons` (the MSIX assets are
-  out of date against `gen-icons.sh`). `exec-no-device` and `exec-wine`
-  are the 2026-09-23 ones.
+  guest clock at 13 %, the same on a QEMU built without patch 56) and
+  `icons` (the MSIX assets are out of date against `gen-icons.sh`).
+  `exec-no-device` and `exec-wine` are the 2026-09-23 ones.
+  `guest-G9=native` / `G8` / `F9` failed only under `scripts/test.sh
+  all`, by 1.93 %: `exec_wine_check` exported the Wine executor into the
+  script's shell, so every guest after it ran on Wine's rasteriser
+  (`d3dpt: executor ...libd3dpt_exec_remote.so` in its QEMU log). It runs
+  in a subshell since 2026-09-26, and `all` passes them.
 
 - **The zero-copy ring's frozen slot has no known cause.** `zc_probe()`
   repairs it; doc 12 §4 has what was ruled out and the suspects left.

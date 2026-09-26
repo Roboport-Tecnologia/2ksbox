@@ -117,7 +117,12 @@ exec_wine_bin() { # a Wine for the executor's other process: D3DPT_WINE, the PAT
   done
   return 1
 }
-exec_wine_check() { # the two host tests through the remote executor, frames against the in-process ones
+# A subshell, not a group: run_check calls a check in this shell, and these
+# exports once stayed set for everything after it. Under `all` the XP guest
+# then ran the Wine executor (`d3dpt: executor ...libd3dpt_exec_remote.so`
+# in its QEMU log) and guest-G9/G8/F9=native failed by 1.93 %, while
+# `guest` alone passed.
+exec_wine_check() ( # the two host tests through the remote executor, frames against the in-process ones
   local wine="$1" rc=0
   # macOS: no window server over ssh, and Wine's Mac driver needs one
   if [ "$(uname -s)" = Darwin ] && [ -z "${TERM_PROGRAM:-}" ] && [ -n "${SSH_CONNECTION:-}" ]; then
@@ -133,7 +138,7 @@ exec_wine_check() { # the two host tests through the remote executor, frames aga
   python3 tools/bmpdiff.py "$OUT/dp2-test.bmp" "$OUT/dp2-wine.bmp" --tolerance 8 || rc=1
   python3 tools/bmpdiff.py "$OUT/exec-test.bmp" "$OUT/exec-wine.bmp" --tolerance 8 || rc=1
   return $rc
-}
+)
 dirdisc_check() { # a host directory served as a disc, read back by someone else's ISO 9660 reader
   # discx's own dirdisc case (the libdisc check) proves the model reads
   # the tree back; this one proves the *volume* is one, by handing it to
