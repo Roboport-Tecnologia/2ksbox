@@ -166,6 +166,22 @@ int main(void)
     say("adapter: 0x%08lx \"%s\" \"%s\" %u.%u.%u.%u vendor 0x%04lx device 0x%04lx\n", hr, id.Driver, id.Description,
         HIWORD(id.DriverVersion.HighPart), LOWORD(id.DriverVersion.HighPart), HIWORD(id.DriverVersion.LowPart),
         LOWORD(id.DriverVersion.LowPart), id.VendorId, id.DeviceId);
+    /* every adapter the runtime lists: a Voodoo 2's DirectDraw driver
+     * (3DFX32V2.DLL) is a second one, listed even with no card */
+    say("adapters: %u\n", D3D_(GetAdapterCount)(d3d));
+    for (i = 1; i < D3D_(GetAdapterCount)(d3d); i++) {
+#if DXVER == 8
+        hr = D3D_(GetAdapterIdentifier)(d3d, i, D3DENUM_NO_WHQL_LEVEL, &id);
+#else
+        hr = D3D_(GetAdapterIdentifier)(d3d, i, 0, &id);
+#endif
+        say("adapter %u: 0x%08lx \"%s\" \"%s\"\n", i, hr, id.Driver, id.Description);
+    }
+#if DXVER == 8
+    D3D_(GetAdapterIdentifier)(d3d, 0, D3DENUM_NO_WHQL_LEVEL, &id);
+#else
+    D3D_(GetAdapterIdentifier)(d3d, 0, 0, &id);
+#endif
     hr = D3D_(GetAdapterDisplayMode)(d3d, 0, &mode);
     say("display mode: 0x%08lx %ux%u %s %u Hz\n", hr, mode.Width, mode.Height, fmtname(mode.Format), mode.RefreshRate);
 

@@ -365,7 +365,12 @@ fetch checked by a title, the 2.0-cap flag.
   32. *Worked around in the harness (Win98).* 3dfx's `3DFX32V2.DLL`,
      installed in `base98-br`, was loaded by d3d8.dll with no card on the
      machine and crashed d3d8 visual and device. `tools/win98-winetest.sh`
-     renames it `.OFF` in the raw copy unless `EXTRA` has a voodoo2. Both
+     renames it `.OFF` in the raw copy unless `EXTRA` has a voodoo2.
+     Whether a player meets it (3dfx's driver installed, the Voodoo
+     unticked): the runtimes list one adapter only (`DX8CAPS` / `DX9CAPS`
+     print them all now), Max Payne (d3d8, full screen) runs with the DLL
+     present, and `D9CTEST -modechange` does too. Only d3d8 visual and
+     device crashed in it, so far. Both
      device files then crashed on Wine's 2x4x8 system-memory volume
      (finding 33): `patches/winetest/07` guards that dereference, and
      they run whole.
