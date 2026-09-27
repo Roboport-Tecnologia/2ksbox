@@ -835,3 +835,4 @@ Filled in as step 6 runs. A title gets a row when it has been tried.
 
 | Title | API / SM | OS | Result |
 |---|---|---|---|
+| Max Payne 2 | d3d8 | Win98 (`base98-br`) | **Plays**, every setting at its maximum (user, by hand, 2026-09-27). Its installer warns of no AGP texture acceleration (the driver has no non-local heap); the game does not need it. The USA Play disc's SecuROM times single-sector reads across the disc (DPM), which a cue/bin cannot answer |
