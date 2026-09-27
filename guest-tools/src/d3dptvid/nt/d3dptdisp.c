@@ -514,8 +514,12 @@ HSURF APIENTRY DrvEnableSurface(DHPDEV dhpdev)
         dbg_puts(&p->core, "d3dptdisp: map failed\n");
         return NULL;
     }
-    p->core.fb = vmi.FrameBufferBase;
-    p->core.fb_len = vmi.FrameBufferLength;
+    /* VRAM from its start, and the screen FrameBufferBase - VideoRamBase
+     * into it (Vista and later: above the boot screen's uncached pages,
+     * d3dptvid.c). Every offset the device and DirectDraw see is VRAM's. */
+    p->core.fb = vmi.VideoRamBase;
+    p->core.fb_len = vmi.VideoRamLength;
+    p->core.fb_base = (ULONG)((PUCHAR)vmi.FrameBufferBase - (PUCHAR)vmi.VideoRamBase);
     if (p->core.bpp == 8) {
         set_clut(p, 0, 256, p->pal);
     }
@@ -539,7 +543,7 @@ HSURF APIENTRY DrvEnableSurface(DHPDEV dhpdev)
         ULONG v;
         for (v = 0; v < sizeof(variants) / sizeof(variants[0]); v++) {
             if (EngModifySurface(hsurf, p->hdev, variants[v].hooks, variants[v].surf,
-                                 (DHSURF)p, p->core.fb, (LONG)p->core.pitch, NULL)) {
+                                 (DHSURF)p, (PUCHAR)p->core.fb + p->core.fb_base, (LONG)p->core.pitch, NULL)) {
                 dbg_hex(&p->core, "d3dptdisp: device surface, variant ", v);
                 dbg_puts(&p->core, "\n");
                 p->device_surface = TRUE;
@@ -556,7 +560,7 @@ HSURF APIENTRY DrvEnableSurface(DHPDEV dhpdev)
     }
     if (!hsurf) {
         hsurf = (HSURF)EngCreateBitmap(sizl, p->core.pitch, bmf_of(p),
-                                       BMF_TOPDOWN | BMF_NOZEROINIT, p->core.fb);
+                                       BMF_TOPDOWN | BMF_NOZEROINIT, (PUCHAR)p->core.fb + p->core.fb_base);
         if (!hsurf) {
             dbg_puts(&p->core, "d3dptdisp: EngCreateBitmap failed\n");
             goto unmap;
@@ -569,7 +573,7 @@ HSURF APIENTRY DrvEnableSurface(DHPDEV dhpdev)
         dbg_puts(&p->core, "d3dptdisp: engine bitmap surface (no DirectDraw)\n");
     }
     p->hsurf = hsurf;
-    dbg_hex(&p->core, "d3dptdisp: surface ", (ULONG)(ULONG_PTR)p->core.fb);
+    dbg_hex(&p->core, "d3dptdisp: surface ", (ULONG)(ULONG_PTR)p->core.fb + p->core.fb_base);
     dbg_hex(&p->core, " pitch ", p->core.pitch);
     dbg_puts(&p->core, "\n");
     return hsurf;
@@ -1041,7 +1045,7 @@ static DWORD APIENTRY DdFlipToGDISurface(PDD_FLIPTOGDISURFACEDATA d)
     PPDEV p = (PPDEV)d->lpDD->dhpdev;
 
     if (d->dwToGDI && p->core.regs) {
-        p->core.regs[D3DPT_FB_REG_OFFSET / 4] = 0;
+        p->core.regs[D3DPT_FB_REG_OFFSET / 4] = p->core.fb_base;
         p->core.flip_pending = FALSE;
     }
     d->ddRVal = DD_OK;
@@ -1223,7 +1227,7 @@ BOOL APIENTRY DrvGetDirectDrawInfo(DHPDEV dhpdev, DD_HALINFO *pHalInfo, DWORD *p
 
     for (i = 0; i < sizeof(*pHalInfo) / 4; i++) ((ULONG *)pHalInfo)[i] = 0;
     pHalInfo->dwSize = sizeof(*pHalInfo);
-    pHalInfo->vmiData.fpPrimary = 0;
+    pHalInfo->vmiData.fpPrimary = p->core.fb_base;
     pHalInfo->vmiData.dwDisplayWidth = p->core.w;
     pHalInfo->vmiData.dwDisplayHeight = p->core.h;
     pHalInfo->vmiData.lDisplayPitch = (LONG)p->core.pitch;
@@ -1238,7 +1242,7 @@ BOOL APIENTRY DrvGetDirectDrawInfo(DHPDEV dhpdev, DD_HALINFO *pHalInfo, DWORD *p
     pHalInfo->vmiData.dwTextureAlign = 32;
     pHalInfo->vmiData.dwZBufferAlign = 32;
     pHalInfo->vmiData.dwAlphaAlign = 32;
-    pHalInfo->vmiData.pvPrimary = p->core.fb;
+    pHalInfo->vmiData.pvPrimary = (PUCHAR)p->core.fb + p->core.fb_base;
 
     pHalInfo->ddCaps.dwSize = sizeof(DDNTCORECAPS);
     /* The caps dxg accepts, found by bisection (doc 15 "dxg's caps

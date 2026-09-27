@@ -52,6 +52,14 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcA(h, m, w, l);
 }
 
+/* where a frame's time goes: the performance counter around each of the
+ * four calls, summed over the run (Windows 7's DirectDraw runtime paced
+ * the loop at 15.6 ms steps where XP's ran at the refresh, track M18) */
+static LARGE_INTEGER qpf;
+static double call_ms[5];
+static LONGLONG tick(void) { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
+static void spent(int k, LONGLONG t0) { call_ms[k] += (double)(tick() - t0) * 1000.0 / (double)qpf.QuadPart; }
+
 static void pump(void)
 {
     MSG msg;
@@ -350,15 +358,21 @@ int main(int argc, char **argv)
     logp("back:    %lux%lu %lu bpp pitch %ld caps %08lx %s\n", sd.dwWidth, sd.dwHeight,
          sd.ddpfPixelFormat.dwRGBBitCount, sd.lPitch, sd.ddsCaps.dwCaps, caps_str(sd.ddsCaps.dwCaps));
 
+    QueryPerformanceFrequency(&qpf);
     t0 = GetTickCount();
     for (i = 0; i < frames; i++) {
         DDBLTFX fx;
         RECT r;
         unsigned y, x;
+        LONGLONG c0;
 
+        c0 = tick();
         pump();
+        spent(4, c0);
         memset(&sd, 0, sizeof(sd)); sd.dwSize = sizeof(sd);
+        c0 = tick();
         hr = back->lpVtbl->Lock(back, NULL, &sd, DDLOCK_WAIT | DDLOCK_WRITEONLY, NULL);
+        spent(0, c0);
         if (FAILED(hr)) { logp("Lock failed %08lx at frame %d\n", hr, i); goto out; }
         for (y = 0; y < sd.dwHeight; y++) {
             unsigned char *row = (unsigned char *)sd.lpSurface + y * sd.lPitch;
@@ -377,7 +391,9 @@ int main(int argc, char **argv)
                 for (x = 0; x < sd.dwWidth; x++) p[x] = ((x + i) / 16 & 1) ? v : v ^ 0xffff;
             }
         }
+        c0 = tick();
         hr = back->lpVtbl->Unlock(back, NULL);
+        spent(1, c0);
         if (FAILED(hr)) { logp("Unlock failed %08lx\n", hr); goto out; }
 
         /* a moving bar through Blt (HEL or HAL, whichever DirectDraw picks) */
@@ -385,14 +401,18 @@ int main(int argc, char **argv)
         fx.dwFillColor = sd.ddpfPixelFormat.dwRGBBitCount == 32 ? 0x00ff2020 :
                          sd.ddpfPixelFormat.dwRGBBitCount == 8 ? 255 : 0xf800;
         r.left = (i * 3) % (w - 40); r.right = r.left + 40; r.top = h / 4; r.bottom = h * 3 / 4;
+        c0 = tick();
         hr = back->lpVtbl->Blt(back, &r, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+        spent(2, c0);
         if (FAILED(hr)) { logp("Blt(COLORFILL) failed %08lx at frame %d\n", hr, i); goto out; }
 
+        c0 = tick();
         if (windowed) {
             hr = prim->lpVtbl->Blt(prim, NULL, back, NULL, DDBLT_WAIT, NULL);
         } else {
             hr = prim->lpVtbl->Flip(prim, NULL, DDFLIP_WAIT);
         }
+        spent(3, c0);
         if (FAILED(hr)) { logp("%s failed %08lx at frame %d\n", windowed ? "Blt(primary)" : "Flip", hr, i); goto out; }
         if (pal) {
             /* palette animation: rotate the 256 entries by one per frame */
@@ -409,6 +429,10 @@ int main(int argc, char **argv)
     }
     t1 = GetTickCount();
     logp("%d frames in %lu ms = %.1f fps\n", frames, t1 - t0, t1 > t0 ? frames * 1000.0 / (t1 - t0) : 0.0);
+    if (frames > 0)
+        logp("per frame: Lock %.2f ms, Unlock %.2f, colour fill %.2f, %s %.2f, messages %.2f\n",
+             call_ms[0] / frames, call_ms[1] / frames, call_ms[2] / frames, windowed ? "Blt(primary)" : "Flip",
+             call_ms[3] / frames, call_ms[4] / frames);
 
     hr = dd->lpVtbl->WaitForVerticalBlank(dd, DDWAITVB_BLOCKBEGIN, NULL);
     logp("WaitForVerticalBlank %08lx\n", hr);

@@ -228,8 +228,9 @@ typedef struct _D3DCTX {
 
 typedef struct d3dpt_core {
     volatile ULONG *regs;       /* public access range (register page) */
-    PVOID fb;                   /* mapped frame buffer */
+    PVOID fb;                   /* mapped frame buffer: VRAM from its start */
     ULONG fb_len;
+    ULONG fb_base;              /* where the screen starts in VRAM: 0, or 4 MiB on NT 6 (d3dptvid.c NT6_FB_BASE) */
     ULONG w, h, bpp, pitch;     /* the mode */
 
     /* the flip chain's vertical blank (see d3dpt_flip_done) */

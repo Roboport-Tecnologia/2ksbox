@@ -29,6 +29,7 @@ The roadmap is doc 08.
 | 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted |
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
+| 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -721,3 +722,29 @@ DDI work, tested twice). Keeping the DLLs as a fallback beside the
 driver: two paths to keep equal, and the DLL path is the one with the
 stubs. An OpenGL wrapper that stays per game after the Direct3D DLLs go:
 the point is a game folder nobody touches.
+
+## ADR-022: Aero on Windows 7 through a WDDM driver of our own, beside the XP one (2026-09-27)
+
+**Decision** (user: "ultimately what I want is to run full Aero on
+windows 7"). Windows 7's compositor runs only on a WDDM driver, so the
+guest gets a second display driver: a WDDM 1.1 kernel-mode driver and a
+Direct3D 9 user-mode driver over the same `d3dpt-vga` device, protocol,
+executor and DXVK. The XP-model driver stays: it is XP's and Win98's
+driver, and Windows 7's fallback (it already runs there, track M18 step
+1). **The WDDM headers are our own** (user decision): the subset we use,
+written from Microsoft's public documentation, with a small shim for
+`DxgkInitialize`, so the driver keeps the Linux cross build and the
+open-source rule. **32-bit first** (user decision): the user's Windows 7
+is 32-bit and loads an unsigned driver after a prompt; 64-bit and its
+signing are a later step.
+
+**Why.** DWM composes through Direct3D 9Ex surfaces shared between
+processes, which only WDDM's video memory manager provides; no XDDM driver
+gets Aero. The host side already executes a Direct3D 9 stream, so the
+new work is the guest's half and the device's interrupt, fence and DMA.
+
+**Rejected.** Building the WDDM parts with the WDK on the user's PC: faster
+to start, but it ties the driver to a Windows build machine and to the
+WDK's licence. Stretching the XP-model driver: no path to DWM exists
+there.
+

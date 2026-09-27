@@ -1498,6 +1498,35 @@ the 9x layer not yet.
   (D3DFEAT9's 4x4 float target put its whole frame through a 4x4
   viewport until then).
 
+## Windows 7 (track M18)
+
+The same driver installs and runs on Windows 7 SP1 (32-bit), which still
+loads XP-model display drivers: no Aero (the desktop compositor needs a
+WDDM driver, track M18), and everything else as on XP. DirectDraw takes
+the HAL, `d3d9.dll` / `d3d8.dll` get the DX9 / DX8 DDI with shader model
+3.0, and D3DGAME9, D3DGAME8, D3DFEAT9 and D3D7TEST give the native frames
+byte for byte (`tools/xp-driver-test.sh` with `MEM=2048`, 2026-09-27).
+32-bit Windows 7 loads an unsigned kernel driver after the "can't verify
+the publisher" prompt; 64-bit would need a signed one.
+
+**The screen starts 4 MiB into VRAM on Windows 6.x.** Windows 7's boot
+screen draws through VBE on the adapter's linear frame buffer (1024x768x24,
+the first 2.25 MiB), and the kernel keeps that view, uncached, for the blue
+screen. From Vista on the memory manager gives every later mapping of the
+same physical pages the same cache type, so the miniport's cached views
+(`d3dptvid.c`, "VRAM mappings") came out uncached over exactly that range
+(QEMU's `info tlb`: PCD and PWT on those 576 pages alone). The primary and
+a full-screen flip chain live there: DDTEST wrote its frames at 30
+frames/s (every frame 2 x 15.6 ms, which first looked like a timer) and a
+windowed blit to the primary took 70 ms. The miniport now puts the screen
+at `NT6_FB_BASE` (4 MiB, which also covers a 32-bit boot screen) when
+`PsGetVersion` says 6 or later, and reports it as `FrameBufferBase -
+VideoRamBase`. The display driver keeps every offset VRAM's and adds the
+base to the primary, GDI's surface, the flip back to GDI and the heap's
+start; an older display driver reads 0 there. XP and Win98 are unchanged.
+DDTEST then runs at the refresh (75 Hz, the rate Windows 7 picks) and the
+windowed blit at 291 frames/s.
+
 ## The ddflags bits
 
 `-device d3dpt-vga,ddflags=N` (the adapter's DDFLAGS register; `DDFLAGS=`

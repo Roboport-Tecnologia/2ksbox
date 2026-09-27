@@ -50,7 +50,7 @@ void dbg_hex(d3dpt_core *p, const char *tag, ULONG v)
 
 ULONG heap_start(d3dpt_core *p)
 {
-    return (p->pitch * p->h + 4095) & ~4095u;
+    return (p->fb_base + p->pitch * p->h + 4095) & ~4095u;
 }
 
 /* the DirectDraw heap ends where the command window starts */

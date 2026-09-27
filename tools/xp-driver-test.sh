@@ -184,7 +184,7 @@ CD1="$ISO"
 if [ -n "${GAME_ISO:-}" ]; then CD1="$GAME_ISO"; CD2=(-drive "file=$ISO,media=cdrom,if=ide,index=3,readonly=on"); fi
 export D3DPT_EXEC_LIB="${D3DPT_EXEC_LIB:-$ROOT/build/d3dpt/libd3dpt_exec.so}"
 export D3DPT_DXVK_LIB="${D3DPT_DXVK_LIB:-$ROOT/build/dxvk/src/d3d9/libdxvk_d3d9.so.0}"
-"$ROOT/build/qemu/qemu-system-i386" -L "$ROOT/qemu/pc-bios" "${ACCEL[@]}" -machine pc -m 512 \
+"$ROOT/build/qemu/qemu-system-i386" -L "$ROOT/qemu/pc-bios" "${ACCEL[@]}" -machine pc -m "${MEM:-512}" \
   -hda "$IMG" -hdb "$SCRATCH" -cdrom "$CD1" "${CD2[@]}" "${VGA_ARGS[@]}" \
   -net none -usb -device usb-tablet -display none -qmp "unix:$SOCK,server,nowait" \
   -serial "file:$SER" -monitor none ${QEMU_EXTRA:-} > "$LOG" 2>&1 &
@@ -232,9 +232,32 @@ gw_wait_sock "$SOCK" || exit 1
 # something and says so on COM1 (tools/guestwait.sh). `install` is the mode
 # where the driver is not in the image yet, so there is no adapter line to
 # wait for either. The knocking works on every mode.
-gw_poke_until "$SOCK" xp 'cmd /c echo SHELLUP > COM1' "${BOOT_WAIT:-300}" grep -q SHELLUP "$SER" || {
+gw_poke_until "$SOCK" xp 'cmd /c ver > COM1 & echo SHELLUP > COM1' "${BOOT_WAIT:-300}" grep -q SHELLUP "$SER" || {
   Q screendump "$OUT/$MODE-noshell.png" || true
   echo "the guest never reached its shell: see $OUT/$MODE-noshell.png and $LOG"
+}
+# Windows 7 (track M18) runs the same checks. What differs is the install:
+# DRVINST needs an administrator, and UAC gives one only to a program
+# started so. Win7's Run box has no Ctrl+Shift+Enter (Windows 10 added it),
+# its Start menu search box has, and UAC's prompt then takes Alt+Y. The
+# unsigned-driver prompt that follows ("Windows can't verify the publisher")
+# never gets the keyboard, so it is clicked, on a USB tablet: "Install this
+# driver software anyway" sits 18 px right of and 48 px below the screen's
+# centre, the prompt being centred.
+NT6=0; grep -q 'Version 6\.' "$SER" 2>/dev/null && NT6=1
+elevated() {  # an administrator's console, the command typed into it
+  Q keys esc; sleep 1; Q keys meta_l; sleep 2; Q type 'cmd'; sleep 2
+  Q keys ctrl+shift+ret; sleep 5; Q keys alt+y; sleep 5
+  Q type "$1"; Q keys ret
+}
+click_install_anyway() {  # the unsigned-driver prompt's second choice, clicked until the installer answers
+  local k geom w h
+  for k in 1 2 3 4 5 6; do
+    sleep 10; grep -q DRVDONE "$SER" && return 0
+    Q screendump "$OUT/unsigned-$k.png" >/dev/null 2>&1 || true
+    geom=$(head -c 20 "$OUT/unsigned-$k.png.ppm" 2>/dev/null | sed -n 2p); w=${geom% *}; h=${geom#* }
+    [ -n "$w" ] && Q click $((w / 2 + 18)) $((h / 2 + 48)) "$w" "$h" >/dev/null || true
+  done
 }
 case "$MODE" in
   install)
@@ -248,7 +271,13 @@ case "$MODE" in
     # guest. A screendump every 20 s meanwhile (install-NN.png), because the
     # one at the end shows where it ended, not what it went through.
     ( i=0; while sleep 20; do i=$((i+1)); Q screendump "$OUT/install-$(printf %02d "$i").png" >/dev/null 2>&1 || true; done ) & SHOTPID=$!
-    run_until DRVDONE "${CMD_WAIT:-300}" 'D:\DRIVER\DRVINST.EXE > COM1'
+    if [ "$NT6" = 1 ]; then
+      elevated 'D:\DRIVER\DRVINST.EXE > COM1 & echo DRVDONE > COM1'
+      click_install_anyway
+      gw_wait_log "$SER" DRVDONE "${CMD_WAIT:-300}" || true
+    else
+      run_until DRVDONE "${CMD_WAIT:-300}" 'D:\DRIVER\DRVINST.EXE > COM1'
+    fi
     Q screendump "$OUT/install-done.png"
     # the count to beat: the machine has to program the desktop mode once
     # more, after the restart, and that (not a screendump of a desktop
@@ -256,7 +285,7 @@ case "$MODE" in
     # driver (nothing at all here on the first install: the count is 0)
     seen=$(grep -c "linear mode on" "$LOG" 2>/dev/null || true)
     want=$(( ${seen:-0} + 1 ))
-    Q type 'shutdown -r -t 0'; Q keys ret
+    if [ "$NT6" = 1 ]; then run 'shutdown -r -t 0'; else Q type 'shutdown -r -t 0'; Q keys ret; fi
     gw_wait_count "$LOG" "linear mode on" "$want" "${REBOOT_WAIT:-300}" || true
     Q screendump "$OUT/install-rebooted.png"
     kill $SHOTPID 2>/dev/null || true

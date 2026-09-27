@@ -328,7 +328,10 @@ fi
 
 # SETUP.EXE at the root: the installer that reads the folders above and
 # knows which of them this guest's Windows wants (guest-tools/src/setup.c).
-i686-w64-mingw32-gcc -O2 -Wall -o "$OUT/iso/setup.exe" "$ROOT/guest-tools/src/setup.c" \
+# Its manifest (setup.manifest) asks Vista and 7 for an administrator and
+# keeps their Program Compatibility Assistant quiet afterwards.
+( cd "$ROOT/guest-tools/src" && i686-w64-mingw32-windres setup.rc -O coff -o "$OUT/setup-res.o" )
+i686-w64-mingw32-gcc -O2 -Wall -o "$OUT/iso/setup.exe" "$ROOT/guest-tools/src/setup.c" "$OUT/setup-res.o" \
   -ladvapi32 -luser32 -lwinmm -lshell32
 
 # Every binary on the disc, however deep and whatever case it was staged

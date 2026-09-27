@@ -171,6 +171,16 @@ IOCTLs) alone rather than downgrade it.
 guest (`REBOOT=1` for the restart, `VOODOO=1` for the 3dfx card;
 `docs/testing.md`).
 
+**Windows 7** (32-bit) takes the XP family's components, installed as on
+XP (track M18). SETUP carries a manifest asking for an administrator
+(`src/setup.manifest`), so UAC asks once, and the display driver's install
+shows Windows' "can't verify the publisher" prompt, answered with "Install
+this driver software anyway". Without the manifest Windows 7 elevated
+SETUP by its name anyway, then showed the Program Compatibility
+Assistant's "might not have installed correctly". Checked by hand on the
+user's `win7` machine: `SETUP /ALL` installs all four and the machine
+restarts on the driver. `setup-guest-test.sh` has no `win7` family yet.
+
 ## CDSHELF: the disc shelf from inside the machine
 
 The launcher's shelf (doc 07) from a guest that may be mid-game.

@@ -59,6 +59,23 @@ NTSYSAPI NTSTATUS NTAPI ZwMapViewOfSection(HANDLE SectionHandle, HANDLE ProcessH
                                            ULONG AllocationType, ULONG Win32Protect);
 NTSYSAPI NTSTATUS NTAPI ZwUnmapViewOfSection(HANDLE ProcessHandle, PVOID BaseAddress);
 NTSYSAPI NTSTATUS NTAPI ZwClose(HANDLE Handle);
+NTSYSAPI BOOLEAN NTAPI PsGetVersion(PULONG MajorVersion, PULONG MinorVersion, PULONG BuildNumber, PVOID CSDVersion);
+
+/*
+ * The bottom of VRAM on Windows Vista and 7 (track M18). Their boot screen
+ * draws through VBE on this adapter's linear frame buffer (1024x768x24,
+ * the first 2.25 MiB) and the kernel keeps that view, uncached, for the
+ * blue screen. From Vista on the memory manager gives every later mapping
+ * of the same physical pages the same cache type, so the cached views
+ * above came out uncached over exactly that range: the primary and a
+ * full-screen flip chain, where DDTEST wrote its frames at 30 frames/s
+ * and a windowed blit took 70 ms. So on NT 6 the screen starts above it.
+ * The display driver learns the offset from FrameBufferBase -
+ * VideoRamBase; an older display driver sees 0 there and needs nothing
+ * else, since the primary is then at the start as before. 4 MiB covers
+ * the boot screen at 32 bits too.
+ */
+#define NT6_FB_BASE (4u << 20)
 
 static WCHAR physmem_name[] = L"\\Device\\PhysicalMemory";
 
@@ -94,6 +111,7 @@ typedef struct _DEVICE_EXTENSION {
     PHYSICAL_ADDRESS vram_phys;           /* BAR 0 */
     ULONG vram_len;
     PUCHAR vram;                          /* BAR 0 mapped (kernel VA), for clearing */
+    ULONG fb_base;                        /* where the screen starts in VRAM: NT6_FB_BASE on Vista and later, else 0 */
     ULONG num_modes;
     PVIDEO_MODE_INFORMATION modes;        /* num_modes entries */
     ULONG cur_mode;                       /* index into modes, or ~0 */
@@ -228,13 +246,13 @@ static VP_STATUS set_mode(PDEVICE_EXTENSION d, ULONG index, BOOLEAN zero)
     /* As on real adapters, the new mode comes up black, not with the old
      * desktop bytes reinterpreted at the new pitch. */
     if (zero && d->vram) {
-        VideoPortZeroMemory(d->vram, m->ScreenStride * m->VisScreenHeight);
+        VideoPortZeroMemory(d->vram + d->fb_base, m->ScreenStride * m->VisScreenHeight);
     }
     reg_write(d, D3DPT_FB_REG_WIDTH, m->VisScreenWidth);
     reg_write(d, D3DPT_FB_REG_HEIGHT, m->VisScreenHeight);
     reg_write(d, D3DPT_FB_REG_BPP, m->BitsPerPlane);
     reg_write(d, D3DPT_FB_REG_PITCH, m->ScreenStride);
-    reg_write(d, D3DPT_FB_REG_OFFSET, 0);
+    reg_write(d, D3DPT_FB_REG_OFFSET, d->fb_base);
     reg_write(d, D3DPT_FB_REG_HZ, m->Frequency);
     reg_write(d, D3DPT_FB_REG_ENABLE, 1);
     d->cur_mode = index;
@@ -300,10 +318,16 @@ static VP_STATUS NTAPI HwFindAdapter(PVOID ext, PVOID ctx, PWSTR args,
      * driver's DirectDraw heap. 32 MiB of system PTEs is what any real
      * adapter's miniport takes. */
     d->vram = MmMapIoSpace(d->vram_phys, d->vram_len, MmCached);
+    {
+        ULONG major = 0;
+        PsGetVersion(&major, NULL, NULL, NULL);
+        d->fb_base = major >= 6 && d->vram_len >= 4 * NT6_FB_BASE ? NT6_FB_BASE : 0;
+    }
     dbg_puts(d, "d3dptvid: adapter found\n");
     dbg_hex(d, "  vram ", d->vram_phys.LowPart);
     dbg_hex(d, " len ", d->vram_len);
     dbg_hex(d, " regs ", d->regs_phys.LowPart);
+    dbg_hex(d, " screen at ", d->fb_base);
     dbg_puts(d, "\n");
 
     st = build_mode_table(d);
@@ -439,8 +463,8 @@ static BOOLEAN NTAPI HwStartIO(PVOID ext, PVIDEO_REQUEST_PACKET rp)
         /* the display driver draws through the miniport's cached kernel view */
         out->VideoRamBase = d->vram;
         out->VideoRamLength = d->vram_len;
-        out->FrameBufferBase = d->vram;
-        out->FrameBufferLength = d->vram_len;
+        out->FrameBufferBase = d->vram + d->fb_base;
+        out->FrameBufferLength = d->vram_len - d->fb_base;
         rp->StatusBlock->Information = sizeof(*out);
         break;
     }

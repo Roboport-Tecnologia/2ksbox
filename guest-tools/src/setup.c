@@ -1250,7 +1250,7 @@ static void usage(void)
            "  SETUP /LOG <file>     write the log there (default C:\\2KSBOX\\SETUP.LOG)\n");
 }
 
-/* "Windows 98 SE" / "Windows XP", shown so the user can confirm it: the
+/* "Windows 98 SE" / "Windows XP" / "Windows 7", shown so the user can confirm it: the
  * component list differs per family. */
 static void os_name(char *out, OSVERSIONINFOA *v)
 {
@@ -1259,7 +1259,9 @@ static void os_name(char *out, OSVERSIONINFOA *v)
     if (v->dwPlatformId == VER_PLATFORM_WIN32_NT) {
         if (v->dwMajorVersion == 5 && v->dwMinorVersion == 0) n = "Windows 2000";
         else if (v->dwMajorVersion == 5) n = "Windows XP";
-        else if (v->dwMajorVersion > 5) n = "Windows, newer than XP";
+        else if (v->dwMajorVersion == 6 && v->dwMinorVersion == 0) n = "Windows Vista";
+        else if (v->dwMajorVersion == 6 && v->dwMinorVersion == 1) n = "Windows 7";
+        else if (v->dwMajorVersion > 5) n = "Windows, newer than 7";
         else n = "Windows NT";
     } else if (v->dwMajorVersion == 4) {
         if (v->dwMinorVersion == 0) n = "Windows 95";
