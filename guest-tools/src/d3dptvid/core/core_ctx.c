@@ -58,6 +58,14 @@ HRESULT ctx_create(d3dpt_core *p, ULONG_PTR *handle, ULONG pid, ULONG rt, ULONG 
     c->ret_off = off;
     c->rt = rt;
     c->z = z;
+    /* the caps this runtime was shown (core_caps.c): d3d9.dll's (interface
+     * 5) claim conditional sizes on 9x only, the older runtimes' unless
+     * DDF_TEX_ANYSIZE; the host clamps such a texture then (v20) */
+    c->flags = 0;
+    if (!(ddflags(p) & DDF_TEX_ANYSIZE) && (!(p->dx9 && iface >= 5) || p->pow2_mips)) {
+        c->flags |= D3DPT_CTX_NP2_CONDITIONAL;
+    }
+    c->pad = 0;
     d3dpt_enc_flush(&p->enc);
     hr = p->enc.last_status ? 0x80004005u : d3dpt_enc_result(&p->enc, off)->hr;
     dbg_hex(p, "d3dptdisp: d3d context ", i + 1);
@@ -65,6 +73,7 @@ HRESULT ctx_create(d3dpt_core *p, ULONG_PTR *handle, ULONG pid, ULONG rt, ULONG 
     dbg_hex(p, " z ", c->z);
     dbg_hex(p, " pid ", pid);
     dbg_hex(p, " iface ", iface);
+    dbg_hex(p, " flags ", c->flags);
     dbg_hex(p, " -> ", hr);
     dbg_puts(p, "\n");
     if (hr & 0x80000000u) {

@@ -433,7 +433,7 @@ static void walk_volumeblt(DP2WALK *w, const ULONG *b)
     d3dpt_core *p = w->p;
     SURF *dst = surf_slot(b[0], FALSE), *src = surf_slot(b[1], FALSE);
     ULONG bpp, levels, lv, z, y, skip, w0;
-    BOOL dxt;
+    BOOL dxt, same;
 
     if (p->reg_lines < 4096 && p->bufblt_lines < 8) {
         p->reg_lines++;
@@ -455,8 +455,18 @@ static void walk_volumeblt(DP2WALK *w, const ULONG *b)
         dbg_puts(p, "\n");
     }
     /* a system-memory source with no pixel format (d3d9.dll's, as for
-     * TEXBLT) is the target's format */
-    if (!dst || !src || !dst->depth || !src->depth || !dst->fmt || (dst->fmt != src->fmt && !src->nopf) ||
+     * TEXBLT) is the target's format, and so is one of another format of
+     * the same texel size, as walk_texblt takes it: 9x's runtime registers
+     * the source with its own format, and Wine's test_updatetexture updates
+     * an A8R8G8B8 volume into an X8R8G8B8 one (dropped, the target showed
+     * the VRAM's last contents) */
+    if (!dst || !src) {
+        return;
+    }
+    same = dst->fmt == src->fmt || src->nopf ||
+           (!fmt_is_dxt(src->fmt) && !fmt_is_dxt(dst->fmt) && fmt_row_bytes(src->fmt, 1) &&
+            fmt_row_bytes(src->fmt, 1) == fmt_row_bytes(dst->fmt, 1));
+    if (!same || !dst->depth || !src->depth || !dst->fmt ||
         dst->buffer || src->buffer || b[7] <= b[5] || b[8] <= b[6] || b[10] <= b[9]) {
         return;
     }

@@ -3,14 +3,14 @@ wtrun: d3d9_test d3d9ex: exit 0 in 0 s
 wtrun: d3d9_test stateblock: start
 wtrun: d3d9_test stateblock: exit 0 in 1 s
 wtrun: d3d9_test visual: start
-wtrun: d3d9_test visual: exit 4294967295 in 28 s
+wtrun: d3d9_test visual: exit 170 in 146 s
 wtrun: d3d9_test device: start
-wtrun: d3d9_test device: exit 5 in 123 s
+wtrun: d3d9_test device: exit 169 in 111 s
 WTDONE
 wtrun: d3d8_test stateblock: start
 wtrun: d3d8_test stateblock: exit 0 in 0 s
 wtrun: d3d8_test visual: start
-wtrun: d3d8_test visual: exit 0 in 43 s
+wtrun: d3d8_test visual: exit 68 in 92 s
 wtrun: d3d8_test device: start
-wtrun: d3d8_test device: exit 5 in 69 s
+wtrun: d3d8_test device: exit 89 in 88 s
 WTDONE

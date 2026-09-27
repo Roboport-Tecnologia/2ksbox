@@ -384,8 +384,8 @@ fetch checked by a title, the 2.0-cap flag.
      ddraw's error mapper. The DX9 caps claim `POW2 | NONPOW2CONDITIONAL`
      and the cube / volume POW2 flags on 9x (`core.pow2_mips`), so the
      runtime refuses such a texture up front with `D3DERR_INVALIDCALL`
-     and titles take their power-of-two path. `test_npot_textures` passes; the price is
-     `conditional_np2_repeat_test`'s 2 (finding 30's clamp). The volume's
+     and titles take their power-of-two path. `test_npot_textures` passes, and
+     the conditional claim's clamp is the host's since finding 36. The volume's
      mip-count rule has no cap. A real card meets the same rule, so the
      rig's Win98 run should agree.
   34. *Fixed (Win98).* 9x DirectDraw refuses a
@@ -412,6 +412,25 @@ fetch checked by a title, the 2.0-cap flag.
      a system-memory offscreen plain surface only in the primary's format
      or one of its own 20 (doc 19 §45); the driver has no say, so the
      rig's Win98 should fail the same checks.
+  36. *Fixed (protocol v20).* A conditional claim promises that a texture
+     of other sizes samples clamped, and DXVK wraps it: Win98's d3d9
+     `conditional_np2_repeat_test` drew the texture's inside where the
+     rig's GeForce 6200 draws its border, and every DX7 / DX8 title
+     (their faces claim `NONPOW2CONDITIONAL` for Crimson Skies) would
+     have met the same. The driver flags the contexts whose runtime
+     was shown the claim (`D3DPT_CTX_NP2_CONDITIONAL`: d3d9.dll on 9x,
+     the older runtimes unless `DDF_TEX_ANYSIZE`); on those the executor
+     forces `ADDRESSU` / `V` / `W` to `CLAMP` while such a texture is
+     bound and gives the app's own modes back for a power-of-two one
+     (`Dp2::apply_addr`; a state set records the app's values, and one
+     executed is read back before the clamp goes on again).
+  37. *Fixed (Win98).* `VOLUMEBLT` was dropped when the two volumes'
+     formats differed, and 9x's runtime registers a system-memory volume
+     with its own format (XP's d3d9.dll with none), so Wine's
+     `test_updatetexture` A8R8G8B8 into X8R8G8B8 volume (d3d9 case 2 /
+     12, d3d8 case 2 / 13) sampled the VRAM's last contents (green 0x6d
+     for 0x7f). The walker takes another format of the same texel size,
+     as `TEXBLT` does, and copies the bytes.
 
 - **The suites in a guest** (2026-09-25). Wine 11.0 is the pin: its
   test EXEs import only functions that XP's and Win98's own
@@ -624,8 +643,21 @@ track builds.
   stateblocks 0, d3d8 visual 68 again. d3d9 visual crashed in
   `test_texture_transform_flags`, which makes an A32B32G32R32F target and
   texture and uses them unchecked, so it is left out too (only
-  `test_lighting_matrices` comes after it). One more rig run with that
-  list gives d3d9 visual's totals and the saved `rig-98.txt`.
+  `test_lighting_matrices` comes after it). The run with that list
+  (2026-09-27, 01:28) is `rig-98.txt` and `logs/rig-98/`: every file to
+  its end, d3d9 visual 192444 checks / 170 failures, device 169, d3d8
+  visual 68, device 89, both stateblocks 0. Our Win98 guest with the
+  same list, against it (`--split dxvk-wine.txt --by-function`): 48 keys
+  worse, 23 of them DXVK's own; of the rest, `depth_clamp_test` /
+  `z_range_test` are finding 24 (XP fails them too), then three that are
+  Win98's only: `conditional_np2_repeat_test` (fixed, finding 36),
+  `test_pixel_format` 4 + 4 (the GL pass-through's `OPENGL32.DLL` in
+  `SYSTEM` keeps one pixel format per process, `wrapgl32.c`'s
+  `currPixFmt`, so a new window's DC reports the last one set; not the
+  D3D driver's, and a game sets its own window's format) and
+  `test_updatetexture`'s volume case with a format change (fixed,
+  finding 37). What is left against the rig is DXVK's, finding 24 and
+  `test_pixel_format`.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
   runs the same EXEs on the host's Wine with DXVK's `d3d9.dll`, and
   `reference/winetest/dxvk-wine.txt` is its baseline. A guest failure

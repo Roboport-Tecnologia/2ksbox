@@ -14,7 +14,7 @@ The driver came in three stages, which still name the parts: **M7a** the
 framebuffer driver, **M7b** the DirectDraw DDI, **M7c** the Direct3D DDI
 (a DirectX 7 HAL, grown into a DirectX 8 DDI with hardware T&L, and
 since M16 a DirectX 9 DDI with shader model 3.0). The
-register set is **v5** (`D3DPT_FB_VERSION`) and the protocol **v19**
+register set is **v5** (`D3DPT_FB_VERSION`) and the protocol **v20**
 (`D3DPT_PROTO_VERSION`). FIFA 2000, Max Payne, Diablo, Moto Racer 1997,
 GTA 2 and GTA Vice City run on it with no DLL in their folders.
 
@@ -686,7 +686,11 @@ guest (XP)                                      host
   `D3DERR_DRIVERINTERNALERROR` (`0x88760827`) whatever the caps said. So the 9x layer sets
   `core.pow2_mips` and the DX9 caps keep the DX8 face's `POW2 |
   NONPOW2CONDITIONAL` with `CUBEMAP_POW2` / `VOLUMEMAP_POW2` (M16 finding
-  33). The price is `conditional_np2_repeat_test`'s 2 checks there.
+  33). **The host keeps the conditional promise** (v20): the driver
+  flags each context whose runtime was shown the conditional claim
+  (`D3DPT_CTX_NP2_CONDITIONAL` in `CTX_CREATE`), and on such a context
+  the executor samples a texture of other sizes with every address mode
+  clamped, whatever the app set, as those cards do (M16 finding 36).
 - **A Z buffer written through a Lock.** Some titles reset depth by
   writing the Z buffer, and the HEL performs an application's depth fill
   through `DdLock` too, since the driver claims no blits. Both write VRAM

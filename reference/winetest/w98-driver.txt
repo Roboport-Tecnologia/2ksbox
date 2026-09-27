@@ -46,7 +46,6 @@ d3d8_test_visual visual.c:5138 6
 d3d8_test_visual visual.c:5141 4
 d3d8_test_visual visual.c:6640 1
 d3d8_test_visual visual.c:6759 8
-d3d8_test_visual visual.c:7402 1
 d3d8_test_visual visual.c:9215 3
 d3d8_test_visual visual.c:9217 3
 d3d8_test_visual visual.c:9850 3
@@ -145,7 +144,6 @@ d3d9_test_visual visual.c:18342 6
 d3d9_test_visual visual.c:18345 4
 d3d9_test_visual visual.c:20054 1
 d3d9_test_visual visual.c:20383 8
-d3d9_test_visual visual.c:21788 1
 d3d9_test_visual visual.c:2410 1
 d3d9_test_visual visual.c:2412 1
 d3d9_test_visual visual.c:24589 1
@@ -162,5 +160,3 @@ d3d9_test_visual visual.c:3914 1
 d3d9_test_visual visual.c:7589 5
 d3d9_test_visual visual.c:8852 5
 d3d9_test_visual visual.c:8854 5
-d3d9_test_visual visual.c:9936 1
-d3d9_test_visual visual.c:9938 1

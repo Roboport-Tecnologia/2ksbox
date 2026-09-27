@@ -1,64 +1,83 @@
 visual.c:12583: Driver string: "NVDD32.DLL"
 visual.c:12584: Description string: "NVIDIA GeForce 6200"
 visual.c:12587: Driver version 4.14.10.7772
-visual.c:417: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3425: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:572: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:981: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:1072: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:1255: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:2361: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:2729: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:2868: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:2654: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:1634: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:1964: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3027: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3266: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3578: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3716: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:3880: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:4216: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:4382: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:4801: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:4508: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:5044: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:5250: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:5367: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:5578: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:6148: Tests skipped: Failed to create a D3D device.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (160, 120), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 120), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (480, 120), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (160, 240), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (480, 240), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (160, 360), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 360), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (480, 360), got 0x00fbfbfb, case 0.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 1.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 2.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 3.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 4.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 5.
+visual.c:1040: Test failed: Expected color 0x00ffffff at location (320, 240), got 0x00fdfdfd, case 6.
+visual.c:3034: Tests skipped: D3DFMT_P8 textures not supported.
+visual.c:3663: Test failed: Expected color 0x0000ff00 at 400,60, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 560,60, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x0000ff00 at 400,180, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 560,180, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x0000ff00 at 80,300, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x0000ff00 at 240,300, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x0000ff00 at 400,300, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 560,300, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 80,420, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 240,420, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 400,420, got 0x000000ff.
+visual.c:3663: Test failed: Expected color 0x00ff0000 at 560,420, got 0x000000ff.
+visual.c:3902: Tests skipped: No INTZ support, skipping INTZ test.
+visual.c:4341: Test failed: Expected color 0x00000000 at (400, 60) for format D3DFMT_D24S8, got 0xffff00ff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 180) for format D3DFMT_D24S8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 300) for format D3DFMT_D24S8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 300) for format D3DFMT_D24S8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 180) for format D3DFMT_D24S8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (240, 60) for format D3DFMT_D24S8, got 0xffff00ff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (400, 60) for format D3DFMT_D24X8, got 0xffff00ff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 180) for format D3DFMT_D24X8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 300) for format D3DFMT_D24X8, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 300) for format D3DFMT_D24X8, got 0xff00ff00.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 180) for format D3DFMT_D24X8, got 0xff00ff00.
+visual.c:4341: Test failed: Expected color 0x00000000 at (240, 60) for format D3DFMT_D24X8, got 0xffff00ff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (400, 60) for format D3DFMT_D16, got 0xffff00ff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 180) for format D3DFMT_D16, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0xffff00ff at (560, 300) for format D3DFMT_D16, got 0xffffffff.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 300) for format D3DFMT_D16, got 0x0000ff00.
+visual.c:4341: Test failed: Expected color 0x00000000 at (80, 180) for format D3DFMT_D16, got 0x0000ff00.
+visual.c:4341: Test failed: Expected color 0x00000000 at (240, 60) for format D3DFMT_D16, got 0xffff00ff.
+visual.c:4529: Tests skipped: No INTZ support, skipping RESZ test.
+visual.c:5138: Test failed: Expected left color 0x00ff0000, got 0x0000ff00, case 0.
+visual.c:5138: Test failed: Expected left color 0x00ff0000, got 0x0000ff00, case 1.
+visual.c:5262: Tests skipped: DXT1 volume textures are not supported, skipping test.
+visual.c:5262: Tests skipped: DXT3 volume textures are not supported, skipping test.
+visual.c:5262: Tests skipped: DXT5 volume textures are not supported, skipping test.
+visual.c:5374: Tests skipped: Volume V16U16 textures are not supported, skipping test.
+visual.c:5837: Test failed: Got unexpected color 0x00ffffff.
 visual.c:6258: Tests skipped: ATI1N textures are not supported, skipping test.
-visual.c:6415: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:6589: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:6705: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:6917: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:7165: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:7592: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:7972: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:8033: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:8332: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:8509: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:8679: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:8912: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:9109: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:9265: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:9738: Tests skipped: Failed to create a D3D device.
-visual.c:9935: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:10081: Tests skipped: Failed to create a D3D device.
-visual.c:10239: Tests skipped: Failed to create a D3D device.
-visual.c:10346: Tests skipped: Failed to create a D3D device.
-visual.c:10450: Tests skipped: Failed to create a D3D device.
-visual.c:10581: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:10777: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:10913: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:11044: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:11327: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:11436: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:11500: Tests skipped: Failed to create a 3D device.
-visual.c:11595: Tests skipped: Failed to create a D3D device, skipping tests.
-visual.c:12029: Tests skipped: Failed to create a 3D device.
-visual.c:319: Tests skipped: Failed to create a D3D device.
-visual.c:319: Tests skipped: Failed to create a D3D device.
-visual.c:319: Tests skipped: Failed to create a D3D device.
-visual.c:319: Tests skipped: Failed to create a D3D device.
-fffd333d:visual: 67 tests executed (0 marked as todo, 0 as flaky, 0 failures), 60 skipped.
+visual.c:6481: Test failed: Got unexpected color 0x0000ea15, case 2.
+visual.c:6481: Test failed: Got unexpected color 0x0000ea15, case 3.
+visual.c:6947: Tests skipped: Format D3DFMT_V16U16 not supported, skipping.
+visual.c:7225: Test failed: Failed to create texture, hr 0x88760827, case 0, 15.
+visual.c:7225: Test failed: Failed to create texture, hr 0x88760827, case 0, 16.
+visual.c:7225: Test failed: Failed to create texture, hr 0x88760827, case 0, 17.
+visual.c:7237: Test failed: Failed to create texture, hr 0x88760827, case 1, 15.
+visual.c:7237: Test failed: Failed to create texture, hr 0x88760827, case 1, 16.
+visual.c:7237: Test failed: Failed to create texture, hr 0x88760827, case 1, 17.
+visual.c:7202: Tests skipped: Volume ATI2N textures are not supported, skipping some tests.
+visual.c:8993: Test failed: Got unexpected color 0xff000000, case 0.
+visual.c:8993: Test failed: Got unexpected color 0xff000000, case 2.
+visual.c:9294: Test failed: Got unexpected color 0xff00ff00, position 0x0.
+visual.c:9850: Test failed: Test 5: Got color 0xffff0000, expected 0x80ff0000.
+visual.c:9850: Test failed: Test 7: Got color 0x00ff0000, expected 0x80ff0000.
+visual.c:9850: Test failed: Test 10: Got color 0xffff0000, expected 0x80ff0000.
+visual.c:10089: Edge antialiasing support: 0.
+visual.c:12373: Test failed: Got color ff003300.
+visual.c:12375: Test failed: Got color ff001a00.
+visual.c:12377: Test failed: Got color ff009900.
+visual.c:12379: Test failed: Got color ff003300.
+visual.c:12390: Test failed: Got unexpected color 0x00003300.
+visual.c:12400: Test failed: Got unexpected color 0x00470047.
+fffb7571:visual: 142862 tests executed (0 marked as todo, 0 as flaky, 68 failures), 10 skipped.

@@ -54,14 +54,8 @@ visual.c:11920: Tests skipped: D3DFMT_R32F textures not supported as render targ
 visual.c:11920: Tests skipped: D3DFMT_G32R32F textures not supported as render targets.
 visual.c:11920: Tests skipped: D3DFMT_A32B32G32R32F textures not supported as render targets.
 visual.c:11920: Tests skipped: D3DFMT_L8 textures not supported as render targets.
-visual.c:5750: Test failed: Unexpected color 0x005a7edc.
-visual.c:5752: Test failed: Unexpected color 0x005a7edc.
-visual.c:5754: Test failed: Unexpected color 0x005a7edc.
-visual.c:5756: Test failed: Unexpected color 0x005a7edc.
-visual.c:5758: Test failed: Unexpected color 0x005a7edc.
-visual.c:5760: Test failed: Unexpected color 0x005a7edc.
-visual.c:5762: Test failed: Unexpected color 0x005a7edc.
-visual.c:5764: Test failed: Unexpected color 0x005a7edc.
+visual.c:5760: Test failed: Unexpected color 0x00000002.
+visual.c:5762: Test failed: Unexpected color 0x00000002.
 visual.c:9890: Tests skipped: Card has unconditional NP2 support, skipping conditional NP2 tests
 visual.c:11502: Test failed: Setup 10: test 11 (expected size 1): Got unexpected color 0x00000000 at (63, 64).
 visual.c:11504: Test failed: Setup 10: test 11 (expected size 1): Got unexpected color 0x0000ff00 at (65, 64).
@@ -75,6 +69,175 @@ visual.c:11502: Test failed: Setup 12: test 11 (expected size 1): Got unexpected
 visual.c:11504: Test failed: Setup 12: test 11 (expected size 1): Got unexpected color 0x0000ff00 at (65, 64).
 visual.c:11506: Test failed: Setup 12: test 11 (expected size 1): Got unexpected color 0x00ffff00 at (64, 63).
 visual.c:11508: Test failed: Setup 12: test 11 (expected size 1): Got unexpected color 0x0000ff00 at (64, 65).
-visual.c:12859: Test failed: Failed to create surface, hr 0x8876086a.
-visual.c:12859: this is the last test seen before the exception
-fffd032d:visual: unhandled exception c0000005 at 004ad92c
+wt: yuv_color_test left out (WT_SKIP)
+wt: yuv_layout_test left out (WT_SKIP)
+visual.c:8228: Test failed: Got unexpected color 0x0000ff00 for quad 2 (different colors).
+visual.c:8228: Test failed: Got unexpected color 0x0000ff00 for quad 2 (different colors).
+visual.c:8228: Test failed: Got unexpected color 0x0000ff00 for quad 2 (different colors).
+visual.c:8334: Test failed: Got unexpected color 0x00ffff00 for no color attribute test.
+visual.c:8334: Test failed: Got unexpected color 0x00ffff00 for no color attribute test.
+visual.c:8334: Test failed: Got unexpected color 0x00ffff00 for no color attribute test.
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 0)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 1)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 1)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 2)
+visual.c:12427: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 2)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 3)
+visual.c:12425: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 3)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 5)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 5)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 6)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 6)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 7)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 7)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 8)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 8)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 9)
+visual.c:12427: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 9)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 10)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 10)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 11)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 11)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 12)
+visual.c:12429: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 12)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 14)
+visual.c:12425: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 14)
+visual.c:12423: Test failed: has color 0x00ffffff, expected 0x00ff0000 (case 15)
+visual.c:12427: Test failed: has color 0x00ff0000, expected 0x00ffffff (case 15)
+visual.c:16825: Test failed: Unbound sampler color is 0.
+visual.c:16839: Test failed: Unbound sampler color is 0.
+visual.c:16853: Test failed: Unbound sampler color is 0.
+visual.c:7589: Test failed: Test blendweight returned color 0x00000000, expected 0x00191919 (todo).
+visual.c:7589: Test failed: Test normal returned color 0x00000000, expected 0x004c4c4c (todo).
+visual.c:7589: Test failed: Test tangent returned color 0x00000000, expected 0x00999999 (todo).
+visual.c:7589: Test failed: Test binormal returned color 0x00000000, expected 0x00b2b2b2 (todo).
+visual.c:7589: Test failed: Test fog returned color 0x00220000, expected 0x00666666 (todo).
+visual.c:7589: Test failed: Test depth returned color 0x00000000, expected 0x00cccccc (todo).
+visual.c:7595: Test failed: Test texcoord1 returned color 0x00999999, expected 0x00000000.
+visual.c:7595: Test failed: Test texcoord1 alpha returned color 0x00b2b2b2, expected 0x00000000.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 6, 6.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 7, 6.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 8, 6.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 9, 6.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 6, 7.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 7, 7.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 8, 7.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 9, 7.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 6, 8.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 7, 8.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 8, 8.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 9, 8.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 6, 9.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 7, 9.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 8, 9.
+visual.c:11771: Test failed: Expected color 0xff0000ff, got 0x00000000 at 9, 9.
+visual.c:11825: Test failed: Texture 1(output color 1) has color 0x00ff0000, expected 0x0000ff00
+visual.c:11827: Test failed: Texture 2(output color 2) has color 0x00ff0000, expected 0x000000ff
+visual.c:14835: Test failed: Expected color 0x0000ff00 at 400,60, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 560,60, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x0000ff00 at 400,180, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 560,180, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x0000ff00 at 80,300, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x0000ff00 at 240,300, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x0000ff00 at 400,300, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 560,300, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 80,420, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 240,420, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 400,420, got 0x000000ff.
+visual.c:14835: Test failed: Expected color 0x00ff0000 at 560,420, got 0x000000ff.
+visual.c:14929: Tests skipped: No INTZ support, skipping INTZ test.
+visual.c:15496: Tests skipped: No DF24 support, skipping Fetch4 test.
+visual.c:14337: Tests skipped: No NVDB (depth bounds test) support, skipping tests.
+visual.c:16522: Tests skipped: Format D3DFMT_A16B16G16R16F not supported as render target, skipping test.
+visual.c:16522: Tests skipped: Format D3DFMT_A32B32G32R32F not supported as render target, skipping test.
+visual.c:18342: Test failed: Expected left color 0x00ff0000, got 0x0000ff00, case 0.
+visual.c:18342: Test failed: Expected left color 0x00ff0000, got 0x0000ff00, case 1.
+visual.c:18590: Tests skipped: DXT1 volume textures are not supported, skipping test.
+visual.c:18590: Tests skipped: DXT3 volume textures are not supported, skipping test.
+visual.c:18590: Tests skipped: DXT5 volume textures are not supported, skipping test.
+visual.c:19144: Test failed: Got unexpected color 0x00ffffff.
+visual.c:17574: Tests skipped: No INTZ support, skipping RESZ test.
+visual.c:19671: Tests skipped: ATI1N textures are not supported, skipping test.
+visual.c:19895: Test failed: Got unexpected color 0x0000ea15, case 2.
+visual.c:19895: Test failed: Got unexpected color 0x0000ea15, case 3.
+visual.c:21609: Tests skipped: 2D mipmapped R32F textures are not supported, skipping some tests.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:21637: Test failed: Failed to create texture, hr 0x88760827, case 0, 16.
+visual.c:21637: Test failed: Failed to create texture, hr 0x88760827, case 0, 17.
+visual.c:21637: Test failed: Failed to create texture, hr 0x88760827, case 0, 18.
+visual.c:21609: Tests skipped: Cube R32F textures are not supported, skipping some tests.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:21649: Test failed: Failed to create texture, hr 0x88760827, case 1, 16.
+visual.c:21649: Test failed: Failed to create texture, hr 0x88760827, case 1, 17.
+visual.c:21649: Test failed: Failed to create texture, hr 0x88760827, case 1, 18.
+visual.c:21609: Tests skipped: Volume R32F textures are not supported, skipping some tests.
+visual.c:21616: Tests skipped: Volume ATI2N textures are not supported, skipping some tests.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:211: Can't read the render target data, hr 0x88760868.
+visual.c:21881: Tests skipped: Depth format 71 not supported, skipping.
+visual.c:21881: Tests skipped: Depth format 1515474505 not supported, skipping.
+visual.c:22418: Test failed: Got unexpected color 0xff000000, case 0.
+visual.c:22418: Test failed: Got unexpected color 0xff000000, case 3.
+visual.c:22418: Test failed: Got unexpected color 0xff000000, case 6.
+visual.c:22495: Test failed: Got unexpected color 0xff00ff00, position 0x0.
+visual.c:23398: Test failed: Test 7: Got color 0xffff0000, expected 0x80ff0000.
+visual.c:23398: Test failed: Test 9: Got color 0x00ff0000, expected 0x80ff0000.
+visual.c:23398: Test failed: Test 12: Got color 0x8fff0000, expected 0x80ff0000.
+visual.c:23398: Test failed: Test 13: Got color 0x01ff0000, expected 0x80ff0000.
+visual.c:23398: Test failed: Test 14: Got color 0x01ffff00, expected 0x80ffff00.
+visual.c:23684: Line antialiasing support: 0.
+visual.c:24422: Tests skipped: No vertex texture fetch support for D3DFMT_A8R8G8B8, hr 0x8876086a.
+visual.c:24589: Test failed: Expected color 0x00000000, got 0x000101fc (sw shader in hw mode).
+visual.c:24774: Tests skipped: No NULL format support, skipping NULL test.
+visual.c:25313: Test failed: Expected colour 0x00ff0000 for test 13, got 0x00ffffff.
+visual.c:25313: Test failed: Expected colour 0x00000040 for test 14, got 0x00ffffff.
+visual.c:25313: Test failed: Expected colour 0x00000000 for test 19, got 0x00ffffff.
+visual.c:25891: Test failed: Failed to create a D3D device
+visual.c:26462: Test failed: Got unexpected color 0x00818181.
+visual.c:26545: Tests skipped: Alpha to coverage is not supported.
+visual.c:27752: Test failed: PS test 0: VS test 2: Got unexpected colour 00ffffff.
+visual.c:27752: Test failed: PS test 0: VS test 4: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 0: VS test 5: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 0: VS test 6: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 0: VS test 7: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 0: VS test 8: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 1: VS test 2: Got unexpected colour 00ffffff.
+visual.c:27752: Test failed: PS test 1: VS test 4: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 1: VS test 5: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 1: VS test 6: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 1: VS test 7: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 1: VS test 8: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 2: VS test 2: Got unexpected colour 00ffffff.
+visual.c:27752: Test failed: PS test 2: VS test 4: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 2: VS test 5: Got unexpected colour 000000ff.
+visual.c:27752: Test failed: PS test 2: VS test 6: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 2: VS test 7: Got unexpected colour 00000000.
+visual.c:27752: Test failed: PS test 2: VS test 8: Got unexpected colour 00000000.
+visual.c:28118: Test failed: Vertex declaration: Got colour 0x00ff0000.
+visual.c:28142: Test failed: Vertex declaration: Got colour 0x00ff0000.
+visual.c:28118: Test failed: FVF: Got colour 0x00ff0000.
+visual.c:28142: Test failed: FVF: Got colour 0x00ff0000.
+wt: test_fog left out (WT_SKIP)
+wt: test_texture_transform_flags left out (WT_SKIP)
+fffca671:visual: 192444 tests executed (0 marked as todo, 0 as flaky, 170 failures), 37 skipped.

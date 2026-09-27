@@ -1,111 +1,209 @@
-device.c:15319: Test failed: Failed to get display mode.
-device.c:15321: Test failed: Failed to get display mode.
-device.c:401: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:455: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:773: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:870: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:987: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:1060: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:5037: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:3735: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:1299: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:1545: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:1105: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:1221: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:1898: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:5362: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:4860: Tests skipped: Unable to create device. Skipping test.
-device.c:2120: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:2706: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:2842: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:2912: Tests skipped: Failed to create a d3d device
-device.c:3063: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:3132: Tests skipped: Failed to create a D3D device.
-device.c:3369: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:3441: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:3494: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:3681: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:4188: device_window 00000828, focus_window 00000824, dummy_window 0000082c.
+device.c:1741: Test failed: Invalid refcount. Expected 9 got 10
+device.c:1743: Test failed: Invalid refcount. Expected 2 got 1
+device.c:1747: Test failed: Invalid refcount. Expected 2 got 1
+device.c:1748: Test failed: Invalid refcount. Expected 3 got 2
+device.c:1749: Test failed: Invalid refcount. Expected 3 got 1
+device.c:1750: Test failed: Invalid refcount. Expected 2 got 1
+device.c:1751: Test failed: Invalid refcount. Expected 2 got 1
+device.c:1752: Test failed: Invalid refcount. Expected 1 got 0
+device.c:1842: Test failed: Invalid refcount. Expected 7 got 8
+device.c:1844: Test failed: Invalid refcount. Expected 6 got 7
+device.c:1845: Test failed: Invalid refcount. Expected 5 got 6
+device.c:1846: Test failed: Invalid refcount. Expected 4 got 5
+device.c:1848: Test failed: Invalid refcount. Expected 3 got 4
+device.c:1849: Test failed: Invalid refcount. Expected 2 got 3
+device.c:1850: Test failed: Invalid refcount. Expected 1 got 2
+device.c:1853: Test failed: Invalid refcount. Expected 0 got 1
+device.c:4908: Test failed: Received unexpected WM_SIZE message.
+device.c:4933: Test failed: Received unexpected WM_SIZE message.
+device.c:4188: device_window 00000980, focus_window 0000097c, dummy_window 00000984.
+device.c:4253: Test failed: Expected message 0x7e for window 0, but didn't receive it, i=0.
+device.c:4266: Test failed: Got unexpected screen size 720x480.
+device.c:4298: Test failed: Expected message 0x46 for window 0, but didn't receive it, i=0.
+device.c:4303: Test failed: Got unexpected hr 0x88760868.
+device.c:4307: Test failed: Got unexpected screen size 720x480.
+device.c:4312: Test failed: Failed to reset device, hr 0x88760868.
+device.c:4324: Test failed: Expected message 0x7e for window 0, but didn't receive it, i=0.
+device.c:4333: Test failed: Got unexpected width 720.
+device.c:4334: Test failed: Got unexpected height 480.
+device.c:4345: Test failed: Expected message 0x112 for window 0x1, but didn't receive it, i=0.
+device.c:3795: Test failed: Received unexpected message 0x85 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x14 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x46 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x24 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x83 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x85 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x14 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x47 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x5 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x46 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x85 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x14 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x47 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:4437: Test failed: Expected message 0x112 for window 0x1, but didn't receive it, i=0.
+device.c:4485: Test failed: Expected message 0x1c for window 0x1, but didn't receive it, i=0.
+device.c:4492: Test failed: Got unexpected hr 0x88760868.
+device.c:4495: Test failed: Failed to reset device, hr 0x88760868.
+device.c:3795: Test failed: Received unexpected message 0x86 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x6 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x46 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x47 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x86 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x6 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x86 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x6 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x46 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x86 for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0xd for window 0000097c.
+device.c:3795: Test failed: Received unexpected message 0x6 for window 0000097c.
+device.c:4550: Test failed: Expected message 0x18 for window 0, but didn't receive it, i=0.
+device.c:4556: Test failed: Got unexpected WINDOWPOS hwnd=00000000, insertAfter=00000000, x=0, y=0, cx=0, cy=0, flags=0
+device.c:4188: device_window 000009a8, focus_window 000009a4, dummy_window 000009ac.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 640x480 format 0x15, windowed 0, depth 1 format 0x50, flags 0x840.
 device.c:4208: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:4188: device_window 00000834, focus_window 00000830, dummy_window 00000838.
-device.c:4208: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:4657: device_window 00000840, focus_window 0000083c, dummy_window 00000844.
-device.c:4675: Tests skipped: Failed to create a D3D device, skipping tests.
+device.c:4657: device_window 000009b8, focus_window 000009b4, dummy_window 000009bc.
+device.c:4699: Test failed: Failed to reset device, hr 0x88760827.
+device.c:4706: Test failed: Expected wndproc != 0x4579d0.
+device.c:3795: Test failed: Received unexpected message 0xd for window 000009b8.
+device.c:4738: Test failed: Failed to reset device, hr 0x88760827.
+device.c:4745: Test failed: Expected wndproc != 0x4579d0.
+device.c:3795: Test failed: Received unexpected message 0xd for window 000009b8.
+device.c:4776: Test failed: Failed to reset device, hr 0x88760827.
+device.c:4783: Test failed: Expected wndproc != 0x4579d0.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 800x600 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:5176: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:5447: Test failed: EnumDisplaySettingsW failed, error 0x78.
-device.c:5450: Test failed: EnumDisplaySettingsW failed, error 0x78.
+device.c:5448: Test failed: Got a different mode.
+device.c:5451: Test failed: Got a different mode.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 640x480 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:5531: Tests skipped: Failed to create a D3D device, skipping tests.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 800x600 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:5951: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6013: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6082: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6186: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6267: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6334: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6404: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6473: Tests skipped: Failed to create a D3D device, skipping tests.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 800x600 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:6563: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6823: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:6993: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7066: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7194: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7265: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7536: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7684: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7845: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:7948: Tests skipped: Failed to create a D3D device, skipping tests.
+device.c:7289: SetPixelShaderConstantF was able to set 224 shader constants.
+device.c:7570: Tests skipped: This GPU supports SM3, skipping unsupported shader test.
+wt: test_mipmap_gen left out (WT_SKIP)
 device.c:8134: Tests skipped: D3DFMT_A32B32G32R32F not supported, skipping tests.
-device.c:8221: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8272: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8317: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8386: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8487: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8596: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:8858: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:9052: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:9362: Tests skipped: Failed to create a D3D device, skipping tests.
+device.c:8498: Tests skipped: Format ATI1N not supported, skipping lockrect offset tests.
+device.c:9079: Test failed: Got unexpected hr 0x8876086c for format A8R8G8B8.
+device.c:9184: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9186: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9188: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9190: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9193: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9199: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9213: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9215: Test failed: Got unexpected hr 0 for format A8R8G8B8.
+device.c:9217: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9220: Test failed: Failed to map surface for format A8R8G8B8, hr 0x8876086c.
+device.c:9227: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9233: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9236: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9242: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9272: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9274: Test failed: Got unexpected hr 0 for format A8R8G8B8.
+device.c:9278: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9281: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9283: Test failed: Got unexpected hr 0 for format A8R8G8B8.
+device.c:9287: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9292: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9294: Test failed: Failed to unmap surface for format A8R8G8B8, hr 0x8876086c.
+device.c:9296: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9303: Test failed: Failed to get DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9305: Test failed: Failed to unmap surface for format A8R8G8B8, hr 0x8876086c.
+device.c:9307: Test failed: Failed to release DC for format A8R8G8B8, hr 0x8876086c.
+device.c:9120: Test failed: Got unexpected height -64 for format X8R8G8B8.
+device.c:9131: Test failed: Got unexpected horizontal resolution 372703232 for format X8R8G8B8.
+device.c:9120: Test failed: Got unexpected height -64 for format R5G6B5.
+device.c:9131: Test failed: Got unexpected horizontal resolution 265224192 for format R5G6B5.
+device.c:9120: Test failed: Got unexpected height -64 for format X1R5G5B5.
+device.c:9126: Test failed: Got unexpected compression 0 for format X1R5G5B5.
+device.c:9131: Test failed: Got unexpected horizontal resolution 265748480 for format X1R5G5B5.
+device.c:9079: Test failed: Got unexpected hr 0x8876086c for format A1R5G5B5.
+device.c:9184: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9186: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9188: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9190: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9193: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9199: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9213: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9215: Test failed: Got unexpected hr 0 for format A1R5G5B5.
+device.c:9217: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9220: Test failed: Failed to map surface for format A1R5G5B5, hr 0x8876086c.
+device.c:9227: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9233: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9236: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9242: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9272: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9274: Test failed: Got unexpected hr 0 for format A1R5G5B5.
+device.c:9278: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9281: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9283: Test failed: Got unexpected hr 0 for format A1R5G5B5.
+device.c:9287: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9292: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9294: Test failed: Failed to unmap surface for format A1R5G5B5, hr 0x8876086c.
+device.c:9296: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9303: Test failed: Failed to get DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9305: Test failed: Failed to unmap surface for format A1R5G5B5, hr 0x8876086c.
+device.c:9307: Test failed: Failed to release DC for format A1R5G5B5, hr 0x8876086c.
+device.c:9069: Tests skipped: Failed to create surface for format R8G8B8 (hr 0x8876086c), skipping tests.
+device.c:9069: Tests skipped: Failed to create surface for format A2R10G10B10 (hr 0x8876086c), skipping tests.
+device.c:9069: Tests skipped: Failed to create surface for format A8B8G8R8 (hr 0x8876086c), skipping tests.
+device.c:9069: Tests skipped: Failed to create surface for format X8B8G8R8 (hr 0x8876086c), skipping tests.
+device.c:9069: Tests skipped: Failed to create surface for format R3G3B2 (hr 0x8876086c), skipping tests.
+device.c:9069: Tests skipped: Failed to create surface for format P8 (hr 0x8876086c), skipping tests.
 device.c:9402: Tests skipped: No D3DFMT_NULL support, skipping test.
-device.c:9504: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:9640: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:9961: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10043: Tests skipped: Test 0: failed to create a D3D device.
-device.c:10043: Tests skipped: Test 1: failed to create a D3D device.
-device.c:10043: Tests skipped: Test 2: failed to create a D3D device.
-device.c:10132: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10234: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10304: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10381: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10532: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10595: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:10707: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11018: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11120: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11261: Tests skipped: Failed to create device
-device.c:11391: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11476: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11643: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11821: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:11989: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:12070: Tests skipped: Failed to create a D3D device, skipping tests.
+wt: test_surface_blocks left out (WT_SKIP)
+device.c:10167: Test failed: CreateTexture(w=h=10, D3DPOOL_DEFAULT, levels=2) returned hr 0x88760827, expected 0.
+device.c:10183: Test failed: CreateCubeTexture(EdgeLength=3, D3DPOOL_DEFAULT) returned hr 0x88760827, expected 0.
+device.c:10167: Test failed: CreateTexture(w=h=10, D3DPOOL_MANAGED, levels=0) returned hr 0x88760827, expected 0.
+device.c:10167: Test failed: CreateTexture(w=h=10, D3DPOOL_MANAGED, levels=2) returned hr 0x88760827, expected 0.
+device.c:10183: Test failed: CreateCubeTexture(EdgeLength=3, D3DPOOL_MANAGED) returned hr 0x88760827, expected 0.
+device.c:10167: Test failed: CreateTexture(w=h=10, D3DPOOL_SYSTEMMEM, levels=0) returned hr 0x88760827, expected 0.
+device.c:10167: Test failed: CreateTexture(w=h=10, D3DPOOL_SYSTEMMEM, levels=2) returned hr 0x88760827, expected 0.
+device.c:10183: Test failed: CreateCubeTexture(EdgeLength=3, D3DPOOL_SYSTEMMEM) returned hr 0x88760827, expected 0.
+device.c:10476: Test failed: Source test 2, destination test 0: Expected colour 11223344, got 44332211.
+wt: test_volume_blocks left out (WT_SKIP)
+device.c:11921: Test failed: Failed to create volume texture, hr 0x88760827.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 800x600 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:12137: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:12250: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:12412: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:12749: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:12865: Tests skipped: Failed to create a D3D device.
-device.c:12913: Tests skipped: Failed to create a D3D device.
-device.c:12970: Tests skipped: Failed to create a D3D device.
-device.c:13038: Tests skipped: Failed to create a 3D device, skipping test.
-device.c:13074: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:13170: Tests skipped: Failed to create D3D device, flags 0.
-device.c:13170: Tests skipped: Failed to create D3D device, flags 0x8.
-device.c:13256: Tests skipped: Failed to create a 3D device.
-device.c:13319: Tests skipped: Failed to create a 3D device.
-device.c:13531: Tests skipped: Adapter 0: Failed to create a D3D device, skipping test.
-device.c:13777: Tests skipped: Failed to create a D3D device.
-device.c:14162: Tests skipped: Failed to create 3D device.
-device.c:14244: Tests skipped: Failed to create a D3D device, skipping tests.
-device.c:14346: Tests skipped: Failed to create a D3D device.
-device.c:14854: Tests skipped: Adapter 0: Failed to create a D3D device.
+device.c:12444: Test failed: Expected hr 0, got 0x88760827, test 4.
+device.c:12482: Test failed: Expected hr 0, got 0x88760827, test 4.
+device.c:12444: Test failed: Expected hr 0, got 0x88760827, test 5.
+device.c:12482: Test failed: Expected hr 0, got 0x88760827, test 5.
+device.c:12444: Test failed: Expected hr 0, got 0x88760827, test 6.
+device.c:12482: Test failed: Expected hr 0, got 0x88760827, test 6.
+device.c:12444: Test failed: Expected hr 0, got 0x88760827, test 13.
+device.c:12482: Test failed: Expected hr 0, got 0x88760827, test 13.
+device.c:12444: Test failed: Expected hr 0, got 0x88760827, test 14.
+device.c:12482: Test failed: Expected hr 0, got 0x88760827, test 14.
+device.c:12532: Test failed: Got unexpected hr 0x88760827, test 0.
+device.c:12532: Test failed: Got unexpected hr 0x88760827, test 1.
+device.c:12532: Test failed: Got unexpected hr 0x88760827, test 2.
+device.c:12532: Test failed: Got unexpected hr 0x88760827, test 4.
+device.c:12532: Test failed: Got unexpected hr 0x88760827, test 8.
+wt: test_miptree_layout left out (WT_SKIP)
+device.c:13049: Test failed: Failed to present, hr 0x88760827.
+device.c:13178: Max user clip planes: 6.
+device.c:13178: Max user clip planes: 6.
+device.c:13843: Test failed: Test 2D 2: Got unexpected hr 0x88760827.
+device.c:13843: Test failed: Test 2D 9: Got unexpected hr 0x88760827.
+device.c:13843: Test failed: Test 2D 15: Got unexpected hr 0x88760827.
+device.c:13843: Test failed: Test 2D 22: Got unexpected hr 0x88760827.
+device.c:13858: Test failed: Test CUBE 15: Got unexpected hr 0x88760827.
+device.c:13858: Test failed: Test CUBE 22: Got unexpected hr 0x88760827.
+device.c:13996: Tests skipped: ATI2N texture not supported.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 640x480 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
+device.c:14375: Tests skipped: Failed to create a D3D device.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 640x480 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:14927: Tests skipped: Adapter 0: Failed to create a D3D device.
-device.c:14975: Test failed: Adapter 0: GetMonitorInfoW failed, error 0x78.
+device.c:305: CreateDevice failed: hr 0x88760827, adapter 0, 800x600 format 0x15, windowed 0, depth 1 format 0x50, flags 0x40.
 device.c:14985: Tests skipped: Adapter 0: Failed to create a D3D device, skipping tests.
-fffde481:device: 538 tests executed (0 marked as todo, 0 as flaky, 5 failures), 102 skipped.
+fffd5d61:device: 8693 tests executed (0 marked as todo, 0 as flaky, 169 failures), 20 skipped.

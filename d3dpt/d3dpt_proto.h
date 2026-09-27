@@ -30,7 +30,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   19u
+#define D3DPT_PROTO_VERSION   20u
 #define D3DPT_MAGIC           0x54503344u          /* "D3PT" read at REG_MAGIC */
 
 /* guest-physical map: below mesapt's 0xe0000000+ windows and SeaBIOS' BAR area */
@@ -337,7 +337,13 @@ typedef struct d3dpt_vram_surface {
 typedef struct d3dpt_ctx_create {
     uint32_t handle, ret_off;       /* the context handle the guest chose; ret: d3dpt_ret */
     uint32_t rt, z;                 /* VRAM surface handles (z may be 0) */
+    uint32_t flags;                 /* v20: D3DPT_CTX_* */
+    uint32_t pad;
 } d3dpt_ctx_create;
+/* v20: the caps this context's runtime was shown claim
+ * D3DPTEXTURECAPS_NONPOW2CONDITIONAL, so a texture of other sizes samples
+ * clamped whatever address mode the app sets, as on the era's cards */
+#define D3DPT_CTX_NP2_CONDITIONAL 0x1u
 
 typedef struct d3dpt_ctx_clear {
     uint32_t ctx, flags;            /* D3DCLEAR_* */

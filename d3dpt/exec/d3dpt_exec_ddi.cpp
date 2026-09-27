@@ -186,6 +186,7 @@ struct Ctx {
     std::unordered_map<uint32_t, IDirect3DVertexShader9 *> vfuncs;
     uint32_t vfunc = 0;
     bool dx9 = false;
+    bool np2cond = false;               /* v20: D3DPT_CTX_NP2_CONDITIONAL (Dp2::apply_addr) */
     void release_shaders() {
         for (auto &kv : vshaders) kv.second.release();
         for (auto &kv : pshaders) if (kv.second) kv.second->Release();
@@ -229,6 +230,10 @@ struct Ddi {
      * map sampler and the four vertex samplers (D3DDMAPSAMPLER 256 and
      * D3DVERTEXTEXTURESAMPLER0..3 257..260, sampler_slot) */
     uint32_t ckey_rs = 0, stage_tex[21] = {};
+    /* each sampler's ADDRESSU / V / W as the app set them (v20, apply_addr) */
+    uint32_t addr[21][3];
+    void reset_addr() { for (auto &a : addr) a[0] = a[1] = a[2] = D3DTADDRESS_WRAP; }
+    Ddi() { reset_addr(); }
     bool ckey_forced = false, ckey_alpha_ovr = false;
     /* TEXTUREMAPBLEND / TEXTUREHANDLE in effect for stage 0's colour op and
      * for its alpha op: each half follows the bound texture until the app
@@ -1701,11 +1706,36 @@ struct Dp2 {
      * numbering: DX7's 12..21, DX8's ADDRESSW 25, and DX9's sRGB read,
      * element index and displacement-map offset at 29..31 (d3dhal.h's
      * D3DTSS_SRGBTEXTURE, D3DTSS_ELEMENTINDEX, D3DTSS_DMAPOFFSET) */
+    /* v20: a context whose caps claim NONPOW2CONDITIONAL (the DX7 / DX8
+     * faces, and the DX9 face on 9x) samples a texture of other sizes
+     * clamped whatever address mode the app set, as the era's cards do;
+     * DXVK would wrap it (Wine's conditional_np2_repeat_test). d.addr keeps
+     * the app's modes for a power-of-two texture. Not while a state set
+     * records: the block keeps the app's own values */
+    static bool pow2(uint32_t v) { return v && !(v & (v - 1)); }
+    void apply_addr(uint32_t stage) {
+        static const D3DSAMPLERSTATETYPE st[3] = { D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_ADDRESSW };
+        uint32_t i = sampler_slot(stage);
+        if (i == ~0u || d.recording || !c.np2cond) return;
+        VramSurf *s = d.stage_tex[i] ? surf(x, d.stage_tex[i]) : nullptr;
+        bool clamp = s && !(pow2(s->d.width) && pow2(s->d.height) && (!s->vol || pow2(s->depth)));
+        for (int k = 0; k < 3; k++) x.dev->SetSamplerState(stage, st[k], clamp ? (uint32_t)D3DTADDRESS_CLAMP : d.addr[i][k]);
+    }
+    void address_state(uint32_t stage, uint32_t mask, uint32_t v) {
+        static const D3DSAMPLERSTATETYPE st[3] = { D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_ADDRESSW };
+        uint32_t i = sampler_slot(stage);
+        for (int k = 0; k < 3; k++)
+            if (mask & (1u << k)) {
+                if (i != ~0u) d.addr[i][k] = v;
+                x.dev->SetSamplerState(stage, st[k], v);
+            }
+        apply_addr(stage);
+    }
     void sampler_state(uint32_t stage, uint32_t st, uint32_t v) {
         switch (st) {
-        case 12: x.dev->SetSamplerState(stage, D3DSAMP_ADDRESSU, v); x.dev->SetSamplerState(stage, D3DSAMP_ADDRESSV, v); break;
-        case 13: x.dev->SetSamplerState(stage, D3DSAMP_ADDRESSU, v); break;
-        case 14: x.dev->SetSamplerState(stage, D3DSAMP_ADDRESSV, v); break;
+        case 12: address_state(stage, 3, v); break;
+        case 13: address_state(stage, 1, v); break;
+        case 14: address_state(stage, 2, v); break;
         case 15: x.dev->SetSamplerState(stage, D3DSAMP_BORDERCOLOR, v); break;
         /* the filters in the DDI's DX7 numbering (D3DTFG_* / D3DTFN_* / D3DTFP_*): the
          * driver rewrites a d3d8.dll context's D3DTEXF_* values before they get here */
@@ -1715,7 +1745,7 @@ struct Dp2 {
         case 19: x.dev->SetSamplerState(stage, D3DSAMP_MIPMAPLODBIAS, v); break;
         case 20: x.dev->SetSamplerState(stage, D3DSAMP_MAXMIPLEVEL, v); break;
         case 21: x.dev->SetSamplerState(stage, D3DSAMP_MAXANISOTROPY, v); break;
-        case 25: x.dev->SetSamplerState(stage, D3DSAMP_ADDRESSW, v); break;
+        case 25: address_state(stage, 4, v); break;
         case 29: x.dev->SetSamplerState(stage, D3DSAMP_SRGBTEXTURE, v); break;
         case 30: x.dev->SetSamplerState(stage, D3DSAMP_ELEMENTINDEX, v); break;
         case 31: x.dev->SetSamplerState(stage, D3DSAMP_DMAPOFFSET, v); break;
@@ -1750,6 +1780,7 @@ struct Dp2 {
         x.dev->SetTexture(stage, t);
         if (sampler_slot(stage) != ~0u) d.stage_tex[sampler_slot(stage)] = t ? handle : 0;
         if (stage == 0) apply_ckey();
+        apply_addr(stage);
     }
     /* before a draw: a bound texture whose VRAM / palette / key changed
      * since it was bound is uploaded again (the runtime re-sends TEXTUREMAP
@@ -1843,7 +1874,7 @@ struct Dp2 {
             stage_state(0, 0, v);
             apply_mapblend(true);
             break;
-        case 3: x.dev->SetSamplerState(0, D3DSAMP_ADDRESSU, v); x.dev->SetSamplerState(0, D3DSAMP_ADDRESSV, v); break;   /* TEXTUREADDRESS */
+        case 3: address_state(0, 3, v); break;                            /* TEXTUREADDRESS */
         case 5: case 6: {                                                   /* WRAPU / WRAPV: WRAP0 bits */
             uint32_t w0 = ((d.rs_set[5] && d.rs_val[5]) ? 1u : 0u) | ((d.rs_set[6] && d.rs_val[6]) ? 2u : 0u);
             x.dev->SetRenderState(D3DRS_WRAP0, w0);
@@ -2260,6 +2291,17 @@ struct Dp2 {
                             it->second->Apply();
                             if (c.dx9) x.dev->SetViewport(&c.vp);
                             else x.dev->GetViewport(&c.vp);
+                            /* the block's address modes are the app's now
+                             * (one captured while a clamp was forced keeps
+                             * the clamp), then the clamp again */
+                            if (c.np2cond)
+                                for (uint32_t i = 0; i < 21; i++) {
+                                    uint32_t stage = i < 16 ? i : 256 + (i - 16);
+                                    DWORD v;
+                                    for (int k = 0; k < 3; k++)
+                                        if (SUCCEEDED(x.dev->GetSamplerState(stage, (D3DSAMPLERSTATETYPE)(D3DSAMP_ADDRESSU + k), &v))) d.addr[i][k] = v;
+                                    apply_addr(stage);
+                                }
                         }
                         else if (d.warn_once(0xb0000)) x.log("ddi: dp2: state set %u executed before it was recorded", handle);
                         break;
@@ -2586,6 +2628,7 @@ void exec_ddi_device_reset(Exec &x)
     x.ddi->drop_stage();
     x.ddi->bound_rt = x.ddi->bound_z = 0;
     memset(x.ddi->stage_tex, 0, sizeof x.ddi->stage_tex);
+    x.ddi->reset_addr();
     x.log("ddi: %zu surfaces dropped for the device reset; each is re-read from VRAM", x.ddi->surfs.size());
 }
 
@@ -2865,6 +2908,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
                 d.lights_on.reset();
                 d.fresh->Apply();
                 memset(d.stage_tex, 0, sizeof d.stage_tex);
+                d.reset_addr();
                 d.bound_rt = d.bound_z = 0;
                 memset(d.bound_mrt, 0, sizeof d.bound_mrt);
             }
@@ -2873,9 +2917,11 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         cx.rt = a->rt;
         cx.z = surf(x, a->z) ? a->z : 0;
         cx.vp = { 0, 0, rt->d.width, rt->d.height, 0.0f, 1.0f };
+        cx.np2cond = (a->flags & D3DPT_CTX_NP2_CONDITIONAL) != 0;
         if (!ensure_object(x, *rt) || (cx.z && !ensure_object(x, *surf(x, cx.z)))) { r->hr = (uint32_t)E_FAIL; return true; }
         d.ctxs[a->handle] = cx;
-        x.log("ddi: context %u on %ux%u fmt %u (z %u), %zu contexts", a->handle, rt->d.width, rt->d.height, rt->d.format, cx.z, d.ctxs.size());
+        x.log("ddi: context %u on %ux%u fmt %u (z %u%s), %zu contexts", a->handle, rt->d.width, rt->d.height, rt->d.format, cx.z,
+              cx.np2cond ? ", conditional NP2" : "", d.ctxs.size());
         r->hr = S_OK;
         break;
     }
