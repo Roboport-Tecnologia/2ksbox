@@ -1,0 +1,94 @@
+diff --git dlls/d3d8/tests/visual.c dlls/d3d8/tests/visual.c
+index f1e648a..035c10d 100644
+--- dlls/d3d8/tests/visual.c
++++ dlls/d3d8/tests/visual.c
+@@ -7222,36 +7222,36 @@ static void test_updatetexture(void)
+                             tests[i].src_width, tests[i].src_height,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DTexture8 **)&src);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice8_CreateTexture(device,
+                             tests[i].dst_width, tests[i].dst_height,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DTexture8 **)&dst);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture8_Release(src); continue; }
+                     break;
+                 case D3DRTYPE_CUBETEXTURE:
+                     hr = IDirect3DDevice8_CreateCubeTexture(device,
+                             tests[i].src_width,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DCubeTexture8 **)&src);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice8_CreateCubeTexture(device,
+                             tests[i].dst_width,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DCubeTexture8 **)&dst);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture8_Release(src); continue; }
+                     break;
+                 case D3DRTYPE_VOLUMETEXTURE:
+                     hr = IDirect3DDevice8_CreateVolumeTexture(device,
+                             tests[i].src_width, tests[i].src_height, tests[i].src_width,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DVolumeTexture8 **)&src);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice8_CreateVolumeTexture(device,
+                             tests[i].dst_width, tests[i].dst_height, tests[i].dst_width,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DVolumeTexture8 **)&dst);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture8_Release(src); continue; }
+                     break;
+                 default:
+                     trace("Unexpected resource type.\n");
+diff --git dlls/d3d9/tests/visual.c dlls/d3d9/tests/visual.c
+index ade80fb..fa968d4 100644
+--- dlls/d3d9/tests/visual.c
++++ dlls/d3d9/tests/visual.c
+@@ -21634,36 +21634,36 @@ static void test_updatetexture(void)
+                             tests[i].src_width, tests[i].src_height,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DTexture9 **)&src, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice9_CreateTexture(device,
+                             tests[i].dst_width, tests[i].dst_height,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DTexture9 **)&dst, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture9_Release(src); continue; }
+                     break;
+                 case D3DRTYPE_CUBETEXTURE:
+                     hr = IDirect3DDevice9_CreateCubeTexture(device,
+                             tests[i].src_width,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DCubeTexture9 **)&src, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice9_CreateCubeTexture(device,
+                             tests[i].dst_width,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DCubeTexture9 **)&dst, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture9_Release(src); continue; }
+                     break;
+                 case D3DRTYPE_VOLUMETEXTURE:
+                     hr = IDirect3DDevice9_CreateVolumeTexture(device,
+                             tests[i].src_width, tests[i].src_height, tests[i].src_width,
+                             tests[i].src_levels, 0, tests[i].src_format, D3DPOOL_SYSTEMMEM,
+                             (IDirect3DVolumeTexture9 **)&src, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) continue;
+                     hr = IDirect3DDevice9_CreateVolumeTexture(device,
+                             tests[i].dst_width, tests[i].dst_height, tests[i].dst_width,
+                             tests[i].dst_levels, 0, tests[i].dst_format, D3DPOOL_DEFAULT,
+                             (IDirect3DVolumeTexture9 **)&dst, NULL);
+-                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i);
++                    ok(SUCCEEDED(hr), "Failed to create texture, hr %#lx, case %u, %u.\n", hr, t, i); if (FAILED(hr)) { IDirect3DBaseTexture9_Release(src); continue; }
+                     break;
+                 default:
+                     trace("Unexpected resource type.\n");

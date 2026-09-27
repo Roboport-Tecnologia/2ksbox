@@ -74,7 +74,9 @@ echo "built $OUT/wtrun.exe"
 # names are relative), and bring C:\2KSBOX\WINETEST back for
 # tools/winetest-summary.py --save
 {
-  printf '%s\r\n' '@echo off' 'rem Wine d3d8/d3d9 tests, every file (2ksbox M16). Output: C:\2KSBOX\WINETEST'
+  printf '%s\r\n' '@echo off' 'rem Wine d3d8/d3d9 tests, every file (2ksbox M16). Output: C:\2KSBOX\WINETEST' \
+    'rem Start from a fresh boot: on Win9x a test that dies inside d3d8.dll / d3d9.dll' \
+    'rem can leave DirectDraw locked, and every later device fails until a restart.'
   for dll in d3d9 d3d8; do
     tests=""
     # `device` last, as in xp-driver-test.sh: its fullscreen tests change modes

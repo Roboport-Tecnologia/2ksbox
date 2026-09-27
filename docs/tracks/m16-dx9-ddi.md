@@ -581,7 +581,16 @@ track builds.
   patches 06 and 07, waiting on the user; there is no `zip` here, so the
   archive is made with Python's `zipfile` from `build/winetest/out/`).
   The rig's desktop must be at 32 bpp first (d3d8 skips every file on
-  16 bpp). That run settles findings 33 and 35, `test_getdc` and the
+  16 bpp), and **the run wants a fresh boot**. The rig's runs of
+  2026-09-26 made no A8R8G8B8 device at all (`D3DERR_NOTAVAILABLE`,
+  `0x8876086a`) while DX8CAPS, WTPROBE8/9 and the stateblock files made
+  theirs in another session (`build/winetest/rigdiag/`, uploaded in
+  `~/Downloads/rig-98/`): d3d8 visual on the GeForce 6200 runs until
+  `test_updatetexture`'s ATI2 case, whose system-memory source Win98's
+  HEL refuses (finding 35's rule, on a real card), the test then dies
+  inside `D3D8.DLL`, and on Win9x that left DirectDraw locked for every
+  later process until a restart. Patch 08 guards it; the batch now
+  says to start from a fresh boot. That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
   like Win98's own.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
