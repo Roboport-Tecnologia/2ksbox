@@ -31,6 +31,10 @@ profile: the samples it removed.
 
 ## State
 
+**Closed 2026-09-27 (user: "end here, it's good enough already")**
+after the two fixes below. The next steps are left as written, for
+whoever takes the driver's speed up again.
+
 **Where the time goes** (2026-09-27, `perf` + QEMU's `-perfmap`,
 `tools/guest-code-owner.py`). The vCPU thread is 95.8 % busy and the
 process averages one core: the guest CPU is the limit, not the GPU (DXVK's
