@@ -82,7 +82,8 @@ runall() {  # extra lines
     'rem can leave DirectDraw locked, and every later device fails until a restart.' \
     'rem WT_CANARY: after every test function one plain device; when none can be made' \
     'rem the run stops and WINETEST\STOP.TXT names the test (winetest patch 09).' \
-    'if exist C:\2KSBOX\WINETEST\NUL echo y| del C:\2KSBOX\WINETEST\*.* > nul' \
+    'if exist C:\2KSBOX\WINETEST\*.TXT del C:\2KSBOX\WINETEST\*.TXT' \
+    'if exist C:\2KSBOX\WINETEST\*.LOG del C:\2KSBOX\WINETEST\*.LOG' \
     'set WT_CANARY=1' "$@"
   for dll in d3d9 d3d8; do
     tests=""
@@ -95,8 +96,12 @@ runall() {  # extra lines
   done
 }
 runall >"$OUT/RUNALL.BAT"
-# yuv_color_test: the card claims YUY2 / UYVY, the 4x1 surface fails and no
-# device can be made after it (the rig's canary, 2026-09-26)
+# The rig's GeForce 6200 claims YUY2 / UYVY on Win98, a surface in either
+# fails, and no device can be made after it for the rest of the boot (the
+# canary named yuv_color_test, then yuv_layout_test crashed on its
+# missing surface; 2026-09-26). Left out: every test that makes one
+# (test_surface_blocks / test_volume_blocks walk YUY2 and UYVY too).
+# Not a *.* delete above: del asks before one, in the machine's language
 runall 'rem Win98: tests left out on the rig, each one leaves DirectDraw locked' \
-  'set WT_SKIP=yuv_color_test' >"$OUT/RUNALL98.BAT"
+  'set WT_SKIP=yuv_color_test,yuv_layout_test,test_surface_blocks,test_volume_blocks' >"$OUT/RUNALL98.BAT"
 echo "wrote $OUT/RUNALL.BAT and RUNALL98.BAT"

@@ -599,7 +599,15 @@ track builds.
   UYVY, the 4x1 surface fails, and no device can be made after it. The
   rig's Win98 batch now skips it (`WT_SKIP`), and a failing canary stops
   the run at once (`STOP.TXT`, WTRUN runs nothing after it) instead of
-  letting every later file fail for many minutes. That run settles findings 33 and 35, `test_getdc` and the
+  letting every later file fail for many minutes. The next run crashed
+  in `yuv_layout_test` (a UYVY surface, the same failure), so the Win98
+  batch leaves out every test that makes a YUY2 / UYVY surface:
+  `yuv_color_test`, `yuv_layout_test`, and the device files'
+  `test_surface_blocks` and `test_volume_blocks` (most of those files'
+  checks: d3d9 device 9334 instead of 57209 on our guest, where the same
+  batch otherwise matches `w98-driver.txt`). The batch empties the
+  output folder by `*.TXT` / `*.LOG`, not `*.*`, because `del` asks
+  before `*.*` in the machine's language (the rig is pt-BR). That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
   like Win98's own.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
