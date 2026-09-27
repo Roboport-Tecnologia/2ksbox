@@ -403,7 +403,13 @@ by a title.
      buffers at 60 frames/s (about 300 buffer writes and 4800 draws per
      5 s): `CDS=<its ISO> GUEST_CMD=...MAXPAYNE.EXE CLICKS="130:607,160"`
      (Play in v1.0's launcher, which `-skipstartup` does not skip)
-     `RUN_SECS=330 tools/win98-game-test.sh`.
+     `RUN_SECS=330 tools/win98-game-test.sh`. Gameplay (2026-09-27, v20):
+     the menu takes Enter (Tutorial is the default item), and the
+     tutorial level runs at the 60 Hz cap, Max walking on a held `w`
+     (QMP key events), firing and bullet time on the mouse buttons (raw
+     QMP button events), about 6900 buffer writes and 39000 draws per 5 s.
+     The campaign's levels crash in the game's own level init with this
+     disc image's data (on XP too, not ours).
   35. *Win98's own.* A system-memory float surface
      (`CreateOffscreenPlainSurface`, A16B16G16R16F / A32B32G32R32F) fails
      `D3DERR_DRIVERINTERNALERROR` with no driver call, so a float render target
