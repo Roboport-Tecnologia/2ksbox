@@ -20,7 +20,7 @@ Glide.
   in `08`.
 - `patches/qemu/README.md`: every QEMU patch, what it does, when to drop
   it. `patches/deps/README.md`: the same for the libraries
-  `scripts/build-deps.sh` builds (macOS).
+  `scripts/build-deps.sh` builds (macOS; on Linux QEMU's own GLib).
 - `docs/build-macos.md`, `docs/build-windows.md`: platform specifics.
   The M1 Air is the Apple test machine, the reference rig (doc 09) the
   oracle, the user's own PC the only Windows test machine.

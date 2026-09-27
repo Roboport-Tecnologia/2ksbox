@@ -218,20 +218,22 @@ elif [ "$(uname -s)" = Darwin ]; then
   export PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig:$(xcrun --show-sdk-path)/usr/lib/pkgconfig"
   unset PKG_CONFIG_PATH
   echo "==> libraries: $DEPS (static)"
-elif [ "${QEMU_DEPS:-}" = ours ]; then
-  # Linux, QEMU on a glib of its own (scripts/build-deps.sh on Linux): for
-  # a player that runs GTK in its process, where one shared glib means
-  # QEMU's main loop iterates GTK's default GMainContext on QEMU's thread
-  # (spikes/player-gtk/README.md). glib and libslirp, the one other
-  # library QEMU links that links glib, come static from build/deps/<arch>
-  # ahead of the distribution's .pc files; the rest stays the
-  # distribution's. Their symbols are hidden, so QEMU's calls bind inside
-  # libqemu-embed and the process's own glib never sees them. Smartcard
-  # goes: libcacard links the system glib, and no machine the launcher
-  # writes has a CCID device.
+elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
+  # Linux: QEMU on a glib of its own (scripts/build-deps.sh on Linux,
+  # which scripts/build.sh runs). QEMU's main loop iterates glib's global
+  # default GMainContext on QEMU's thread; sharing the process's glib, a
+  # toolkit that runs on that context (GTK; Qt's glib event dispatcher)
+  # would have its sources dispatched there (spikes/player-gtk/README.md).
+  # glib and libslirp, the one other library QEMU links that links glib,
+  # come static from build/deps/<arch> ahead of the distribution's .pc
+  # files; the rest stays the distribution's. Their symbols are hidden, so
+  # QEMU's calls bind inside libqemu-embed and the process's own glib never
+  # sees them. Smartcard goes: libcacard links the system glib, and no
+  # machine the launcher writes has a CCID device. QEMU_DEPS=system links
+  # the distribution's glib instead.
   DEPS="$ROOT/build/deps/$(uname -m)"
   [ -f "$DEPS/lib/pkgconfig/glib-2.0.pc" ] || {
-    echo "no $DEPS/lib/pkgconfig/glib-2.0.pc: scripts/build-deps.sh first"; exit 1; }
+    echo "no $DEPS/lib/pkgconfig/glib-2.0.pc: scripts/build-deps.sh first (scripts/build.sh runs it), or QEMU_DEPS=system"; exit 1; }
   export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   HIDE=libglib-2.0.a:libgio-2.0.a:libgobject-2.0.a:libgmodule-2.0.a:libpcre2-8.a:libslirp.a
   CFG+=(--disable-smartcard --extra-ldflags="-Wl,--exclude-libs,$HIDE")

@@ -2238,6 +2238,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-app-kit/objc2-app-kit-0.3.2.crate",
+        "sha256": "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c",
+        "dest": "cargo/vendor/objc2-app-kit-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-app-kit-0.3.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/objc2-audio-toolbox/objc2-audio-toolbox-0.3.2.crate",
         "sha256": "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08",
         "dest": "cargo/vendor/objc2-audio-toolbox-0.3.2"
@@ -2272,6 +2285,19 @@
         "type": "inline",
         "contents": "{\"package\": \"74dd3b56391c7a0596a295029734d3c1c5e7e510a4cb30245f8221ccea96b009\", \"files\": {}}",
         "dest": "cargo/vendor/objc2-cloud-kit-0.2.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-cloud-kit/objc2-cloud-kit-0.3.2.crate",
+        "sha256": "73ad74d880bb43877038da939b7427bba67e9dd42004a18b809ba7d87cee241c",
+        "dest": "cargo/vendor/objc2-cloud-kit-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"73ad74d880bb43877038da939b7427bba67e9dd42004a18b809ba7d87cee241c\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-cloud-kit-0.3.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -2329,6 +2355,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-core-data/objc2-core-data-0.3.2.crate",
+        "sha256": "0b402a653efbb5e82ce4df10683b6b28027616a2715e90009947d50b8dd298fa",
+        "dest": "cargo/vendor/objc2-core-data-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"0b402a653efbb5e82ce4df10683b6b28027616a2715e90009947d50b8dd298fa\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-core-data-0.3.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/objc2-core-foundation/objc2-core-foundation-0.3.2.crate",
         "sha256": "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536",
         "dest": "cargo/vendor/objc2-core-foundation-0.3.2"
@@ -2368,6 +2407,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-core-image/objc2-core-image-0.3.2.crate",
+        "sha256": "e5d563b38d2b97209f8e861173de434bd0214cf020e3423a52624cd1d989f006",
+        "dest": "cargo/vendor/objc2-core-image-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"e5d563b38d2b97209f8e861173de434bd0214cf020e3423a52624cd1d989f006\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-core-image-0.3.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/objc2-core-location/objc2-core-location-0.2.2.crate",
         "sha256": "000cfee34e683244f284252ee206a27953279d370e309649dc3ee317b37e5781",
         "dest": "cargo/vendor/objc2-core-location-0.2.2"
@@ -2376,6 +2428,32 @@
         "type": "inline",
         "contents": "{\"package\": \"000cfee34e683244f284252ee206a27953279d370e309649dc3ee317b37e5781\", \"files\": {}}",
         "dest": "cargo/vendor/objc2-core-location-0.2.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-core-text/objc2-core-text-0.3.2.crate",
+        "sha256": "0cde0dfb48d25d2b4862161a4d5fcc0e3c24367869ad306b0c9ec0073bfed92d",
+        "dest": "cargo/vendor/objc2-core-text-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"0cde0dfb48d25d2b4862161a4d5fcc0e3c24367869ad306b0c9ec0073bfed92d\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-core-text-0.3.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-core-video/objc2-core-video-0.3.2.crate",
+        "sha256": "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6",
+        "dest": "cargo/vendor/objc2-core-video-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-core-video-0.3.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {

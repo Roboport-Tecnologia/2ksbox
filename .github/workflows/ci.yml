@@ -35,8 +35,13 @@ jobs:
         with:
           submodules: recursive
       - name: deps
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libglib2.0-dev libpixman-1-dev flex bison rsync
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config zlib1g-dev libffi-dev libpixman-1-dev flex bison rsync
       - uses: astral-sh/setup-uv@v5
+      # glib 2.90 wants meson 1.4; Ubuntu 24.04 packages 1.3
+      - name: meson
+        run: uv tool install meson
+      - name: QEMU's own glib (pcre2, glib, libslirp; static)
+        run: ./scripts/build-deps.sh
       - name: prepare (3dfx overlay + patch + sign)
         run: ./scripts/prepare-qemu.sh
       - name: configure (uv-managed python)
