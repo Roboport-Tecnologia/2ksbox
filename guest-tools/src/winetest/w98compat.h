@@ -196,7 +196,8 @@ W98_API LONG WINAPI w98_GetWindowLongW(HWND hwnd, int i)
 /* patches/winetest/09: running the files on a machine where one test can
  * leave DirectDraw locked for the rest of the boot (the rig's Win98).
  *
- * WT_SKIP="a,b": START_TEST leaves those test functions out (wt_run).
+ * WT_SKIP="a,b" (or WTSKIP.TXT in the current folder, names separated by
+ * commas, spaces or lines): START_TEST leaves those test functions out.
  * WT_CANARY: after every test function wt_canary makes one plain device;
  * when that fails twice, a second apart, the test names the test before
  * it in <out>\STOP.TXT and the process ends. WTRUN then runs no further
@@ -207,7 +208,20 @@ W98_API int wt_run(const char *name)
     char skip[512], *p;
     size_t n = strlen(name);
 
-    if (!GetEnvironmentVariableA("WT_SKIP", skip, sizeof skip)) return 1;
+    /* WT_SKIP, or else WTSKIP.TXT in the current folder: Win98's
+     * command.com has a 127-character line and little environment, and
+     * the rig's list outgrew both */
+    if (!GetEnvironmentVariableA("WT_SKIP", skip, sizeof skip)) {
+        FILE *f = fopen("WTSKIP.TXT", "r");
+        size_t k;
+
+        if (!f) return 1;
+        k = fread(skip, 1, sizeof skip - 1, f);
+        fclose(f);
+        skip[k] = 0;
+        for (p = skip; *p; p++)
+            if (*p == '\r' || *p == '\n' || *p == ' ') *p = ',';
+    }
     for (p = skip; (p = strstr(p, name)); p += n) {
         if ((p == skip || p[-1] == ',') && (p[n] == 0 || p[n] == ',')) {
             printf("wt: %s left out (WT_SKIP)\n", name);

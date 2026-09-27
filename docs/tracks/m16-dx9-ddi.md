@@ -607,7 +607,17 @@ track builds.
   checks: d3d9 device 9334 instead of 57209 on our guest, where the same
   batch otherwise matches `w98-driver.txt`). The batch empties the
   output folder by `*.TXT` / `*.LOG`, not `*.*`, because `del` asks
-  before `*.*` in the machine's language (the rig is pt-BR). That run settles findings 33 and 35, `test_getdc` and the
+  before `*.*` in the machine's language (the rig is pt-BR). The run
+  after that locked nothing: d3d8 visual ran whole on the GeForce 6200
+  (142862 checks, 68 failures; our Win98 driver 156), and three files
+  crashed in the tests' own code: `test_fog` makes an A32B32G32R32F
+  target the card has none of, and `test_mipmap_gen` /
+  `test_miptree_layout` make non-power-of-two mip chains that Win98's
+  DirectDraw refuses, finding 33 on a real card (NVIDIA's Win98 driver
+  claims no POW2 either). Those three are left out too; the list is
+  `WTSKIP.TXT` beside the tests now (`wt_run` reads it when `WT_SKIP` is
+  unset), because as a `set` line it reached command.com's 127
+  characters. That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
   like Win98's own.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
