@@ -10,7 +10,9 @@
  * goes to WTRUN.LOG there and to COM1: its exit code, or "timeout" when it
  * ran past <seconds> and was killed. A driver bug can hang a test, and a
  * hung test must not take the rest of the run with it. The last line on
- * COM1 is "WTDONE", the harness's marker.
+ * COM1 is "WTDONE", the harness's marker. A STOP.TXT in the output folder
+ * (winetest patch 09: a test found that no device can be made any more)
+ * leaves every later file unrun, with the test it names.
  *
  * The lines Wine's runner prints ("visual: 1234 tests executed (5 marked as
  * todo, 0 as flaky, 6 failures), 7 skipped.") are read on the host by
@@ -80,11 +82,23 @@ int main(int argc, char **argv)
 
     for (i = 3; i < argc; i++) {
         SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
+        char stop[MAX_PATH], why[128] = "";
+        FILE *sf;
         STARTUPINFOA si;
         PROCESS_INFORMATION pi;
         HANDLE out;
         DWORD t0, rc = 0, w;
 
+        /* a test's canary found no device after some test (winetest
+         * patch 09, w98compat.h's wt_stop): every file after it would only
+         * fail, until the machine restarts */
+        snprintf(stop, sizeof stop, "%s\\STOP.TXT", dir);
+        if ((sf = fopen(stop, "r"))) {
+            if (!fgets(why, sizeof why, sf)) why[0] = 0;
+            fclose(sf);
+            say("wtrun: %s %s: not run, no device can be made after %s (restart the machine)", stem, argv[i], why);
+            continue;
+        }
         snprintf(path, sizeof path, "%s\\%s_%s.txt", dir, stem, argv[i]);
         out = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
                           FILE_ATTRIBUTE_NORMAL, NULL);

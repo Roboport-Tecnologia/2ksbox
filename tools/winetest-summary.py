@@ -47,6 +47,8 @@ SUMMARY = re.compile(r"^[0-9a-f]{4,8}:(\w+):.*?(\d+) tests executed \((\d+) mark
 FAIL = re.compile(r"^(\w+\.c):(\d+): .*?(Test failed|Test succeeded inside todo block|Test marked todo|"
                   r"Test marked flaky|Test succeeded inside flaky todo block)")
 CRASH = re.compile(r"unhandled exception ([0-9a-f]{8})")
+STOPPED = re.compile(r"wt: no device can be made after (\S+): stopping")
+NOTRUN = re.compile(r"wtrun: (\S+) (\S+): not run, no device can be made after (\S+)")
 WTRUN = re.compile(r"^wtrun: (\w+) (\w+): (exit \d+|timeout|cannot start)")
 
 
@@ -75,6 +77,11 @@ def read_run(d):
                 m = CRASH.search(line)
                 if m:
                     info["state"] = f"crash {m[1]}"
+                    continue
+                m = STOPPED.match(line)
+                if m:
+                    # winetest patch 09: no device could be made after a test
+                    info["state"] = f"stopped after {m[1]}"
         if info["state"] != "ran":
             keys[(stem, "crash")] += 1
             info["failures"] = seen
@@ -83,6 +90,13 @@ def read_run(d):
     if os.path.exists(log):
         with open(log, errors="replace") as f:
             for line in f:
+                m = NOTRUN.match(line.strip())
+                if m:
+                    # WTRUN's STOP.TXT: the file never ran (patch 09)
+                    stem = f"{m[1]}_{m[2]}".lower()
+                    files[stem] = {"executed": 0, "failures": 0, "skipped": 0, "state": f"not run (after {m[3]})"}
+                    keys[(stem, "not run")] += 1
+                    continue
                 m = WTRUN.match(line.strip())
                 if m and m[3] == "timeout":
                     stem = f"{m[1]}_{m[2]}".lower()

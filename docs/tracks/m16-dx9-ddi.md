@@ -595,8 +595,11 @@ track builds.
   could be made again, with seven silent tests in between. The rig's
   real-card answers so far: no float render target at all on the
   GeForce 6200's Win98 driver, ATI2 claimed. Patch 09's canary
-  (`WT_CANARY=1`, set by `RUNALL.BAT`) names the test after which no
-  device can be made. That run settles findings 33 and 35, `test_getdc` and the
+  (`WT_CANARY=1`) named `yuv_color_test`: the card claims YUY2 and
+  UYVY, the 4x1 surface fails, and no device can be made after it. The
+  rig's Win98 batch now skips it (`WT_SKIP`), and a failing canary stops
+  the run at once (`STOP.TXT`, WTRUN runs nothing after it) instead of
+  letting every later file fail for many minutes. That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
   like Win98's own.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`

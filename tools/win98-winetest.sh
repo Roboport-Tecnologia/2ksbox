@@ -17,7 +17,9 @@
 #   WT_TESTS="d3d9:visual d3d8:device"  a subset (default: every file, the
 #                       device files last, as on XP)
 #   WT_CAP=s            WTRUN's cap per file (3600: TCG)
-#   WT_CANARY=1         a traced device after every test function (patch 09)
+#   WT_CANARY=1         a device after every test function; the first that
+#                       fails stops the run (STOP.TXT names the test; patch 09)
+#   WT_SKIP="a,b"       leave those test functions out (patch 09)
 #   WT_BASELINE=f       a verdict against reference/winetest/<f>.txt (or a path);
 #                       w98-driver is the driver's Win98 baseline
 #   WT_SAVE=f           save this run as a baseline
@@ -86,6 +88,8 @@ fi
 # ("canary after <test>: device ok" / "NO DEVICE"; winetest patch 09), to
 # find the test after which no device can be made
 [ -n "${WT_CANARY:-}" ] && CMD+="set WT_CANARY=1"$'\n'
+# WT_SKIP="a,b": leave those test functions out (patch 09, the rig's list)
+[ -n "${WT_SKIP:-}" ] && CMD+="set WT_SKIP=$WT_SKIP"$'\n'
 # one WTRUN per file, so a crash or a hang costs that file only
 for t in ${WT_TESTS:-d3d9:visual d3d9:stateblock d3d9:d3d9ex d3d8:visual d3d8:stateblock d3d9:device d3d8:device}; do
   CMD+="C:\\WT\\WTRUN.EXE ${WT_CAP:-3600} C:\\WT\\$(echo "${t%%:*}" | tr a-z A-Z)_TEST.EXE ${t#*:}"$'\n'

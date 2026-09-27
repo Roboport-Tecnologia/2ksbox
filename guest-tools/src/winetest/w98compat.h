@@ -20,6 +20,7 @@
 #define COBJMACROS
 #endif
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <windows.h>
 
@@ -191,5 +192,50 @@ W98_API LONG WINAPI w98_GetWindowLongW(HWND hwnd, int i)
           "flags %#lx.\n", (hr), (unsigned)(adapter), (pp).BackBufferWidth, (pp).BackBufferHeight, \
           (pp).BackBufferFormat, (pp).Windowed, (pp).EnableAutoDepthStencil, (pp).AutoDepthStencilFormat, \
           (unsigned long)(flags))
+
+/* patches/winetest/09: running the files on a machine where one test can
+ * leave DirectDraw locked for the rest of the boot (the rig's Win98).
+ *
+ * WT_SKIP="a,b": START_TEST leaves those test functions out (wt_run).
+ * WT_CANARY: after every test function wt_canary makes one plain device;
+ * when that fails twice, a second apart, the test names the test before
+ * it in <out>\STOP.TXT and the process ends. WTRUN then runs no further
+ * file (every device would fail until a restart). <out> is WTRUN's
+ * folder: BOXLOG\WINETEST, or C:\2KSBOX\WINETEST. */
+W98_API int wt_run(const char *name)
+{
+    char skip[512], *p;
+    size_t n = strlen(name);
+
+    if (!GetEnvironmentVariableA("WT_SKIP", skip, sizeof skip)) return 1;
+    for (p = skip; (p = strstr(p, name)); p += n) {
+        if ((p == skip || p[-1] == ',') && (p[n] == 0 || p[n] == ',')) {
+            printf("wt: %s left out (WT_SKIP)\n", name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+W98_API void wt_stop(const char *name)
+{
+    char path[MAX_PATH], dir[MAX_PATH];
+    DWORD n = GetEnvironmentVariableA("BOXLOG", dir, sizeof dir);
+    HANDLE f;
+    DWORD w;
+
+    if (!n || n >= sizeof dir) strcpy(dir, "C:\\2KSBOX");
+    n = (DWORD)strlen(dir);
+    while (n && (dir[n - 1] == '\\' || dir[n - 1] == ' ')) dir[--n] = 0;
+    snprintf(path, sizeof path, "%s\\WINETEST\\STOP.TXT", dir);
+    f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f != INVALID_HANDLE_VALUE) {
+        WriteFile(f, name, (DWORD)strlen(name), &w, NULL);
+        CloseHandle(f);
+    }
+    printf("wt: no device can be made after %s: stopping (restart the machine)\n", name);
+    fflush(stdout);
+    ExitProcess(3);
+}
 
 #endif
