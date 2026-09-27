@@ -428,7 +428,9 @@ by a title.
      ran all 17 tests after it with frames that look right, 5339 3D
      marks, inside doc 22 §6.2's range (`tools/w98-3dmark2001.sh` with
      `TDM_DIR='C:\ARQUIV~1\MADONION.COM\3DMARK~1'`, the pt-BR
-     machine's path).
+     machine's path). Crimson Skies (DX7, the title the conditional claim
+     is for) on the driver after it: the main menu, the Instant Action
+     book, its mission list and every drop-down's text draw right.
   37. *Fixed (Win98).* `VOLUMEBLT` was dropped when the two volumes'
      formats differed, and 9x's runtime registers a system-memory volume
      with its own format (XP's d3d9.dll with none), so Wine's
