@@ -92,7 +92,9 @@ if [ $seen -ge 2 ]; then
   # the list is pages long (user, project, display, the results, the
   # system) and its keyboard focus is not the list's (PgDn does nothing).
   # A click on the scrollbar's track below the thumb pages it
-  # down, a screendump per page, until the last two pages are the same
+  # down, a screendump per page, until the last two pages are the same.
+  # A page click scrolls one row past the page, so the row at each page
+  # boundary is not on any shot (Game 2's high detail, on a pt-BR run)
   q screendump "$O/details-00.png" >/dev/null
   prev=$(cksum < "$O/details-00.png.ppm")
   for i in $(seq -w 1 24); do

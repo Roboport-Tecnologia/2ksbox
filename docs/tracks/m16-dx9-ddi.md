@@ -187,7 +187,9 @@ by a title.
   `-modechange` the focus-loss case (`-modechange -nolock` with Win98's
   foreground lock off).
 - **Win98 titles on the driver, protocol v20 (2026-09-27, `base98-br`,
-  headless).** 3DMark2001 SE's whole Benchmark (5339), Crimson Skies'
+  headless).** 3DMark2001 SE's whole Benchmark (5339 and 5341 in two
+  runs; Car Chase 59.8 / 16.6 fps, Lobby 60.1 / 41.8, Nature 60.0,
+  vertex shader 52.9, pixel shaders 59.9, as doc 22 §6.2), Crimson Skies'
   menus (DX7), Max Payne's tutorial level (DX8, finding 34) and GTA Vice
   City from the main menu through the intro into the city, walking, at
   the game's own 30 frames/s limiter (DX8, about 500 draws a frame, the
