@@ -387,7 +387,7 @@ pastes the same words.
    *Age ratings* is the IARC questionnaire (all "no"); *Pricing* is
    free; *Store listing* takes the text and at least one screenshot of
    1366×768 or more, a shot of the player's window with the shader
-   chain on it (Windows' Win+PrtScn with the player full screen), never
+   chain on it (the player full screen, Ctrl+Alt+Shift+S or Win+PrtScn), never
    the player's Ctrl+Alt+S guest frame scaled up (the listing file says
    why); *Submission options* takes
    one sentence per restricted capability (`runFullTrust`, in the

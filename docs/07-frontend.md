@@ -22,7 +22,7 @@ commands `docs/development.md` and `docs/build-macos.md` /
   bars. Ctrl+Alt+Shift+F is borderless full screen.
 - **Input** is doc 03's model (tablet or PS/2 grab, Ctrl+Alt+G,
   Ctrl+Alt+K, Ctrl+Alt+Shift+D for Ctrl+Alt+Del, Ctrl+Alt+S for a shot
-  of the guest's frame). Alt+F4 asks first, in a panel the player draws
+  of the guest's frame, Ctrl+Alt+Shift+S for one of the window's). Alt+F4 asks first, in a panel the player draws
   over the picture (`player/src/prompt.rs`), since the player has no
   toolkit and Linux has no message box that works inside the Flatpak and
   over a full-screen window. A gamepad (M13, `docs/tracks/m13-gamepads.md`)
@@ -68,8 +68,14 @@ player line runs a machine with nothing else.
   copy runs on a thread and writes `machine.toml` last, so a clone in
   progress or failed never shows in the grid. It cannot be cancelled
   mid-file: `std::fs::copy` keeps the kernel's fast paths (reflinks,
-  `copy_file_range`). `launcherx --clone <machine.toml> [name]` and
-  `lc_machines_clone` are the same model.
+  `copy_file_range`). **"Use the same hard disk instead of copying it"**
+  (user request, 2026-09-26) makes the clone name the original's disk by
+  its absolute path and copy only the rest of the bundle; the window
+  warns that only one machine at a time may run on that disk. Nothing
+  enforces it beyond QEMU's own image lock. Nothing of the disk is read,
+  so such a clone of a running machine goes ahead. `launcherx --clone
+  <machine.toml> [--same-disk] [name]` and `lc_machines_clone` (its
+  `same_disk` argument) are the same model.
 - **Not built:** last-frame thumbnails in the grid, and bundle
   import/export.
 

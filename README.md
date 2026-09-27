@@ -230,6 +230,7 @@ Keys in the player window:
 | Ctrl+Alt+Shift+D | Ctrl+Alt+Del in the guest |
 | Ctrl+Alt+Shift+F | windowed full screen on and off |
 | Ctrl+Alt+S | save the guest's own frame as a PNG |
+| Ctrl+Alt+Shift+S | save what the window shows (scaled, through the CRT shader) as a PNG |
 | Alt+F4 | asks before stopping the machine; the window's close button does not |
 
 Windows machines use a "seamless" mouse by default: the host pointer is

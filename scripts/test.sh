@@ -373,6 +373,14 @@ clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   case "$o" in *"already a machine called"*) ;; *) echo "...and not refused for that: $o"; rc=1;; esac
   o="$(target/release/launcherx --clone "$bundle" " " 2>&1)" && { echo "a clone with no name was made"; rc=1; }
   case "$o" in *"name is required"*) ;; *) echo "...and not refused for that: $o"; rc=1;; esac
+  # "Use the same hard disk": the clone boots the original's disk, copies
+  # nothing of it, and carries the rest of the bundle (the snapshot tree).
+  twin="$(target/release/launcherx --clone "$bundle" --same-disk "Same disk" 2>&1)" \
+    || { echo "--clone --same-disk failed: $twin"; rc=1; }
+  args="$(target/release/launcherx --print-args "$twin")"
+  case "$args" in *"file=$(realpath "$disk"),"*) ;; *) echo "the same-disk clone does not boot the original's disk: $args"; rc=1;; esac
+  [ ! -e "$(dirname "$twin")/disk.qcow2" ] || { echo "the same-disk clone copied the disk"; rc=1; }
+  [ -f "$(dirname "$twin")/snapshots.toml" ] || { echo "the same-disk clone left the snapshot record behind"; rc=1; }
   # A disk outside the library, as "Use an existing disk" leaves one, and
   # an overlay whose backing file is named relative to it: the copy lands
   # in the clone's own folder and still finds the backing file.
@@ -402,6 +410,9 @@ clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
     o="$(target/release/launcherx --clone "$bundle" "While running" 2>&1)" && { echo "a running machine was cloned"; rc=1; }
     case "$o" in *"is running"*) ;; *) echo "...and not refused for that: $o"; rc=1;; esac
     [ ! -e "$dir/library/while-running" ] || { echo "a refused clone left a directory behind"; rc=1; }
+    # Nothing of the disk is read for a same-disk clone, so that one goes ahead.
+    o="$(target/release/launcherx --clone "$bundle" --same-disk "Same while running" 2>&1)" \
+      || { echo "a same-disk clone of a running machine was refused: $o"; rc=1; }
     kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
   else
     echo "  (no build/qemu/qemu-system-i386: the running-machine refusal is not checked)"
@@ -478,6 +489,18 @@ qtclone_check() { # the Qt "Clone…" window, driven (doc 07)
   saved="$(printf '%s' "$o" | sed -n 's/.*saved \(.*\), grid.*/\1/p')"
   grep -qx 'name = "Typed twin"' "$saved" 2>/dev/null || { echo "no bundle called Typed twin at '$saved'"; rc=1; }
   cmp -s "$dir/disk.img" "$(dirname "$saved")/disk.img" || { echo "the clone has no copy of the disk"; rc=1; }
+  # The same, with "same hard disk" ticked: the window warns, and the new
+  # machine names the original's disk and has no copy of it.
+  rm -rf "$(dirname "$saved")"
+  o="$(timeout 120 env LAUNCHER_QT_SCREEN=clone LAUNCHER_QT_ARG="$bundle;same" LAUNCHER_QT_DELAY=300 \
+       "$bin" 2>&1 | sed -n 's/^\[diag\] clone //p')"
+  printf '  %s\n' "$o"
+  printf '%s' "$o" | grep -q 'same disk true, warning \[Only one machine at a time' \
+    || { echo "ticking same hard disk did not reach the model, or no warning"; rc=1; }
+  saved="$(printf '%s' "$o" | sed -n 's/.*saved \(.*\), grid.*/\1/p')"
+  grep -qx "disk = \"$(realpath "$dir/disk.img")\"" "$saved" 2>/dev/null \
+    || { echo "the same-disk clone does not name the original disk: $(grep '^disk' "$saved" 2>&1)"; rc=1; }
+  [ ! -e "$(dirname "$saved")/disk.img" ] || { echo "the same-disk clone copied the disk"; rc=1; }
   # Then the window left open (`;show`) and measured: it is as tall as its
   # content and no taller. It used to be a fixed 280 with a band of nothing
   # above the buttons (user nag, 2026-09-23), and a first fix bound the

@@ -181,10 +181,16 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   machine rendered, for tests and bug reports. **It is not a picture
   of the product**: a screenshot meant for people (a Store listing,
   Flathub, the README) is the player's window after the shader chain,
-  at the window's resolution, taken with the OS's own screenshot with
-  the player full screen; a guest frame scaled up shows something the
+  at the window's resolution, with the player full screen
+  (`Ctrl+Alt+Shift+S`, or the OS's own screenshot); a guest frame scaled up shows something the
   box never draws (user, 2026-09-25).
-- `PLAYER_SHOT_EVERY=300` takes that shot every 300 presented guest
+- `Ctrl+Alt+Shift+S` writes that picture: the window's content after
+  the geometry stage and the CRT chain, at the window's size, black
+  bars included, to the same numbered files. It draws the chain's last
+  output again into a texture of the swapchain's format with the
+  blit the window uses (inside the viewport it equals the mode sweep's
+  chain dump, 0 pixels differ); the close prompt is left out.
+- `PLAYER_SHOT_EVERY=300` takes the guest-frame shot every 300 presented guest
   frames, driven from the wake path so a window behind a terminal still
   shoots. This is how a headless run sees a 3D frame; a QMP screendump
   shows the VGA surface, frozen while the 3D device presents.

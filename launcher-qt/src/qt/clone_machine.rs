@@ -3,8 +3,8 @@
 //!
 //! The model decides everything: the name offered, what is copied and
 //! where, the refusal while the machine runs, the sentences. This file
-//! is the projection onto properties and the three things a view does:
-//! type a name, press Clone, and poll a running copy from a `Timer`
+//! is the projection onto properties and the four things a view does:
+//! type a name, tick "same hard disk", press Clone, and poll a running copy from a `Timer`
 //! (`Main.qml`, which also rescans the grid when it lands).
 
 #[cxx_qt::bridge]
@@ -22,7 +22,9 @@ pub mod ffi {
         #[qproperty(QString, title)]
         #[qproperty(QString, name)]
         #[qproperty(QString, note)]
-        /// The machine is running: drawn as a warning, and Clone is off.
+        #[qproperty(bool, same_disk)]
+        #[qproperty(QString, same_disk_label)]
+        /// The shared disk's rule, or the machine is running: drawn as a warning, and Clone is off.
         #[qproperty(QString, warning)]
         #[qproperty(QString, error)]
         /// The line for the grid once a clone has landed.
@@ -43,6 +45,10 @@ pub mod ffi {
         /// would change the property and leave the model behind it.
         #[qinvokable]
         fn rename(self: Pin<&mut CloneModel>, name: &QString);
+
+        /// The "same hard disk" checkbox changed.
+        #[qinvokable]
+        fn share_disk(self: Pin<&mut CloneModel>, same: bool);
 
         #[qinvokable]
         fn submit(self: Pin<&mut CloneModel>);
@@ -76,6 +82,8 @@ pub struct CloneModelRust {
     title: QString,
     name: QString,
     note: QString,
+    same_disk: bool,
+    same_disk_label: QString,
     warning: QString,
     error: QString,
     status: QString,
@@ -97,6 +105,11 @@ impl ffi::CloneModel {
 
     fn rename(mut self: Pin<&mut Self>, name: &QString) {
         self.as_mut().rust_mut().model.name = name.to_string();
+        self.publish();
+    }
+
+    fn share_disk(mut self: Pin<&mut Self>, same: bool) {
+        self.as_mut().rust_mut().model.same_disk = same;
         self.publish();
     }
 
@@ -123,13 +136,15 @@ impl ffi::CloneModel {
     /// The model, onto the properties, each through its own setter (see
     /// the header of `main.rs`).
     fn publish(mut self: Pin<&mut Self>) {
-        let (open, title, name, note, warning, error, status, busy, can_submit, progress, progress_label);
+        let (open, title, name, note, same_disk, same_disk_label, warning, error, status, busy, can_submit, progress, progress_label);
         {
             let m = &self.rust().model;
             open = m.open;
             title = qs(m.title());
             name = qs(&m.name);
             note = qs(m.note());
+            same_disk = m.same_disk;
+            same_disk_label = qs(m.same_disk_label());
             warning = qs_opt(m.warning());
             error = qs_opt(m.error());
             status = qs_opt(m.status());
@@ -141,6 +156,8 @@ impl ffi::CloneModel {
         self.as_mut().set_title(title);
         self.as_mut().set_name(name);
         self.as_mut().set_note(note);
+        self.as_mut().set_same_disk(same_disk);
+        self.as_mut().set_same_disk_label(same_disk_label);
         self.as_mut().set_warning(warning);
         self.as_mut().set_error(error);
         self.as_mut().set_status(status);

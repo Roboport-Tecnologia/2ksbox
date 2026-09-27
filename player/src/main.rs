@@ -411,24 +411,92 @@ impl Gpu {
             return;
         };
         let (w, h, rgb) = shader_chain::read_texture(&self.device, &self.queue, tex);
-        let dir = std::env::var_os("PLAYER_SHOT_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            eprintln!("[shot] {}: {e}", dir.display());
-            return;
-        }
-        // numbered rather than time-stamped: a number needs no time zone to
-        // read, and the next free one is stable across runs
-        let path = (1..10_000)
-            .map(|n| dir.join(format!("2ksbox-{n:04}.png")))
-            .find(|p| !p.exists());
-        let Some(path) = path else {
-            eprintln!("[shot] {}: no free file name", dir.display());
-            return;
-        };
+        let Some(path) = shot_path() else { return };
         shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb);
         eprintln!("[shot] {w}x{h} guest frame → {}", path.display());
+    }
+
+    /// The window's picture into `view`: the chain's output (or the guest
+    /// frame when no preset is loaded) in the geometry stage's viewport,
+    /// black around it, and the close prompt over it when `overlay` is set.
+    /// `render` and `window_shot` both draw with this, so the shot is the
+    /// presented picture pixel for pixel.
+    fn draw_picture(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, overlay: bool) {
+        let bg: &wgpu::BindGroup = match (&self.chain, &self.chain_bg) {
+            (Some(_), Some((bg, _, _))) => bg,
+            _ => &self.current().unwrap().1,
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("blit"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let (x, y, w, h) = self.viewport();
+        pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, bg, &[]);
+        pass.draw(0..3, 0..1);
+        if !overlay {
+            return;
+        }
+        if let (Some((_, obg, _, _)), Some((ox, oy, ow, oh))) = (&self.overlay, self.overlay_rect()) {
+            pass.set_viewport(ox, oy, ow, oh, 0.0, 1.0);
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, obg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    /// Write what the window shows as a PNG: the picture after the geometry
+    /// stage and the CRT chain, at the window's own size, black bars
+    /// included. The chain's last output is drawn again rather than the
+    /// chain run again, so an animated preset is not stepped by a shot.
+    /// Ctrl+Alt+Shift+S; `screenshot` is the guest's own frame.
+    fn window_shot(&self) {
+        if self.current().is_none() {
+            eprintln!("[shot] no guest frame yet");
+            return;
+        }
+        let (w, h) = self.surface_size();
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("window shot"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // the swapchain's format, so the pipeline and its sRGB encoding
+            // are the ones the window gets
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("window shot"),
+            });
+        self.draw_picture(&mut encoder, &view, false);
+        self.queue.submit(Some(encoder.finish()));
+        let (w, h, rgb) = shader_chain::read_texture(&self.device, &self.queue, &tex);
+        let Some(path) = shot_path() else { return };
+        shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb);
+        eprintln!("[shot] {w}x{h} window → {}", path.display());
     }
 
     fn upload(&mut self, pixels: &[u32], w: u32, h: u32) {
@@ -773,10 +841,6 @@ impl Gpu {
         if let Some(enc) = chain_enc {
             self.queue.submit(Some(enc.finish()));
         }
-        let bg: &wgpu::BindGroup = match (&self.chain, &self.chain_bg) {
-            (Some(_), Some((bg, _, _))) => bg,
-            _ => &self.current().unwrap().1,
-        };
         let Some(frame) = frame else { return };
         let view = frame
             .texture
@@ -786,35 +850,7 @@ impl Gpu {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("blit"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            let (x, y, w, h) = self.viewport();
-            pass.set_viewport(x, y, w, h, 0.0, 1.0);
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, bg, &[]);
-            pass.draw(0..3, 0..1);
-            if let (Some((_, obg, _, _)), Some((ox, oy, ow, oh))) = (&self.overlay, self.overlay_rect()) {
-                pass.set_viewport(ox, oy, ow, oh, 0.0, 1.0);
-                pass.set_pipeline(&self.overlay_pipeline);
-                pass.set_bind_group(0, obg, &[]);
-                pass.draw(0..3, 0..1);
-            }
-        }
+        self.draw_picture(&mut encoder, &view, true);
         self.queue.submit(Some(encoder.finish()));
         self.window.pre_present_notify();
         self.queue.present(frame);
@@ -1785,14 +1821,20 @@ impl ApplicationHandler for App {
                     self.set_grab(false);
                     return;
                 }
-                // Ctrl+Alt+S: shoot the guest's own frame, unscaled and unshaded
+                // Ctrl+Alt+S: shoot the guest's own frame, unscaled and
+                // unshaded; with Shift, what the window shows (scaled and
+                // through the CRT chain)
                 if down
                     && code == KeyCode::KeyS
                     && self.modifiers.control_key()
                     && self.modifiers.alt_key()
                 {
-                    if let Some(gpu) = self.gpu.as_ref() {
-                        gpu.screenshot();
+                    if let (false, Some(gpu)) = (event.repeat, self.gpu.as_ref()) {
+                        if self.modifiers.shift_key() {
+                            gpu.window_shot();
+                        } else {
+                            gpu.screenshot();
+                        }
                     }
                     return;
                 }
@@ -2201,6 +2243,27 @@ impl ApplicationHandler for App {
             }
         }
     }
+}
+
+/// The next free `PLAYER_SHOT_DIR/2ksbox-NNNN.png` (the working directory
+/// when unset), for both shots. `None`, said on stderr, when there is none.
+fn shot_path() -> Option<std::path::PathBuf> {
+    let dir = std::env::var_os("PLAYER_SHOT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("[shot] {}: {e}", dir.display());
+        return None;
+    }
+    // numbered rather than time-stamped: a number needs no time zone to
+    // read, and the next free one is stable across runs
+    let path = (1..10_000)
+        .map(|n| dir.join(format!("2ksbox-{n:04}.png")))
+        .find(|p| !p.exists());
+    if path.is_none() {
+        eprintln!("[shot] {}: no free file name", dir.display());
+    }
+    path
 }
 
 /// `PLAYER_SHOT_EVERY=<n>`: shoot the guest's own frame every n presented

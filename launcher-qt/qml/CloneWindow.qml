@@ -1,5 +1,5 @@
 // "Clone…" (doc 07): a new machine that is a whole copy of this one,
-// disk included. The model decides the name offered, what is copied and
+// disk included unless "same hard disk" is ticked. The model decides the name offered, what is copied and
 // whether the machine may be copied at all; this only draws it.
 import QtQuick
 import QtQuick.Controls
@@ -27,6 +27,7 @@ Window {
         nameField.insert(0, text)
     }
     function clickClone() { cloneButton.click() }
+    function clickSameDisk() { sameDisk.click() }
 
     /// Where the layout put things, for the `qt-clone` probe: the window
     /// is as tall as its content, so its height and the layout's must agree.
@@ -95,11 +96,19 @@ Window {
                     id: nameField
                     Layout.fillWidth: true
                     selectByMouse: true
-                    enabled: !root.cloner.busy && root.cloner.warning === ""
+                    enabled: !root.cloner.busy
                     text: root.cloner.name
                     onTextChanged: if (text !== root.cloner.name) root.cloner.rename(text)
                     onAccepted: if (cloneButton.enabled) cloneButton.click()
                 }
+            }
+
+            CheckBox {
+                id: sameDisk
+                text: root.cloner.sameDiskLabel
+                enabled: !root.cloner.busy
+                checked: root.cloner.sameDisk
+                onToggled: root.cloner.shareDisk(checked)
             }
 
             Label {

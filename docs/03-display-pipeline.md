@@ -173,8 +173,13 @@ parameters, stay open with the pack.
 the mode's own size, before the geometry stage and the chain. That is the
 picture to compare with a golden BMP, a native run or another emulator.
 An imported 3D slot is shot the same way. Files land in `PLAYER_SHOT_DIR`
-(default: the working directory) as `2ksbox-NNNN.png`. `PLAYER_DUMP_OUT`
-writes the shaded window content instead.
+(default: the working directory) as `2ksbox-NNNN.png`.
+**Ctrl+Alt+Shift+S** shoots what the window shows instead: the chain's
+last output drawn again, with the window's own blit, into a texture of
+the swapchain's size and format, black bars included and the close
+prompt left out. Drawing it again rather than running the chain again
+keeps an animated preset from being stepped by a shot. `PLAYER_DUMP_OUT`
+writes the chain's output alone, at the viewport's size.
 
 ### Sampling outside the picture
 

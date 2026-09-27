@@ -602,7 +602,8 @@ ApplicationWindow {
                 // pressed, and the copy is waited out (`cloneSettle`),
                 // ending on the rescanned grid, so it passes only if the
                 // new machine landed in the library. `<path>;show` stops
-                // at the open window, for a picture of it.
+                // at the open window, for a picture of it; `<path>;same`
+                // ticks "same hard disk" first.
                 const cloneSpec = diag.arg.split(";")
                 cloner.openFor(cloneSpec[0], false)
                 diag.note("clone offered [" + cloneWindow.shownName + "] model [" + cloner.name
@@ -610,6 +611,10 @@ ApplicationWindow {
                           + ", error [" + cloner.error + "]")
                 if (cloneSpec[1] === "show")
                     break
+                if (cloneSpec[1] === "same") {
+                    cloneWindow.clickSameDisk()
+                    diag.note("clone same disk " + cloner.sameDisk + ", warning [" + cloner.warning + "]")
+                }
                 cloneWindow.retypeName("Typed twin")
                 cloneWindow.clickClone()
                 diag.note("clone started: busy=" + cloner.busy + ", error [" + cloner.error + "]")
