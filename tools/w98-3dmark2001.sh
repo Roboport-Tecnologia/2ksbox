@@ -11,6 +11,8 @@
 #     C:\PROGRA~1\MADONION.COM\3DMARK~1), CPU= (-cpu, e.g.
 #     pentium3,x87-pc64-as-53=on), QEMU_TCG_OPTS=, DDFLAGS=, EXTRA=, TABLET=1
 #     (a USB tablet and absolute clicks; off by default, see w98-3dmark.sh),
+#     TDM_DIR= (3DMark's folder as 8.3; a pt-BR machine's is
+#     C:\ARQUIV~1\MADONION.COM\3DMARK~1),
 #     CAP= (seconds to wait for the score, 3000), passed through to
 #     win98-game-test.sh where it takes them.
 # Output: build/w98game/<name>/: score.png (the Overall Score dialog),
@@ -92,10 +94,10 @@ if [ $seen -ge 2 ]; then
   # A click on the scrollbar's track below the thumb pages it
   # down, a screendump per page, until the last two pages are the same
   q screendump "$O/details-00.png" >/dev/null
-  prev=$(md5 -q "$O/details-00.png.ppm")
+  prev=$(cksum < "$O/details-00.png.ppm")
   for i in $(seq -w 1 24); do
     c 624 410 >/dev/null; sleep 2; q screendump "$O/details-$i.png" >/dev/null
-    h=$(md5 -q "$O/details-$i.png.ppm"); [ "$h" = "$prev" ] && { rm -f "$O/details-$i.png" "$O/details-$i.png.ppm"; break; }
+    h=$(cksum < "$O/details-$i.png.ppm"); [ "$h" = "$prev" ] && { rm -f "$O/details-$i.png" "$O/details-$i.png.ppm"; break; }
     prev=$h
   done
 else

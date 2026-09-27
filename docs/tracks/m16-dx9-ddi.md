@@ -423,7 +423,12 @@ by a title.
      forces `ADDRESSU` / `V` / `W` to `CLAMP` while such a texture is
      bound and gives the app's own modes back for a power-of-two one
      (`Dp2::apply_addr`; a state set records the app's values, and one
-     executed is read back before the clamp goes on again).
+     executed is read back before the clamp goes on again). 3DMark2001
+     SE's Benchmark on `base98-br` (DX8, pure hardware T&L, 1024x768x32)
+     ran all 17 tests after it with frames that look right, 5339 3D
+     marks, inside doc 22 §6.2's range (`tools/w98-3dmark2001.sh` with
+     `TDM_DIR='C:\ARQUIV~1\MADONION.COM\3DMARK~1'`, the pt-BR
+     machine's path).
   37. *Fixed (Win98).* `VOLUMEBLT` was dropped when the two volumes'
      formats differed, and 9x's runtime registers a system-memory volume
      with its own format (XP's d3d9.dll with none), so Wine's
