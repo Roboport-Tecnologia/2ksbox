@@ -47,16 +47,10 @@ start it in the player's place (the pad is not read):
 LAUNCHER_PLAYER_BIN=$PWD/target/release/player-gtk-spike ../../launcher-qt/target/release/launcher-qt
 ```
 
-A live guest needs QEMU on a GLib of its own (the last section says why):
-
-```sh
-scripts/build-deps.sh                          # pcre2, glib, libslirp: static, build/deps/<arch>
-QEMU_DEPS=ours scripts/configure-qemu.sh       # glib and slirp from there, their symbols hidden
-ninja -C build/qemu qemu-system-i386 qemu-img qemu-io libqemu-embed-i386.so
-```
-
-`scripts/build.sh` knows nothing of this yet: its next QEMU reconfigure
-goes back to the system GLib.
+A live guest needs QEMU on a GLib of its own (the last section says why),
+which is the Linux build's default since 2026-09-27 (`scripts/build.sh`;
+`QEMU_DEPS` in `docs/development.md`). A QEMU built with
+`QEMU_DEPS=system` aborts as soon as the guest starts.
 
 `SPIKE_MUTE=1` gives the guest a silent audio device; `SPIKE_INHIBIT=1`
 takes the compositor's shortcuts while the window has focus (GTK's own
@@ -102,7 +96,7 @@ dispatches GTK's sources (here the spike's wake, a thread-local source).
 has no GLib and never met this; Qt's GLib event dispatcher would (unless
 `QT_NO_GLIB=1`). The fix taken
 is a private static GLib inside `libqemu-embed` (`scripts/build-deps.sh`
-on Linux, `QEMU_DEPS=ours scripts/configure-qemu.sh`): GLib, pcre2 and
+on Linux, linked by `scripts/configure-qemu.sh`): GLib, pcre2 and
 libslirp static, their symbols hidden with `--exclude-libs`, smartcard
 off (libcacard links the system GLib). The library then lists no GLib,
 gio, gobject, slirp or pcre2 in `ldd` and has no `g_*` symbol, defined or

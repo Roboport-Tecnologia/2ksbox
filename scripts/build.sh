@@ -11,11 +11,13 @@
 #
 # Stages, in the order they must run:
 #
-#   deps    macOS only: scripts/build-deps.sh, the libraries QEMU links
-#           (glib, pixman, libslirp, zstd; static) and the launcher's Qt
-#           6, built from source for the floor into build/deps/<arch>
-#           (docs/build-macos.md, "The libraries"). Elsewhere the
-#           distribution's.
+#   deps    scripts/build-deps.sh into build/deps/<arch>. macOS: the
+#           libraries QEMU links (glib, pixman, libslirp, zstd; static)
+#           and the launcher's Qt 6, built from source for the floor
+#           (docs/build-macos.md, "The libraries"). Linux: QEMU's own
+#           glib (pcre2, glib, libslirp; static), so QEMU never shares a
+#           glib with the process it is embedded in (QEMU_DEPS in
+#           docs/development.md); the rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
 #           -> ninja: qemu-system-i386, qemu-img, qemu-io,
 #           libqemu-embed-i386.{so,dylib}
@@ -204,15 +206,31 @@ if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/00-qemu92x-mesa-glide.p
   git submodule update --init --depth 1 qemu third_party/qemu-3dfx
 fi
 
-# --- deps (macOS) -----------------------------------------------------
+# --- deps -------------------------------------------------------------
 # The libraries QEMU links, ours (scripts/build-deps.sh). Stamped on the
 # script (its versions and checksums are in it), the floor and the
 # architecture; a change rebuilds them and then reconfigures QEMU, since
 # meson recorded the old archives' paths and flags.
 DEPS_FRESH=""
 if want deps; then
-  if [ "$(uname -s)" != Darwin ]; then
-    echo "    deps: the distribution's libraries (macOS builds its own)"
+  if [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" = system ]; then
+    echo "    deps: QEMU_DEPS=system, QEMU links the distribution's glib"
+  elif [ "$(uname -s)" = Linux ]; then
+    if ! have meson || ! have ninja || ! have pkg-config; then
+      skip deps "needs meson, ninja and pkg-config" || true
+    elif stamp_stale "deps-$(uname -m)" scripts/build-deps.sh \
+       || ! ls "build/deps/$(uname -m)"/.built-glib-*-linux >/dev/null 2>&1 \
+       || ! ls "build/deps/$(uname -m)"/.built-libslirp-*-linux >/dev/null 2>&1; then
+      say "deps: pcre2, glib and libslirp for QEMU ($(uname -m), static)"
+      scripts/build-deps.sh
+      stamp_save
+      DEPS_FRESH=1
+      BUILT+=(deps)
+    else
+      echo "    script and architecture unchanged - skipping"
+    fi
+  elif [ "$(uname -s)" != Darwin ]; then
+    echo "    deps: the distribution's libraries"
   elif ! have meson || ! have ninja || ! have pkg-config; then
     skip deps "needs meson, ninja and pkg-config" || true
   else
@@ -259,9 +277,9 @@ if want qemu; then
     # silent until a guest has no network and QEMU refuses the launcher's
     # command line.
     slirp_pkg=""; have pkg-config && pkg-config --exists slirp && slirp_pkg=1
-    # On macOS slirp is one of ours, in the prefix configure-qemu.sh
-    # points pkg-config at.
-    [ "$(uname -s)" = Darwin ] && [ -f "build/deps/$(uname -m)/lib/pkgconfig/slirp.pc" ] && slirp_pkg=1
+    # On macOS and Linux slirp is one of ours, in the prefix
+    # configure-qemu.sh points pkg-config at.
+    [ -f "build/deps/$(uname -m)/lib/pkgconfig/slirp.pc" ] && slirp_pkg=1
     slirp_built=""
     grep -q '^#define CONFIG_SLIRP' "$QB/config-host.h" 2>/dev/null && slirp_built=1
 
@@ -284,6 +302,15 @@ if want qemu; then
         needs_configure=1
       fi
     done
+    # Configured on the other glib (Linux): ours hides its symbols with
+    # --exclude-libs, so build.ninja says which one the last configure
+    # used. A build configured by hand the other way is otherwise kept
+    # until something else forces a configure.
+    if [ "$(uname -s)" = Linux ] && [ -f "$QB/build.ninja" ]; then
+      own=""; grep -q -- '--exclude-libs,libglib-2.0.a' "$QB/build.ninja" && own=1
+      if [ "${QEMU_DEPS:-}" = system ]; then [ -n "$own" ] && needs_configure=1
+      else [ -z "$own" ] && needs_configure=1; fi
+    fi
     # Configured for another macOS: configure-qemu.sh passes the target as
     # a compiler flag, so configuring again is what recompiles for it.
     if [ "$(uname -s)" = Darwin ] && [ -f "$QB/config-meson.cross" ] \

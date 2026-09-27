@@ -68,11 +68,16 @@ Debian 12 and 13 and Ubuntu 24.04 and 26.04.
 | Purpose | Arch | Debian / Ubuntu |
 |---|---|---|
 | Compilers and build tools | `base-devel git ninja meson pkgconf` | `build-essential git ninja-build meson pkg-config` |
-| QEMU's libraries | `glib2 pixman zlib libslirp mesa libx11` | `libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libgl-dev libx11-dev` |
+| QEMU's libraries | `pixman zlib libffi mesa libx11` | `libpixman-1-dev zlib1g-dev libffi-dev libgl-dev libx11-dev` |
 | The launcher (Qt 6) | `qt6-base qt6-declarative` | `qt6-base-dev qt6-declarative-dev qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-dialogs` |
 | Direct3D executor (optional) | `vulkan-headers vulkan-icd-loader glslang` | `libvulkan-dev glslang-tools` |
 | Direct3D through Wine, for a GPU without Vulkan 1.3 (optional) | `mingw-w64-gcc wine` | `g++-mingw-w64-x86-64 wine` |
 | Guest tools disc (optional) | `mingw-w64-gcc nasm xorriso` | `gcc-mingw-w64-i686 nasm xorriso` |
+
+QEMU gets a GLib of its own: the build downloads GLib, PCRE2 and libslirp
+and builds them for it, which needs meson 1.4 or newer. Debian 12 and
+Ubuntu 24.04 package older ones; there, `uv tool install meson` (uv is
+below) gives a newer one.
 
 The guest tools disc also needs **Open Watcom v2** for the Windows 98
 display driver. Unpack the `ow-snapshot.tar.xz`

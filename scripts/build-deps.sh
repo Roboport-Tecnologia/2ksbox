@@ -36,11 +36,12 @@
 #
 # On Linux it builds QEMU's glib alone (pcre2, glib, and libslirp, the
 # one other library QEMU links that links glib), static, into
-# build/deps/<arch>, for `QEMU_DEPS=ours scripts/configure-qemu.sh`. A
-# player that runs GTK in its own process needs QEMU on a glib of its own:
-# QEMU's main loop iterates glib's global default GMainContext on QEMU's
-# thread, and with one shared glib that is GTK's context
-# (spikes/player-gtk/README.md). Everything else stays the distribution's.
+# build/deps/<arch>, which scripts/configure-qemu.sh links by default
+# there. QEMU's main loop iterates glib's global default GMainContext on
+# QEMU's thread; with one glib shared with its process, that is the
+# context a toolkit's own loop runs on (spikes/player-gtk/README.md).
+# Everything else stays the distribution's. The Flatpak runs this script
+# in its SDK, offline, with the tarballs as declared sources.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OS="$(uname -s)"
@@ -326,5 +327,5 @@ PY
 echo
 echo "deps ($ARCH, $FOR): $PREFIX"
 ls "$PREFIX/lib"/*.a | sed 's|.*/|    |'
-ls -d "$PREFIX/lib"/Qt*.framework 2>/dev/null | sed 's|.*/|    |' | tr '\n' ' '; echo
+[ "$OS" = Linux ] || { ls -d "$PREFIX/lib"/Qt*.framework 2>/dev/null | sed 's|.*/|    |' | tr '\n' ' '; echo; }
 [ ${#built[@]} -eq 0 ] || echo "    built now: ${built[*]}"

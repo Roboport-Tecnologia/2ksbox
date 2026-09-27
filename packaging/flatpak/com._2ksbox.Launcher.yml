@@ -79,18 +79,6 @@ build-options:
     QEMU_PYTHON: /usr/bin/python3
 
 modules:
-  # QEMU 9.2 needs libslirp for `-netdev user`, which every machine this
-  # launcher generates uses, and the runtime has neither the library nor
-  # its pkg-config file.
-  - name: libslirp
-    buildsystem: meson
-    config-opts:
-      - --buildtype=release
-    sources:
-      - type: archive
-        url: https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.4/libslirp-v4.9.4.tar.gz
-        sha256: 3998863b020aeda34bddc567097c6efba55a78cdf6eeee6bcd42c11ef23967da
-
   # QEMU 9.2's mkvenv wants distlib and falls back to pip's vendored
   # copy. pip 26 (what the SDK ships) trimmed that copy
   # (`pip._vendor.distlib.scripts` is there, `...distlib.version` is
@@ -146,7 +134,27 @@ modules:
       # `cargo/vendor` with a `cargo/config` that redirects crates-io at
       # them; `CARGO_HOME` above points at that directory.
       - cargo-sources.json
+      # QEMU's own glib (scripts/build-deps.sh, which on Linux builds
+      # pcre2, glib and libslirp, static, into build/deps/<arch>, and
+      # configure-qemu.sh links by default): the tarballs it pins, where
+      # it looks for them before fetching, so the build stays offline.
+      # libslirp is here rather than a module of its own, because the
+      # runtime's has to be built against this glib. Versions and
+      # checksums are build-deps.sh's.
+      - type: file
+        url: https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2
+        sha256: b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed
+        dest: build/deps/src
+      - type: file
+        url: https://download.gnome.org/sources/glib/2.90/glib-2.90.0.tar.xz
+        sha256: 17d15cac2af80a33271127408e0abc2748eb297c595c2a26409e81e14e7d1b8f
+        dest: build/deps/src
+      - type: file
+        url: https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.gz
+        sha256: f43e68b60b580647574ec4a0e2b6c600a56281e6c39f79426510832dc810f483
+        dest: build/deps/src
     build-commands:
+      - scripts/build-deps.sh
       # The steps a developer runs, then the tarball's staging script
       # with `<prefix>` = `/app`, so the install layout needs no
       # Flatpak-specific variant.
