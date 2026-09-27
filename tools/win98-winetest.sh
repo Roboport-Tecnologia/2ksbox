@@ -17,6 +17,7 @@
 #   WT_TESTS="d3d9:visual d3d8:device"  a subset (default: every file, the
 #                       device files last, as on XP)
 #   WT_CAP=s            WTRUN's cap per file (3600: TCG)
+#   WT_CANARY=1         a traced device after every test function (patch 09)
 #   WT_BASELINE=f       a verdict against reference/winetest/<f>.txt (or a path);
 #                       w98-driver is the driver's Win98 baseline
 #   WT_SAVE=f           save this run as a baseline
@@ -81,6 +82,10 @@ if [ "${WT_BPP:-32}" != 0 ]; then
   mcopy -o -i "$M" "$ROOT/guest-tools/out/driver9x/setbpp.exe" ::/WT/SETBPP.EXE
   CMD+="C:\\WT\\SETBPP.EXE -save ${WT_BPP:-32}"$'\n'
 fi
+# WT_CANARY=1: after every test function one plain device, traced
+# ("canary after <test>: device ok" / "NO DEVICE"; winetest patch 09), to
+# find the test after which no device can be made
+[ -n "${WT_CANARY:-}" ] && CMD+="set WT_CANARY=1"$'\n'
 # one WTRUN per file, so a crash or a hang costs that file only
 for t in ${WT_TESTS:-d3d9:visual d3d9:stateblock d3d9:d3d9ex d3d8:visual d3d8:stateblock d3d9:device d3d8:device}; do
   CMD+="C:\\WT\\WTRUN.EXE ${WT_CAP:-3600} C:\\WT\\$(echo "${t%%:*}" | tr a-z A-Z)_TEST.EXE ${t#*:}"$'\n'

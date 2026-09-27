@@ -590,7 +590,13 @@ track builds.
   HEL refuses (finding 35's rule, on a real card), the test then dies
   inside `D3D8.DLL`, and on Win9x that left DirectDraw locked for every
   later process until a restart. Patch 08 guards it; the batch now
-  says to start from a fresh boot. That run settles findings 33 and 35, `test_getdc` and the
+  says to start from a fresh boot. The next run (fresh boot, patch 08)
+  went further, but after `test_generate_mipmap` in d3d9 visual no device
+  could be made again, with seven silent tests in between. The rig's
+  real-card answers so far: no float render target at all on the
+  GeForce 6200's Win98 driver, ATI2 claimed. Patch 09's canary
+  (`WT_CANARY=1`, set by `RUNALL.BAT`) names the test after which no
+  device can be made. That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
   like Win98's own.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
