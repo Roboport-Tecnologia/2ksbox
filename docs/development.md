@@ -112,6 +112,13 @@ What each stage needs to know:
   interpreter and never consult uv (3.8–3.13 enforced; 3.14 only with the
   real `distlib`). It is for a sandbox that has a Python and cannot fetch
   one, such as the Flatpak.
+- **`QEMU_DEPS=ours`** (Linux) makes `configure-qemu.sh` link QEMU on a
+  GLib of its own: GLib, pcre2 and libslirp from `build/deps/<arch>`
+  (`scripts/build-deps.sh`, which on Linux builds those three alone),
+  static, their symbols hidden, and smartcard off. A player that runs GTK
+  in QEMU's process needs it (`spikes/player-gtk/README.md`). `build.sh`
+  does not pass it, so its next QEMU reconfigure goes back to the
+  system's GLib; no package uses it yet.
 - **A `D3DPT_PROTO_VERSION` bump makes the executor and the guest-tools
   ISO stale, silently.** The suite fails as `d3dpt-dp2: protocol
   mismatch` and as a guest that never attaches. `build.sh` rebuilds
