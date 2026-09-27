@@ -38,9 +38,9 @@ Step 3 has its formats: the DX9 formats (float, 10-bit, 16-bit), sRGB,
 the ARGB group's conversions and the DX9 samplers (doc 15 "The DX9
 formats", "Samplers"), and mip generation (protocol v15, doc 15 "Mip
 generation") with a managed texture's SetLOD, instancing (v16, doc 15
-"Instancing") and four render targets (v17). What step 3 has left: a
-vertex texture
-fetch checked by a title, the 2.0-cap flag.
+"Instancing") and four render targets (v17); the 2.0-cap flag is
+`DDF_SM2` (step 1). What step 3 has left: a vertex texture fetch checked
+by a title.
 
 - **D3DGAME9 through XP's own `d3d9.dll`** (2026-09-25,
   `xp-driver-test.sh d3dgame9`): 600 frames on a hardware-vertex-processing
