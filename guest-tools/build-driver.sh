@@ -115,6 +115,9 @@ for v in 8 9; do
   echo "==> dx${v}caps.exe (what d3d${v}.dll makes of the driver: device types, depth formats, CreateDevice, caps; M16)"
   "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic -DDXVER=$v \
     -o "$OUT/dx${v}caps.exe" "$SRC/dx9caps.c" -lgdi32 -luser32
+  echo "==> wtprobe${v}.exe (windowed CreateDevice across the ways Wine's tests and the caps tools differ; M16)"
+  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic -DDXVER=$v \
+    -o "$OUT/wtprobe${v}.exe" "$SRC/wtprobe.c" -lgdi32 -luser32
 done
 echo "==> d9ctest.exe (the resources d3d9.dll creates on the driver, and float render-target readback; M16)"
 "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
