@@ -84,8 +84,9 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   (ADR-021, track M16): Microsoft's `d3d9.dll` / `d3d8.dll` on the
   driver's DDI with SM3, on XP and Win98. The Direct3D DLLs
   (`D3D8/D3D9/DDRAW.DLL`) and the SysBus `-device d3dpt` are retired (M16
-  step 7); `OPENGL32.DLL` is next, as an ICD the driver's INF installs.
-  Don't bring them back or add a new per-game DLL. `DINPUT.DLL` stays per
+  step 7). `OPENGL32.DLL` stays per game in `OPENGL\` (the ICD was left
+  open when M16 closed, user decision 2026-09-27). Don't bring the
+  Direct3D DLLs back or add a new per-game DLL. `DINPUT.DLL` stays per
   game (user decision), in the disc's `DINPUT\`.
 - **DXVK is the executor's default and the only rasteriser goldens are
   compared against. Below its Vulkan 1.3 floor the same executor runs on

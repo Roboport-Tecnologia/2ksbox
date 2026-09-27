@@ -22,6 +22,12 @@ and executor. Read `docs/00-status.md` first for the track rules.
 
 ## State
 
+**Closed 2026-09-27 (user decision), steps 0 to 7 done.** Step 8, the
+OpenGL ICD, is left open: `OPENGL32.DLL` stays the per-game copy from
+`OPENGL\`, with the device mapper (user: "I don't think that's worth
+it, at least for the time being"). Also not done: vertex texture fetch
+in a title (step 3). The history below is as the track left it.
+
 Opened 2026-09-25. Step 0 is built and run on today's driver; the rig's
 two baselines are the part left (they are the user's runs). Step 1 is
 done: XP's `d3d9.dll` takes the driver as a DirectX 9 device with vs /
@@ -802,7 +808,7 @@ track builds.
    gets the driver's own answer. The SysBus `-device d3dpt` (patch 40)
    has no user left and goes. `D3DPT\` keeps `DINPUT.DLL` alone; the
    folder's name is settled then.
-8. **The OpenGL ICD.** qemu-3dfx's GL wrapper, today `OPENGL32.DLL`
+8. *Left open when the track closed (user, 2026-09-27).* **The OpenGL ICD.** qemu-3dfx's GL wrapper, today `OPENGL32.DLL`
    copied beside a game, becomes an installable client driver
    registered under `OpenGLDrivers` by both INFs, so a game loads
    Windows' own `opengl32.dll`, which loads the ICD. The ICD reaches

@@ -28,7 +28,7 @@ The roadmap is doc 08.
 | 018 | Below the Vulkan floor, the executor runs on Wine on the host; WineD3D-in-guest retired | accepted, retirement done 2026-09-23 |
 | 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted |
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
-| 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted, work in M16 |
+| 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -703,7 +703,13 @@ the claim at 2.0 for A/B.
 **Done for Direct3D** (M16 step 7, 2026-09-27): the three DLLs, their
 sources and the SysBus device are gone; SETUP's file set 1 is a retired
 placeholder so set 3 keeps its number, and `DINPUT.DLL` moved to its own
-`DINPUT\` folder. `OPENGL32.DLL` and the mapper wait for the ICD (step 8).
+`DINPUT\` folder.
+
+**Amended 2026-09-27: the OpenGL ICD is left open** (user decision, "I
+don't think that's worth it, at least for the time being"). M16 closed
+with step 7; `OPENGL32.DLL` stays the per-game copy from `OPENGL\`, and
+the device mapper stays with it. The rejection below of a wrapper that
+stays per game is suspended for OpenGL until the ICD is taken up.
 
 **Amends** ADR-006 and ADR-008: the paravirtual device and its executor
 stand, and the guest DLLs that ADR-008 staged the driver after are
