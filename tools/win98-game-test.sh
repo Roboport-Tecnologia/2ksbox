@@ -78,9 +78,9 @@
 #                       program of ours writes to C:\2KSBOX
 #                       (guest-tools/src/guestlog.h), so
 #                       PULL='2KSBOX\DDPROBE.LOG', not DDPROBE.LOG.
-#   DUMP_EVERY=n        the executor writes every n-th presented frame to
-#                       frames/: what the *game* draws, which a screendump
-#                       cannot see while 3D is presenting
+#                       (A 3D frame on the driver is read back into VRAM,
+#                       so SHOTS= shows the game's frames too; DUMP_EVERY=
+#                       went with the Direct3D DLLs, M16 step 7.)
 #   TRACE=1             D3DPT_DP2_TRACE: one whole frame of DP2 tokens per
 #                       touch of frames/trace.on
 #   DDFLAGS=n           -device d3dpt-vga,ddflags=N (the bisection knob)
@@ -334,7 +334,6 @@ done
 VGAARGS=(-vga none -device "d3dpt-vga,addr=0x02${DDFLAGS:+,ddflags=$DDFLAGS}${FBVER:+,fb-version=$FBVER}")
 [ "${VGA:-d3dpt}" = d3dpt ] || VGAARGS=(-vga "${VGA}")
 USBARGS=(); [ "${TABLET:-0}" = 1 ] && USBARGS=(-usb -device usb-tablet)
-[ -n "${DUMP_EVERY:-}" ] && { export D3DPT_DUMP_DIR="$OUT/frames" D3DPT_DUMP_EVERY="$DUMP_EVERY"; }
 [ "${TRACE:-0}" = 1 ] && export D3DPT_DP2_TRACE="$OUT/frames/trace.on"
 
 echo "==> booting ${VGA:-d3dpt}, discs: ${CDS:-none}, ${RUN_SECS}s of run -> $OUT${PLAYER:+ (in the player)}"
@@ -535,8 +534,10 @@ grep -c "linear mode on" "$OUT/qemu.log" 2>/dev/null | sed 's/^/mode programmed 
 grep -oE "linear mode on \([0-9]+x[0-9]+x[0-9]+" "$OUT/qemu.log" 2>/dev/null | sort | uniq -c | sed 's/^/   /'
 echo "page flips       $(grep -c 'page flips' "$OUT/qemu.log" 2>/dev/null || echo 0) reports"
 grep -oE '[0-9]+ page flips in [0-9.]+ s' "$OUT/qemu.log" 2>/dev/null | tail -5 | sed 's/^/   /'
-echo "ddi: frames      $(grep -c '^ddi:' "$OUT/qemu.log" 2>/dev/null || echo 0) reports"
-grep -E '^ddi:' "$OUT/qemu.log" 2>/dev/null | tail -5 | sed 's/^/   /'
+# the executor's rate lines come prefixed like the device's (a timestamp and
+# "d3dpt-vga: "), so not ^ddi:, which counted 0 for every driver run
+echo "ddi: frames      $(grep -c 'ddi: [0-9.]* frames/s' "$OUT/qemu.log" 2>/dev/null || echo 0) reports"
+grep -oE 'ddi: [0-9.]+ frames/s.*' "$OUT/qemu.log" 2>/dev/null | tail -5 | sed 's/^/   /'
 echo "untracked pixels $(grep -c 'untracked guest pixels' "$OUT/qemu.log" 2>/dev/null || echo 0)"
 echo
 echo "=== anything the device or the executor complained about"

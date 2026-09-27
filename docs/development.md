@@ -351,6 +351,9 @@ Diagnostics:
 
 - `D3DPT_DP2_TRACE`, `D3DPT_DDI_REREAD`, `D3DPT_DDI_NOFOG` trace the
   display driver's DP2 stream (doc 15; `docs/testing.md`).
+- `D3DPT_DDI_FLUSH_DRAWS=n` sets the executor's flush hint (16 draws; 0
+  turns it off, doc 15), and `D3DPT_DDI_FLUSH_AB=n` alternates it with n,
+  one 5 s rate line each, for an A/B inside one run (`tools/ddi-rate.py`).
 - While a 3D device is active, the player shows the VGA surface again
   after 1 s without a presented frame if the guest drew on it (an error
   box, a movie, a crashed game): `[display] no 3D frame for …`.

@@ -622,6 +622,18 @@ guest (XP)                                      host
   stale VRAM; a partial one, or a draw onto a HEL-blitted background,
   uploads it first. Per frame that is one `GetRenderTargetData` + memcpy
   (1.2 MB at 640×480×32).
+- **The GPU starts on a frame before its readback** (track M17). The
+  executor never presents, and DXVK submits recorded work on its own only
+  once three command chunks have piled up (`EndScene`'s hint, at the end
+  of every batch). The rest of a frame waited for the readback, which then
+  waited for the GPU to draw it. After every DP2 record that brings the
+  count to `flush_draws` draws since the last hint (16), the executor
+  issues an EVENT query and polls it with `D3DGETDATA_FLUSH`, which
+  submits whenever the GPU is short of work. In Max Payne 2's corridor
+  the readback's wait fell from 283 to 116 ms in every 5 s and the frame
+  rate rose 4.7 % (tools/w98-mp2.sh); 4 draws instead of 16 changed
+  nothing. `D3DPT_DDI_FLUSH_DRAWS=n` sets it (0 = off). The rate line
+  reports the readbacks' time and the part spent waiting for the frame.
 - **DrawPrimitives2** copies the runtime's command buffer and vertices
   into one `DP2` record and rings the doorbell.
   `D3DHALDP2_USERMEMVERTICES` is a user pointer, read in the caller's

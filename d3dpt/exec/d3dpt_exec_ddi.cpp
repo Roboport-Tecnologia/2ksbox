@@ -269,6 +269,8 @@ struct Ddi {
     std::chrono::steady_clock::time_point stat_t0{};
     uint32_t stat_dp2 = 0, stat_draws = 0, stat_rb = 0, stat_untracked = 0, stat_bw = 0, stat_bb = 0;
     uint32_t buffer_writes = 0, buffer_bytes = 0;   /* v9: VRAM_DIRTY_RANGE records (the guest's vertex / index buffer writes) */
+    /* host time in readbacks, and the part of it spent waiting for the GPU's frame (GetRenderTargetData + the lock) */
+    uint64_t rb_ns = 0, rb_wait_ns = 0, stat_rb_ns = 0, stat_rb_wait_ns = 0;
 
     bool warn_once(uint32_t key) {
         for (uint32_t k : warned) if (k == key) return false;
@@ -280,13 +282,42 @@ struct Ddi {
         if (stage_def) stage_def->Release();
         stage = stage_def = nullptr;
         stage_w = stage_h = 0;
+        if (flush_q) flush_q->Release();
+        flush_q = nullptr;
+    }
+
+    /* The GPU works on a frame while the guest is still building it. The
+     * executor never presents; its frame ends in a readback, and until then
+     * DXVK submits only once three command chunks have piled up (EndScene's
+     * hint at the end of every batch). The rest waited for the readback,
+     * which then waited for the GPU to draw it: 1 ms a frame, 6 % of the
+     * vCPU in Max Payne 2. An EVENT query's GetData(FLUSH) submits whenever
+     * the GPU is short of work, so every flush_draws draws the recorded
+     * commands go now. D3DPT_DDI_FLUSH_DRAWS=n sets it, 0 turns it off. */
+    uint32_t flush_draws = 16, hint_draws = 0;
+    /* D3DPT_DDI_FLUSH_AB=n: flush_draws and n by turns, one rate line
+     * each, so an A/B is read within one run (a TCG run's own speed moves
+     * by 5 % between launches, doc 22 §5.0); n = 0 is the hint off */
+    bool flush_ab = false;
+    uint32_t flush_alt = 0;
+    IDirect3DQuery9 *flush_q = nullptr;
+    void flush_hint(IDirect3DDevice9 *dev) {
+        if (!flush_draws || draws - hint_draws < flush_draws) return;
+        hint_draws = draws;
+        if (!flush_q && FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &flush_q))) { flush_q = nullptr; flush_draws = 0; return; }
+        flush_q->Issue(D3DISSUE_END);
+        flush_q->GetData(nullptr, 0, D3DGETDATA_FLUSH);
     }
 };
 
 namespace {
 
 static Ddi &ddi(Exec &x) {
-    if (!x.ddi) x.ddi = new Ddi;
+    if (!x.ddi) {
+        x.ddi = new Ddi;
+        if (const char *e = getenv("D3DPT_DDI_FLUSH_DRAWS")) x.ddi->flush_draws = (uint32_t)atoi(e);
+        if (const char *e = getenv("D3DPT_DDI_FLUSH_AB")) { x.ddi->flush_ab = true; x.ddi->flush_alt = (uint32_t)atoi(e); }
+    }
     return *x.ddi;
 }
 
@@ -726,12 +757,14 @@ static HRESULT readback(Exec &x, Ddi &d, VramSurf &s) {
     x.scene_end();
     if (!s.rt || (s.d.caps & D3DPT_VS_ZBUFFER)) return D3DERR_INVALIDCALL;
     if (!ensure_stage(x, d, s.d.width, s.d.height, (D3DFORMAT)s.d.format, false)) return E_FAIL;
+    auto t0 = std::chrono::steady_clock::now();
     IDirect3DSurface9 *src = resolved(x, s);
     if (!src) return E_FAIL;
     HRESULT hr = x.dev->GetRenderTargetData(src, d.stage);
     if (FAILED(hr)) { x.log("ddi: readback: GetRenderTargetData 0x%08x", (unsigned)hr); return hr; }
     D3DLOCKED_RECT lr;
     if (FAILED(d.stage->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return E_FAIL;
+    auto t1 = std::chrono::steady_clock::now();
     uint32_t row = fmt_row_bytes(s.d.format, s.d.width), bpp = fmt_row_bytes(s.d.format, 1), kept = 0;
     if (d.trace || d.readbacks < 5) {
         uint32_t px0 = *(const uint32_t *)lr.pBits;
@@ -762,6 +795,8 @@ static HRESULT readback(Exec &x, Ddi &d, VramSurf &s) {
     s.checked = false;
     d.readbacks++;
     auto now = std::chrono::steady_clock::now();
+    d.rb_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(now - t0).count();
+    d.rb_wait_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
     if (d.stat_t0 == std::chrono::steady_clock::time_point{}) d.stat_t0 = now;
     double dt = std::chrono::duration<double>(now - d.stat_t0).count();
     if (dt >= 5.0) {
@@ -769,8 +804,14 @@ static HRESULT readback(Exec &x, Ddi &d, VramSurf &s) {
         size_t n = 0;
         if (d.untracked != d.stat_untracked) n += (size_t)snprintf(extra + n, sizeof extra - n, ", %u untracked guest pixels", d.untracked - d.stat_untracked);
         if (d.buffer_writes != d.stat_bw) snprintf(extra + n, sizeof extra - n, ", %u buffer writes of %u KiB", d.buffer_writes - d.stat_bw, (d.buffer_bytes - d.stat_bb) >> 10);
-        x.log("ddi: %.1f frames/s (%u readbacks, %u dp2 calls, %u draws%s in %.1f s)",
-              (d.readbacks - d.stat_rb) / dt, d.readbacks - d.stat_rb, d.dp2_calls - d.stat_dp2, d.draws - d.stat_draws, extra, dt);
+        char ab[32] = "";
+        if (d.flush_ab) snprintf(ab, sizeof ab, " [flush %u]", d.flush_draws);
+        x.log("ddi: %.1f frames/s (%u readbacks, %u dp2 calls, %u draws%s in %.1f s; readbacks %.0f ms, %.0f of them waiting for the frame)%s",
+              (d.readbacks - d.stat_rb) / dt, d.readbacks - d.stat_rb, d.dp2_calls - d.stat_dp2, d.draws - d.stat_draws, extra, dt,
+              (d.rb_ns - d.stat_rb_ns) / 1e6, (d.rb_wait_ns - d.stat_rb_wait_ns) / 1e6,
+              ab);
+        if (d.flush_ab) std::swap(d.flush_draws, d.flush_alt);
+        d.stat_rb_ns = d.rb_ns; d.stat_rb_wait_ns = d.rb_wait_ns;
         d.stat_t0 = now;
         d.stat_rb = d.readbacks; d.stat_dp2 = d.dp2_calls; d.stat_draws = d.draws; d.stat_untracked = d.untracked;
         d.stat_bw = d.buffer_writes; d.stat_bb = d.buffer_bytes;
@@ -1961,9 +2002,11 @@ struct Dp2 {
             if (v) {
                 VramSurf *s = surf(x, v);
                 if (s && d.reread_all) s->dirty = true;
-                if (s) {
+                if (s && d.trace) {
                     /* the mean of the level-0 texels in VRAM (every 8th pixel of every 8th row, 32/16-bit only):
-                     * black VRAM = the guest never wrote it, content = the host copy may be stale */
+                     * black VRAM = the guest never wrote it, content = the host copy may be stale.
+                     * Trace only: it reads the texture on every bind (7 % of the vCPU thread in
+                     * Max Payne 2, whose DXT textures it read a quarter of) */
                     uint32_t bpp = fmt_row_bytes(s->d.format, 1), n = 0; uint64_t sum = 0;
                     if (fmt_dxt(s->d.format)) {                 /* compressed: the mean of the block bytes */
                         uint32_t rows = fmt_rows(s->d.format, s->d.height), row = fmt_row_bytes(s->d.format, s->d.width);
@@ -3020,6 +3063,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         bool ok = p.run();
         r->hr = b.err ? (uint32_t)E_FAIL : ok ? (uint32_t)S_OK : (uint32_t)p.hr;
         r->bytes = ok ? 0 : p.pos;
+        x.ddi->flush_hint(x.dev);
         break;
     }
     case D3DPT_OP_READBACK: {
