@@ -51,7 +51,9 @@ section.
 - **Host tests.** `d3dpt-dp2-test` and `d3dpt-exec-test` through the
   child are byte-identical to in-process DXVK, under Rosetta (WineHQ
   11.17) and on a real macOS 15.8 on the M1's GL (328 fps,
-  user-confirmed). The `exec-wine` check holds it.
+  user-confirmed). The `exec-wine` check holds
+  `d3dpt-dp2-test`'s half (`d3dpt-exec-test` left with the guest DLLs'
+  records, M16 step 7).
 - **XP guest.** D3DGAME8 within the rig budget (600 frames in 3.4 s
   against 2.1 s in process); the ten DX8 DDI probes give the in-process
   verdicts; FIFA 2000 plays a match at 22.6 frames/s against 19.0.

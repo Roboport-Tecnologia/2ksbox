@@ -196,9 +196,8 @@ Windows is a **cross build from Linux** (`scripts/win-cross.sh`,
 artefacts. QEMU there is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
-d3d9 under that name); `build/win/d3dpt-dp2-test.exe` and
-`build/win/d3dpt-exec-test.exe` are the oracle and must pass on both
-`D3DPT_D3D9=dxvk` and `system`. The same script builds natively in
+d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and
+must pass on both `D3DPT_D3D9=dxvk` and `system`. The same script builds natively in
 MSYS2's MINGW64 shell for debugging on the PC (`scripts/win-run.sh`,
 `GDB=1`; the guest ISO via `scripts/build-windows.sh guest`).
 `docs/build-windows.md`.

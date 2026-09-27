@@ -7,11 +7,11 @@
  * (WineD3D over the host's OpenGL) and answers d3dpt_remote.h requests
  * from its stdin, which is QEMU's libd3dpt_exec_remote on the other end.
  *
- * It maps the regions QEMU names (the command window, VRAM, the frame
- * slot) out of the one shared file QEMU created, so a batch is executed
- * where the guest wrote it and a readback lands in VRAM with no copy; the
- * executor's callbacks (log, active, frame, vram_dirty) become its
- * stderr, a flag, a copy into the frame slot and a list in the reply.
+ * It maps the regions QEMU names (the command window, VRAM) out of the
+ * one shared file QEMU created, so a batch is executed where the guest
+ * wrote it and a readback lands in VRAM with no copy; the executor's
+ * callbacks (log, active, vram_dirty) become its stderr, a flag and a
+ * list in the reply.
  *
  *   d3dpt-exec-host.exe <shared file, a Unix path>
  *
@@ -49,7 +49,6 @@ typedef struct region {
 
 static region regions[MAX_REGIONS];
 static int nregions;
-static const region *frame_region;
 static HANDLE hfile = INVALID_HANDLE_VALUE;
 static HANDLE in_h, out_h;
 
@@ -66,7 +65,6 @@ static d3dpt_exec_t *execs[MAX_EXECS];
 static d3dpt_rp cur;
 static d3dpt_rp_range dirty[D3DPT_REMOTE_MAX_DIRTY];
 static int active_flag;
-static int frame_too_big_said;
 
 static void say(const char *fmt, ...)
 {
@@ -121,21 +119,6 @@ static void cb_active(void *ud, int on)
     active_flag = on;
 }
 
-static void cb_frame(void *ud, const void *px, int w, int h, int stride)
-{
-    (void)ud;
-    if (!frame_region || w <= 0 || h <= 0) return;
-    uint64_t need = (uint64_t)w * 4u * (uint64_t)h;
-    if (need > frame_region->size) {
-        if (!frame_too_big_said++) say("a %dx%d frame does not fit the frame slot (%u bytes); dropped", w, h, frame_region->size);
-        return;
-    }
-    const uint8_t *src = px;
-    uint8_t *dst = frame_region->ptr;
-    for (int y = 0; y < h; y++) memcpy(dst + (size_t)y * w * 4, src + (size_t)y * stride, (size_t)w * 4);
-    cur.frame_w = (uint32_t)w; cur.frame_h = (uint32_t)h; cur.frame_stride = (uint32_t)w * 4u;
-}
-
 static void cb_vram_dirty(void *ud, uint32_t offset, uint32_t bytes)
 {
     (void)ud;
@@ -153,7 +136,7 @@ static void cb_vram_dirty(void *ud, uint32_t offset, uint32_t bytes)
     dirty[0].offset = (uint32_t)lo; dirty[0].bytes = (uint32_t)(hi - lo); cur.ndirty = 1;
 }
 
-static const d3dpt_exec_ops ops = { NULL, cb_log, cb_active, cb_frame, cb_vram_dirty };
+static const d3dpt_exec_ops ops = { NULL, cb_log, cb_active, cb_vram_dirty };
 
 /* ---- set-up ---- */
 
@@ -226,7 +209,6 @@ static int map_region(uint32_t id, uint64_t off, uint32_t size)
     if (!p) { say("MapViewOfFile(%llu, %u): error %lu", (unsigned long long)off, size, GetLastError()); CloseHandle(m); return 0; }
     region *r = &regions[nregions++];
     r->id = id; r->off = off; r->size = size; r->ptr = p; r->map = m;
-    if (id == D3DPT_REMOTE_FRAME_ID) frame_region = r;
     return 1;
 }
 
@@ -302,7 +284,6 @@ int main(int argc, char **argv)
             uint8_t *ptr = x ? region_ptr(q.a1, q.a64, q.a2) : NULL;
             if (!ptr) { p.status = 1; break; }
             p.ret = p_submit(x, ptr, q.a2);
-            p.frame_w = cur.frame_w; p.frame_h = cur.frame_h; p.frame_stride = cur.frame_stride;
             p.ndirty = cur.ndirty;
             break;
         }

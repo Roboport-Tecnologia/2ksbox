@@ -47,7 +47,6 @@ static int failures;
 
 static void cb_log(void *, const char *m) { printf("exec: %s\n", m); }
 static void cb_active(void *, int on) { printf("exec: 3D %s\n", on ? "on" : "off"); }
-static void cb_frame(void *, const void *, int, int, int) {}
 static void cb_dirty(void *, uint32_t off, uint32_t bytes) { dirty_calls++; dirty_bytes += bytes; printf("vram dirty: %u +%u\n", off, bytes); }
 static void doorbell(d3dpt_enc *e) { p_submit(X, e->shm, D3DPT_SHM_SIZE); }
 
@@ -288,7 +287,7 @@ int main(int argc, char **argv) {
     if (!p_version || !p_create || !p_attach || !p_destroy || !p_submit || !p_set_vram) { fprintf(stderr, "bad executor library\n"); return 1; }
     printf("executor protocol %u (header %u)\n", p_version(), D3DPT_PROTO_VERSION);
     if (p_version() != D3DPT_PROTO_VERSION) { fprintf(stderr, "protocol mismatch\n"); return 1; }
-    d3dpt_exec_ops ops = { nullptr, cb_log, cb_active, cb_frame, cb_dirty };
+    d3dpt_exec_ops ops = { nullptr, cb_log, cb_active, cb_dirty };
     X = p_create(&ops);
     if (!X) { printf("no executor (no DXVK / Vulkan device)\n"); return 77; }
     p_attach(X, 1);

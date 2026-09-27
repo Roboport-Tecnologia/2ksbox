@@ -1,7 +1,7 @@
 /*
  * d3dpt_exec.h: C API of the host-side decoder/executor of the
- * paravirtual Direct3D device (libd3dpt_exec, C++ over DXVK's d3d9).
- * The QEMU device (hw/d3dpt) dlopens it, so QEMU stays C and the
+ * display driver's Direct3D (libd3dpt_exec, C++ over DXVK's d3d9).
+ * The d3dpt-vga adapter (hw/d3dpt) dlopens it, so QEMU stays C and the
  * protocol evolves without a QEMU rebuild.
  *
  * Threading: one caller thread (the vCPU that took the doorbell write,
@@ -25,8 +25,6 @@ typedef struct d3dpt_exec_ops {
     void (*log)(void *ud, const char *msg);
     /* a device was created (on) / the last one released (off) */
     void (*active)(void *ud, int on);
-    /* a frame was presented: XRGB8888, top-down, stride in bytes; valid during the call */
-    void (*frame)(void *ud, const void *pixels, int width, int height, int stride);
     /* M7c: the executor wrote [offset, offset + bytes) of the guest VRAM
      * handed over by d3dpt_exec_set_vram (a READBACK); the device marks the
      * range dirty for its scanout. May be NULL. */

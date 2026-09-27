@@ -120,7 +120,7 @@ exec_wine_bin() { # a Wine for the executor's other process: D3DPT_WINE, the PAT
 # then ran the Wine executor (`d3dpt: executor ...libd3dpt_exec_remote.so`
 # in its QEMU log) and guest-G9/G8/F9=native failed by 1.93 %, while
 # `guest` alone passed.
-exec_wine_check() ( # the two host tests through the remote executor, frames against the in-process ones
+exec_wine_check() ( # the host test through the remote executor, its frame against the in-process one
   local wine="$1" rc=0
   # macOS: no window server over ssh, and Wine's Mac driver needs one
   if [ "$(uname -s)" = Darwin ] && [ -z "${TERM_PROGRAM:-}" ] && [ -n "${SSH_CONNECTION:-}" ]; then
@@ -131,10 +131,8 @@ exec_wine_check() ( # the two host tests through the remote executor, frames aga
   export D3DPT_REMOTE_DIR="$OUT"
   echo "wine: $wine"; echo "prefix: $D3DPT_WINEPREFIX"
   build/d3dpt-dp2-test "$OUT/dp2-wine.bmp" > "$OUT/exec-wine-dp2.log" 2>&1 || { echo "dp2 test through the remote executor failed:"; tail -5 "$OUT/exec-wine-dp2.log"; return 1; }
-  build/d3dpt-exec-test "$OUT/exec-wine.bmp" 120 60 > "$OUT/exec-wine-exec.log" 2>&1 || { echo "exec test through the remote executor failed:"; tail -5 "$OUT/exec-wine-exec.log"; return 1; }
-  grep -h "d3dpt-remote:\|d3dpt-exec-host: exec: d3d9\|frames," "$OUT/exec-wine-dp2.log" "$OUT/exec-wine-exec.log" | sort -u | head -8
+  grep -h "d3dpt-remote:\|d3dpt-exec-host: exec: d3d9\|frames," "$OUT/exec-wine-dp2.log" | sort -u | head -8
   python3 tools/bmpdiff.py "$OUT/dp2-test.bmp" "$OUT/dp2-wine.bmp" --tolerance 8 || rc=1
-  python3 tools/bmpdiff.py "$OUT/exec-test.bmp" "$OUT/exec-wine.bmp" --tolerance 8 || rc=1
   return $rc
 )
 dirdisc_check() { # a host directory served as a disc, read back by someone else's ISO 9660 reader
@@ -2581,10 +2579,6 @@ host_stage() {
 
   # decoder + executor without a guest
   if [ -f "$D3DPT_EXEC_LIB" ] && [ -f "$D3DPT_DXVK_LIB" ]; then
-    if c++ -std=c++17 -O2 -o build/d3dpt-exec-test tools/d3dpt-exec-test.cpp \
-         -I"$DX" -I"$DX/windows" -I"$DX/directx" -ldl; then
-      run_check d3dpt-exec d3dpt-exec.log build/d3dpt-exec-test "$OUT/exec-test.bmp" 120 60 || true
-    else FAIL+=(d3dpt-exec); echo "  FAIL d3dpt-exec (build)"; fi
     if c++ -std=c++17 -O2 -o build/d3dpt-dp2-test tools/d3dpt-dp2-test.cpp \
          -I"$DX" -I"$DX/windows" -I"$DX/directx" -ldl; then
       run_check d3dpt-dp2 d3dpt-dp2.log build/d3dpt-dp2-test "$OUT/dp2-test.bmp" || true
@@ -2603,23 +2597,22 @@ host_stage() {
       run_check exec-no-device exec-no-device.log exec_no_device_check || true
     else FAIL+=(d3dpt-dp2); echo "  FAIL d3dpt-dp2 (build)"; fi
   else
-    skip d3dpt-exec "needs $D3DPT_EXEC_LIB and $D3DPT_DXVK_LIB"
     skip d3dpt-dp2 "needs $D3DPT_EXEC_LIB and $D3DPT_DXVK_LIB"
   fi
 
   # The executor in another process, on Wine (docs/tracks/m15-wine-executor.md,
   # ADR-018): a host below DXVK's Vulkan 1.3 floor runs Direct3D on this.
-  # The two host tests above once more, through build/d3dpt/libd3dpt_exec_remote
+  # The host test above once more, through build/d3dpt/libd3dpt_exec_remote
   # (the same API, a child d3dpt-exec-host.exe under Wine running the
-  # Windows build of the executor on Wine's own d3d9), and their frames must
-  # be the frames the in-process executor drew. SKIPs without a Wine or
+  # Windows build of the executor on Wine's own d3d9), and its frame must
+  # be the frame the in-process executor drew. SKIPs without a Wine or
   # without mingw's pair; on macOS it needs a GUI session (Wine's Mac driver
   # wants the window server), so it SKIPs over plain ssh.
   if wine_bin=$(exec_wine_bin) && [ -f "build/d3dpt/wine/d3dpt-exec-host.exe" ] \
-     && [ -f "build/d3dpt/libd3dpt_exec_remote.$SO" ] && [ -f "$OUT/dp2-test.bmp" ] && [ -f "$OUT/exec-test.bmp" ]; then
+     && [ -f "build/d3dpt/libd3dpt_exec_remote.$SO" ] && [ -f "$OUT/dp2-test.bmp" ]; then
     run_check exec-wine exec-wine.log exec_wine_check "$wine_bin" || true
   else
-    skip exec-wine "needs a Wine (D3DPT_WINE), build/d3dpt/wine/ (mingw) and the two host frames"
+    skip exec-wine "needs a Wine (D3DPT_WINE), build/d3dpt/wine/ (mingw) and the host frame"
   fi
 
 

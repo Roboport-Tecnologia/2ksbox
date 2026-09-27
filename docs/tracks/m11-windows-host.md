@@ -63,7 +63,7 @@ On the PC, in MSYS2's MINGW64 shell (setup in `docs/build-windows.md`
 scripts/build-windows.sh              # natively
 scripts/win-run.sh launcher           # the launcher out of the checkout
 GDB=1 scripts/win-run.sh player ...   # the [player] line from launcher.log
-build/win/d3dpt-dp2-test.exe / d3dpt-exec-test.exe   # with D3DPT_D3D9=dxvk and =system
+build/win/d3dpt-dp2-test.exe                  # with D3DPT_D3D9=dxvk and =system
 ```
 
 When a package misbehaves, ask the user for the `2ksbox-debug.log` that

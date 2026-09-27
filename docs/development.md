@@ -343,14 +343,8 @@ inside QEMU, whose knobs are:
 
 Diagnostics:
 
-- `D3DPT_DUMP_DIR=dir D3DPT_DUMP_EVERY=60` writes every 60th presented
-  frame as `dir/frame-NNNNNN.ppm` (bare `qemu-system-i386` too).
 - `D3DPT_DP2_TRACE`, `D3DPT_DDI_REREAD`, `D3DPT_DDI_NOFOG` trace the
   display driver's DP2 stream (doc 15; `docs/testing.md`).
-- Guest side, `D3DPT_TRACE=1` or a file `d3dpt_trace.on` next to the DLL
-  writes the creation / lock / upload / present calls to
-  `d3d8_trace.log` / `d3d9_trace.log`. A DLL that cannot open the device
-  forwards `Direct3DCreateN` to the system DLL.
 - While a 3D device is active, the player shows the VGA surface again
   after 1 s without a presented frame if the guest drew on it (an error
   box, a movie, a crashed game): `[display] no 3D frame for …`.

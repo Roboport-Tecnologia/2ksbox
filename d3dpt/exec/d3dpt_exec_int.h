@@ -1,6 +1,6 @@
 /*
- * d3dpt_exec_int.h: what d3dpt_exec.cpp (the d3d9 records, doc 14) and
- * d3dpt_exec_ddi.cpp (the display driver's records, doc 15 M7c) share:
+ * d3dpt_exec_int.h: what d3dpt_exec.cpp (the d3d9 and the batch loop,
+ * doc 14) and d3dpt_exec_ddi.cpp (the display driver's records, doc 15) share:
  * the executor state, the batch parser state and the record accessors.
  * Internal to libd3dpt_exec.
  *
@@ -25,7 +25,7 @@ namespace d3dpt {
 struct Exec;
 void exec_ddi_release(Exec &x);
 
-enum Kind : uint8_t { K_NONE, K_DEVICE, K_VB, K_IB, K_TEX, K_SURF, K_VS, K_PS, K_CUBE, K_DECL, K_QUERY };
+enum Kind : uint8_t { K_NONE, K_QUERY };
 
 struct Obj { Kind kind; IUnknown *p; };
 
@@ -43,13 +43,7 @@ struct Exec {
     D3DPRESENT_PARAMETERS last_pp{}; /* what the live device was created with (a lost device's Reset) */
     bool lost = false;              /* native: the device was lost and has not come back */
     IDirect3DDevice9 *dev = nullptr;
-    uint32_t dev_handle = 0;
-    std::unordered_map<uint32_t, Obj> objs;
-    /* readback staging for Present */
-    IDirect3DSurface9 *sys = nullptr;
-    uint32_t sys_w = 0, sys_h = 0;
-    D3DFORMAT sys_fmt = D3DFMT_UNKNOWN;
-    std::vector<uint32_t> conv;
+    std::unordered_map<uint32_t, Obj> objs;     /* the queries */
     int attach = 0;
     /* M7c: guest VRAM (d3dpt_exec_set_vram) and the display driver's objects */
     uint8_t *vram = nullptr;
@@ -58,14 +52,13 @@ struct Exec {
 
     /* A scene, opened by the executor rather than by whatever it is
      * executing. The display driver's DP2 stream carries no scene at all
-     * (the DirectDraw/Direct3D 7 DDI has no such call), and the guest
-     * DLLs pass on whatever the game does; DXVK draws outside a scene
+     * (the DirectDraw/Direct3D 7 DDI has no such call); DXVK draws outside a scene
      * happily, Windows' own Direct3D 9 answers D3DERR_INVALIDCALL and
      * draws nothing. That was "the host drew 60-170 frames/s and every
      * readback was zero". So the executor keeps
      * the scene itself: opened before a draw, closed before every
      * transfer that D3D9 will not do inside one (StretchRect,
-     * GetRenderTargetData, Present) and at the end of a batch. Both
+     * GetRenderTargetData) and at the end of a batch. Both
      * backends, because a scene is what a D3D9 frame is. */
     bool scene = false;
     void scene_begin() { if (dev && !scene && SUCCEEDED(dev->BeginScene())) scene = true; }
@@ -89,12 +82,10 @@ struct Exec {
     void release_all() {
         scene_end();
         exec_ddi_release(*this);
-        for (auto &kv : objs) if (kv.second.kind != K_DEVICE && kv.second.p) kv.second.p->Release();
+        for (auto &kv : objs) if (kv.second.p) kv.second.p->Release();
         objs.clear();
-        if (sys) { sys->Release(); sys = nullptr; }
-        sys_w = sys_h = 0;
         if (dev) {
-            dev->Release(); dev = nullptr; dev_handle = 0;
+            dev->Release(); dev = nullptr;
             if (ops.active) ops.active(ops.ud, 0);
         }
     }
@@ -133,7 +124,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c);
  * VRAM_SURFACE once and never again. */
 void exec_ddi_device_reset(Exec &x);
 
-/* CreateDevice for both paths and both backends (d3dpt_exec.cpp) */
+/* CreateDevice for both backends (d3dpt_exec.cpp) */
 HRESULT exec_create_device(Exec &x, UINT adapter, DWORD flags, D3DPRESENT_PARAMETERS &pp, IDirect3DDevice9 **dev);
 
 } // namespace d3dpt

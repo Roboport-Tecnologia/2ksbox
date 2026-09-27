@@ -43,15 +43,15 @@ guest (XP / Win98)                      host (QEMU process)
   VRAM BAR (doc 15). Until step 7 the DLLs used the qemu-3dfx model
   instead: a SysBus device with a 4 KiB register page at `D3DPT_MM_BASE`
   (0xdfffe000) and a 64 MiB RAM window at `D3DPT_SHM_BASE` (0xd8000000),
-  mapped through the device mapper; the two constants stay in the header
-  until the next protocol bump. The guest writes
-  records until a sync point (Present, a Lock readback,
-  GetRenderTargetData, a query, device creation) and rings
-  `D3DPT_REG_DOORBELL` once. The batch runs synchronously on the vCPU
+  mapped through the device mapper; protocol v21 dropped both. The
+  driver writes records until a sync point (a DP2 call that needs its
+  result, a readback, a query) and rings the adapter's doorbell once. The batch runs synchronously on the vCPU
   thread under the BQL; a decoder thread waits until a measurement asks
   for it.
-- **Protocol.** `d3dpt/d3dpt_proto.h` is the one header for guest DLL,
-  QEMU device and executor (`D3DPT_PROTO_VERSION`, 19 today). Bump it on
+- **Protocol.** `d3dpt/d3dpt_proto.h` is the one header for the display
+  drivers, the adapter and the executor (`D3DPT_PROTO_VERSION`, 21
+  today; v21 dropped the guest DLLs' records, whose op numbers stay
+  unused). Bump it on
   any wire change and rebuild the executor and the ISO, which do not say
   they are stale; the suite then fails as `protocol mismatch` or a guest
   that never attaches. The guest encoder is `d3dpt/d3dpt_enc.h`. The
@@ -167,8 +167,8 @@ calls and failed Presents into a "getters 3" line (native: 0). The loader
 is paced to two rounds a frame: DXVK frees a released resource only after
 the frames that could use it, and unpaced it reached 17.8 GB on the M1 in
 five seconds. `DDVMTEST` uses an object after releasing a
-QueryInterface'd reference, and `d3dpt-exec-test` sends a
-DrawIndexedPrimitiveUP at MinVertexIndex 0xfff000.
+QueryInterface'd reference, and `d3dpt-exec-test` (retired with the
+records it sent) sent a DrawIndexedPrimitiveUP at MinVertexIndex 0xfff000.
 
 Controls: the pre-review DLLs fail exactly `guest-F9` (CreateVertexBuffer
 returns E_FAIL after the first UpdateTexture; `batch error 3`),
@@ -208,11 +208,12 @@ DXVK with no Vulkan loader calls through a null pointer in
 too, so the executor looks for `libvulkan` before it tries DXVK and never
 closes a probed library.
 
-**Depth formats.** `depth_norm()` maps what 2001 cards offered and DXVK
-refuses: D32 → D24X8, D15S1 and D24X4S4 → D24S8. The guest keeps
-reporting the format asked for. Without it Max Payne's D32 auto depth
-buffer failed and the game said, in 32-bit modes, that it "requires a
-DirectX 8 compatible display adapter". `d3dpt-exec-test` asks for D32.
+**Depth formats.** A depth buffer in a format DXVK refuses (D32, D15S1,
+D24X4S4: what 2001 cards offered) is made as the first of D24S8, D24X8
+and D16 that it takes (`d3dpt_exec_ddi.cpp`); the guest keeps the
+format it asked for. Without it Max Payne's D32 depth buffer failed and
+the game said, in 32-bit modes, that it "requires a DirectX 8
+compatible display adapter".
 
 **The system Direct3D 9 (Windows).** On a Windows host DXVK cannot serve
 (no Vulkan 1.3, or only a software device), a real card's own D3D9 driver
@@ -222,10 +223,7 @@ is faster. Everything it refuses and DXVK accepts sits behind
 - a hidden 1×1 popup is the device window;
 - `Exec::scene_begin` opens a scene itself (on both backends, since the
   DX7 DDI's DP2 stream has no BeginScene) and closes it before every
-  StretchRect, readback and Present;
-- the back buffer is read before Present: `D3DSWAPEFFECT_DISCARD`
-  leaves it undefined afterwards on real hardware (the black frames),
-  while DXVK keeps it;
+  StretchRect and readback;
 - `TestCooperativeLevel` once per batch, `Reset` on loss, and
   `exec_ddi_device_reset` drops the DEFAULT-pool mirror so every surface
   is read from guest VRAM again;
@@ -235,8 +233,8 @@ is faster. Everything it refuses and DXVK accepts sits behind
   this backend uploads it as X8L8V8U8 (`d3dpt/exec/d3dpt_exec_ddi.cpp`).
 
 It is a second rasteriser, so the goldens stay DXVK's and
-`d3dpt-dp2-test` / `d3dpt-exec-test` run on both backends whenever either
-changes; their frames were byte-identical on the user's PC. The one
+`d3dpt-dp2-test` runs on both backends whenever either changes; its
+frames were byte-identical on the user's PC. The one
 measured difference: the X byte of an X8R8G8B8 target reads back `0xff`
 from DXVK and `0x00` from NVIDIA's d3d9 (`px0 0xff203040` against
 `0x00203040`, D3D7TEST on Win98). The format leaves it undefined and
@@ -259,7 +257,7 @@ like the in-process library. It does so when that library's
 - **The wire** (`d3dpt/exec/d3dpt_remote.h`): 32-byte records over the
   child's stdio, synchronous, one per call.
 - **The shared file.** Every region with a size (the command window,
-  VRAM, the frame the executor presents) is a region of one file the
+  VRAM) is a region of one file the
   library owns (`d3dpt_exec_shared_alloc`). QEMU maps it as guest RAM
   with `memory_region_init_ram_from_fd` (the adapter's VRAM through patch
   73), the child with `MapViewOfFile`, so a batch runs where the guest
@@ -268,9 +266,9 @@ like the in-process library. It does so when that library's
   once in the log. `memory_region_init_ram_from_fd` is under
   `CONFIG_POSIX`, so both call sites carry the guard; the Windows build
   has no remote executor.
-- **The reply** carries the executor's `active` flag, the presented
-  frame's geometry (its pixels in the frame slot) and up to 64
-  `vram_dirty` ranges, folded into one past that.
+- **The reply** carries the executor's `active` flag and up to 64
+  `vram_dirty` ranges, folded into one past that. (Remote version 1 also
+  had a frame slot for the guest DLLs' Present; version 2 dropped it.)
 - **The child's Wine.** It sets `D3DPT_D3D9=system` for the executor
   (under Wine, Wine's builtin `system32\d3d9.dll`) and writes
   `HKCU\Software\Wine\Direct3D\renderer` = `gl` into its prefix
@@ -290,8 +288,8 @@ like the in-process library. It does so when that library's
   guest. The child makes it at `d3dpt_exec_probe`, which the adapter's
   realize runs before the guest boots.
 
-Through the child, `d3dpt-dp2-test` and `d3dpt-exec-test` draw frames
-byte-identical to in-process DXVK (the `exec-wine` check), and the XP and
+Through the child, `d3dpt-dp2-test` draws frames byte-identical to
+in-process DXVK (the `exec-wine` check), and the XP and
 Win98 guests give the in-process verdicts; the numbers are in the M15
 track doc.
 
@@ -313,7 +311,7 @@ travels with the Linux packages; the macOS app carries the LunarG loader
 and KosmicKrisp. The packaged player names the files to QEMU through
 `player/src/companions.rs`, and packagers check `player --companions`,
 which prints what that rule resolved. `D3DPT_EXEC_LIB` /
-`D3DPT_DXVK_LIB` point `tools/d3dpt-exec-test` at a staged pair, the
+`D3DPT_DXVK_LIB` point `tools/d3dpt-dp2-test` at a staged pair, the
 cheap proof that the files themselves work.
 
 ## Milestones (P = paravirt)

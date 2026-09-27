@@ -226,9 +226,7 @@ by a title.
   `/GAME 3` (OpenGL) still means what it did. The SysBus `-device d3dpt`
   (`d3dpt_mm.c`, `d3dpt.h`, the embed library's present hooks) is gone:
   patch 40 now only adds the meson subdir, and patch 74 was regenerated
-  for the context that left `pc.c`. `D3DPT_MM_BASE` / `D3DPT_SHM_BASE`
-  stay in `d3dpt_proto.h` until the next protocol bump, so the drivers
-  on existing images do not go stale for a comment. `scripts/test.sh
+  for the context that left `pc.c`. `scripts/test.sh
   guest` ran D3DGAME9 / D3DGAME8 / D3DFEAT9 and DDVMTEST through the DLLs
   on Cirrus; `tools/xp-dx9-test.sh` now installs the driver on a fresh
   overlay of the XP image and runs them through XP's own runtime (both
@@ -236,10 +234,19 @@ by a title.
   lines equal; DDVMTEST through Windows' `ddraw.dll` reports 60 MB free,
   which is the driver's answer to Vice City's video-memory question).
   `tools/xp-game-test.sh` moved to the driver (it waits for the first
-  `ddi: context`). Not done here: the executor's pre-DDI record path
-  (`d3dpt_exec.cpp`'s device / resource records), which only
-  `tools/d3dpt-exec-test.cpp` still uses; retiring it is a protocol
-  bump.
+  `ddi: context`). Then protocol v21 (user: "people can install the new
+  driver"): the DLLs' records (adapter, device, state, draws, resources,
+  Present, LOG), their structs, the SysBus addresses and registers leave
+  `d3dpt_proto.h`; the survivors keep their op numbers (NOP, RELEASE and
+  the three query records the DX9 DDI sends, and the DDI's own).
+  `d3dpt_exec.cpp` keeps the d3d9 loading, CreateDevice, the lost device
+  and the batch loop; `ops.frame`, the Present readback and
+  `D3DPT_DUMP_DIR` are gone, and the remote wire (version 2) lost its
+  frame slot. `tools/d3dpt-exec-test.cpp`, which only sent the old
+  records, is gone with its `d3dpt-exec` check and its half of
+  `exec-wine`; `d3dpt-dp2-test` is the executor's host test. No record
+  an installed driver sends changed, so a driver from before v21 still
+  works; the ISO carries the rebuilt one.
 - **A modern card, for contrast** (`reference/winetest/win11-rtx3090.txt`,
   the user's Windows 11 PC, RTX 3090, 2026-09-26): d3d9 visual 210814
   checks, 69 failures; device 160756 / 0; d3d8 visual 2; d3d8 device

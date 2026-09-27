@@ -274,11 +274,6 @@ if want exec; then
   # ... and the display driver's host test, which package-windows.sh runs
   # under wine against the staged pair: a frame through the Windows DLLs.
   inw "$WCXX" -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
-  # ... and the guest DLLs' host test beside it. The display driver's
-  # records never present; this one creates a swapchain, opens a scene and
-  # calls Present, which is the half of the executor that differs between
-  # DXVK and the system Direct3D 9 backend (D3DPT_D3D9).
-  inw "$WCXX" -std=c++17 -O2 -static -o build/win/d3dpt-exec-test.exe tools/d3dpt-exec-test.cpp
   # The WGL probe (tools/wgl-probe.c) rides along as one more compile. It
   # is the first thing to run on a Windows machine whose Win98 guest gets
   # no OpenGL.

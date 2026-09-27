@@ -470,7 +470,6 @@ static bool ensure_device(Exec &x, uint32_t w, uint32_t h) {
     x.log("ddi: device for %ux%u render targets -> 0x%08x", w, h, (unsigned)hr);
     if (FAILED(hr) || !dev) return false;
     x.dev = dev;
-    x.dev_handle = 0;
     bump16_expand = x.native;
     /* the texture formats this adapter lacks, expanded at upload (host_format) */
     char lacks[128] = "";

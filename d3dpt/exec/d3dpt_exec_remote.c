@@ -78,8 +78,6 @@ static pid_t child;
 static int to_child = -1, from_child = -1;
 static int child_failed;
 static int child_hello;
-static void *frame_ptr;
-static region *frame_region;
 static int copying_said;
 
 struct d3dpt_exec {
@@ -405,21 +403,12 @@ D3DPT_EXEC_API uint32_t d3dpt_exec_version(void)
  * machine reset at that read and came back to the Startup Menu's "Windows
  * did not finish loading"). So the device is made here, at the probe the
  * adapter's realize runs before the guest boots, and create() collects it;
- * a second create() in the same process (the SysBus device beside the
- * adapter) makes its own, as before. */
+ * a second create() in the same process makes its own. */
 static uint32_t ready_id;               /* an executor the child made at probe time (ids start at 0) */
 static int have_ready;
 
 static int make_device(uint32_t *id_out, const d3dpt_exec_ops *ops)
 {
-    if (!frame_region) {
-        frame_region = alloc_region(D3DPT_REMOTE_FRAME_ID, D3DPT_REMOTE_FRAME_SIZE);
-        if (!frame_region) return 0;
-        frame_ptr = mmap(NULL, frame_region->size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, (off_t)frame_region->off);
-        if (frame_ptr == MAP_FAILED) { say("cannot map the frame slot: %s", strerror(errno)); frame_ptr = NULL; return 0; }
-        frame_region->ptr = frame_ptr;
-        if (!map_in_child(frame_region)) return 0;
-    }
     d3dpt_rq q = { D3DPT_RQ_CREATE, 0, 0, 0, 0, 0 };
     d3dpt_rp p; d3dpt_rp_range dummy[D3DPT_REMOTE_MAX_DIRTY];
     if (!call(&q, &p, dummy) || p.status) {
@@ -552,7 +541,6 @@ D3DPT_EXEC_API uint32_t d3dpt_exec_submit(d3dpt_exec_t *x, void *shm, uint32_t s
         x->active = (int)p.active;
         if (x->ops.active) x->ops.active(x->ops.ud, x->active);
     }
-    if (p.frame_w && x->ops.frame && frame_ptr) x->ops.frame(x->ops.ud, frame_ptr, (int)p.frame_w, (int)p.frame_h, (int)p.frame_stride);
     for (uint32_t i = 0; i < p.ndirty; i++) if (x->ops.vram_dirty) x->ops.vram_dirty(x->ops.ud, ranges[i].offset, ranges[i].bytes);
     return p.ret;
 }

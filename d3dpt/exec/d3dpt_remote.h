@@ -9,7 +9,7 @@
  * Requests go down the child's stdin, replies come up its stdout, both as
  * fixed 32-byte records (little-endian both sides; x86_64 and arm64 hosts
  * agree on this layout). Everything with a size (the command window,
- * VRAM, the frame the executor presents) lives in ONE shared file. QEMU
+ * VRAM) lives in ONE shared file. QEMU
  * maps regions of it as guest RAM (memory_region_init_ram_from_fd), the
  * child maps the same regions with MapViewOfFile, and a request names a
  * region and an offset rather than carrying bytes. Every region starts at
@@ -23,11 +23,9 @@
 
 #include <stdint.h>
 
-#define D3DPT_REMOTE_VERSION    1u
+#define D3DPT_REMOTE_VERSION    2u           /* 2: no frame slot (the guest DLLs' Present, M16 step 7) */
 #define D3DPT_REMOTE_ALIGN      (1u << 20)
 #define D3DPT_REMOTE_MAX_DIRTY  64u          /* vram_dirty ranges a reply carries before they fold into one */
-#define D3DPT_REMOTE_FRAME_ID   0xffffffffu  /* the region id of the frame slot */
-#define D3DPT_REMOTE_FRAME_SIZE (16u << 20)  /* 2048x2048x32: larger than any mode the adapter offers */
 
 enum {
     D3DPT_RQ_HELLO = 1, /* a0 = D3DPT_REMOTE_VERSION → ret = the DLL's D3DPT_PROTO_VERSION; status != 0: no d3d9 */
@@ -50,11 +48,8 @@ typedef struct d3dpt_rp {
     uint32_t status;        /* 0 = done; else the child could not honour the request (its stderr says why) */
     uint32_t ret;           /* the call's own return value */
     uint32_t active;        /* the executor's "3D on" flag after the call */
-    uint32_t frame_w;       /* != 0: a frame was presented into the frame region, packed XRGB8888 top-down */
-    uint32_t frame_h;
-    uint32_t frame_stride;
     uint32_t ndirty;        /* d3dpt_rp_range records follow the reply */
-    uint32_t pad;
+    uint32_t pad[4];
 } d3dpt_rp;
 
 typedef struct d3dpt_rp_range {

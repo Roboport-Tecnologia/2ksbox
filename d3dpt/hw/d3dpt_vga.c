@@ -512,7 +512,7 @@ static void d3d_vram_dirty(void *ud, uint32_t offset, uint32_t bytes)
 
 static bool d3d_load(D3dptVgaState *s)
 {
-    d3dpt_exec_ops ops = { s, d3d_log, d3d_active, NULL, d3d_vram_dirty };
+    d3dpt_exec_ops ops = { s, d3d_log, d3d_active, d3d_vram_dirty };
 
     if (s->exec_tried || !s->cmd_offset) {
         return s->exec != NULL;

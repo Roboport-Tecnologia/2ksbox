@@ -2,9 +2,9 @@
 # The M15 spike inside a macOS guest (docs/tracks/m15-wine-executor.md,
 # ADR-019): a pre-26 macOS in a UTM virtual machine on this Mac stands in
 # for the community build's user (no Vulkan 1.3, so the executor has to
-# run on Wine). This drives the two host tests through the Windows
-# build of the executor on Wine's own d3d9 *in that guest*, over ssh, and
-# diffs the frames it drew against the DXVK frames this host made.
+# run on Wine). This drives the display driver's host test through the
+# Windows build of the executor on Wine's own d3d9 *in that guest*, over
+# ssh, and diffs the frame it drew against the DXVK frame this host made.
 #
 #   tools/macvm-wine-spike.sh <user>@<guest ip>        # utmctl ip-address <vm> gives the ip
 #   RENDERER=vulkan …                                   # wined3d's Vulkan renderer (MoltenVK) instead of GL
@@ -13,9 +13,8 @@
 #   build/wine/wine-staging-*-osx64.tar.xz   WineHQ's macOS build (x86_64)
 #   build/wine-spike/d3dpt_exec.dll          scripts/build-d3dpt-exec.sh --windows
 #   build/wine-spike/d3dpt-dp2-test.exe      the display driver's host test, mingw build
-#   build/wine-spike/d3dpt-exec-test.exe     the DLL path's host test, mingw build
 #   build/wine-spike/libwinpthread-1.dll     Homebrew's mingw links it dynamically
-#   build/test/dp2-test.bmp, build/wine-spike/final-native.bmp   the DXVK frames (the oracle)
+#   build/test/dp2-test.bmp                  the DXVK frame (the oracle)
 # and, in the guest, done once by hand: an account logged in at the
 # console with Remote Login on, Rosetta installed (`softwareupdate
 # --install-rosetta --agree-to-license`, it wants an administrator), and
@@ -46,8 +45,8 @@ RENDERER="${RENDERER:-gl}"
 OUT="${OUT:-build/macvm/spike}"; mkdir -p "$OUT"
 tar=$(ls build/wine/wine-staging-*-osx64.tar.xz | head -1)
 for f in build/wine-spike/d3dpt_exec.dll build/wine-spike/d3dpt-dp2-test.exe \
-         build/wine-spike/d3dpt-exec-test.exe build/wine-spike/libwinpthread-1.dll \
-         build/test/dp2-test.bmp build/wine-spike/final-native.bmp; do
+         build/wine-spike/libwinpthread-1.dll \
+         build/test/dp2-test.bmp; do
   [ -f "$f" ] || { echo "missing $f (run the spike on the host first: the track doc)"; exit 1; }
 done
 ssh_() { ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "$target" "$@"; }
@@ -62,7 +61,7 @@ grep -q "rosetta: yes" "$OUT/guest.txt" && grep -q "sudo: yes" "$OUT/guest.txt" 
 echo "==> copying Wine ($(du -h "$tar" | cut -f1)) and the spike"
 ssh_ 'mkdir -p ~/2ksbox-spike'
 scp -q "$tar" build/wine-spike/d3dpt_exec.dll build/wine-spike/d3dpt-dp2-test.exe \
-    build/wine-spike/d3dpt-exec-test.exe build/wine-spike/libwinpthread-1.dll "$target:~/2ksbox-spike/"
+    build/wine-spike/libwinpthread-1.dll "$target:~/2ksbox-spike/"
 ssh_ 'cd ~/2ksbox-spike && { [ -d "Wine Staging.app" ] || tar xJf wine-staging-*-osx64.tar.xz; }'
 
 # The guest-side script: written whole, run in the GUI session.
@@ -75,21 +74,18 @@ export WINEPREFIX="\$HOME/2ksbox-spike/prefix" WINEDEBUG=-all WINEDLLOVERRIDES="
 "\$W" reg add "HKCU\\\\Software\\\\Wine\\\\Direct3D" /v renderer /d $RENDERER /f >/dev/null 2>&1
 "\$W" --version
 D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_D3D9=system WINEDEBUG=-all,+d3d,+wgl "\$W" d3dpt-dp2-test.exe dp2.bmp > dp2.log 2>&1; echo "dp2 exit=\$?"
-D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_D3D9=system "\$W" d3dpt-exec-test.exe exec.bmp 120 60 > exec.log 2>&1; echo "exec exit=\$?"
 grep -o 'GL_RENDERER "[^"]*"' dp2.log | head -1
 grep "Using the .* renderer" dp2.log | head -1
 grep -q "init_context CGLChoosePixelFormat() failed" dp2.log && echo "no OpenGL for Wine in this guest: the Mac driver found no accelerated pixel format (a VM's paravirtual GPU has none)"
 grep "PASSED\|FAILED" dp2.log | tail -1
-grep "frames," exec.log
 EOF
 
 echo "==> running in the guest's GUI session (the first start makes the prefix: ~30 s)"
 ssh_ "chmod +x ~/2ksbox-spike/run.sh; sudo -n launchctl asuser \$(id -u) sudo -u $user -i bash ~/2ksbox-spike/run.sh" | tee "$OUT/run.txt"
 
 echo "==> frames"
-for f in dp2.bmp exec.bmp dp2.log exec.log; do scp -q "$target:~/2ksbox-spike/$f" "$OUT/$f" 2>/dev/null || true; done
+for f in dp2.bmp dp2.log; do scp -q "$target:~/2ksbox-spike/$f" "$OUT/$f" 2>/dev/null || true; done
 rc=0
 [ -f "$OUT/dp2.bmp" ] && python3 tools/bmpdiff.py build/test/dp2-test.bmp "$OUT/dp2.bmp" --tolerance 8 -o "$OUT/dp2-diff.bmp" || rc=1
-[ -f "$OUT/exec.bmp" ] && python3 tools/bmpdiff.py build/wine-spike/final-native.bmp "$OUT/exec.bmp" --tolerance 8 -o "$OUT/exec-diff.bmp" || rc=1
-[ $rc = 0 ] && echo "PASS: both frames match the DXVK frames" || echo "FAIL: a frame is missing or differs (logs and diff images in $OUT)"
+[ $rc = 0 ] && echo "PASS: the frame matches the DXVK frame" || echo "FAIL: the frame is missing or differs (logs and diff images in $OUT)"
 exit $rc

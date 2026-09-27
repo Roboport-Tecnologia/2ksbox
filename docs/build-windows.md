@@ -74,7 +74,7 @@ Three things that look like the build ignoring you:
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; WHPX built in; clang |
 | `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu` |
 | `qt` | `launcher-qt/target/x86_64-pc-windows-gnu/release/launcher-qt.exe` | the package's `2ksbox.exe` (ADR-015); its own workspace |
-| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/d3dpt-exec-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its two host tests, the offscreen-GL probe |
+| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its host test, the offscreen-GL probe |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, built only if absent |
 
 ## The package
@@ -182,15 +182,12 @@ backend's first version had no oracle and drew black on a user's PC):
 export D3DPT_EXEC_LIB=build/win/d3dpt/d3dpt_exec.dll
 export D3DPT_DXVK_LIB="$PWD/build/win/d3dpt/dxvk_d3d9.dll"
 for b in dxvk system; do
-  D3DPT_D3D9=$b build/win/d3dpt-dp2-test.exe  out-dp2-$b.bmp    # the display driver's 107 checks
-  D3DPT_D3D9=$b build/win/d3dpt-exec-test.exe out-exec-$b.bmp   # the guest DLLs': swapchain, scene, Present
+  D3DPT_D3D9=$b build/win/d3dpt-dp2-test.exe out-dp2-$b.bmp    # the display driver's checks
 done
 ```
 
-Both must PASS, and each pair of BMPs should be byte-identical (it was
-on the RTX 3090). The display driver's records never present, so only
-the second exercises the swapchain, the scene and the Present, where
-the system implementation is strictest.
+Both must PASS, and the two BMPs should be byte-identical (they were on
+the RTX 3090).
 
 ## OpenGL for a Win98 guest
 

@@ -11,11 +11,11 @@
 #
 # Needs, in that checkout, what scripts/build.sh made on the other macOS
 # (nothing here links Homebrew, so it all runs on a bare install):
-#   build/d3dpt-dp2-test, build/d3dpt-exec-test          the two host tests
+#   build/d3dpt-dp2-test                                  the host test
 #   build/d3dpt/libd3dpt_exec_remote.dylib               QEMU's side of the transport
 #   build/d3dpt/wine/d3dpt_exec.dll + d3dpt-exec-host.exe   the pair the Wine process runs
 #   build/wine/wine-staging-*-osx64.tar.xz               WineHQ's macOS build (x86_64)
-#   build/test/dp2-test.bmp, build/test/exec-test.bmp     the DXVK frames (the oracle)
+#   build/test/dp2-test.bmp                               the DXVK frame (the oracle)
 # and, on this macOS, Rosetta: `softwareupdate --install-rosetta --agree-to-license`
 # (a fresh install has none; no sudo needed). A bare install has no python3
 # either (/usr/bin/python3 is the Command Line Tools' stub, which asks to
@@ -23,9 +23,9 @@
 # else uv's own CPython from the checkout owner's home on the other volume.
 #
 # It unpacks Wine beside the tarball if that has not been done, keeps its
-# prefix in build/wine-prefix-<macOS version>, runs both host tests through
+# prefix in build/wine-prefix-<macOS version>, runs the host test through
 # the executor in the Wine process with wined3d's GL renderer, and diffs
-# the frames. The two answers this macOS gives and the other cannot: the
+# the frame. The two answers this macOS gives and the other cannot: the
 # GL_RENDERER line (the real GPU's GL, for a Rosetta process) and the fps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,9 +33,9 @@ cd "$ROOT"
 ver="$(sw_vers -productVersion)"
 echo "macOS $ver, $(uname -m)"
 arch -x86_64 /usr/bin/true 2>/dev/null || { echo "no Rosetta: softwareupdate --install-rosetta --agree-to-license"; exit 1; }
-for f in build/d3dpt-dp2-test build/d3dpt-exec-test build/d3dpt/libd3dpt_exec_remote.dylib \
+for f in build/d3dpt-dp2-test build/d3dpt/libd3dpt_exec_remote.dylib \
          build/d3dpt/wine/d3dpt_exec.dll build/d3dpt/wine/d3dpt-exec-host.exe \
-         build/test/dp2-test.bmp build/test/exec-test.bmp; do
+         build/test/dp2-test.bmp; do
   [ -f "$f" ] || { echo "missing $f: scripts/build.sh and scripts/test.sh host on the other macOS first"; exit 1; }
 done
 wine=""
@@ -61,10 +61,8 @@ export WINEDEBUG="-all,+d3d"       # the GL_RENDERER line, and any refusal, in t
 echo "wine: $wine"; echo "prefix: $D3DPT_WINEPREFIX (a fresh one costs ~20 s)"
 rc=0
 build/d3dpt-dp2-test "$OUT/dp2.bmp" > "$OUT/dp2.log" 2>&1 || { echo "dp2 test failed:"; tail -5 "$OUT/dp2.log"; rc=1; }
-build/d3dpt-exec-test "$OUT/exec.bmp" 120 60 > "$OUT/exec.log" 2>&1 || { echo "exec test failed:"; tail -5 "$OUT/exec.log"; rc=1; }
 grep -ho 'GL_RENDERER "[^"]*"' "$OUT"/*.log | sort -u | head -2
 grep -h "Using the .* renderer\|d3dpt-exec-host: exec: d3d9\|suitable pixel format\|frames," "$OUT"/*.log | sort -u | head -6
 [ -f "$OUT/dp2.bmp" ] && "$py" tools/bmpdiff.py build/test/dp2-test.bmp "$OUT/dp2.bmp" --tolerance 8 -o "$OUT/dp2-diff.bmp" || rc=1
-[ -f "$OUT/exec.bmp" ] && "$py" tools/bmpdiff.py build/test/exec-test.bmp "$OUT/exec.bmp" --tolerance 8 -o "$OUT/exec-diff.bmp" || rc=1
-[ $rc = 0 ] && echo "PASS on macOS $ver: both frames match the DXVK frames" || echo "FAIL on macOS $ver (logs and diff images in $OUT)"
+[ $rc = 0 ] && echo "PASS on macOS $ver: the frame matches the DXVK frame" || echo "FAIL on macOS $ver (logs and diff images in $OUT)"
 exit $rc
