@@ -82,10 +82,11 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   `guest-tools/src/d3dgame9.c` / `d3dgame8.c`, golden on the rig first.
 - **The display driver becomes a DirectX 9 driver, and no custom DLLs**
   (ADR-021, track M16): Microsoft's `d3d9.dll` / `d3d8.dll` on the
-  driver's DDI with SM3, on XP and Win98. The `D3DPT\` Direct3D DLLs and
-  `OPENGL32.DLL` are being retired (the GL one as an ICD the driver's INF
-  installs); don't add features to them or add a new per-game DLL.
-  `DINPUT.DLL` stays per game (user decision).
+  driver's DDI with SM3, on XP and Win98. The Direct3D DLLs
+  (`D3D8/D3D9/DDRAW.DLL`) and the SysBus `-device d3dpt` are retired (M16
+  step 7); `OPENGL32.DLL` is next, as an ICD the driver's INF installs.
+  Don't bring them back or add a new per-game DLL. `DINPUT.DLL` stays per
+  game (user decision), in the disc's `DINPUT\`.
 - **DXVK is the executor's default and the only rasteriser goldens are
   compared against. Below its Vulkan 1.3 floor the same executor runs on
   another D3D9**: one decoder, four D3D9s (ADR-007 + second amendment,
@@ -154,7 +155,7 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   `#[cfg(test)]`, no per-function cases. When something starts working,
   add or extend a tool and wire it into `scripts/test.sh`. Run
   `scripts/test.sh all` before every commit that touches QEMU, the embed
-  library, the D3D device or the guest DLLs. Local only; never propose
+  library, the D3D device, the display driver or the guest tools. Local only; never propose
   CI for it (`docs/testing.md`).
 - **Guest programs of ours write output to `C:\2KSBOX`**
   (`guest-tools/src/guestlog.h`): new guest code calls

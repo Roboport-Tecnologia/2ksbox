@@ -15,7 +15,7 @@ is the index.
 
 | Track | Doc | Owns | State · next |
 |---|---|---|---|
-| **M4** paravirtual Direct3D device | `tracks/m4-d3d-device.md` | `d3dpt/exec/`, `d3dpt/hw/d3dpt_mm.c`, `guest-tools/src/d3dpt/`, `scripts/test.sh`, doc 14 | Done; the Win98 DLL path and the executor's harness · a game by hand, the P8 and other stubs, zero-copy present |
+| **M4** paravirtual Direct3D device | `tracks/m4-d3d-device.md` | `d3dpt/exec/`, `scripts/test.sh`, doc 14 | Done; its guest DLLs and SysBus device retired by M16 step 7 (2026-09-27). The executor and its host harness stay |
 | **M5** CD-ROM backend | `tracks/m5-cdrom-backend.md` | `libdisc/`, patches 50–59, `tools/atapi-guest-test.py`, `guest-tools/src/cdtest.c`, docs 05, 17 | Done (steps 1–8) · FIFA 2002's no-match, a second SafeDisc 2 title, SecuROM, multisession, CHD |
 | **M5g** a host folder as a CD (`isodir:`) | `tracks/m5-dirdisc.md` | `libdisc/src/isodir.rs`, `libdisc/qemu/cdimage.c` | Done |
 | **M6** launcher and packaging | `tracks/m6-launcher.md` | `launcher-core/`, `launcher-qt/`, `launcher-capi/`, `shader-chain/`, `scripts/package-*.sh`, doc 07 | Shipped (Qt, ADR-015/017), continues on `main` · AppImage, Windows installer, the preview as a `QQuickRhiItem`, the player's own overlay controls |
@@ -28,7 +28,7 @@ is the index.
 | **M13** gamepads | `tracks/m13-gamepads.md` | `player/src/pad.rs`, `gamepad/`, patches 26–27, `bundle::Pad`, `tools/pad-guest-test.py` | Done · a real controller on the key mapping, the USB pad on Win98 FE / Me |
 | **M14** Voodoo 2 device | `tracks/m14-voodoo2.md` | `voodoo/`, patch 62 and the Voodoo patches after it, `tools/voodoo-guest-test.py`, `scripts/sync-86box-voodoo.sh`, doc 21 | Active on `main` · a second Glide game after one has quit, a client left on a dead ring, the Air and Windows builds |
 | **M15** Direct3D executor on Wine | `tracks/m15-wine-executor.md` | `d3dpt/exec/d3dpt_exec_host.c`, `d3dpt_exec_remote.c`, `d3dpt_remote.h`, the loader's library choice, `build-d3dpt-exec.sh --wine`, `player/src/companions.rs`, `launcher-core/src/host_gpu.rs` | Steps 1–7 done: the community app passed on a real macOS 15, WineD3D-in-guest was removed, and the Flatpak's Wine add-on `com._2ksbox.Launcher.Wine` was built and checked in the sandbox (2026-09-23) · a game through the add-on on a below-floor host; the spike's host tests on the rig's Linux Wine |
-| **M16** DirectX 9 driver, no custom DLLs | `tracks/m16-dx9-ddi.md` | the DX9 DDI in `guest-tools/src/d3dptvid/` (with M10 / M7's files), its decoder cases in `d3dpt/exec/d3dpt_exec_ddi.cpp`, the Wine test suites' build, runner and baselines, doc 15's DX9 section | Opened 2026-09-25 (ADR-021). Steps 1 and 2 done: XP's `d3d9.dll` takes the driver as a DX9 / SM3 device (protocol v14) and renders D3DGAME9 and D3DFEAT9 identical to the native frames, getters included; step 3's formats (float, sRGB, the ARGB group), mip generation (protocol v15), instancing (v16), four render targets (v17) and depth StretchRect (v18) are in, and every Wine d3d8 / d3d9 test file runs to its end since the lost device (finding 5) was fixed (d3d9 visual 618 failures; against the rig's XP baseline every one left is DXVK's behaviour, per its own run `tools/winetest-dxvk.sh`, or finding 24's DXVK patch) · Win98 (step 5) begun 2026-09-26: the 9x HAL offers the DX9 face; D3DGAME8 / 9 and D3DFEAT9 match the native frames there and the DX8 probes pass; `tools/win98-winetest.sh` runs every file to its end (d3d9 visual 1541, device 152, both stateblocks 0), and the rig's own Win98 run is whole (`rig-98.txt`, 2026-09-27; the guest's differences from it are DXVK's, finding 24 and the GL wrapper's pixel format, track doc), and `scripts/test.sh guest` checks both on Win98 (`win98-dx9`, `win98-winetest`); Win98's DirectDraw makes power-of-two mip chains and cubes only, so the DX9 caps claim POW2 on 9x (finding 33); float readback into system memory is impossible there (Win98's HEL, finding 35); the conditional non-power-of-two claim is kept on the host now, by a clamp (protocol v20, finding 36); vertex / index buffers in VRAM on 9x too (finding 34); full-screen devices inside the tests open (track doc State); the DXVK patches landed 2026-09-27 (`patches/dxvk/10`-`14`, `dxbc-spirv/01`-`02`: fog, depth clip / finding 24, flat shading, point sprites, FF W): XP d3d9 visual 618 -> 175, d3d8 visual 155 -> 4, and against the rig three small groups are left, none DXVK's |
+| **M16** DirectX 9 driver, no custom DLLs | `tracks/m16-dx9-ddi.md` | the DX9 DDI in `guest-tools/src/d3dptvid/` (with M10 / M7's files), its decoder cases in `d3dpt/exec/d3dpt_exec_ddi.cpp`, the Wine test suites' build, runner and baselines, doc 15's DX9 section | Opened 2026-09-25 (ADR-021). Steps 1 and 2 done: XP's `d3d9.dll` takes the driver as a DX9 / SM3 device (protocol v14) and renders D3DGAME9 and D3DFEAT9 identical to the native frames, getters included; step 3's formats (float, sRGB, the ARGB group), mip generation (protocol v15), instancing (v16), four render targets (v17) and depth StretchRect (v18) are in, and every Wine d3d8 / d3d9 test file runs to its end since the lost device (finding 5) was fixed (d3d9 visual 618 failures; against the rig's XP baseline every one left is DXVK's behaviour, per its own run `tools/winetest-dxvk.sh`, or finding 24's DXVK patch) · Win98 (step 5) begun 2026-09-26: the 9x HAL offers the DX9 face; D3DGAME8 / 9 and D3DFEAT9 match the native frames there and the DX8 probes pass; `tools/win98-winetest.sh` runs every file to its end (d3d9 visual 1541, device 152, both stateblocks 0), and the rig's own Win98 run is whole (`rig-98.txt`, 2026-09-27; the guest's differences from it are DXVK's, finding 24 and the GL wrapper's pixel format, track doc), and `scripts/test.sh guest` checks both on Win98 (`win98-dx9`, `win98-winetest`); Win98's DirectDraw makes power-of-two mip chains and cubes only, so the DX9 caps claim POW2 on 9x (finding 33); float readback into system memory is impossible there (Win98's HEL, finding 35); the conditional non-power-of-two claim is kept on the host now, by a clamp (protocol v20, finding 36); vertex / index buffers in VRAM on 9x too (finding 34); full-screen devices inside the tests open (track doc State); the DXVK patches landed 2026-09-27 (`patches/dxvk/10`-`14`, `dxbc-spirv/01`-`02`: fog, depth clip / finding 24, flat shading, point sprites, FF W): XP d3d9 visual 618 -> 175, d3d8 visual 155 -> 4, and against the rig three small groups are left, none DXVK's · step 7 done 2026-09-27: `D3D8.DLL`, `D3D9.DLL`, `DDRAW.DLL`, their sources and the SysBus `-device d3dpt` are gone, `DINPUT.DLL` has its own `DINPUT\`, SETUP's set 1 is a retired placeholder, and `scripts/test.sh guest` runs the reference scenes on XP through the driver (`tools/xp-dx9-test.sh`) |
 | Everything else (M2's leftovers) | "Next steps" below | | as listed |
 
 Rules: work on `main` or on a branch `track/<name>-<topic>` off it,
@@ -257,10 +257,10 @@ tracks, plus the items no track owns.
 
 1. **M16, the DirectX 9 driver** (ADR-021, `tracks/m16-dx9-ddi.md`
    "Steps"). Microsoft's `d3d9.dll` on the driver with SM3, XP then
-   Win98, checked against Wine's d3d8/d3d9 test suites on the rig; then
-   the `D3DPT\` Direct3D DLLs and `OPENGL32.DLL` (as an ICD) leave the
-   ISO. Step 0 first: the suites built for the guest and the rig's
-   pass lists, which the user runs there.
+   Win98, checked against Wine's d3d8/d3d9 test suites on the rig. Steps
+   0 to 5 and 7 are done (the Direct3D DLLs and the SysBus device are
+   gone); left: step 3's vertex texture fetch in a title, step 6 (DX9
+   titles by hand) and step 8 (`OPENGL32.DLL` as an ICD).
 2. **M15, the Direct3D fallback on Wine** (ADR-018,
    `tracks/m15-wine-executor.md` "Steps"). Steps 1–7 are done: the
    packaged community app on a real macOS 15 (the floor, `build-macos.md`)
@@ -544,9 +544,7 @@ to one subsystem lives in its design doc; pointers are at the end.
   returned FALSE from `DllMain`. Either qemu-3dfx's `OPENGL32.DLL` could
   not open `\\.\MAPMEM` (FXPTL.SYS and the MAPMEM service missing:
   install SETUP's device-mapper component as Administrator; OpenGL needs it
-  too), a `D3DPT\` DLL found no executor
-  (`D3DPT_STATUS_NO_EXEC`), or the protocol version differs (`d3dpt.log`
-  names both).
+  too).
 - **A benchmark inside a DOS `.COM` keeps its data off the code page**,
   or self-modifying-code invalidation dominates the number.
 

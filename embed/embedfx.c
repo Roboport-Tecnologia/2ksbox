@@ -11,7 +11,6 @@
 #include "qemu/error-report.h"
 #include "ui/console.h"
 #include "embedfx.h"
-#include "hw/d3dpt/d3dpt.h"
 
 static int fx_active;
 
@@ -75,30 +74,7 @@ static const QemuFxUiOps embed_fx_ui_ops = {
     .mesa_gui_fullscreen  = fx_mesa_gui_fullscreen,
 };
 
-/* paravirtual Direct3D (hw/d3dpt): the executor's frames take the same
- * path as GL swaps. Unlike the GL path the VGA surface keeps rendering
- * while a device exists: a game's process can die without releasing it
- * (no DLL_PROCESS_DETACH on a crash), and games draw on the VGA surface
- * between CreateDevice and their first Present (Vice City's intro movies
- * through DirectShow, launcher dialogs); the player shows whichever of
- * the two was drawn last. */
-static void d3dpt_present_active(bool on)
-{
-    embed_fx_active(on);
-}
-
-static void d3dpt_present_frame(const void *px, int w, int h, int stride)
-{
-    embed_fx_frame(px, w, h, stride, /* bottom_up */ 0);
-}
-
-static const D3dptPresentOps embed_d3dpt_present_ops = {
-    .active = d3dpt_present_active,
-    .frame = d3dpt_present_frame,
-};
-
 void embed_fx_register(void)
 {
     qemu_fx_ui_register(&embed_fx_ui_ops);
-    d3dpt_set_present_ops(&embed_d3dpt_present_ops);
 }

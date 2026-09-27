@@ -64,8 +64,7 @@ DRIVER\     the 2000/XP display driver for d3dpt-vga (D3DPTVID.SYS,
 DRIVER9X\   the 98/Me display driver for d3dpt-vga: D3DPT9X.INF,
             D3DPT9X.DRV, D3DPT9V.VXD, the DirectDraw HAL D3DPT9HL.DLL;
             and the blue-screen test VxDs
-D3DPT\      per game: D3D8.DLL D3D9.DLL DDRAW.DLL DINPUT.DLL over the
-            paravirtual device (doc 14)
+DINPUT\     per game: DINPUT.DLL, the DirectInput keyboard fix
 OPENGL\     per game: OPENGL32.DLL (the GL pass-through) and
             WRAPGL32.EXT, its extension-list cap
 VOODOO2\    V2START.EXE, the start-up guard for 3dfx's Voodoo 2 driver
@@ -79,8 +78,8 @@ things, and each folder carries the DLLs under the names a game loads,
 so a user copies from Explorer and renames nothing (user request). The
 files are the same for 98 and XP.
 
-**The mapper is not optional.** `OPENGL32.DLL` and the `D3DPT\` DLLs reach
-the device through it and refuse to load without it (`0xc0000142` on NT).
+**The mapper is not optional.** `OPENGL32.DLL` reaches the device through
+it and refuses to load without it (`0xc0000142` on NT).
 9x has it as a VxD in `SYSTEM`; NT as a kernel driver that the `MAPMEM`
 service points at, registered by `INSTDRV.EXE`.
 
@@ -125,16 +124,15 @@ a folder.
 
 | n | Set | From |
 |---|---|---|
-| 1 | Direct3D 8/9 on the paravirtual device (`D3D8.DLL D3D9.DLL DDRAW.DLL`) | `D3DPT\` |
-| 2 | DirectInput keyboard fix (`DINPUT.DLL`) | `D3DPT\` |
+| 1 | *retired*: the Direct3D 8/9 DLLs (M16 step 7). Direct3D is the display driver's now, through Windows' own runtime | |
+| 2 | DirectInput keyboard fix (`DINPUT.DLL`) | `DINPUT\` |
 | 3 | OpenGL pass-through (`OPENGL32.DLL WRAPGL32.EXT`) | `OPENGL\` |
 
-`DDRAW.DLL` in set 1 forwards to Windows' own and reports 256 MB of video
-memory, for launchers that ask DirectDraw rather than Direct3D (GTA Vice
-City refuses 4 MB). `DINPUT.DLL` merges `GetAsyncKeyState` into a
+Set 1 keeps its number so set 3 does not move; `/GAME 1` says it is
+retired. `DINPUT.DLL` merges `GetAsyncKeyState` into a
 non-exclusive keyboard's state, for a game whose loop stops pumping
 messages (FIFA 2000's match, doc 15); `D3DPT_DINPUT_LOG=1` adds its log.
-Both are per game by decision, never system-wide.
+It is per game by decision, never system-wide.
 
 **A machine with a 3dfx card** (the emulated Voodoo 2, doc 21) gets its
 Glide from 3dfx's driver; nothing on the disc is Glide (ADR-020). SETUP

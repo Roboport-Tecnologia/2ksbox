@@ -1,6 +1,6 @@
 /*
- * dinput.c: the DINPUT.DLL shim (D3DPT\DINPUT.DLL next to a game's EXE):
- * forwards DirectInputCreate{A,W,Ex} to the system dinput.dll, logs what
+ * dinput.c: the DINPUT.DLL shim (the disc's DINPUT\DINPUT.DLL, next to a
+ * game's EXE): forwards DirectInputCreate{A,W,Ex} to the system dinput.dll, logs what
  * the game does with its devices, and fixes the keyboard state.
  *
  * The fix (FIFA 2000 on XP, doc 15): the game's keyboard device is

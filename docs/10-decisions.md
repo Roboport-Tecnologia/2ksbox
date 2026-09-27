@@ -700,6 +700,11 @@ claimed version is caps, and SM3's additions (vertex texture fetch,
 instancing) sit beside the SM2 work rather than changing it. A flag caps
 the claim at 2.0 for A/B.
 
+**Done for Direct3D** (M16 step 7, 2026-09-27): the three DLLs, their
+sources and the SysBus device are gone; SETUP's file set 1 is a retired
+placeholder so set 3 keeps its number, and `DINPUT.DLL` moved to its own
+`DINPUT\` folder. `OPENGL32.DLL` and the mapper wait for the ICD (step 8).
+
 **Amends** ADR-006 and ADR-008: the paravirtual device and its executor
 stand, and the guest DLLs that ADR-008 staged the driver after are
 retired rather than kept as the 9x per-game path (doc 14 "The guest

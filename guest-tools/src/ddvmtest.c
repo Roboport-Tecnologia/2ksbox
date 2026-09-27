@@ -3,8 +3,8 @@
  * object like GTA Vice City's psInitialize() does and prints total / free
  * video memory (GetAvailableVidMem, DDSCAPS_VIDEOMEMORY) plus the DDCAPS
  * figures, to the console and to DDVMTEST.LOG in C:\2KSBOX (guestlog.h). With the
- * system ddraw.dll on the Cirrus adapter this shows the card's 4 MB; with
- * D3DPT\DDRAW.DLL next to it, the shim's answer. Exit status 0 when free
+ * system ddraw.dll on the Cirrus adapter this shows the card's 4 MB; on
+ * d3dpt-vga, the display driver's video memory. Exit status 0 when free
  * memory is at least 12 MB (Vice City's threshold), 1 otherwise.
  *
  * Build (guest): i686-w64-mingw32-gcc -O2 -o ddvmtest.exe ddvmtest.c -lddraw -ldxguid

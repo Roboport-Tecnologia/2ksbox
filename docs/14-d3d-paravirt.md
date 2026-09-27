@@ -2,10 +2,14 @@
 
 Direct3D 8/9 calls leave the guest as a command stream and run in native
 host code: one protocol, one decoder, one executor over four possible
-Direct3D 9 libraries. This doc covers the device, the protocol, the guest
-DLLs and the executor. The XP display driver's Direct3D DDI (doc 15) and
-the Win9x driver's HAL (doc 19) use the same protocol and executor
-through a command window in `d3dpt-vga`'s VRAM. Doc 04 has the 3D
+Direct3D 9 libraries. This doc covers the protocol and the executor, and
+the guest DLLs and SysBus device they started with. Today the only guest
+side is the display driver: the XP driver's Direct3D DDI (doc 15) and the
+Win9x driver's HAL (doc 19) send the stream through a command window in
+`d3dpt-vga`'s VRAM, under Microsoft's own runtime. The guest DLLs
+(`D3D8.DLL`, `D3D9.DLL`, `DDRAW.DLL`) and the SysBus `-device d3dpt` were
+retired by ADR-021 (M16 step 7, 2026-09-27); what is written about them
+below is history, kept because the driver inherited its lessons. Doc 04 has the 3D
 strategy as a whole, the M4 and M15 track docs the test loops,
 `docs/testing.md` the tools and `docs/development.md` the env knobs.
 
@@ -27,20 +31,20 @@ emulating a GPU.
 
 ```
 guest (XP / Win98)                      host (QEMU process)
- game.exe                               d3dpt (SysBus) or d3dpt-vga's window
-   └ d3d9.dll (ours, C)  ──batch──▶       └ libd3dpt_exec (dlopened)
-   └ d3d8.dll (over d3d9)                     decoder + handle mirror
+ game.exe                               d3dpt-vga's window (top of VRAM)
+   └ d3d9.dll / d3d8.dll (Microsoft's)      └ libd3dpt_exec (dlopened)
+   └ the display driver  ──batch──▶             decoder + handle mirror
  shared window: records, data, bulk           └ IDirect3D9: DXVK / system d3d9 /
- FXPTL.SYS / FXMEMMAP.VXD map it                 Wine's d3d9 in a child process
-                                          present → embed presenter (doc 12)
+                                                 Wine's d3d9 in a child process
+                                          frames land in VRAM, scanned out
 ```
 
-- **Transport.** The qemu-3dfx model: a SysBus device (`d3dpt/hw/d3dpt_mm.c`,
-  patch 40) with a 4 KiB register page at `D3DPT_MM_BASE` (0xdfffe000)
-  and a 64 MiB RAM window at `D3DPT_SHM_BASE` (0xd8000000), fixed
-  guest-physical addresses mapped through `FXPTL.SYS`'s `\\.\MAPMEM` on
-  NT or `FXMEMMAP.VXD` on 9x. On `d3dpt-vga` the window is the top
-  `D3DPT_SHM_SIZE` of the VRAM BAR instead (doc 15). The guest writes
+- **Transport.** The window is the top `D3DPT_SHM_SIZE` of `d3dpt-vga`'s
+  VRAM BAR (doc 15). Until step 7 the DLLs used the qemu-3dfx model
+  instead: a SysBus device with a 4 KiB register page at `D3DPT_MM_BASE`
+  (0xdfffe000) and a 64 MiB RAM window at `D3DPT_SHM_BASE` (0xd8000000),
+  mapped through the device mapper; the two constants stay in the header
+  until the next protocol bump. The guest writes
   records until a sync point (Present, a Lock readback,
   GetRenderTargetData, a query, device creation) and rings
   `D3DPT_REG_DOORBELL` once. The batch runs synchronously on the vCPU
@@ -53,7 +57,7 @@ guest (XP / Win98)                      host (QEMU process)
   that never attaches. The guest encoder is `d3dpt/d3dpt_enc.h`. The
   executor validates every record (a hostile guest must not crash the
   host), and a refused batch logs `batch error N at record R (op O)`.
-- **Guest `d3d9.dll`** (`guest-tools/src/d3dpt/`): COM objects for
+- **Guest `d3d9.dll`** (retired; `guest-tools/src/d3dpt/` in git history): COM objects for
   IDirect3D9, the device, swap chain and resources. Each method is
   *forward* (append a record), *shadow* (state the app reads back, such
   as GetRenderState, GetTransform and caps, answered from a guest copy)
@@ -62,7 +66,7 @@ guest (XP / Win98)                      host (QEMU process)
   control word to PC=24 unless `D3DCREATE_FPU_PRESERVE`, like native
   (doc 13's PC=24 path exists for this). Code may come from current Wine
   (LGPL, ADR-006).
-- **Guest `d3d8.dll`:** D3D8 over our d3d9 in the d3d8to9 shape (BSD-2),
+- **Guest `d3d8.dll`** (retired): D3D8 over our d3d9 in the d3d8to9 shape (BSD-2),
   in C: `d3d8.c` includes `d3d9.c` and wraps its objects. `gen_vtbl8.py`
   generates the vtables from mingw's `d3d8.h`, since the two headers
   cannot coexist, and D3D8-only structs keep the headers' `pack(4)`.
@@ -71,23 +75,20 @@ guest (XP / Win98)                      host (QEMU process)
   loaded (below). The QEMU device `dlopen`s it
   (`d3dpt/hw/d3dpt_exec_load.c`), so the protocol evolves without a QEMU
   rebuild and QEMU stays C.
-- **Present.** The device presents once per frame at `Present` into the
-  embed presenter (`embed/embedfx.c`), with none of the GL path's
-  front-buffer flush heuristics. The frame is read back through
-  GetRenderTargetData; zero-copy through DXVK's Vulkan interop is open
-  (M4 track).
-- **Fallback.** With no executor the device reports
-  `D3DPT_STATUS_NO_EXEC`; without our DLLs a game loads Microsoft's d3d9
-  and gets its software device.
+- **Present.** The driver's render targets live in the adapter's VRAM,
+  so a frame is scanned out like any other surface. (The SysBus device
+  read each frame back at `Present` into the embed presenter.)
+- **Fallback.** With no executor the adapter reports
+  `D3DPT_STATUS_NO_EXEC`, the driver keeps its DirectDraw half and a game
+  gets the runtime's software device.
 
 ## The guest DLLs
 
-On XP the display driver's DX8 DDI (doc 15) replaced per-game DLLs; the
-DLLs remain the Win98 per-game path and the executor's test harness
-(`D3DGAME9`, `D3DGAME8`, `D3DFEAT9`). ADR-021 retires them: once the
-driver is a DirectX 9 driver (track M16), those programs run through
-Microsoft's runtime on the driver and the DLLs leave the ISO. Fix what a
-title needs in the driver, not here.
+Retired (ADR-021, M16 step 7, 2026-09-27): the driver is a DirectX 9
+driver on XP and Win98, `D3DGAME9`, `D3DGAME8` and `D3DFEAT9` run through
+Microsoft's runtime on it (`scripts/test.sh guest`), and the DLLs left
+the ISO with their source. The notes below are how they worked, for the
+driver's sake.
 
 - **Identity and lifetime (D3D8).** Real D3D8 keeps device- and
   texture-owned objects (surfaces, levels) alive at refcount 0 and hands

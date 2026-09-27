@@ -1,30 +1,10 @@
-Instantiate the paravirtual Direct3D device (hw/d3dpt, overlaid from
-d3dpt/hw by prepare-qemu.sh; doc 14) on the pc machine next to the
-qemu-3dfx devices, and add its meson subdir.
+Add the hw/d3dpt meson subdir (overlaid from d3dpt/hw by prepare-qemu.sh):
+the d3dpt-vga display adapter (docs 15, 19) and the executor loader it
+opens. Until M16 step 7 this also put a SysBus Direct3D device (doc 14)
+on the pc machine for the retired D3D8/D3D9 guest DLLs.
 
-diff --git a/hw/i386/pc.c b/hw/i386/pc.c
-index c8b7892..bf92a76 100644
---- a/hw/i386/pc.c
-+++ b/hw/i386/pc.c
-@@ -25,6 +25,7 @@
- #include "qemu/osdep.h"
- #include "qemu/units.h"
- #include "hw/i386/pc.h"
-+#include "hw/d3dpt/d3dpt.h"
- #include "hw/char/serial-isa.h"
- #include "hw/char/parallel.h"
- #include "hw/hyperv/hv-balloon.h"
-@@ -1237,6 +1238,8 @@ void pc_basic_device_init(struct PCMachineState *pcms,
-     glidept_mm_init();
-     /* MESA pass-through */
-     mesapt_mm_init();
-+    /* win98-xp-virt: paravirtual Direct3D (hw/d3dpt) */
-+    d3dpt_mm_init();
-     /* Super I/O */
-     pc_superio_init(isa_bus, create_fdctrl, pcms->i8042_enabled,
-                     pcms->vmport != ON_OFF_AUTO_ON, &error_fatal);
 diff --git a/meson.build b/meson.build
-index e559b73..cb7dba1 100644
+index 07aa7b7..e9d8ee2 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -3700,6 +3700,7 @@ if have_system or have_user

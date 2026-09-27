@@ -196,12 +196,9 @@ details, and a native build in MSYS2 for debugging, are in
   installs, swap discs from the launcher or from inside the guest with
   `CDSHELF.EXE` (a DOS box has `CDSHELF.COM`), which the guest tools
   install.
-- **DirectX 1 up to 8 games** run through the display driver, nothing to
-  copy per game. On Windows 98, install DirectX 7 or later first (9.0c
-  is the one to use); 98 SE's own DirectX 6.1 gets DirectDraw but no
-  Direct3D.
-- **DirectX 9 games** want our `D3D9.DLL` next to the game's EXE:
-  `SETUP /GAME 1 <game folder>`, or copy it from the disc's `D3DPT\`.
+- **DirectX 1 up to 9 games** run through the display driver, nothing to
+  copy per game. On Windows 98, install DirectX 9.0c first; 98 SE's own
+  DirectX 6.1 gets DirectDraw but no Direct3D.
 - **When the host has no Direct3D for the guest** (no Vulkan 1.3 and no
   Wine), the guest has none either: the 2ksbox adapter keeps its 2D and
   DirectDraw, and OpenGL games and the Voodoo 2 still run. Installing

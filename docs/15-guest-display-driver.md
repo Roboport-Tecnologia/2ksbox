@@ -146,8 +146,7 @@ is checked.
 | `full-frames=on` | whole-frame conversion every refresh |
 
 The executor properties model hosts, not devices. The adapter only hands
-them to the loader (`d3dpt/hw/d3dpt_exec_load.c`), which doc 14's SysBus
-device shares, so both devices answer the same.
+them to the loader (`d3dpt/hw/d3dpt_exec_load.c`).
 
 - **`no-exec=on`** models a Linux or macOS host below the Vulkan 1.3
   floor with no Wine (`-global d3dpt-vga.no-exec=on` in the machine
@@ -583,8 +582,8 @@ BltFast, each read back) passes at every depth and no call reaches
 
 This is the DX7 HAL behind the display driver, on the doc 14 protocol
 and executor. The adapter's top 64 MiB of VRAM is a command window in
-the SysBus device's layout (`d3dpt_proto.h`: header page, records,
-return area), so the guest encoder `d3dpt_enc.h` and `d3dpt_exec_submit`
+the layout doc 14's retired SysBus device used (`d3dpt_proto.h`: header
+page, records, return area), so the guest encoder `d3dpt_enc.h` and `d3dpt_exec_submit`
 work unchanged. DOORBELL submits the window, and the host runs the batch
 synchronously inside the write. D3D_STATUS says whether the host has an
 executor (reading it loads the library); CMD_OFFSET says where the
@@ -875,7 +874,7 @@ emulator's input path (`DRIVER\DITEST.EXE` sees every key, and the
 `qemu-embed: input:` statistics are clean), `LowLevelHooksTimeout`, and
 the frame rate.
 
-The fix is `D3DPT\DINPUT.DLL` next to the EXE (`SETUP /GAME 2`), a
+The fix is `DINPUT\DINPUT.DLL` next to the EXE (`SETUP /GAME 2`), a
 forwarding shim that sets every key `GetAsyncKeyState` reports pressed
 in the returned keyboard state; a KVM host needs nothing. The shim is
 silent by default; `D3DPT_DINPUT_LOG=1` adds `dinput_log.txt` (devices,

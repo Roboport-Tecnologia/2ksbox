@@ -998,7 +998,7 @@ typedef struct {
 
 static Component g_comp[MAX_COMPONENTS] = {
     { "Display adapter driver (d3dpt-vga)", "needs a restart",              1, 1, 1, step_driver,  0 },
-    { "The device mapper",                  "needed by OPENGL32.DLL and the D3DPT DLLs", 1, 1, 1, step_mapper, 0 },
+    { "The device mapper",                  "needed by OPENGL32.DLL",       1, 1, 1, step_mapper,  0 },
     { "Disc shelf tool",                    "CDSHELF.EXE in the Windows folder", 1, 1, 1, step_cdshelf, 0 },
     { "Test programs",                      "in C:\\2KSBOX",                1, 1, 0, step_tests,   0 },
     /* last, so no earlier component's /I number moves */
@@ -1018,7 +1018,8 @@ static int g_ncomp;
  * are pairs, <name on the ISO> then <name it must have next to the EXE>.
  * No set renames anything: the folders carry the DLLs under the names a
  * game loads, so copying a folder from Explorer and running SETUP /GAME
- * give the same result. */
+ * give the same result. A retired set keeps its place (no dir) so the
+ * numbers after it do not move. */
 typedef struct {
     const char *label;
     const char *dir;
@@ -1026,10 +1027,10 @@ typedef struct {
 } GameSet;
 
 static const GameSet g_sets[] = {
-    { "Direct3D 8/9 on the paravirtual device (D3D8.DLL D3D9.DLL DDRAW.DLL)",
-      "D3DPT",   { "D3D8.DLL", "D3D8.DLL", "D3D9.DLL", "D3D9.DLL", "DDRAW.DLL", "DDRAW.DLL", NULL } },
+    { "Direct3D 8/9 DLLs: retired. Games use Windows' own Direct3D on the display driver.",
+      NULL,      { NULL } },
     { "DirectInput keyboard fix (DINPUT.DLL)",
-      "D3DPT",   { "DINPUT.DLL", "DINPUT.DLL", NULL } },
+      "DINPUT",  { "DINPUT.DLL", "DINPUT.DLL", NULL } },
     { "OpenGL pass-through (OPENGL32.DLL WRAPGL32.EXT)",
       "OPENGL",  { "OPENGL32.DLL", "OPENGL32.DLL",
                    "WRAPGL32.EXT", "WRAPGL32.EXT", NULL } },
@@ -1054,6 +1055,7 @@ static int copy_game_set(int n, const char *dir)
 
     if (n < 1 || n > NSETS) { say("no such set: %d", n); return 1; }
     s = &g_sets[n - 1];
+    if (!s->dir) { say("set %d: %s", n, s->label); return 1; }
     if (GetFileAttributesA(dir) == INVALID_FILE_ATTRIBUTES) {
         say("%s: no such folder", dir);
         return 1;
@@ -1171,7 +1173,7 @@ static void print_sets(void)
 
     say("Copy next to one game's EXE:");
     for (i = 0; i < NSETS; i++)
-        say("  %d %s", i + 1, g_sets[i].label);
+        if (g_sets[i].dir) say("  %d %s", i + 1, g_sets[i].label);
 }
 
 /* A line from the console, trimmed; NULL at end of input (a redirected

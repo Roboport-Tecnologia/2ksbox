@@ -47,7 +47,9 @@
 # CMD_WAIT=s (the cap on waiting for the command to say it is done over
 # COM1, default 300; BOOT_WAIT=s is the cap on finding the shell at all,
 # REBOOT_WAIT=s the cap on `install`'s restart; none of the three is a
-# sleep, see tools/guestwait.sh) or SHOTS=n SHOT_EVERY=s (n screendumps
+# sleep, see tools/guestwait.sh, except that `cmd` / `bat` sleep CMD_WAIT
+# (30) unless UNTIL=word names what the command echoes to COM1 at its end)
+# or SHOTS=n SHOT_EVERY=s (n screendumps
 # cmd-01.png … every s seconds, for watching a game start; SHOT_KEYS="26:esc"
 # presses a key right before screendump n). KEEP=1 leaves the machine
 # running at the end (QMP at OUT/qmp.sock; kill it yourself) for a look
@@ -127,7 +129,7 @@ esac
 gl=$(echo "$GN" | tr A-Z a-z)
 if [ -n "$GN" ]; then
   # the reference scene's DX8 / DX9 build from the guest-tools ISO (TESTS\), copied out alone
-  # so no D3DPT\D3D8.DLL / D3D9.DLL sits next to it: XP's own runtime, our DDI (DX9's since M16)
+  # into a folder of its own: XP's own runtime on our DDI (DX9's since M16)
   FULL_ISO="$(ls -t "$ROOT"/guest-tools/out/guest-tools-*.iso 2>/dev/null | head -1)"
   [ -f "$FULL_ISO" ] || { echo "no guest-tools ISO (TESTS\\$GEXE.EXE): run guest-tools/build-wrappers.sh"; exit 1; }
   ISO="$FULL_ISO"
@@ -424,6 +426,8 @@ PY
         SK="${SHOT_KEYS:-}"; for k in ${SK//,/ }; do [ "${k%%:*}" = "${i#0}" ] && { Q keys "${k#*:}" || true; sleep 1; }; done
         Q screendump "$OUT/cmd-$i.png" || true
       done
+    elif [ -n "${UNTIL:-}" ]; then
+      gw_wait_log "$SER" "$UNTIL" "${CMD_WAIT:-300}" || true   # the command echoes UNTIL to COM1 when it is done
     else
       sleep "${CMD_WAIT:-30}"
     fi

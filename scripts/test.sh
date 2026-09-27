@@ -15,9 +15,7 @@
 # Each check function below says why it exists.
 #
 # Environment: WINXP_IMG (~/vms/winxp.qcow2), GUEST_ISO (newest
-# guest-tools/out/guest-tools-3dfx-*.iso), TEST_ACCEL (kvm|tcg),
-# D3D_GOLDEN_BUDGET (1200), TEST_BOOT_TIMEOUT (300 s), TEST_KEEP=1 keeps
-# the VM running on failure for a look (QMP socket printed).
+# guest-tools/out/guest-tools-3dfx-*.iso), D3D_GOLDEN_BUDGET (1200).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -2049,7 +2047,9 @@ machine_map_check() { # the pass-through regions a PC machine carries
   # patch 74 leaves the Glide one out of the build (ADR-020: Glide is the
   # Voodoo 2's). A tree that lost that patch grows a `glidept` region back
   # and nothing else notices, since no guest of ours asks for it. `mesapt`
-  # and `d3dpt` must still be there, or the same tree lost the overlay.
+  # must still be there, or the same tree lost the overlay. The SysBus
+  # `d3dpt` left with the guest DLLs (M16 step 7); a region of it back
+  # means patch 40 went stale.
   local out
   out="$(printf '%s\n' '{"execute":"qmp_capabilities"}' \
         '{"execute":"human-monitor-command","arguments":{"command-line":"info mtree"}}' \
@@ -2058,9 +2058,8 @@ machine_map_check() { # the pass-through regions a PC machine carries
             -display none -S -qmp stdio -net none 2>&1)" \
     || { echo "QEMU refused to start"; echo "$out" | tail -3; return 1; }
   local rc=0 r
-  for r in mesapt d3dpt; do
-    case "$out" in *"): $r"*) echo "$r region present" ;; *) echo "no $r region on the machine"; rc=1 ;; esac
-  done
+  case "$out" in *"): mesapt"*) echo "mesapt region present" ;; *) echo "no mesapt region on the machine"; rc=1 ;; esac
+  case "$out" in *"): d3dpt"*) echo "a SysBus d3dpt region is on the machine (patch 40 stale?)"; rc=1 ;; *) echo "no SysBus d3dpt region (M16 step 7)" ;; esac
   case "$out" in *glidept*|*glidelfb*|*glideshm*) echo "a Glide pass-through region is on the machine (patch 74 lost?)"; rc=1 ;; *) echo "no Glide pass-through region (patch 74)" ;; esac
   return $rc
 }
@@ -2693,15 +2692,6 @@ host_stage() {
 }
 
 # --------------------------------------------------------------- guest stage
-QEMU_PID=""; SOCK=""
-qmp() { python3 tools/qmpc.py "$SOCK" "$@" >/dev/null; }
-guest_teardown() {
-  [ -n "$QEMU_PID" ] && kill -0 "$QEMU_PID" 2>/dev/null || return 0
-  if [ "${TEST_KEEP:-0}" = 1 ]; then echo "  TEST_KEEP=1: XP left running, QMP at $SOCK (pid $QEMU_PID)"; return 0; fi
-  qmp json '{"execute":"system_powerdown"}' 2>/dev/null
-  for _ in $(seq 60); do kill -0 "$QEMU_PID" 2>/dev/null || return 0; sleep 2; done
-  echo "  XP did not power down, killing"; kill "$QEMU_PID" 2>/dev/null
-}
 guest_stage() {
   log "guest stage"
   local img="${WINXP_IMG:-$HOME/vms/winxp.qcow2}"
@@ -2773,59 +2763,19 @@ guest_stage() {
   else skip guest-cdimage "needs target/release/discx and bsdtar"; fi
   [ -f "$D3DPT_EXEC_LIB" ] || { skip guest "no $D3DPT_EXEC_LIB"; return; }
   [ -f "$OUT/g9-native.bmp" ] && [ -f "$OUT/f9-native.bmp" ] || { skip guest "run the host stage first (native oracle frames)"; return; }
-  local accel="${TEST_ACCEL:-}"
-  if [ -z "$accel" ]; then if [ -w /dev/kvm ]; then accel=kvm; else accel=tcg; fi; fi
-  local cpu=(-cpu pentium3); [ "$accel" = kvm ] && cpu=(-cpu host)
-
-  # scratch disk: 64 MB FAT32, one partition at 2048, RUN.BAT drives the whole session
-  local scratch="$OUT/scratch.img"
-  rm -f "$scratch"; truncate -s 64M "$scratch"
-  printf 'label: dos\nstart=2048, type=c\n' | sfdisk -q "$scratch" >/dev/null
-  mkfs.fat -F 32 --offset 2048 "$scratch" >/dev/null
-  local fat="$scratch@@1048576"
-  printf '@echo off\r\nxcopy D:\\D3DPT E:\\D3DPT\\ /I /Y\r\nxcopy D:\\TESTS E:\\D3DPT\\ /I /Y\r\nmkdir E:\\OUT\r\ncd /d E:\\D3DPT\r\nset BOXLOG=E:\\D3DPT\r\nDDVMTEST.EXE\r\nD3DGAME9.EXE -frames 600 -dump 300 E:\\OUT\\G9.BMP\r\nD3DGAME8.EXE -frames 600 -dump 300 E:\\OUT\\G8.BMP\r\nD3DFEAT9.EXE -frames 600 -dump 300 E:\\OUT\\F9.BMP\r\necho done > E:\\OUT\\DONE.TXT\r\n' > "$OUT/RUN.BAT"
-  mcopy -i "$fat" "$OUT/RUN.BAT" ::/RUN.BAT
-
-  SOCK="$OUT/qmp.sock"; rm -f "$SOCK"
-  local qlog="$OUT/qemu.log"
-  echo "  XP: $img (snapshot), ISO: $iso, accel: $accel"
-  build/qemu/qemu-system-i386 -L qemu/pc-bios -accel "$accel" "${cpu[@]}" -machine pc -m 512 \
-    -drive "file=$img,if=ide,index=0,media=disk,snapshot=on" -drive "file=$scratch,format=raw,if=ide,index=1,media=disk" -cdrom "$iso" \
-    -vga cirrus -net none -usb -device usb-tablet -display none -serial none -monitor none \
-    -qmp "unix:$SOCK,server,nowait" >"$qlog" 2>&1 &
-  QEMU_PID=$!
-  trap guest_teardown EXIT
-  for _ in $(seq 50); do [ -S "$SOCK" ] && break; sleep 0.2; done
-  [ -S "$SOCK" ] || { FAIL+=(guest-boot); echo "  FAIL guest-boot (no QMP socket) — $qlog"; tail -5 "$qlog"; return; }
-
-  # boot: XP autologs in; the Run dialog is retried until the device sees the first attach
-  local deadline=$(( $(date +%s) + ${TEST_BOOT_TIMEOUT:-300} )) t0=$(date +%s)
-  sleep 25
-  while ! grep -q ", attached (" "$qlog"; do
-    if [ "$(date +%s)" -ge "$deadline" ] || ! kill -0 "$QEMU_PID" 2>/dev/null; then
-      FAIL+=(guest-boot); echo "  FAIL guest-boot (no d3dpt attach within the timeout) — $qlog"; tail -5 "$qlog"; return; fi
-    qmp keys meta_l+r; sleep 1; qmp keys ctrl+a; qmp type 'E:\RUN.BAT'; qmp keys ret
-    for _ in $(seq 15); do grep -q ", attached (" "$qlog" && break; sleep 1; done
-  done
-  echo "  first attach after $(( $(date +%s) - t0 )) s"
-  # three programs, three detaches; then DONE.TXT once XP has flushed the FAT
-  deadline=$(( $(date +%s) + 300 ))
-  while [ "$(grep -c "DLL_PROCESS_DETACH" "$qlog")" -lt 3 ]; do
-    if [ "$(date +%s)" -ge "$deadline" ] || ! kill -0 "$QEMU_PID" 2>/dev/null; then
-      FAIL+=(guest-run); echo "  FAIL guest-run ($(grep -c "DLL_PROCESS_DETACH" "$qlog") of 3 programs detached) — $qlog"; grep -i "d3dpt:" "$qlog" | tail -8; return; fi
-    sleep 2
-  done
-  for _ in $(seq 30); do mcopy -n -i "$fat" ::/OUT/DONE.TXT "$OUT/DONE.TXT" 2>/dev/null && break; sleep 2; done
-  echo "  guest run done after $(( $(date +%s) - t0 )) s; shutting XP down"
-  QEMU_KEEP="${TEST_KEEP:-0}"; TEST_KEEP=0 guest_teardown; TEST_KEEP="$QEMU_KEEP"; QEMU_PID=""
+  # XP on the display driver through its own runtime (M16 step 7): a fresh
+  # overlay, the driver installed from the ISO, then the scenes in one boot
   rm -f "$OUT"/G9.BMP "$OUT"/G8.BMP "$OUT"/F9.BMP "$OUT"/guest-*.log
-  mcopy -n -i "$fat" ::/OUT/G9.BMP ::/OUT/G8.BMP ::/OUT/F9.BMP "$OUT/" 2>/dev/null
-  mcopy -n -i "$fat" ::/D3DPT/D3DGAME9.LOG "$OUT/guest-d3dgame9.log" 2>/dev/null
-  mcopy -n -i "$fat" ::/D3DPT/D3DGAME8.LOG "$OUT/guest-d3dgame8.log" 2>/dev/null
-  mcopy -n -i "$fat" ::/D3DPT/D3DFEAT9.LOG "$OUT/guest-d3dfeat9.log" 2>/dev/null
-  mcopy -n -i "$fat" ::/D3DPT/DDVMTEST.LOG "$OUT/guest-ddvmtest.log" 2>/dev/null
-  # the DirectDraw shim next to the EXE: a Vice City-style launcher check passes
-  if grep -q "ddraw.dll is E:" "$OUT/guest-ddvmtest.log" 2>/dev/null && grep -q ": enough" "$OUT/guest-ddvmtest.log"; then
+  echo "  XP: $img (overlay), ISO: $iso"
+  if OUT="$OUT/xpdx9" tools/xp-dx9-test.sh "$img" "$iso" > "$OUT/xpdx9.log" 2>&1; then
+    echo "  $(tail -1 "$OUT/xpdx9.log")"
+  else FAIL+=(guest-run); echo "  FAIL guest-run — $OUT/xpdx9.log"; tail -3 "$OUT/xpdx9.log" | sed 's/^/       /'; fi
+  local g
+  for g in G9.BMP G8.BMP F9.BMP guest-ddvmtest.log guest-d3dgame9.log guest-d3dgame8.log guest-d3dfeat9.log; do
+    [ -f "$OUT/xpdx9/$g" ] && cp "$OUT/xpdx9/$g" "$OUT/"
+  done
+  # a Vice City-style launcher check through Windows' own ddraw.dll: the driver's video memory
+  if grep -qiF "ddraw.dll is C:\\WINDOWS" "$OUT/guest-ddvmtest.log" 2>/dev/null && grep -q ": enough" "$OUT/guest-ddvmtest.log"; then
     PASS+=(guest-ddvm); echo "  PASS guest-ddvm"; grep "GetAvailableVidMem" "$OUT/guest-ddvmtest.log" | tr -d '\r' | sed 's/^/       /'
   else FAIL+=(guest-ddvm); echo "  FAIL guest-ddvm — $OUT/guest-ddvmtest.log"; cat "$OUT/guest-ddvmtest.log" 2>/dev/null | tr -d '\r' | sed 's/^/       /'; fi
 

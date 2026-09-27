@@ -12,10 +12,10 @@ The glide_* entries of patch 30's UI table stay as unreferenced defaults.
 Drop: never; upstream will not grow a build option for one device.
 
 diff --git a/hw/i386/pc.c b/hw/i386/pc.c
-index bf92a76..1003147 100644
+index c8b7892..af66660 100644
 --- a/hw/i386/pc.c
 +++ b/hw/i386/pc.c
-@@ -1234,9 +1234,7 @@ void pc_basic_device_init(struct PCMachineState *pcms,
+@@ -1233,9 +1233,7 @@ void pc_basic_device_init(struct PCMachineState *pcms,
              ? ON_OFF_AUTO_OFF : ON_OFF_AUTO_ON;
      }
  
@@ -24,9 +24,9 @@ index bf92a76..1003147 100644
 -    /* MESA pass-through */
 +    /* MESA pass-through (2ksbox: the Glide device is not built, ADR-020) */
      mesapt_mm_init();
-     /* win98-xp-virt: paravirtual Direct3D (hw/d3dpt) */
-     d3dpt_mm_init();
-@@ -1268,14 +1266,6 @@ void pc_nic_init(PCMachineClass *pcmc, ISABus *isa_bus, PCIBus *pci_bus)
+     /* Super I/O */
+     pc_superio_init(isa_bus, create_fdctrl, pcms->i8042_enabled,
+@@ -1265,14 +1263,6 @@ void pc_nic_init(PCMachineClass *pcmc, ISABus *isa_bus, PCIBus *pci_bus)
      rom_reset_order_override();
  }
  

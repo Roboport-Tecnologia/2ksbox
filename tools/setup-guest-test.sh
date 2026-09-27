@@ -7,7 +7,8 @@
 #   tools/setup-guest-test.sh ~/vms/win98.qcow2  win98
 #
 # `SETUP /LIST` (the component list for this family), `SETUP /ALL` (install
-# every one of them) and `SETUP /GAME 3 C:\2KSBOX` (a per-game file set),
+# every one of them), `SETUP /GAME 3` and `/GAME 2 C:\2KSBOX` (the per-game
+# file sets) and `/GAME 1` (retired: it must say so and copy nothing),
 # then Windows' own `dir` on each thing that should now exist. That, and
 # the MAPMEM service on NT, are the proof, not SETUP's own exit code.
 # Output comes back over COM1; PASS/FAIL per check at the end.
@@ -168,6 +169,9 @@ MARKS=("$SYSDIR\\GLIDE2X.DLL|MARK-GLIDE2X" "$SYSDIR\\GLIDE3X.DLL|MARK-GLIDE3X")
   fi
   echo 'echo ==== per-game set 3 (OpenGL) > COM1'
   setup_line '/GAME 3 C:\2KSBOX'
+  echo 'echo ==== per-game set 2 (DirectInput), then the retired set 1 > COM1'
+  setup_line '/GAME 2 C:\2KSBOX'
+  setup_line '/GAME 1 C:\2KSBOX'
   if [ -n "${VOODOO:-}" ]; then
     # FIND prints a matching line only if the marker is still the file's
     # content; a copy of ours in its place prints just the file's name
@@ -445,6 +449,10 @@ if [ "$FAMILY" = win98 ]; then
   want "2KSBOX~1 PIF" "the PIF is on the desktop (Windows' own dir)"
 fi
 want "WGLGEARS.EXE" "the test programs are in C:\\2KSBOX (Windows' own dir)"
+want "DINPUT.DLL ->" "set 2 copied DINPUT.DLL from DINPUT\\"
+want "set 1: Direct3D 8/9 DLLs: retired" "set 1 says it is retired (M16 step 7)"
+never "D3D9.DLL ->" "no Direct3D DLL is copied anywhere"
+never "  1 Direct3D" "/LIST does not offer the retired set"
 want "OPENGL32.DLL" "the per-game set landed in C:\\2KSBOX (Windows' own dir)"
 if [ "$FAMILY" = win98 ]; then
   want "Windows 98" "the family was detected"

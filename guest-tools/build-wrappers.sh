@@ -121,15 +121,15 @@ build_wrapper mesa
 # next to the game" can never pick up the wrong DLL, and every test
 # program lives in TESTS\. One copy of every file.
 rm -rf "$OUT/iso"
-mkdir -p "$OUT/iso"/{MAPPER,OPENGL,D3DPT,TESTS,CDSHELF,VOODOO2,DOSMODE}
+mkdir -p "$OUT/iso"/{MAPPER,OPENGL,DINPUT,TESTS,CDSHELF,VOODOO2,DOSMODE}
 G="$FX/wrappers/3dfx/build"; M="$FX/wrappers/mesa/build"
 T="$OUT/iso/TESTS"
 
 # MAPPER\: the device mapper (FXMEMMAP.VXD on 9x, FXPTL.SYS + INSTDRV on
-# NT), which OPENGL32.DLL and the D3DPT DLLs reach the pass-through device
-# through. It comes out of qemu-3dfx's 3dfx wrapper build, whose Glide DLLs
-# are not staged: the Glide pass-through is retired (ADR-020), and a Glide
-# game runs on the emulated Voodoo 2 with 3dfx's own driver (doc 21).
+# NT), which OPENGL32.DLL reaches the OpenGL pass-through device through.
+# It comes out of qemu-3dfx's 3dfx wrapper build, whose Glide DLLs are not
+# staged: the Glide pass-through is retired (ADR-020), and a Glide game
+# runs on the emulated Voodoo 2 with 3dfx's own driver (doc 21).
 cp "$G"/fxmemmap.vxd "$G"/fxptl.sys "$G"/instdrv.exe "$OUT/iso/MAPPER/"
 # OPENGL\: the GL pass-through wrapper, per game, with the settings file
 # the wrapper reads from the game's own folder. It ships with a year cap on
@@ -140,29 +140,14 @@ cp "$G"/fxmemmap.vxd "$G"/fxptl.sys "$G"/instdrv.exe "$OUT/iso/MAPPER/"
 # user edits, so SETUP /GAME never overwrites one already next to a game.
 cp "$M"/opengl32.dll "$OUT/iso/OPENGL/"
 cp "$ROOT/guest-tools/wrapgl32.ext" "$OUT/iso/OPENGL/WRAPGL32.EXT"
-# D3DPT\: Direct3D 8/9 over our paravirtual device (doc 14), with
-# qemu-3dfx's fxlib device mapper (FXPTL.SYS / FXMEMMAP.VXD). Per game:
-# only the DLLs live here. d3d9_vtbl.h is generated from mingw's d3d9.h
-# (gen_vtbl.py) and checked in.
-i686-w64-mingw32-gcc -O2 -Wall -shared -o "$OUT/iso/D3DPT/d3d9.dll" "$ROOT/guest-tools/src/d3dpt/d3d9.c" \
-  "$FX/wrappers/fxlib/fxlibnt.c" "$FX/wrappers/fxlib/fxlib9x.c" -I"$FX/wrappers/fxlib" \
-  -static-libgcc -Wl,--kill-at -lgdi32 -luser32
-# Direct3D 8 over the same device (doc 14 P4): d3d8.c includes d3d9.c, one DLL.
-i686-w64-mingw32-gcc -O2 -Wall -shared -o "$OUT/iso/D3DPT/d3d8.dll" "$ROOT/guest-tools/src/d3dpt/d3d8.c" \
-  "$FX/wrappers/fxlib/fxlibnt.c" "$FX/wrappers/fxlib/fxlib9x.c" -I"$FX/wrappers/fxlib" \
-  -static-libgcc -Wl,--kill-at -lgdi32 -luser32
-# DirectDraw 7 shim (d3dpt/ddraw.c): forwards to the system ddraw.dll and
-# reports 256 MB of video memory. RenderWare launchers (GTA Vice City) ask
-# DirectDraw, not Direct3D, and refuse the Cirrus adapter's 4 MB.
-i686-w64-mingw32-gcc -O2 -Wall -shared -o "$OUT/iso/D3DPT/ddraw.dll" "$ROOT/guest-tools/src/d3dpt/ddraw.c" \
-  "$ROOT/guest-tools/src/d3dpt/ddraw.def" -static-libgcc -Wl,--kill-at -Wl,--enable-stdcall-fixup
-# DirectInput shim (d3dpt/dinput.c): forwards to the system dinput.dll and
-# merges GetAsyncKeyState into a non-exclusive keyboard's state, for a game
-# whose loop stops pumping messages (FIFA 2000's match, doc 15).
-# Silent by default; D3DPT_DINPUT_LOG=1 in the environment adds the log of
-# what the game asks of its keyboard / mouse devices and what it gets back.
+# DINPUT\: the DirectInput shim (dinput/dinput.c), per game. It forwards
+# to the system dinput.dll and merges GetAsyncKeyState into a non-exclusive
+# keyboard's state, for a game whose loop stops pumping messages (FIFA
+# 2000's match, doc 15). Silent by default; D3DPT_DINPUT_LOG=1 in the
+# environment adds the log of what the game asks of its keyboard / mouse
+# devices and what it gets back.
 i686-w64-mingw32-gcc -O2 -Wall -shared -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
-  -o "$OUT/iso/D3DPT/dinput.dll" "$ROOT/guest-tools/src/d3dpt/dinput.c" "$ROOT/guest-tools/src/d3dpt/dinput.def" \
+  -o "$OUT/iso/DINPUT/dinput.dll" "$ROOT/guest-tools/src/dinput/dinput.c" "$ROOT/guest-tools/src/dinput/dinput.def" \
   -static-libgcc -Wl,--kill-at -Wl,--enable-stdcall-fixup -ldxguid
 
 # TESTS\: every test, benchmark and calibration program, one copy each.
@@ -184,8 +169,8 @@ i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pe
 # D3D9 smoke test (guest-tools/src/d3d9test.c): adapter string, HAL caps,
 # x87 control word after CreateDevice, spinning triangle with fps.
 i686-w64-mingw32-gcc -O2 -o "$T/d3d9test.exe" "$ROOT/guest-tools/src/d3d9test.c" -ld3d9 -lgdi32 -luser32
-# DDVMTEST.EXE prints what a launcher's video-memory check sees (the
-# system ddraw against D3DPT\DDRAW.DLL).
+# DDVMTEST.EXE prints what a launcher's video-memory check sees (Vice
+# City's: DirectDraw's free video memory, which the display driver answers).
 i686-w64-mingw32-gcc -O2 -o "$T/ddvmtest.exe" "$ROOT/guest-tools/src/ddvmtest.c" -lddraw -ldxguid
 # Display-mode probe (guest-tools/src/modetest.c): current mode, mode list,
 # ChangeDisplaySettingsEx results for the switches DirectDraw and Direct3D make.

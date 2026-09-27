@@ -1,9 +1,8 @@
 /*
  * d3dpt_exec_load.h: the executor library (libd3dpt_exec, d3dpt/exec)
  * as the QEMU devices see it: dlopened once per process, its entry
- * points resolved and its protocol version checked. Shared by the SysBus
- * Direct3D device (d3dpt_mm.c, doc 14) and the d3dpt-vga display adapter
- * (d3dpt_vga.c, doc 15 M7c); each creates its own executor instance.
+ * points resolved and its protocol version checked, for the d3dpt-vga
+ * display adapter (d3dpt_vga.c, doc 15).
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */

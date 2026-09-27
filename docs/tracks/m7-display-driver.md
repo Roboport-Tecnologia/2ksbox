@@ -56,7 +56,7 @@ Owned by this track:
 
 Shared (rebase first, edit minimally, name the other track in the
 commit): `d3dpt/d3dpt_proto.h`, `d3dpt/exec/d3dpt_exec.cpp` /
-`d3dpt_exec.h` and `d3dpt/hw/d3dpt_mm.c` (M4), `core/` (M10), the
+`d3dpt_exec.h` (M4), `core/` (M10), the
 remote executor files (M15), `scripts/test.sh`, `player/`.
 
 ## Where the design lives

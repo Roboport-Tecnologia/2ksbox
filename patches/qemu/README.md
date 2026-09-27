@@ -511,14 +511,13 @@ backend without the op keeps the round trip. **Switch:** `sse-fast`.
 **Drop:** upstream grows a vector-test op.
 
 ### 40-d3dpt-device
-Adds the `hw/d3dpt` meson subdir and puts the paravirtual Direct3D
-device (doc 14) on the pc machine beside the qemu-3dfx devices: a SysBus
-device with a register page at 0xdfffe000 and a 64 MiB window at
-0xd8000000, the executor library opened at the first guest attach
-(`d3dpt_exec_load.c`). The same overlay carries `d3dpt_vga.c`, the
+Adds the `hw/d3dpt` meson subdir. The overlay carries `d3dpt_vga.c`, the
 `d3dpt-vga` PCI adapter of the XP and 9x display drivers (docs 15 and
 19): a stdvga core, a register BAR and 128 MiB of VRAM whose top 64 MiB
-is the Direct3D command window. **Drop:** never.
+is the Direct3D command window, and `d3dpt_exec_load.c`, which opens the
+executor library. Until M16 step 7 (2026-09-27) the patch also put a
+SysBus Direct3D device on the pc machine for the retired guest DLLs
+(doc 14); patch 74's context changed with it. **Drop:** never.
 
 ### 41-disas-context-uninit
 QEMU builds with `-ftrivial-auto-var-init=zero`, and

@@ -18,7 +18,7 @@ instead (ADR-007's second amendment).
   `libd3dpt_exec_remote`, the wire `d3dpt/exec/d3dpt_remote.h`, and the
   back-end choice in `d3dpt/hw/d3dpt_exec_load.[ch]`.
 - The shared file behind device memory: `d3dpt/hw/d3dpt_vga.c` (VRAM,
-  QEMU patch 73) and `d3dpt/hw/d3dpt_mm.c` (the SysBus window).
+  QEMU patch 73). The SysBus window's `d3dpt_mm.c` went with M16 step 7.
 - Build and packages: `scripts/build-d3dpt-exec.sh --wine` (the PE pair
   into `build/d3dpt/wine/`), `scripts/build.sh`, `package-linux.sh`,
   `package-macos.sh --community`, the Flatpak manifest.

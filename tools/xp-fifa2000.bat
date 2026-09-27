@@ -17,7 +17,7 @@ ren DDRAW.DLL DDRAW.WINE
 ren WINED3D.DLL WINED3D.WINE
 ren WINEDD.DLL WINEDD.WINE
 cd ..
-rem a DINPUT.DLL on E:\ (the D3DPT shim) goes next to the EXE: it merges what
+rem a DINPUT.DLL on E:\ (the disc's DINPUT\ shim) goes next to the EXE: it merges what
 rem Windows reports pressed into the state, which is what makes the match take
 rem keys (doc 15). Silent unless E:\DILOG is staged, then it also writes
 rem dinput_log.txt with what the game asks DirectInput for and what it gets.

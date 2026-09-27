@@ -15,9 +15,9 @@ them somewhere else:  set BOXLOG=E:\
 
 What is on the disc, if you would rather do it by hand:
 
-MAPPER\   the device mapper. OPENGL32.DLL and D3DPT\ reach the host
-          through it; without it they refuse to load (0xc0000142 /
-          "failed to initialize" on 2000/XP).
+MAPPER\   the device mapper. OPENGL32.DLL reaches the host through
+          it; without it, it refuses to load (0xc0000142 / "failed to
+          initialize" on 2000/XP).
           Windows 98/Me: FXMEMMAP.VXD -> C:\WINDOWS\SYSTEM
           2000/XP:       FXPTL.SYS -> system32\drivers, then run
                          INSTDRV.EXE as Administrator.
@@ -30,7 +30,9 @@ DRIVER\   the 2000/XP display driver for the paravirtual adapter. Boot
           the machine with -vga none -device d3dpt-vga, then run
           DRVINST.EXE -reboot. DRIVER\README.TXT lists its own test
           programs (DDTEST, D3D7TEST, SHTEST, ...). Windows 9x wants
-          DRIVER9X\ instead, and SETUP picks for you.
+          DRIVER9X\ instead, and SETUP picks for you. With the driver
+          installed, games use Windows' own Direct3D (DirectX 9.0c on
+          98, the one XP has): nothing to copy next to a game.
 
 DRIVER9X\ the Windows 98/Me display driver for the same adapter, with the
           same machine options: -vga none -device d3dpt-vga. There is
@@ -41,16 +43,12 @@ DRIVER9X\ the Windows 98/Me display driver for the same adapter, with the
           adapter's PCI resources, and without it Windows takes them
           away again.
 
-D3DPT\    Direct3D 8/9 through the paravirtual device, per game. Copy
-          D3D8.DLL / D3D9.DLL next to the game's EXE. Add DDRAW.DLL when
-          a launcher checks video memory through DirectDraw (GTA Vice
-          City: "cannot find enough available video memory"). It answers
-          256 MB and forwards the rest to Windows' own.
-          DINPUT.DLL fixes "the keyboard does nothing in the game" when
-          the game polls a non-exclusive DirectInput keyboard from a loop
-          that never pumps messages (FIFA 2000's match). It merges what
-          Windows reports pressed into the state. The log is d3dpt.log
-          next to the EXE.
+DINPUT\   DINPUT.DLL, per game. It fixes "the keyboard does nothing in
+          the game" when the game polls a non-exclusive DirectInput
+          keyboard from a loop that never pumps messages (FIFA 2000's
+          match). It merges what Windows reports pressed into the state.
+          Copy it next to the game's EXE (SETUP /GAME 2). Set
+          D3DPT_DINPUT_LOG=1 for a log, dinput_log.txt next to the EXE.
 
 OPENGL\   OPENGL32.DLL, the OpenGL pass-through wrapper. Put it next to
           an OpenGL game's EXE (Quake 2 and the like). TESTS\WGLGEARS.EXE
@@ -66,9 +64,10 @@ OPENGL\   OPENGL32.DLL, the OpenGL pass-through wrapper. Put it next to
           you have changed.
 
 TESTS\    every test, benchmark and calibration program on the disc, one
-          copy each. SETUP puts them in C:\2KSBOX. A test that must run
-          on a particular stack needs that stack's DLLs beside it: copy
-          the EXE into a folder of its own and use SETUP /GAME there.
+          copy each. SETUP puts them in C:\2KSBOX. The Direct3D ones run
+          on the display driver; WGLGEARS needs OPENGL32.DLL beside it:
+          copy the EXE into a folder of its own and use SETUP /GAME 3
+          there.
             D3DGAME9 D3DGAME8   the reference scene. -frames N runs a
                                 fixed sequence, -dump N x.bmp writes a
                                 frame. Run these on real hardware

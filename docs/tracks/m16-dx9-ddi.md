@@ -217,6 +217,29 @@ by a title.
   itself without `CLIPTLVERTS` and dropping the extra elements; doc 15's
   rule stands). Under Wine, where DXVK claims `CLIPTLVERTS`,
   `depth_clamp_test`'s cap branch fails 5 by design.
+- **Step 7: the Direct3D DLLs retired (2026-09-27, user decision).**
+  `D3D8.DLL`, `D3D9.DLL`, `DDRAW.DLL`, their sources and vtable
+  generators left the tree and the ISO. `DINPUT.DLL` moved to its own
+  folder, `DINPUT\` (source `guest-tools/src/dinput/`); its
+  `D3DPT_DINPUT_LOG` switch keeps its name. SETUP's file set 1 stays as a
+  retired placeholder that `/GAME 1` explains and `/LIST` hides, so
+  `/GAME 3` (OpenGL) still means what it did. The SysBus `-device d3dpt`
+  (`d3dpt_mm.c`, `d3dpt.h`, the embed library's present hooks) is gone:
+  patch 40 now only adds the meson subdir, and patch 74 was regenerated
+  for the context that left `pc.c`. `D3DPT_MM_BASE` / `D3DPT_SHM_BASE`
+  stay in `d3dpt_proto.h` until the next protocol bump, so the drivers
+  on existing images do not go stale for a comment. `scripts/test.sh
+  guest` ran D3DGAME9 / D3DGAME8 / D3DFEAT9 and DDVMTEST through the DLLs
+  on Cirrus; `tools/xp-dx9-test.sh` now installs the driver on a fresh
+  overlay of the XP image and runs them through XP's own runtime (both
+  scenes pixel-identical to the native frame, D3DFEAT9 byte-identical,
+  lines equal; DDVMTEST through Windows' `ddraw.dll` reports 60 MB free,
+  which is the driver's answer to Vice City's video-memory question).
+  `tools/xp-game-test.sh` moved to the driver (it waits for the first
+  `ddi: context`). Not done here: the executor's pre-DDI record path
+  (`d3dpt_exec.cpp`'s device / resource records), which only
+  `tools/d3dpt-exec-test.cpp` still uses; retiring it is a protocol
+  bump.
 - **A modern card, for contrast** (`reference/winetest/win11-rtx3090.txt`,
   the user's Windows 11 PC, RTX 3090, 2026-09-26): d3d9 visual 210814
   checks, 69 failures; device 160756 / 0; d3d8 visual 2; d3d8 device
@@ -593,9 +616,8 @@ rig's GeForce 6200 (doc 09) is an SM3 card, so it answers for 3.0.
 - The Wine conformance suites: a build script in `guest-tools/`, a
   runner on the ISO's `TESTS\`, a host-side summary in `tools/`, the
   baselines under `reference/winetest/`, a stage in `scripts/test.sh`.
-- Removals (steps 7 and 8): `guest-tools/src/d3dpt/` except `dinput.c`,
-  SETUP's file sets 1 and 3, the SysBus `-device d3dpt`
-  (`d3dpt/hw/d3dpt_mm.c`, QEMU patch 40) once nothing uses it, the
+- Removals (steps 7 and 8): step 7's are done (below); left for step
+  8, SETUP's file set 3, `OPENGL\` and the
   device mapper (`MAPPER\`, SETUP component 2) once the ICD no longer
   needs it. `FXMEMMAP.VXD` that 3dfx's own Voodoo 2 driver installs is
   3dfx's and stays.
@@ -764,7 +786,7 @@ track builds.
    against the rig's Win98 run.
 6. **Titles.** DX9 titles of the era, SM2 and SM3, on XP and Win98, with
    the user by hand. Each gets a row in the table below as it is tried.
-7. **Retire the Direct3D DLLs.** `D3D8.DLL`, `D3D9.DLL` and `DDRAW.DLL`
+7. *Done 2026-09-27.* **Retire the Direct3D DLLs.** `D3D8.DLL`, `D3D9.DLL` and `DDRAW.DLL`
    leave the ISO with their source, generators and SETUP's file set 1
    (the set numbers after it do not move). The guest checks in
    `scripts/test.sh` that ran D3DGAME9 / D3DGAME8 / D3DFEAT9 through

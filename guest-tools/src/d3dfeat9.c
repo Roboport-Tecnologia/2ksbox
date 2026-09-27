@@ -232,7 +232,7 @@ static int make_resources(void)
     CHK(IDirect3DSurface9_UnlockRect(X.sysmem));
     /* a render-target texture: Microsoft's runtime refuses ColorFill on a
      * DEFAULT texture without D3DUSAGE_RENDERTARGET (Wine's visual.c
-     * colorfill_test); DXVK and our D3D9.DLL let it through */
+     * colorfill_test); DXVK lets it through */
     CHK(IDirect3DDevice9_CreateTexture(X.dev, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT,
                                        &X.def_tex, NULL));
     CHK(IDirect3DTexture9_GetSurfaceLevel(X.def_tex, 0, &rts));

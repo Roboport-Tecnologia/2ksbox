@@ -4,7 +4,7 @@
 #   tools/xp-fifa-match.sh kvm|tcg <image.qcow2> [outdir]
 #
 # Boots bare QEMU with the FIFA disc as D: and the driver ISO as F:, stages
-# tools/xp-fifa2000.bat (+ D3DPT\DINPUT.DLL when built) on the E: scratch
+# tools/xp-fifa2000.bat (+ DINPUT\DINPUT.DLL when built) on the E: scratch
 # disk, runs it, then drives the game over QMP: Esc skips the intro, the
 # title is detected as the first static frame, AMISTOSO's ball icon and the
 # arrows are long-held mouse clicks (the menus ignore 100 ms clicks), Left
@@ -70,8 +70,8 @@ mcopy -o -i "$SCRATCH@@1048576" "$OUT/RUN.BAT" ::/RUN.BAT
 # DINPUT.DLL there; the lower-case name only exists between the compile and
 # that rename. Looking for one name only made this silently stage nothing and
 # the match then ignores every key, which reads as a driver regression.
-SHIM="$ROOT/guest-tools/out/iso/D3DPT/DINPUT.DLL"
-[ -f "$SHIM" ] || SHIM="$ROOT/guest-tools/out/iso/D3DPT/dinput.dll"
+SHIM="$ROOT/guest-tools/out/iso/DINPUT/DINPUT.DLL"
+[ -f "$SHIM" ] || SHIM="$ROOT/guest-tools/out/iso/DINPUT/dinput.dll"
 if [ -f "$SHIM" ]; then
   mcopy -o -i "$SCRATCH@@1048576" "$SHIM" ::/DINPUT.DLL
   echo "DINPUT.DLL staged (the keyboard fix)"
@@ -80,7 +80,7 @@ if [ -f "$SHIM" ]; then
   # the silent shim
   : > "$OUT/DILOG"; mcopy -o -i "$SCRATCH@@1048576" "$OUT/DILOG" ::/DILOG
 else
-  echo "WARNING: no dinput shim in guest-tools/out/iso/D3DPT (run guest-tools/build-wrappers.sh)."
+  echo "WARNING: no dinput shim in guest-tools/out/iso/DINPUT (run guest-tools/build-wrappers.sh)."
   echo "         The match will ignore every key — this harness's fault, not the HAL's."
 fi
 SOCK="/tmp/xp-fifa-$$.sock"; rm -f "$SOCK"      # short: a Unix socket path is limited to ~100 chars
