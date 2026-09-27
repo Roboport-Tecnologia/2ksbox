@@ -619,7 +619,13 @@ track builds.
   unset), because as a `set` line it reached command.com's 127
   characters. That run settles findings 33 and 35, `test_getdc` and the
   full-screen cases on Win98: the guest's differences from XP there look
-  like Win98's own.
+  like Win98's own. The run after that (2026-09-27) went through every
+  file with no lock: d3d8 device 90 failures, d3d9 device 169, both
+  stateblocks 0, d3d8 visual 68 again. d3d9 visual crashed in
+  `test_texture_transform_flags`, which makes an A32B32G32R32F target and
+  texture and uses them unchecked, so it is left out too (only
+  `test_lighting_matrices` comes after it). One more rig run with that
+  list gives d3d9 visual's totals and the saved `rig-98.txt`.
 - **DXVK's own run** says which failures are DXVK's: `tools/winetest-dxvk.sh`
   runs the same EXEs on the host's Wine with DXVK's `d3d9.dll`, and
   `reference/winetest/dxvk-wine.txt` is its baseline. A guest failure

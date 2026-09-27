@@ -102,7 +102,8 @@ runall >"$OUT/RUNALL.BAT"
 # missing surface; 2026-09-26). Left out: every test that makes one
 # (test_surface_blocks / test_volume_blocks walk YUY2 and UYVY too).
 # Then the ones that crash on that card's Win98, ending their file: test_fog
-# makes an A32B32G32R32F target it has none of, and test_mipmap_gen /
+# and test_texture_transform_flags make an A32B32G32R32F target it has none
+# of (the latter uses it unchecked, c0000005), and test_mipmap_gen /
 # test_miptree_layout make non-power-of-two mip chains that Win98's
 # DirectDraw refuses (M16 finding 33; the card claims no POW2 there).
 # Not a *.* delete above: del asks before one, in the machine's language
@@ -110,5 +111,5 @@ runall >"$OUT/RUNALL.BAT"
 # is unset: as a `set` line it hit command.com's 127-character limit.
 runall 'rem Win98: WTSKIP.TXT lists tests left out (each locks DirectDraw or crashes there)' >"$OUT/RUNALL98.BAT"
 printf '%s\r\n' yuv_color_test yuv_layout_test test_surface_blocks test_volume_blocks \
-  test_fog test_mipmap_gen test_miptree_layout >"$OUT/WTSKIP.TXT"
+  test_fog test_texture_transform_flags test_mipmap_gen test_miptree_layout >"$OUT/WTSKIP.TXT"
 echo "wrote $OUT/RUNALL.BAT and RUNALL98.BAT"
