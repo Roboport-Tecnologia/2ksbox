@@ -186,6 +186,14 @@ by a title.
   one line each; `-readback` runs the float readbacks alone,
   `-modechange` the focus-loss case (`-modechange -nolock` with Win98's
   foreground lock off).
+- **Win98 titles on the driver, protocol v20 (2026-09-27, `base98-br`,
+  headless).** 3DMark2001 SE's whole Benchmark (5339), Crimson Skies'
+  menus (DX7), Max Payne's tutorial level (DX8, finding 34) and GTA Vice
+  City from the main menu through the intro into the city, walking, at
+  the game's own 30 frames/s limiter (DX8, about 500 draws a frame, the
+  driver's 128 MB of VRAM; no `DDRAW.DLL` of ours). Vice City's menus
+  take raw QMP relative moves and clicks (`input-send-event`), Space
+  skips the intro; the others are in findings 34 and 36.
 - **A modern card, for contrast** (`reference/winetest/win11-rtx3090.txt`,
   the user's Windows 11 PC, RTX 3090, 2026-09-26): d3d9 visual 210814
   checks, 69 failures; device 160756 / 0; d3d8 visual 2; d3d8 device
