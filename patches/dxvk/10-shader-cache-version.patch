@@ -1,0 +1,37 @@
+diff --git a/src/dxvk/dxvk_shader_cache.cpp b/src/dxvk/dxvk_shader_cache.cpp
+index 0bec839..2ea4fe9 100644
+--- a/src/dxvk/dxvk_shader_cache.cpp
++++ b/src/dxvk/dxvk_shader_cache.cpp
+@@ -1,6 +1,11 @@
+ #include <iomanip>
+ #include <version.h>
+ 
++// The cache holds compiled shaders, so a patch that changes what DXVK or
++// dxbc-spirv emits must invalidate it: 2ksbox's patch queue bumps the
++// suffix (patches/dxvk/README.md)
++#define DXVK_SHADER_CACHE_VERSION DXVK_VERSION "+2ksbox.2"
++
+ #include "dxvk_shader_cache.h"
+ 
+ #include "../util/util_time.h"
+@@ -186,7 +191,7 @@ namespace dxvk {
+ 
+     LutHeader header = { };
+     header.magic = { 'D', 'X', 'V', 'K' };
+-    header.versionString = DXVK_VERSION;
++    header.versionString = DXVK_SHADER_CACHE_VERSION;
+ 
+     if (!writeHeader(m_lutFile, header)) {
+       Logger::warn(str::format("Failed to write cache header: ", path + m_filePaths.lutFile));
+@@ -209,9 +214,9 @@ namespace dxvk {
+       return false;
+     }
+ 
+-    if (header.versionString != DXVK_VERSION) {
++    if (header.versionString != DXVK_SHADER_CACHE_VERSION) {
+       Logger::warn(str::format("Cache was created with DXVK version ", header.versionString,
+-        ", but current version is ", DXVK_VERSION, ". Discarding old cache."));
++        ", but current version is ", DXVK_SHADER_CACHE_VERSION, ". Discarding old cache."));
+       return false;
+     }
+ 

@@ -1,0 +1,17 @@
+diff --git a/sm3/sm3_io_map.cpp b/sm3/sm3_io_map.cpp
+index 9201180..3dcac31 100644
+--- a/sm3/sm3_io_map.cpp
++++ b/sm3/sm3_io_map.cpp
+@@ -443,8 +443,10 @@ void IoMap::emitIoVarDefault(
+       /* Take point size from render state */
+       builder.add(ir::Op::TmpStore(ioVar.tempDefs[0], emitDefaultPointSize(builder)));
+     } else if (ioVar.semantic == Semantic { SemanticUsage::eFog, 0u }) {
+-      /* The default for fog is 1.0 */
+-      builder.add(ir::Op::TmpStore(ioVar.tempDefs[0u], builder.makeConstant(1.0f)));
++      /* A vertex shader that never writes oFog leaves the fog factor at 0.0:
++       * the pixel is fully fogged, as on the cards of the era (Wine's
++       * fog_with_shader_test, GeForce 6 / 7) */
++      builder.add(ir::Op::TmpStore(ioVar.tempDefs[0u], builder.makeConstant(0.0f)));
+     } else {
+       /* The default for other registers is 0.0, 0.0, 0.0, 0.0 */
+       for (uint32_t i = 0u; i < ioVarType.getVectorSize(); i++) {

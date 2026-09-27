@@ -1,0 +1,17 @@
+diff --git a/sm3/sm3_io_map.cpp b/sm3/sm3_io_map.cpp
+index 9201180..3dcac31 100644
+--- a/sm3/sm3_io_map.cpp
++++ b/sm3/sm3_io_map.cpp
+@@ -674,8 +676,11 @@ ir::SsaDef IoMap::emitTexCoordLoad(
+ 
+ 
+ ir::SsaDef IoMap::emitTexCoordPointSpriteAdjustment(ir::Builder& builder, const IoVarInfo& ioVar, ir::SsaDef texCoordComponent, uint32_t componentIndex) const {
++  /* ps_2_x declares its texture coordinates as t registers (eTexture), and
++   * point sprites replace those too (Wine's test_pointsize) */
+   if (m_converter.getShaderInfo().getType() != ShaderType::ePixel
+-    || (ioVar.registerType != RegisterType::eInput && ioVar.registerType != RegisterType::ePixelTexCoord)
++    || (ioVar.registerType != RegisterType::eInput && ioVar.registerType != RegisterType::ePixelTexCoord
++     && ioVar.registerType != RegisterType::eTexture)
+     || ioVar.semantic.usage != SemanticUsage::eTexCoord)
+     return texCoordComponent;
+ 

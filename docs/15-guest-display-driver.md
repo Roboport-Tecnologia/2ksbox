@@ -958,7 +958,11 @@ oracle).
   pre-transformed vertices and hands the driver polygons that cross the
   camera plane, which the host rasterizes as garbage: Max Payne
   transforms on the CPU even on a T&L device, and its alley walls came
-  out as flat panels at wrong depths.
+  out as flat panels at wrong depths. Since the runtime has clipped such
+  geometry, the executor turns `D3DRS_CLIPPING` off for every
+  pre-transformed draw (`Dp2::apply_clip`) and DXVK then draws it
+  unclipped in depth, depth clamped, as the cards without the cap do
+  (`patches/dxvk/12`, M16 finding 24).
 - **What Wine's conformance tests fixed (M16).** A8R8G8B8 carries
   `D3DFORMAT_OP_SAME_FORMAT_UP_TO_ALPHA_RENDERTARGET` (0x100, from
   `ddk/ddrawint.h`), so a windowed device can have an A8R8G8B8 back

@@ -9,7 +9,9 @@ Vulkan setup (KosmicKrisp, the SDK, the app's own loader) is in
 
 `scripts/prepare-dxvk.sh` applies these patches in filename order to the
 pinned submodule `third_party/dxvk` (3.1.0, master `d7ac258`), restoring
-every tracked file a patch touches first.
+every tracked file a patch touches first, and then `dxbc-spirv/*.patch`
+inside DXVK's own `subprojects/dxbc-spirv` submodule (its SM1-3
+compiler), paths relative to that repository.
 
 | Patch | What / why | Drop when |
 |---|---|---|
@@ -22,6 +24,13 @@ every tracked file a patch touches first.
 | `07-ff-bumpenvmap-luminance` | `D3DTOP_BUMPENVMAPLUMINANCE` in the fixed-function shader applies its luminance. The previous stage's value went into a shadowing variable (the outer one stayed 0), and the luminance came from the environment map's texel instead of the bump map's, so BUMPTEST drew full intensity where L = ½ was asked. `tools/d3dpt-dp2-test.cpp`'s luminance case fails without it | upstream fixes both lines |
 | `08-wsi-headless-windows` | patch 04's headless WSI on Windows too, beside Win32 (still the default when `DXVK_WSI_DRIVER` is unset). The executor asks for `Headless` on every host, since none of its devices has a window | never, as 04 |
 | `09-singleton-acquire-throw` | `Singleton<T>::acquire` (`util_singleton.h`, holder of d3d9's process-wide `DxvkInstance`) counted a user *before* constructing the object. When the constructor threw (an ICD that reports no GPU, such as KosmicKrisp on macOS 15 where `vkEnumeratePhysicalDevices` fails, or a loader with no ICD), the count stayed at one and the object null, and the next `Direct3DCreate9` in the process faulted on that null instance. The executor names the same DXVK by full path and by leaf name, so the community app on macOS 15 died at the adapter's realize instead of moving on to the Wine executor. It now counts after `new`. The executor also never asks a library twice (`d3dpt_exec.cpp`, `refused`); the `exec-no-device` check in `scripts/test.sh` tests the built artefacts | upstream counts after constructing |
+| `10-shader-cache-version` | the on-disk shader cache (`DxvkShaderCache`, `~/.cache/dxvk` natively) is keyed by `DXVK_VERSION`, which a shallow submodule makes a plain `3.1.0` forever, so shaders compiled before a patch below kept being served after it. The cache now carries its own version, `DXVK_VERSION "+2ksbox.N"`: **bump N with every patch that changes what DXVK or dxbc-spirv emits for a shader**. `tools/winetest-dxvk.sh` runs with `DXVK_SHADER_CACHE=0` | never, while we patch the compiler |
+| `11-fog-z-rule` | table fog uses Z (not W) whenever the device's projection transform is not a perspective one, for programmable vertex shaders and pre-transformed vertices too; upstream took W fog for both (the latter for "some D3D6 jank", no title named: a D3D6 title whose fog looks wrong on the driver points here). And linear vertex fog with FOGSTART == FOGEND fogs every vertex fully. The cards of the era, and the rig (Wine's `fog_with_shader_test`, `test_table_fog_zw`, `fog_test`, `fog_special_test`; M16) | upstream matches the hardware |
+| `12-depth-clip-tl-vertices` | depth clip is per draw (`WantDepthClip`): untransformed geometry is always clipped, pre-transformed vertices only while `D3DRS_CLIPPING` and the Z test are on. Upstream always clipped, and flattened a pre-transformed vertex's Z to 0 with the Z test off to escape the clip, which table fog then read as 0. The executor turns `D3DRS_CLIPPING` off for pre-transformed draws, since the display driver claims no `D3DPMISCCAPS_CLIPTLVERTS` and the guest runtime clipped them already; the rig then draws them unclipped in depth (Wine's `z_range_test`, `depth_clamp_test`; M16 finding 24). Under Wine, where DXVK claims the cap, `depth_clamp_test`'s cap branch fails 5 checks by design | never: it follows our driver's caps |
+| `13-flat-shading-programmable-ps` | `D3DSHADE_FLAT` never reached a programmable pixel shader: the pipeline asks the fragment shader's metadata for flat inputs, and `DxvkIrShader` never filled it; and ps_1_x / ps_2_x colour inputs, which have no semantic `dcl`, were never in the mask (Wine's `test_shademode`) | upstream fixes both |
+| `14-ffp-position-w` | the fixed-function vertex path takes an untransformed position's W as 1.0 whatever the vertex carries (an XYZW FVF, a FLOAT4 position); DXVK used the input W, so such geometry drew at 1/W the size (Wine's `test_ffp_w`) | upstream matches the hardware |
+| `dxbc-spirv/01-vs-fog-default` | a vertex shader that never writes `oFog` leaves fog at 0.0 (fully fogged), not 1.0, as the cards of the era do (`fog_with_shader_test`). Applied inside `subprojects/dxbc-spirv` | upstream matches the hardware |
+| `dxbc-spirv/02-ps2-point-sprite-texcoords` | point sprites replace a ps_2_x shader's `t` registers too (declared as `eTexture`, which the adjustment skipped), so a particle system's ps_2_0 read one texel over the whole sprite (`test_pointsize`) | upstream fixes it |
 
 ## Building and testing
 
@@ -45,5 +54,13 @@ expected.
 
 Run `prepare-dxvk.sh`, edit inside `third_party/dxvk`, then `git -C
 third_party/dxvk diff -- <files>` (plain `a/` `b/` prefixes; `git add -N`
-a new file first so it appears with `--- /dev/null`). Prove it from
-pristine: `prepare-dxvk.sh` twice must succeed.
+a new file first so it appears with `--- /dev/null`); a dxbc-spirv patch is
+`git -C third_party/dxvk/subprojects/dxbc-spirv diff -- <files>`. Prove it
+from pristine: `prepare-dxvk.sh` twice must succeed. A patch that changes
+compiled shaders bumps patch 10's `+2ksbox.N`.
+
+The Direct3D behaviour patches (11 onwards, M16) follow the rule in
+`docs/tracks/m16-dx9-ddi.md`: only where the rig's Wine-suite run and
+DXVK's own disagree and a title could meet it. The quick loop is
+`tools/winetest-dxvk.sh` (Wine on the host, no guest, 25 s for d3d9
+visual); the proof is the guest runs against the rig's baselines.

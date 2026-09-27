@@ -1,5 +1,5 @@
 # tools/winetest-summary.py dxvk --save; one failing check per line
-# DXVK on the host's Wine (tools/winetest-dxvk.sh): wine-11.17, AMD Radeon RX 9060 XT (RADV GFX1200)
+# DXVK on the host's Wine (tools/winetest-dxvk.sh): wine-11.18, AMD Radeon RX 9060 XT (RADV GFX1200)
 d3d8_test_device crash 1
 d3d8_test_device device.c:1324 1
 d3d8_test_device device.c:1457 1
@@ -40,10 +40,13 @@ d3d8_test_device device.c:4092 1
 d3d8_test_device device.c:4096 1
 d3d8_test_device device.c:926 1
 d3d8_test_visual visual.c:12377 1
-d3d8_test_visual visual.c:1723 174
 d3d8_test_visual visual.c:245 4
-d3d8_test_visual visual.c:5138 8
-d3d8_test_visual visual.c:5141 4
+d3d8_test_visual visual.c:3493 1
+d3d8_test_visual visual.c:3495 1
+d3d8_test_visual visual.c:3497 1
+d3d8_test_visual visual.c:3499 1
+d3d8_test_visual visual.c:3501 1
+d3d8_test_visual visual.c:5138 4
 d3d8_test_visual visual.c:5837 1
 d3d8_test_visual visual.c:5937 1
 d3d8_test_visual visual.c:5947 1
@@ -53,16 +56,12 @@ d3d8_test_visual visual.c:6003 1
 d3d8_test_visual visual.c:6006 1
 d3d8_test_visual visual.c:6047 6
 d3d8_test_visual visual.c:6481 2
-d3d8_test_visual visual.c:6640 2
-d3d8_test_visual visual.c:6759 8
 d3d8_test_visual visual.c:7036 4
 d3d8_test_visual visual.c:7351 20
 d3d8_test_visual visual.c:7983 1
 d3d8_test_visual visual.c:8348 1
 d3d8_test_visual visual.c:8350 1
 d3d8_test_visual visual.c:8363 1
-d3d8_test_visual visual.c:9215 3
-d3d8_test_visual visual.c:9217 3
 d3d8_test_visual visual.c:9850 3
 d3d9_test_device device.c:10559 2
 d3d9_test_device device.c:1067 7
@@ -210,7 +209,6 @@ d3d9_test_device device.c:6859 1
 d3d9_test_device device.c:6860 1
 d3d9_test_device device.c:6864 1
 d3d9_test_device device.c:6888 1
-d3d9_test_device device.c:6890 1
 d3d9_test_device device.c:6891 1
 d3d9_test_device device.c:6895 1
 d3d9_test_device device.c:7093 1
@@ -260,22 +258,22 @@ d3d9_test_device device.c:9301 5
 d3d9_test_device device.c:9305 5
 d3d9_test_device device.c:9462 1
 d3d9_test_device device.c:994 3
-d3d9_test_visual visual.c:11556 9
-d3d9_test_visual visual.c:11567 9
-d3d9_test_visual visual.c:11571 9
-d3d9_test_visual visual.c:11574 9
 d3d9_test_visual visual.c:12881 33
 d3d9_test_visual visual.c:12885 33
 d3d9_test_visual visual.c:13074 128
 d3d9_test_visual visual.c:13077 336
+d3d9_test_visual visual.c:14255 1
+d3d9_test_visual visual.c:14257 1
+d3d9_test_visual visual.c:14259 1
+d3d9_test_visual visual.c:14261 1
+d3d9_test_visual visual.c:14263 1
 d3d9_test_visual visual.c:15617 48
 d3d9_test_visual visual.c:15668 10
 d3d9_test_visual visual.c:16433 1
 d3d9_test_visual visual.c:16994 3
 d3d9_test_visual visual.c:17102 1
 d3d9_test_visual visual.c:1832 2
-d3d9_test_visual visual.c:18342 8
-d3d9_test_visual visual.c:18345 4
+d3d9_test_visual visual.c:18342 4
 d3d9_test_visual visual.c:1862 1
 d3d9_test_visual visual.c:19144 1
 d3d9_test_visual visual.c:19230 1
@@ -287,10 +285,8 @@ d3d9_test_visual visual.c:19538 1
 d3d9_test_visual visual.c:19556 1
 d3d9_test_visual visual.c:19574 1
 d3d9_test_visual visual.c:19895 2
-d3d9_test_visual visual.c:20054 2
 d3d9_test_visual visual.c:20194 1
 d3d9_test_visual visual.c:20269 1
-d3d9_test_visual visual.c:20383 8
 d3d9_test_visual visual.c:20702 4
 d3d9_test_visual visual.c:20751 9
 d3d9_test_visual visual.c:20880 1
@@ -298,8 +294,6 @@ d3d9_test_visual visual.c:20959 1
 d3d9_test_visual visual.c:21763 23
 d3d9_test_visual visual.c:22418 1
 d3d9_test_visual visual.c:23398 5
-d3d9_test_visual visual.c:2410 1
-d3d9_test_visual visual.c:2412 1
 d3d9_test_visual visual.c:24569 1
 d3d9_test_visual visual.c:24582 1
 d3d9_test_visual visual.c:24589 1
@@ -312,12 +306,9 @@ d3d9_test_visual visual.c:26258 3
 d3d9_test_visual visual.c:26283 3
 d3d9_test_visual visual.c:28031 2
 d3d9_test_visual visual.c:28043 59
-d3d9_test_visual visual.c:28120 2
-d3d9_test_visual visual.c:28144 2
-d3d9_test_visual visual.c:28482 138
-d3d9_test_visual visual.c:28488 142
+d3d9_test_visual visual.c:28482 48
+d3d9_test_visual visual.c:28488 152
 d3d9_test_visual visual.c:28877 134
-d3d9_test_visual visual.c:3350 174
 d3d9_test_visual visual.c:3577 2
 d3d9_test_visual visual.c:3580 2
 d3d9_test_visual visual.c:3583 2
@@ -325,5 +316,5 @@ d3d9_test_visual visual.c:3586 2
 d3d9_test_visual visual.c:3732 1
 d3d9_test_visual visual.c:4470 7
 d3d9_test_visual visual.c:7589 7
-d3d9_test_visual visual.c:8852 5
-d3d9_test_visual visual.c:8854 5
+d3d9_test_visual visual.c:8852 1
+d3d9_test_visual visual.c:8854 1

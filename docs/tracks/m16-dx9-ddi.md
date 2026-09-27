@@ -196,6 +196,27 @@ by a title.
   driver's 128 MB of VRAM; no `DDRAW.DLL` of ours). Vice City's menus
   take raw QMP relative moves and clicks (`input-send-event`), Space
   skips the intro; the others are in findings 34 and 36.
+- **The DXVK patches (2026-09-27, user decision "go with dxvk patches").**
+  Every group the rig passes and DXVK's own run fails, found with
+  `tools/winetest-dxvk.sh` (25 s a file, no guest) and proved on both
+  guests: `patches/dxvk/10` to `14` and `patches/dxvk/dxbc-spirv/01`,
+  `02` (the README has each): table fog by Z under vertex shaders and for
+  pre-transformed vertices, fog 0 from a shader without `oFog`, a
+  degenerate linear range fully fogged, depth clip per draw (finding
+  24), flat shading for programmable pixel shaders, point-sprite
+  coordinates for ps_2_x, W = 1 for untransformed fixed function, and
+  the shader cache's own version so a patched compiler is not hidden by
+  old cache entries (it was, for an hour). XP guest: d3d9 visual 618 ->
+  **175**, d3d8 visual 155 -> **4**; Win98: 1541 -> 1298, d3d8 visual 155 ->
+  4; both baselines saved again, nothing worse; `dxvk-wine.txt` is the
+  patched DXVK now. Against the rig three XP groups are left, none
+  DXVK's: `fp_special_test`'s `lit` on NaN / infinity (1, no title
+  meets it), `test_format_conversion`'s YUY2 -> RGB StretchRect (2, the
+  driver's blit refuses it), and `pretransformed_varying_test` (5: DXVK
+  passes it, so it is the runtime clipping pre-transformed vertices
+  itself without `CLIPTLVERTS` and dropping the extra elements; doc 15's
+  rule stands). Under Wine, where DXVK claims `CLIPTLVERTS`,
+  `depth_clamp_test`'s cap branch fails 5 by design.
 - **A modern card, for contrast** (`reference/winetest/win11-rtx3090.txt`,
   the user's Windows 11 PC, RTX 3090, 2026-09-26): d3d9 visual 210814
   checks, 69 failures; device 160756 / 0; d3d8 visual 2; d3d8 device
@@ -326,7 +347,7 @@ by a title.
      source). A system-memory source of the target's texel size is the
      target's format now, and a plain source into a cube root is its +X
      face. `test_updatetexture` 2 failures (9).
-  24. *Open, a DXVK patch.* Pre-transformed vertices past z = 1:
+  24. *Fixed, a DXVK patch (2026-09-27).* Pre-transformed vertices past z = 1:
      without `D3DPMISCCAPS_CLIPTLVERTS` (never claimed, doc 15) the runtime
      clips such geometry to the screen itself and hands the rest on, and
      the cards of the era draw it unclipped in depth (Wine's `z_range_test`
@@ -335,8 +356,11 @@ by a title.
      (`BindRasterizerState`: `setDepthClip(true)`). The fix is a patch
      making depth clip follow `D3DRS_CLIPPING`, and the executor turning
      clipping off for an XYZRHW draw. The rig passes all seven, so it
-     meets the DXVK rule above; it waits for a user decision. `test_fog`'s
-     6 fail on the rig too and are not ours to fix.
+     meets the DXVK rule above. Done as `patches/dxvk/12` (untransformed
+     geometry always clips, as the rig's `depth_clamp_test` shows;
+     pre-transformed only while `D3DRS_CLIPPING` and the Z test are on)
+     and the executor's `Dp2::apply_clip`; the seven pass on the XP guest.
+     `test_fog`'s 6 fail on the rig too and are not ours to fix.
   25. *Fixed.* The mip walk stopped early or wandered. A system-memory
      DXT chain with no pixel format is sized in block-row bytes by block
      rows, so its 4x4, 2x2 and 1x1 levels are all one block and the walk,

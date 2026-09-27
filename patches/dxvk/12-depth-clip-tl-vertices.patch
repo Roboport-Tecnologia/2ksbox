@@ -1,0 +1,84 @@
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index 9b72bb2..946b374 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -7097,7 +7098,8 @@ namespace dxvk {
+ 
+     DxvkRasterizerState state = { };
+     state.setCullMode(DecodeCullMode(D3DCULL(rs[D3DRS_CULLMODE])));
+-    state.setDepthClip(true);
++    m_depthClip = WantDepthClip();
++    state.setDepthClip(m_depthClip);
+     state.setFrontFace(VK_FRONT_FACE_CLOCKWISE);
+     state.setPolygonMode(DecodeFillMode(D3DFILLMODE(rs[D3DRS_FILLMODE])));
+     state.setFlatShading(m_state.renderStates[D3DRS_SHADEMODE] == D3DSHADE_FLAT);
+@@ -7419,6 +7421,9 @@ namespace dxvk {
+     if (unlikely(m_dirty.test(D3D9DeviceDirtyFlag::DepthStencilState)))
+       BindDepthStencilState();
+ 
++    if (unlikely(WantDepthClip() != m_depthClip))
++      m_dirty.set(D3D9DeviceDirtyFlag::RasterizerState);
++
+     if (unlikely(m_dirty.test(D3D9DeviceDirtyFlag::RasterizerState)))
+       BindRasterizerState();
+ 
+@@ -8129,7 +8134,7 @@ namespace dxvk {
+     }
+ 
+     // Viewport...
+-    if (hasPositionT && (m_dirty.test(D3D9DeviceDirtyFlag::FFViewport) || m_ffZTest != IsZTestEnabled())) {
++    if (hasPositionT && m_dirty.test(D3D9DeviceDirtyFlag::FFViewport)) {
+       m_dirty.clr(D3D9DeviceDirtyFlag::FFViewport);
+       m_dirty.set(D3D9DeviceDirtyFlag::FFVertexData);
+ 
+@@ -8142,12 +8147,13 @@ namespace dxvk {
+       // The 1.0f additional offset however does not,
+       // so we account for that there manually.
+ 
+-      m_ffZTest = IsZTestEnabled();
+-
++      // Z is kept with the depth test off too: table fog reads it (Wine's
++      // test_table_fog_zw), and such a draw is not depth-clipped instead
++      // (WantDepthClip)
+       m_viewportInfo.inverseExtent = Vector4(
+          2.0f / float(vp.Width),
+         -2.0f / float(vp.Height),
+-        m_ffZTest ? 1.0f : 0.0f,
++        1.0f,
+         1.0f);
+ 
+       m_viewportInfo.inverseOffset = Vector4(
+diff --git a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
+index 2b30efb..a6e2980 100644
+--- a/src/d3d9/d3d9_device.h
++++ b/src/d3d9/d3d9_device.h
+@@ -979,6 +979,20 @@ namespace dxvk {
+       return m_state.renderStates[D3DRS_ZENABLE] && m_state.depthStencil != nullptr;
+     }
+ 
++    // Untransformed geometry is always depth-clipped. Pre-transformed
++    // vertices are clipped only by a driver claiming D3DPMISCCAPS_CLIPTLVERTS
++    // and drawn with depth clamped otherwise (Wine's z_range_test and
++    // depth_clamp_test); here they are clipped while D3DRS_CLIPPING is on,
++    // so a caller without that cap turns it off for them, and never with
++    // the depth test off, which upstream got by flattening their Z to 0
++    // (table fog needs it, test_table_fog_zw)
++    inline bool WantDepthClip() {
++      bool positionT = m_state.vertexDecl != nullptr
++        && m_state.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasPositionT);
++      return !positionT
++        || (m_state.renderStates[D3DRS_CLIPPING] && IsZTestEnabled());
++    }
++
+     void BindMultiSampleState();
+ 
+     void BindBlendState();
+@@ -1625,7 +1639,7 @@ namespace dxvk {
+     D3D9VBSlotTracking              m_vbSlotTracking;
+ 
+     bool                            m_isSWVP;
+-    bool                            m_ffZTest          = false;
++    bool                            m_depthClip        = true;
+ 
+     // the enablement of below features is tracked independently
+     // of render states both due to complexity and to avoid

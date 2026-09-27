@@ -1,0 +1,16 @@
+diff --git a/src/d3d9/shaders/d3d9_fixed_function_vert.vert b/src/d3d9/shaders/d3d9_fixed_function_vert.vert
+index d28b967..13f576b 100644
+--- a/src/d3d9/shaders/d3d9_fixed_function_vert.vert
++++ b/src/d3d9/shaders/d3d9_fixed_function_vert.vert
+@@ -408,6 +413,11 @@ Vertex transformVertex() {
+     }
+ 
+     if (!vertexHasPositionT()) {
++        // The fixed function takes an untransformed position's W as 1.0,
++        // whatever the vertex carries (an XYZW FVF or a FLOAT4 element; Wine's
++        // test_ffp_w on the cards of the era)
++        result.coord.w = 1.0;
++
+         if (blendMode() == D3D9FF_VertexBlendMode_Normal) {
+             float blendWeightRemaining = 1.0;
+ 

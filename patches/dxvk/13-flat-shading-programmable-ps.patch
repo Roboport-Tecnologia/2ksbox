@@ -1,0 +1,41 @@
+diff --git a/src/d3d9/d3d9_shader_analysis.cpp b/src/d3d9/d3d9_shader_analysis.cpp
+index fdcd968..42e249b 100644
+--- a/src/d3d9/d3d9_shader_analysis.cpp
++++ b/src/d3d9/d3d9_shader_analysis.cpp
+@@ -54,6 +54,18 @@ namespace dxvk {
+ 
+     m_length = parser.getByteOffset();
+ 
++    // A ps_1_x / ps_2_x shader's colour inputs are v0 / v1 whether declared
++    // or not (ps_1_x has no dcl, ps_2_x's names no semantic), and
++    // D3DSHADE_FLAT applies to them as to fixed function (Wine's
++    // test_shademode)
++    if (m_shaderInfo.getType() == ShaderType::ePixel && m_shaderInfo.getVersion().first < 3u) {
++      for (uint32_t i = 0u; i < 2u; i++) {
++        auto location = FindLocationInFixedFunctionIO(dxbc_spv::sm3::Semantic { dxbc_spv::sm3::SemanticUsage::eColor, i });
++        if (location.has_value())
++          m_flatShadingMask |= 1u << *location;
++      }
++    }
++
+     // The compiler will always constant-fold inline constants that
+     // are statically indexed, so there is no need to keep them around
+     for (size_t i = 0u; i < shaderDefs.floats.size(); i++)
+diff --git a/src/dxvk/dxvk_shader_ir.cpp b/src/dxvk/dxvk_shader_ir.cpp
+index c52fcc4..c2b0c62 100644
+--- a/src/dxvk/dxvk_shader_ir.cpp
++++ b/src/dxvk/dxvk_shader_ir.cpp
+@@ -297,6 +297,13 @@ namespace dxvk {
+ 
+       if (m_info.options.flags.test(DxvkShaderCompileFlag::SemanticIo))
+         m_metadata.flags.set(DxvkShaderFlag::SemanticIo);
++
++      // The pipeline enables flat shading for a fragment shader only when
++      // its metadata lists inputs for it (DxvkGraphicsPipeline), and getCode
++      // applies m_info's; without this no programmable pixel shader was
++      // ever flat-shaded (Wine's test_shademode)
++      if (m_stage == dxbc_spv::ir::ShaderStage::ePixel)
++        m_metadata.flatShadingInputs = m_info.flatShadingInputs;
+     }
+ 
+ 

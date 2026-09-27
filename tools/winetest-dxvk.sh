@@ -38,6 +38,8 @@ rm -f "$OUT"/*_test_*.txt
 cp -f "$WT/d3d9_test.exe" "$WT/d3d8_test.exe" "$BUILD/src/d3d9/d3d9.dll" "$BUILD/src/d3d8/d3d8.dll" "$OUT/"
 export WINEPREFIX="$ROOT/build/winetest/dxvk-prefix" WINEDEBUG=-all DXVK_LOG_LEVEL=none
 export WINEDLLOVERRIDES="d3d9=n;d3d8=n"
+# never a cached shader: a patch under test changes what they compile to
+export DXVK_SHADER_CACHE=0
 
 SWAY_PID=
 if command -v sway >/dev/null; then

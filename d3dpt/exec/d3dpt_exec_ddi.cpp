@@ -156,6 +156,7 @@ struct VShader8 {
     std::vector<ConstRun> consts;
     uint32_t stream_bytes[D3DPT_DRAW8_MAX_STREAMS] = {};  /* what the declaration reads of each stream's vertex */
     uint32_t streams = 0;               /* bitmask of the streams it reads */
+    bool pos_t = false;                 /* a POSITIONT element: pre-transformed vertices (Dp2::apply_clip) */
     std::vector<D3DVERTEXELEMENT9> el;  /* the d3d9 elements, END included */
     /* v10: the declaration with every stream it reads interleaved into
      * stream 0, one per set of strides seen (a few at most) */
@@ -254,6 +255,10 @@ struct Ddi {
      * traced frame: most are set once at scene start) */
     uint32_t rs_val[256] = {}, tss_val[8][33] = {};
     uint8_t rs_set[256] = {}, tss_set[8][33] = {};
+    /* the vertex format bound is pre-transformed, and the D3DRS_CLIPPING
+     * the host has (~0 = not set since the device was fresh; Dp2::apply_clip) */
+    bool clip_tl = false;
+    uint32_t clip_host = ~0u;
     /* D3DPT_DDI_NOFOG=1: FOGENABLE forced off (an experiment switch) */
     bool nofog = getenv("D3DPT_DDI_NOFOG") && atoi(getenv("D3DPT_DDI_NOFOG")) != 0;
     /* D3DPT_DDI_REREAD=1: every texture is re-read from VRAM at every bind
@@ -1196,9 +1201,11 @@ struct Dp2 {
             x.dev->SetVertexDeclaration(s.decl);
             x.dev->SetVertexShader(s.vs);
             for (const auto &r : s.consts) x.dev->SetVertexShaderConstantF(r.reg, r.v.data(), (UINT)(r.v.size() / 4));
+            apply_clip(s.pos_t);
         } else if (!(h & 1)) {
             x.dev->SetVertexShader(nullptr);
             x.dev->SetFVF(h);
+            apply_clip((h & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
         } else {
             if (d.warn_once(0xc0000)) x.log("ddi: dp2: vertex shader handle 0x%x unknown (draws with it are skipped)", h);
             return;
@@ -1230,6 +1237,7 @@ struct Dp2 {
                 return;
             }
             el.push_back(v);
+            if (v.Usage == D3DDECLUSAGE_POSITIONT) s.pos_t = true;
             uint32_t end = v.Offset + type_bytes[v.Type];
             if (end > s.stream_bytes[v.Stream]) s.stream_bytes[v.Stream] = end;
             s.streams |= 1u << v.Stream;
@@ -1893,9 +1901,26 @@ struct Dp2 {
         }
     }
 
+    /* Pre-transformed vertices draw with D3DRS_CLIPPING off. The driver
+     * claims no D3DPMISCCAPS_CLIPTLVERTS (doc 15), so the guest's runtime
+     * has clipped such geometry to the screen itself, and the cards of the
+     * era draw the rest unclipped in depth (Wine's z_range_test and
+     * depth_clamp_test); DXVK's depth clip follows the state
+     * (patches/dxvk/10). Other vertices get the app's own value */
+    void apply_clip(bool tl) {
+        d.clip_tl = tl;
+        if (d.recording) {                              /* a state set keeps the app's own value */
+            if (d.rs_set[D3DRS_CLIPPING]) x.dev->SetRenderState(D3DRS_CLIPPING, d.rs_val[D3DRS_CLIPPING]);
+            d.clip_host = ~0u;
+            return;
+        }
+        uint32_t v = tl ? FALSE : d.rs_set[D3DRS_CLIPPING] ? d.rs_val[D3DRS_CLIPPING] : TRUE;
+        if (v != d.clip_host) { x.dev->SetRenderState(D3DRS_CLIPPING, v); d.clip_host = v; }
+    }
     void render_state(uint32_t s, uint32_t v) {
         tr("rs %u = 0x%x%s", s, v, rs_passthrough(s) || s == 41 || s == 47 || legacy_texture_state(s) ? "" : " (dropped)");
         if (s < 256) { d.rs_val[s] = v; d.rs_set[s] = 1; }
+        if (s == D3DRS_CLIPPING) { apply_clip(d.clip_tl); return; }
         if (s == 28 && d.nofog) v = 0;
         if (s == 41) { d.ckey_rs = v; apply_ckey(); return; }              /* COLORKEYENABLE */
         if (s == 47) {
@@ -2294,6 +2319,12 @@ struct Dp2 {
                             /* the block's address modes are the app's now
                              * (one captured while a clamp was forced keeps
                              * the clamp), then the clamp again */
+                            /* its D3DRS_CLIPPING is the app's now too */
+                            DWORD clip;
+                            if (SUCCEEDED(x.dev->GetRenderState(D3DRS_CLIPPING, &clip))) {
+                                d.rs_val[D3DRS_CLIPPING] = clip; d.rs_set[D3DRS_CLIPPING] = 1; d.clip_host = clip;
+                            }
+                            apply_clip(d.clip_tl);
                             if (c.np2cond)
                                 for (uint32_t i = 0; i < 21; i++) {
                                     uint32_t stage = i < 16 ? i : 256 + (i - 16);
@@ -2629,6 +2660,7 @@ void exec_ddi_device_reset(Exec &x)
     x.ddi->bound_rt = x.ddi->bound_z = 0;
     memset(x.ddi->stage_tex, 0, sizeof x.ddi->stage_tex);
     x.ddi->reset_addr();
+    x.ddi->clip_tl = false; x.ddi->clip_host = ~0u;
     x.log("ddi: %zu surfaces dropped for the device reset; each is re-read from VRAM", x.ddi->surfs.size());
 }
 
@@ -2909,6 +2941,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
                 d.fresh->Apply();
                 memset(d.stage_tex, 0, sizeof d.stage_tex);
                 d.reset_addr();
+                d.clip_tl = false; d.clip_host = ~0u;
                 d.bound_rt = d.bound_z = 0;
                 memset(d.bound_mrt, 0, sizeof d.bound_mrt);
             }
@@ -2981,7 +3014,10 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
             x.log("ddi: trace: armed at dp2 call %u", x.ddi->dp2_calls);
         }
         if (x.ddi->trace) x.log("ddi: trace: dp2 call %u: ctx %u flags 0x%x fvf 0x%x stride %u, %u vertices, %u command bytes", x.ddi->dp2_calls, a->ctx, a->flags, a->fvf, stride, stride ? a->vertex_bytes / stride : 0, a->command_bytes);
-        if (stride) { x.dev->SetVertexShader(nullptr); x.dev->SetFVF(a->fvf); p.cur_vs = a->fvf; }   /* a DX7 record: its vertices, the fixed function */
+        if (stride) {                                   /* a DX7 record: its vertices, the fixed function */
+            x.dev->SetVertexShader(nullptr); x.dev->SetFVF(a->fvf); p.cur_vs = a->fvf;
+            p.apply_clip((a->fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
+        }
         bool ok = p.run();
         r->hr = b.err ? (uint32_t)E_FAIL : ok ? (uint32_t)S_OK : (uint32_t)p.hr;
         r->bytes = ok ? 0 : p.pos;

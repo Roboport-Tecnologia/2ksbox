@@ -1,0 +1,47 @@
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index 9b72bb2..946b374 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -6615,17 +6615,18 @@ namespace dxvk {
+     bool fogEnabled = bool(rs[D3DRS_FOGENABLE]);
+     bool fogUseZ = false;
+ 
+-    if (fogEnabled && !UseProgrammableVS()) {
++    if (fogEnabled) {
+       // Z fog is only used if the projection matrix is not a perspective matrix,
+-      // otherwise we get W fog, including programmable vertex shaders. SM2 pixel
+-      // shaders behave just like fixed-function.
+-      // PositionT also implies W fog, some D3D6 jank apparently relies on that.
++      // otherwise we get W fog. The projection transform set on the device
++      // decides for programmable vertex shaders and pre-transformed vertices
++      // too, as on the cards of the era (Wine's fog_with_shader_test and
++      // test_table_fog_zw, GeForce 6 / 7); upstream took W fog for both, the
++      // latter for "some D3D6 jank". SM2 pixel shaders behave just like
++      // fixed-function.
+       // The projection matrix logic is described in a truly prehistoric Nvidia paper:
+       // https://developer.download.nvidia.com/assets/gamedev/docs/Fog2.pdf
+-      if (!m_state.vertexDecl || !m_state.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasPositionT)) {
+-        auto [wNear, wFar] = ComputeWNearFar();
+-        fogUseZ = wNear == 1.0f && wFar == 1.0f;
+-      }
++      auto [wNear, wFar] = ComputeWNearFar();
++      fogUseZ = wNear == 1.0f && wFar == 1.0f;
+     }
+ 
+     // Only set up vertex frog if pixel fog is not used
+diff --git a/src/d3d9/shaders/d3d9_fixed_function_vert.vert b/src/d3d9/shaders/d3d9_fixed_function_vert.vert
+index d28b967..13f576b 100644
+--- a/src/d3d9/shaders/d3d9_fixed_function_vert.vert
++++ b/src/d3d9/shaders/d3d9_fixed_function_vert.vert
+@@ -302,6 +302,11 @@ float calculateFog(vec4 vPos) {
+                 fogFactor = fogEnd - depth;
+                 fogFactor = fogFactor * fogScale;
+                 fogFactor = spvNClamp(fogFactor, 0.0, 1.0);
++                // start == end (the scale's FLT_MAX sentinel, UpdateFog):
++                // every vertex is fully fogged, as on the cards of the era
++                // (Wine's fog_special_test); per-pixel fog keeps the step
++                if (fogScale >= 3.4e38)
++                    fogFactor = 0.0;
+                 break;
+ 
+             // 1 / (e^[d * density])^2
