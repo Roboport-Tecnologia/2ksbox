@@ -14,7 +14,12 @@
 //!   is copied with the tree and renamed into the clone. What it names
 //!   outside it (discs on the shared shelf, a shader, a SoundFont) is
 //!   shared media and stays shared.
-//! * **A running machine is refused.** Its disk is being written, and a
+//! * **Unless the user asks for the same disk** (`same_disk`): then the
+//!   clone names the original's disk by its absolute path and only the
+//!   rest of the bundle is copied. The window warns that only one of the
+//!   two may run at a time; nothing enforces it beyond QEMU's own image
+//!   lock.
+//! * **A running machine is refused** when its disk is copied. Its disk is being written, and a
 //!   copy taken under QEMU is not a disk that boots. "Running" is the
 //!   grid's own player map or a monitor socket something is listening
 //!   on, which also catches a player started by `--play` or by another
@@ -40,6 +45,9 @@ pub struct CloneMachine {
     pub open: bool,
     /// The name field. A front end writes it as the user types.
     pub name: String,
+    /// "Use the same hard disk": the clone boots the original's disk
+    /// instead of a copy. A front end writes it from its checkbox.
+    pub same_disk: bool,
     library_dir: PathBuf,
     source: Option<Source>,
     /// Whether the machine is up, the one thing that makes the window
@@ -79,6 +87,7 @@ impl Default for CloneMachine {
         CloneMachine {
             open: false,
             name: String::new(),
+            same_disk: false,
             library_dir: library::default_dir(),
             source: None,
             running: false,
@@ -127,9 +136,17 @@ impl CloneMachine {
         }
     }
 
+    /// The checkbox that shares the disk instead of copying it.
+    pub fn same_disk_label(&self) -> &'static str {
+        "Use the same hard disk instead of copying it"
+    }
+
     /// What a clone is, with the size of what will be copied.
     pub fn note(&self) -> String {
         let Some(s) = &self.source else { return String::new() };
+        if self.same_disk {
+            return format!("A new machine with the same settings, on the same disk ({}).", s.machine.disk.display());
+        }
         let mut note = format!(
             "A new machine with the same settings and its own copy of the disk ({}), \
              snapshots included.",
@@ -144,10 +161,19 @@ impl CloneMachine {
         note
     }
 
-    /// Why the Clone button is disabled when it is not a matter of the
-    /// name: the machine is running. Drawn as a warning.
+    /// Drawn as a warning: the shared disk's rule, or why Clone is off
+    /// when it is not a matter of the name (the machine is running and
+    /// its disk would be copied).
     pub fn warning(&self) -> Option<&'static str> {
-        self.running.then_some(
+        if self.same_disk {
+            Some("Only one machine at a time may run on this disk. Two running at once will corrupt it.")
+        } else {
+            self.refused()
+        }
+    }
+
+    fn refused(&self) -> Option<&'static str> {
+        (self.running && !self.same_disk).then_some(
             "This machine is running. Shut it down before cloning it: its disk is being written, \
              and a copy taken now wouldn't boot.",
         )
@@ -166,7 +192,7 @@ impl CloneMachine {
     }
 
     pub fn can_submit(&self) -> bool {
-        self.source.is_some() && !self.running && !self.busy() && !self.name.trim().is_empty()
+        self.source.is_some() && self.refused().is_none() && !self.busy() && !self.name.trim().is_empty()
     }
 
     /// Copied so far and in all, while a copy runs.
@@ -200,8 +226,8 @@ impl CloneMachine {
     }
 
     fn start(&mut self) -> Result<(), String> {
-        if let Some(warning) = self.warning() {
-            return Err(warning.to_string());
+        if let Some(refusal) = self.refused() {
+            return Err(refusal.to_string());
         }
         let source = self.source.as_ref().ok_or("No machine to clone.")?;
         let name = self.name.trim().to_string();
@@ -212,16 +238,24 @@ impl CloneMachine {
             return Err(format!("There is already a machine called \u{201c}{name}\u{201d}."));
         }
         let dest_dir = library::reserve_dir(&self.library_dir, &name).map_err(|e| e.to_string())?;
-        let files: Vec<(PathBuf, PathBuf)> =
+        let mut files: Vec<(PathBuf, PathBuf)> =
             source.files.iter().map(|(from, rel)| (from.clone(), dest_dir.join(rel))).collect();
         let mut machine = source.machine.clone();
         machine.name = name;
         remap(&mut machine, &source.dir, &dest_dir);
         // Set here, from the plan's own record of which file is the disk,
         // and never by comparing spellings of a path: a miss there would
-        // leave the clone booting the original's disk.
-        machine.disk = files[source.disk].1.clone();
-        let disk = source.disk;
+        // leave the clone booting the original's disk when it should not,
+        // or a copy when it should.
+        let disk = if self.same_disk {
+            let (original, _) = files.remove(source.disk);
+            machine.disk = std::fs::canonicalize(&original).unwrap_or(original);
+            None
+        } else {
+            machine.disk = files[source.disk].1.clone();
+            Some(source.disk)
+        };
+        let total = files.iter().filter_map(|(from, _)| std::fs::metadata(from).ok()).map(|m| m.len()).sum();
         let dests = files.iter().map(|(_, to)| to.clone()).collect();
         let (tx, rx) = mpsc::channel();
         let thread_dir = dest_dir.clone();
@@ -232,7 +266,7 @@ impl CloneMachine {
             }
             let _ = tx.send(result);
         });
-        self.job = Some(Job { dest_dir, dests, total: source.bytes, done: rx });
+        self.job = Some(Job { dest_dir, dests, total, done: rx });
         Ok(())
     }
 
@@ -355,14 +389,18 @@ fn remap(machine: &mut Machine, from: &Path, to: &Path) {
     }
 }
 
-fn copy_all(files: &[(PathBuf, PathBuf)], disk: usize, machine: &Machine, dest_dir: &Path) -> Result<PathBuf, String> {
+/// `disk` is which of `files` is the disk, `None` when the clone shares
+/// the original's.
+fn copy_all(files: &[(PathBuf, PathBuf)], disk: Option<usize>, machine: &Machine, dest_dir: &Path) -> Result<PathBuf, String> {
     for (from, to) in files {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         std::fs::copy(from, to).map_err(|e| format!("copying {}: {e}", from.display()))?;
     }
-    absolute_backing(&files[disk].0, &files[disk].1)?;
+    if let Some(disk) = disk {
+        absolute_backing(&files[disk].0, &files[disk].1)?;
+    }
     let bundle_path = dest_dir.join(library::BUNDLE_FILE);
     machine.save(&bundle_path).map_err(|e| format!("{}: {e}", bundle_path.display()))?;
     Ok(bundle_path)

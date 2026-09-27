@@ -290,7 +290,8 @@ pub unsafe extern "C" fn lc_machines_clone_name(m: *const LcMachines, row: usize
 }
 
 /// Clone a row: a new machine with the same settings and its own copy of
-/// the disk, under `name` (NULL for the offered one). Blocks until the
+/// the disk, or the same disk when `same_disk` (only one of the two may
+/// then run at a time), under `name` (NULL for the offered one). Blocks until the
 /// copy is done; a front end that wants progress runs this on a thread
 /// of its own. Returns true on success; `*status` (when non-NULL) is the
 /// new `machine.toml` then and the reason otherwise, owned by the
@@ -304,6 +305,7 @@ pub unsafe extern "C" fn lc_machines_clone(
     m: *mut LcMachines,
     row: usize,
     name: *const c_char,
+    same_disk: bool,
     status: *mut *mut c_char,
 ) -> bool {
     let m = handle_mut!(m, false);
@@ -316,6 +318,7 @@ pub unsafe extern "C" fn lc_machines_clone(
             if !name.is_null() {
                 window.name = unsafe { borrow(name) }.to_string();
             }
+            window.same_disk = same_disk;
             if window.error().is_none() {
                 window.submit();
                 window.wait();

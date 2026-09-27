@@ -443,7 +443,7 @@ int main(int argc, char **argv) {
          * refusal has to arrive as a sentence and leave nothing behind. */
         size_t machines_before = lc_machines_count(m);
         char *why = NULL;
-        check("a disk that is not a file cannot be cloned", !lc_machines_clone(m, found, NULL, &why), why);
+        check("a disk that is not a file cannot be cloned", !lc_machines_clone(m, found, NULL, false, &why), why);
         check("...and says so", why && strstr(why, "not a file") != NULL, why);
         lc_string_free(why);
         lc_machines_refresh(m);

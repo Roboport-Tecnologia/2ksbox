@@ -83,11 +83,13 @@ void lc_machines_republish_shelf(const LcMachines *m);
 /* "Clone…": the name offered for a row ("<name> (copy)", numbered when
  * taken), and the clone itself: the same settings and its own copy of
  * the disk, snapshots included, under `name` (NULL = the offered one).
- * Refused for a running machine or a name already in the library.
+ * With `same_disk` the clone boots the original's disk instead, and
+ * only one of the two may run at a time. Refused for a running machine
+ * (unless `same_disk`) or a name already in the library.
  * Blocks until the copy is done; *status (if given) is the new
  * machine.toml on success, the reason otherwise. Refresh to see it. */
 char *lc_machines_clone_name(const LcMachines *m, size_t row);
-bool lc_machines_clone(LcMachines *m, size_t row, const char *name, char **status);
+bool lc_machines_clone(LcMachines *m, size_t row, const char *name, bool same_disk, char **status);
 char *lc_machines_library_dir(const LcMachines *m);
 char *lc_machines_disc_library_path(const LcMachines *m);
 char *lc_machines_profiles_dir(const LcMachines *m);
