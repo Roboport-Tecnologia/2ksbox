@@ -33,9 +33,18 @@
 # meson, ninja, pkg-config and a C compiler are still needed to *build*;
 # they ship nothing. Under Rosetta (scripts/build.sh --x86_64) the arch
 # defaults to x86_64, as everywhere else in that build.
+#
+# On Linux it builds QEMU's glib alone (pcre2, glib, and libslirp, the
+# one other library QEMU links that links glib), static, into
+# build/deps/<arch>, for `QEMU_DEPS=ours scripts/configure-qemu.sh`. A
+# player that runs GTK in its own process needs QEMU on a glib of its own:
+# QEMU's main loop iterates glib's global default GMainContext on QEMU's
+# thread, and with one shared glib that is GTK's context
+# (spikes/player-gtk/README.md). Everything else stays the distribution's.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-[ "$(uname -s)" = Darwin ] || { echo "build-deps.sh: macOS only; Linux builds against the distribution's libraries" >&2; exit 1; }
+OS="$(uname -s)"
+case "$OS" in Darwin|Linux) ;; *) echo "build-deps.sh: macOS and Linux only" >&2; exit 1 ;; esac
 
 ARCH="$(uname -m)"; CLEAN=""
 while [ $# -gt 0 ]; do
@@ -46,19 +55,26 @@ while [ $# -gt 0 ]; do
     *) echo "build-deps.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-case "$ARCH" in arm64|x86_64) ;; *) echo "build-deps.sh: --arch arm64|x86_64" >&2; exit 2 ;; esac
-
-T="${MACOSX_DEPLOYMENT_TARGET:-$("$ROOT/scripts/macos-floor.sh")}"
-case "$T" in *.*) ;; *) T="$T.0" ;; esac
-export MACOSX_DEPLOYMENT_TARGET="$T"
-SDK="$(xcrun --show-sdk-path)"
+if [ "$OS" = Linux ]; then
+  [ "$ARCH" = "$(uname -m)" ] || { echo "build-deps.sh: Linux builds this machine's architecture only" >&2; exit 2; }
+  # The stamps' target part: nothing here targets an OS version.
+  T=linux; FOR="Linux"
+else
+  case "$ARCH" in arm64|x86_64) ;; *) echo "build-deps.sh: --arch arm64|x86_64" >&2; exit 2 ;; esac
+  T="${MACOSX_DEPLOYMENT_TARGET:-$("$ROOT/scripts/macos-floor.sh")}"
+  case "$T" in *.*) ;; *) T="$T.0" ;; esac
+  export MACOSX_DEPLOYMENT_TARGET="$T"
+  SDK="$(xcrun --show-sdk-path)"
+  FOR="macOS $T"
+fi
 SRC="$ROOT/build/deps/src"
 PREFIX="$ROOT/build/deps/$ARCH"
 WORK="$ROOT/build/deps/work-$ARCH"
 [ -z "$CLEAN" ] || rm -rf "$PREFIX" "$WORK"
 mkdir -p "$SRC" "$PREFIX" "$WORK"
 
-for t in meson ninja pkg-config cmake cc; do
+TOOLS="meson ninja pkg-config cc"; [ "$OS" = Linux ] || TOOLS="$TOOLS cmake"
+for t in $TOOLS; do
   command -v "$t" >/dev/null || { echo "build-deps.sh: no $t (meson, ninja, pkg-config and cmake build these; they ship nothing)" >&2; exit 1; }
 done
 
@@ -75,6 +91,7 @@ qtdeclarative 6.9.3 qtdeclarative-everywhere-src-6.9.3.tar.xz 5a071b227229afbf5c
 qttools 6.9.3 qttools-everywhere-src-6.9.3.tar.xz 0cf7ab0e975fc57f5ce1375576a0a76e9ede25e6b01db3cf2339cd4d9750b4e9 https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qttools-everywhere-src-6.9.3.tar.xz
 qtimageformats 6.9.3 qtimageformats-everywhere-src-6.9.3.tar.xz 4fb26bdbfbd4b8e480087896514e11c33aba7b6b39246547355ea340c4572ffe https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qtimageformats-everywhere-src-6.9.3.tar.xz
 '
+[ "$OS" = Darwin ] || PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp) ')
 
 # Our patches on a package: patches/deps/<name>/*.patch (git-format
 # diffs, filename order; patches/deps/README.md). The set is named by a
@@ -118,13 +135,20 @@ fetch() { # name tarball sha256 url -> the unpacked, patched source directory
 # libpng. The compiler flags name the architecture and the floor, so a
 # meson build of the other architecture gets a cross file saying the same
 # in meson's terms (pixman picks its SIMD paths by host_machine.cpu_family).
-export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$SDK/usr/lib/pkgconfig"
+# On Linux the distribution's own .pc files come after ours (zlib and
+# libffi for gio and gobject, shared: neither links glib).
+if [ "$OS" = Linux ]; then
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$(pkg-config --variable pc_path pkg-config)"
+  FLAGS="-fPIC"
+else
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$SDK/usr/lib/pkgconfig"
+  FLAGS="-arch $ARCH -mmacosx-version-min=$T"
+fi
 unset PKG_CONFIG_PATH
-FLAGS="-arch $ARCH -mmacosx-version-min=$T"
 export CFLAGS="$FLAGS -O2 -I$PREFIX/include" CXXFLAGS="$FLAGS -O2" LDFLAGS="$FLAGS -L$PREFIX/lib"
 export CC=cc CXX=c++
 MESON=(meson setup --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=static -Db_staticpic=true)
-if [ "$ARCH" != "$(uname -m)" ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+if [ "$OS" = Darwin ] && { [ "$ARCH" != "$(uname -m)" ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; }; then
   cat > "$WORK/cross.ini" <<INI
 [binaries]
 c = 'cc'
@@ -186,13 +210,13 @@ while read -r name ver tar sha url; do
   [ -n "$name" ] || continue
   set=$(patchset "$name")
   stamp="$PREFIX/.built-$name-$ver${set:+-p$set}-$T"
-  if [ -f "$stamp" ]; then echo "    $name $ver${set:+ (patched $set)} built for macOS $T $ARCH"; continue; fi
+  if [ -f "$stamp" ]; then echo "    $name $ver${set:+ (patched $set)} built for $FOR $ARCH"; continue; fi
   src=$(fetch "$name" "$tar" "$sha" "$url")
   b="$WORK/$name"; : > "$WORK/$name.log"
   # A meson directory is set up once; Qt's cmake ones are kept, so a
   # changed option reconfigures and rebuilds only what it touches.
   case "$name" in qt*) ;; *) rm -rf "$b" ;; esac
-  say "$name $ver ($ARCH, macOS $T)"
+  say "$name $ver ($ARCH, $FOR)"
   case "$name" in
     pcre2)
       ( cd "$src" && run ./configure --prefix="$PREFIX" --disable-shared --enable-static \
@@ -275,7 +299,7 @@ while read -r name ver tar sha url; do
 done <<< "$PKGS"
 
 # Nothing shared may be left for a link to prefer over the archives.
-rm -f "$PREFIX"/lib/*.dylib
+rm -f "$PREFIX"/lib/*.dylib "$PREFIX"/lib/*.so "$PREFIX"/lib/*.so.*
 # An archive-only prefix: every .pc file's private link line (what a
 # static glib needs: pcre2, intl, iconv, ffi, the frameworks) becomes
 # public, so `pkg-config --libs` answers the whole static link and no
@@ -300,7 +324,7 @@ for p in sys.argv[1:]:
     open(p, "w").write(s)
 PY
 echo
-echo "deps ($ARCH, macOS $T): $PREFIX"
+echo "deps ($ARCH, $FOR): $PREFIX"
 ls "$PREFIX/lib"/*.a | sed 's|.*/|    |'
 ls -d "$PREFIX/lib"/Qt*.framework 2>/dev/null | sed 's|.*/|    |' | tr '\n' ' '; echo
 [ ${#built[@]} -eq 0 ] || echo "    built now: ${built[*]}"
