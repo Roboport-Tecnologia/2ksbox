@@ -8,7 +8,12 @@
 //! ```sh
 //! player-gtk-spike [--shader <preset>]               # the player's test pattern, 60 Hz
 //! player-gtk-spike [--shader <preset>] -- <qemu args> # a live guest
+//! LAUNCHER_PLAYER_BIN=<this binary> 2ksbox           # the launcher's machines on it
 //! ```
+//!
+//! It takes the player's own command line (`--shader`, `--shader-params`,
+//! `--pad`, then `--` and QEMU's), so the launcher can start it in the
+//! player's place. The pad is not read.
 //!
 //! `PLAYER_LATENCY=1` prints, every 240 shown frames, the same
 //! publish→present-return the player prints, plus what GTK adds after it.
@@ -382,7 +387,11 @@ fn to_guest(x: f64, y: f64) -> Option<(i32, i32, i32, i32)> {
     .flatten()
 }
 
-fn picture_widget(status: Signal<String>, source: Source, shader: Option<std::path::PathBuf>) -> gtk4::GraphicsOffload {
+fn picture_widget(
+    status: Signal<String>,
+    source: Source,
+    shader: Option<(std::path::PathBuf, Vec<(String, f32)>)>,
+) -> gtk4::GraphicsOffload {
     let picture = gtk4::Picture::new();
     picture.set_can_shrink(true);
     picture.set_content_fit(gtk4::ContentFit::Fill);
@@ -453,8 +462,8 @@ fn picture_widget(status: Signal<String>, source: Source, shader: Option<std::pa
     });
 
     let mut gpu = gpu::Gpu::new();
-    if let Some(path) = shader {
-        gpu.load_shader(&path);
+    if let Some((path, params)) = shader {
+        gpu.load_shader(&path, &params);
     }
     STATE.with(|s| {
         *s.borrow_mut() = Some(State {
@@ -468,7 +477,7 @@ fn picture_widget(status: Signal<String>, source: Source, shader: Option<std::pa
             rendered_size: (0, 0),
             clock_base: (Instant::now(), glib::monotonic_time()),
             qemu_thread: None,
-            sub_mode: std::env::var("SPIKE_MODE").as_deref() == Ok("subsurface"),
+            sub_mode: std::env::var("SPIKE_MODE").as_deref() != Ok("offload"),
             sub: None,
             returned: Vec::new(),
         })
@@ -504,16 +513,57 @@ fn quit() {
     unsafe { libc::_exit(status) };
 }
 
+/// The player's `--shader-params name=value,…`.
+fn parse_shader_params(s: &str) -> Vec<(String, f32)> {
+    s.split(',')
+        .filter_map(|entry| {
+            let (name, value) = entry.split_once('=')?;
+            Some((name.trim().to_string(), value.trim().parse().ok()?))
+        })
+        .collect()
+}
+
+/// What the player finds for itself in a checkout (its `companions.rs`,
+/// and QEMU's searches beside the player's binary, which this one is not
+/// next to): the SoundFont and the Direct3D executor, from this checkout.
+fn companions() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    for (var, rel) in [
+        ("LIBSYNTH_SF2", "soundfonts/TimGM6mb.sf2"),
+        ("D3DPT_EXEC_LIB", "build/d3dpt/libd3dpt_exec.so"),
+        ("D3DPT_DXVK_LIB", "build/dxvk/src/d3d9/libdxvk_d3d9.so.0"),
+    ] {
+        let path = root.join(rel);
+        if std::env::var_os(var).is_none() && path.exists() {
+            // SAFETY: before any thread exists.
+            unsafe { std::env::set_var(var, path) };
+        }
+    }
+}
+
 fn main() {
+    companions();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut shader = std::env::var("PLAYER_SHADER").ok().map(std::path::PathBuf::from);
-    if args.first().map(String::as_str) == Some("--shader") && args.len() >= 2 {
-        shader = Some(args[1].clone().into());
-        args.drain(0..2);
+    let mut params = Vec::new();
+    while let Some(flag) = args.first().cloned() {
+        match flag.as_str() {
+            "--" => {
+                args.remove(0);
+                break;
+            }
+            "--shader" | "--shader-params" | "--pad" if args.len() >= 2 => {
+                match flag.as_str() {
+                    "--shader" => shader = Some(args[1].clone().into()),
+                    "--shader-params" => params = parse_shader_params(&args[1]),
+                    _ => eprintln!("[spike] {flag} {}: not read", args[1]),
+                }
+                args.drain(0..2);
+            }
+            _ => break,
+        }
     }
-    if args.first().map(String::as_str) == Some("--") {
-        args.remove(0);
-    }
+    let shader = shader.map(|path| (path, params));
     let qemu_args = args;
 
     mitsuami::App::new()
@@ -544,18 +594,18 @@ fn main() {
             set_menu(
                 MenuBar::new().menu(
                     Menu::new("Machine")
-                        .item(MenuItem::new("Send Ctrl+Alt+Del", ctrl_alt_del))
-                        .item(MenuItem::new("Reset", || {
+                        .item(MenuItem::new("Send Ctrl+Alt+Del").on_select(ctrl_alt_del))
+                        .item(MenuItem::new("Reset").on_select(|| {
                             if let Some(vm) = vm() {
                                 vm.vm_reset();
                             }
                         }))
-                        .item(MenuItem::new("Power Button", || {
+                        .item(MenuItem::new("Power Button").on_select(|| {
                             if let Some(vm) = vm() {
                                 vm.vm_powerdown();
                             }
                         }))
-                        .item(MenuItem::new("Close Player", quit)),
+                        .item(MenuItem::new("Close Player").on_select(quit)),
                 ),
             );
             let shader = shader.clone();

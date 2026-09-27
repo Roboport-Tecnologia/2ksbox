@@ -162,7 +162,7 @@ impl Gpu {
         }
     }
 
-    pub fn load_shader(&mut self, path: &std::path::Path) {
+    pub fn load_shader(&mut self, path: &std::path::Path, params: &[(String, f32)]) {
         match shader_chain::Chain::load(
             path,
             &self.device,
@@ -171,6 +171,7 @@ impl Gpu {
             wgpu::TextureFormat::Bgra8Unorm,
         ) {
             Ok(c) => {
+                c.set_parameters(params);
                 eprintln!("[shader] loaded {}", path.display());
                 self.chain = Some(c);
             }
