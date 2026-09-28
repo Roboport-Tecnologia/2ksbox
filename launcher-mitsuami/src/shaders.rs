@@ -79,6 +79,13 @@ impl Shaders {
         self.profiles.set(shader_library::scan(&Self::dir()));
     }
 
+    /// A preset collection landed (the first-run download): look for it
+    /// again, and for the starter profiles written with it.
+    pub fn presets_changed(&self) {
+        self.presets.update(Presets::forget);
+        self.refresh();
+    }
+
     pub fn open_list(&self) {
         self.refresh();
         self.presets.update(Presets::forget);

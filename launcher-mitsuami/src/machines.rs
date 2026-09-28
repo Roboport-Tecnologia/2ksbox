@@ -16,6 +16,7 @@
 //! row's "Running" label.
 
 use crate::clone::{CloneWindow, Cloner};
+use crate::firstrun::Offer;
 use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
 use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
@@ -136,9 +137,19 @@ pub fn MachinesWindow() -> impl View {
     let snaps = use_store::<Snaps>();
     let discs = use_store::<Discs>();
     let shaders = use_store::<Shaders>();
+    let offer = use_store::<Offer>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm(&["", "create", "clonego"]);
+    crate::shot::arm(&["", "create", "clonego", "firstrun"]);
+    // The first-run offer asks on a real start, and on
+    // `firstrun[:<answers>]` with scripted answers; every other headless
+    // screen runs without it, as the Qt build's do.
+    if std::env::var_os("LAUNCHER_SCREEN").is_none() {
+        offer.start(library, shaders, None);
+    }
+    if let Some(answers) = crate::shot::screen("firstrun") {
+        offer.start(library, shaders, Some(&answers));
+    }
     if let Some(arg) = crate::shot::screen("wizard") {
         wizard.open_for_screen(&arg);
     }
@@ -206,6 +217,12 @@ pub fn MachinesWindow() -> impl View {
     view! {
         <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
             <Toolbar>
+                <Show when=move || offer.progress.get().is_some()>
+                    <Row gap=Spacing::Sm align=Align::Center>
+                        <Spinner label="Downloading"/>
+                        <Text>{move || offer.progress.get().unwrap_or_default()}</Text>
+                    </Row>
+                </Show>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
             </Toolbar>
             <Text text_style=TextStyle::Title>"Machines"</Text>

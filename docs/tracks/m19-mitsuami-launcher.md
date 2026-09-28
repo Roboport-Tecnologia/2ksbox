@@ -71,6 +71,7 @@ the window and what it opens on:
 | `profiles` | the shader profile list |
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
+| `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |
 | `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | Broadway's screen is 1024
 wide, so a 1060 window is cut at the right edge there. The debug verbs are
 `launcher_core::cli`'s, as in every front end.
@@ -142,7 +143,19 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
      gone: the process aborted after a shot was written. The device is
      dropped when the editor closes and held in a `ManuallyDrop`, so one
      still alive at exit is never dropped.
-5. **First run** (the preset offer and its progress in the toolbar).
+5. **First run (done 2026-09-27).** `firstrun.rs`: on a start with no
+   preset collection and no `first-run.txt`, the core's question in the
+   platform's alert (Yes / No); a yes shows the download in the machine
+   window's toolbar (a spinner and the core's line), then the outcome in
+   another alert (OK, or Retry / Cancel on a failure); a collection that
+   landed refreshes the profile manager and the Shader column. Every
+   other headless screen runs without it. Checked headless with scripted
+   answers, the Qt check's sequence: declining writes the marker, the
+   next start asks nothing, a yes onto a download that can't succeed
+   comes back as Retry / Cancel with the core's failure line. Not seen:
+   the real alerts on a desktop, and a download that runs (the toolbar
+   line). The core's `firstrun::TITLE` has no place: a platform alert
+   has a headline and a message, not a window title.
 6. **What Qt does that mitsuami has no call for yet**: the app ID
    (Wayland's `app_id`, which the desktop entry is matched by; GTK takes
    the program name today), the window icon, a text colour for warnings,

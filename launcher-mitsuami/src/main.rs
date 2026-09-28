@@ -20,6 +20,7 @@
 
 mod clone;
 mod discs;
+mod firstrun;
 mod machines;
 mod shaders;
 mod shot;
