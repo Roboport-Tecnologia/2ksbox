@@ -104,8 +104,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
      is rebuilt by its `Show`); the Qt window keeps it open.
 3. **Clone, snapshots and the disc shelf (done 2026-09-27).** `clone.rs`,
    `snaps.rs`, `discs.rs`, each a store over its core model. Clone is a
-   fit-height dialog that polls the copy's thread and puts the new row in
-   the list. Snapshots is the tree, rows keyed by snapshot id (qcow2
+   dialog whose height follows its content (`FollowHeight`, as the Qt
+   one's is bound to it: the warning and the progress bar grow it) that
+   polls the copy's thread and puts the new row in the list. Snapshots is the tree, rows keyed by snapshot id (qcow2
    reuses an id once its snapshot is deleted, so a row reads its fields
    by key), Restore asking once, a poll while a live job runs. The shelf's
    rows are keyed by path (it is kept in label order); Boot is a
@@ -166,9 +167,12 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
      parent. Checked on Qt's offscreen platform: the question shows over
      the window and no marker is written. A mitsuami issue too: an alert
      with no window to go in should wait for one, not answer.
-6. **What Qt does that mitsuami has no call for yet**: the app ID
-   (Wayland's `app_id`, which the desktop entry is matched by; GTK takes
-   the program name today), the window icon, a text colour for warnings,
+6. **What Qt does that mitsuami has no call for yet**. The app ID, name
+   and icon came with mitsuami cf35de4 (`App::id`, `name`, `icon` in
+   `main.rs`: `paths::APP_ID` and the 256 px PNG `launcher-qt` uses);
+   under Sway the window's `app_id` is `com._2ksbox.Launcher`. GTK shows
+   only the theme's icon by that name, so a run from the build has none,
+   as with Qt on Wayland. Still missing: a text colour for warnings,
    a file dialog's start folder (step 2), a text input's focus leaving
    and an elide mode (step 3), and a view's size (step 4).
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each

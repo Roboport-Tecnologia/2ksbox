@@ -85,7 +85,9 @@ pub fn CloneWindow() -> impl View {
     view! {
         <Window
             title=get(|c| c.title())
-            size=WindowSize::FitHeight(560.0)
+            // As tall as what it shows, as the Qt dialog is: it grows for
+            // the warning and the progress bar, and shrinks when they go.
+            size=WindowSize::FollowHeight(560.0)
             modal=Modality::Application
             open=move || cloner.read(|c| c.open)
             @close_request=move || cloner.close()

@@ -50,7 +50,19 @@ fn main() {
     }
 
     launcher_core::fatal::note("the event loop");
-    // Wide enough for a row's five buttons with room to spare, as the Qt
-    // window is.
-    App::new().window("2ksbox", Size::new(1060.0, 560.0), || view! { <machines::MachinesWindow/> }).run();
+    // The app's identity, as `launcher-qt` gives Qt: the desktop-entry
+    // name a Wayland compositor matches a window to its launcher by (and
+    // the themed icon GTK and KDE look up under it), and the picture for
+    // the platforms that take one (the Dock outside a bundle, Windows'
+    // title bars). The PNG is one of the sizes `scripts/gen-icons.sh`
+    // derives from the icon the packages install.
+    let icon = include_bytes!("../../packaging/icon/2ksbox-256.png");
+    App::new()
+        .id(launcher_core::paths::APP_ID)
+        .name("2ksbox")
+        .icon(AppIcon::bytes(icon.as_slice()))
+        // Wide enough for a row's five buttons with room to spare, as the
+        // Qt window is.
+        .window("2ksbox", Size::new(1060.0, 560.0), || view! { <machines::MachinesWindow/> })
+        .run();
 }
