@@ -18,8 +18,10 @@
 // `main` borrows the console it was launched from when there is one.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod clone;
 mod machines;
 mod shot;
+mod snaps;
 mod wizard;
 
 use mitsuami::prelude::*;

@@ -15,6 +15,8 @@
 //! that key rather than holding a copy: a player exiting changes only its
 //! row's "Running" label.
 
+use crate::clone::{CloneWindow, Cloner};
+use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
 use launcher_core::machines::Machines;
 use mitsuami::prelude::*;
@@ -117,14 +119,43 @@ fn row_of(machines: &Machines, dir: &Path) -> Option<usize> {
 pub fn MachinesWindow() -> impl View {
     let library = use_store::<Library>();
     let wizard = use_store::<Wizard>();
+    let cloner = use_store::<Cloner>();
+    let snaps = use_store::<Snaps>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm(&["", "create"]);
+    crate::shot::arm(&["", "create", "clonego"]);
     if let Some(arg) = crate::shot::screen("wizard") {
         wizard.open_for_screen(&arg);
     }
     if let Some(arg) = crate::shot::screen("edit") {
         wizard.edit_for_screen(&arg);
+    }
+    // `clone:<machine.toml>[:same]` shows the dialog on a machine (sharing
+    // its disk); `clonego:<machine.toml>` presses Clone and shows this
+    // window once the copy has landed.
+    if let Some(arg) = crate::shot::screen("clone") {
+        let (bundle, same) = match arg.strip_suffix(":same") {
+            Some(bundle) => (bundle.to_owned(), true),
+            None => (arg, false),
+        };
+        cloner.open_for(Path::new(&bundle), false);
+        cloner.set_same_disk(same);
+    }
+    // `snapshots:<machine.toml>[:ask=<name>]`: the window on a machine,
+    // with a row's Restore asking.
+    if let Some(arg) = crate::shot::screen("snapshots") {
+        let (bundle, ask) = match arg.rsplit_once(":ask=") {
+            Some((bundle, name)) => (bundle.to_owned(), Some(name.to_owned())),
+            None => (arg, None),
+        };
+        snaps.open_for(Path::new(&bundle), false);
+        if let Some(name) = ask {
+            snaps.ask(&name);
+        }
+    }
+    if let Some(bundle) = crate::shot::screen("clonego") {
+        cloner.open_for(Path::new(&bundle), false);
+        cloner.submit(library);
     }
     if let Some(arg) = crate::shot::screen("create") {
         wizard.create_for_screen(&arg, library);
@@ -151,6 +182,8 @@ pub fn MachinesWindow() -> impl View {
                 <Button enabled=false>"Shader profiles…"</Button>
             </Row>
             <WizardWindow/>
+            <CloneWindow/>
+            <SnapshotsWindow/>
         </Column>
     }
 }
@@ -170,8 +203,11 @@ fn MachineList() -> impl View {
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
     let wizard = use_store::<Wizard>();
+    let cloner = use_store::<Cloner>();
+    let snaps = use_store::<Snaps>();
     let dir = Rc::new(dir);
-    let (d1, d2, d3, d4, d5, d6) = (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
+    let (d1, d2, d3, d4, d5, d6, d7, d8) =
+        (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
     view! {
         <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
             <Text max_lines=1 width=NAME_W>
@@ -195,8 +231,16 @@ fn MachineRow(dir: PathBuf) -> impl View {
                 }
             }>"Edit…"</Button>
             <Button enabled=false>"Discs…"</Button>
-            <Button enabled=false>"Snapshots…"</Button>
-            <Button enabled=false>"Clone…"</Button>
+            <Button @click=move || {
+                if let Some(bundle) = library.bundle_path(&d8) {
+                    snaps.open_for(&bundle, library.is_running(&d8));
+                }
+            }>"Snapshots…"</Button>
+            <Button enabled=move || !cloner.busy() @click=move || {
+                if let Some(bundle) = library.bundle_path(&d7) {
+                    cloner.open_for(&bundle, library.is_running(&d7));
+                }
+            }>"Clone…"</Button>
         </Row>
     }
 }
