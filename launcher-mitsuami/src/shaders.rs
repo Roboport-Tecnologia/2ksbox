@@ -12,7 +12,7 @@
 //! shader's next frame is due.
 
 use crate::machines::Library;
-use launcher_core::browse::{self, Filter};
+use crate::path_field::PathField;
 use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PresetState, Presets};
 use launcher_core::preview::Preview;
 use launcher_core::shader_library::{self, ProfileEntry};
@@ -182,32 +182,6 @@ impl Shaders {
 
     fn frame_interval(&self) -> Option<Duration> {
         self.preview.get_untracked().borrow().as_ref().and_then(|p| p.frame_interval())
-    }
-}
-
-/// A label, a path field and "Browse…" onto the platform's dialog.
-#[component]
-fn PathRow(#[prop(into)] label: String, value: Value<String>, on_edit: Callback<String>, filter: Filter<'static>) -> impl View {
-    let (title, picked) = (label.clone(), on_edit.clone());
-    let browse = move || {
-        let request = OpenFile::new()
-            .title(title.clone())
-            .filter(FileFilter::new(filter.0, browse::extensions(filter)));
-        let picked = picked.clone();
-        spawn_local(async move {
-            if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {
-                let path = browse::picked(&path);
-                browse::remember(&path);
-                picked.call(path.display().to_string());
-            }
-        });
-    };
-    view! {
-        <Row gap=Spacing::Sm align=Align::Center shrink=0.0>
-            <Text width=LABEL_W shrink=0.0>{label.clone()}</Text>
-            <TextInput grow=1.0 a11y_label=label value=value @input=move |s| on_edit.call(s)/>
-            <Button @click=browse>"Browse…"</Button>
-        </Row>
     }
 }
 
@@ -398,7 +372,8 @@ pub fn ShaderEditorWindow() -> impl View {
                         @input=move |s| shaders.editor.update(|e| e.name = s)
                     />
                 </Row>
-                <PathRow
+                <PathField
+                    label_width=LABEL_W
                     label="Preset (.slangp)"
                     filter=PRESET_FILTER
                     value=move || shaders.read(|e| e.preset_path.clone())
@@ -426,7 +401,8 @@ pub fn ShaderEditorWindow() -> impl View {
                         </Show>
                     </Column>
                     <Column grow=1.0 gap=Spacing::Sm min_height=0>
-                        <PathRow
+                        <PathField
+                            label_width=LABEL_W
                             label="Preview image"
                             filter=IMAGE_FILTER
                             value=move || shaders.read(|e| e.preview_image_path.clone())

@@ -14,6 +14,7 @@
 //! (the Qt window writes on `editingFinished`).
 
 use crate::machines::Library;
+use crate::path_field::PathField;
 use launcher_core::browse;
 use launcher_core::disc_library::{self, DISC_FILTER, Disc};
 use launcher_core::shelf::Shelf;
@@ -135,13 +136,10 @@ impl Discs {
         }
     }
 
-    fn pick(&self, folder: bool) {
-        let mut request = OpenFile::new();
-        request = if folder {
-            request.title("Share a folder with the guest").directories()
-        } else {
-            request.title("Add disc").filter(FileFilter::new(DISC_FILTER.0, browse::extensions(DISC_FILTER)))
-        };
+    /// A folder to share, picked in the platform's dialog. A disc file is
+    /// the Add disc field's `PathField`.
+    fn share_folder(&self) {
+        let request = OpenFile::new().title("Share a folder with the guest").directories();
         let discs = *self;
         spawn_local(async move {
             if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {
@@ -203,19 +201,21 @@ pub fn DiscShelfWindow() -> impl View {
                         <Text>"No discs yet."</Text>
                     </Column>
                 </Show>
-                <Row gap=Spacing::Sm align=Align::Center shrink=0.0>
-                    <Text>"Add disc"</Text>
-                    <TextInput
-                        grow=1.0
-                        a11y_label="Add disc"
-                        bind=discs.adding
-                        @submit=move || {
-                            discs.add(&discs.adding.get_untracked());
-                            discs.adding.set(String::new());
-                        }
-                    />
-                    <Button @click=move || discs.pick(false)>"Browse…"</Button>
-                </Row>
+                // A disc chosen in the dialog goes on the shelf at once.
+                <PathField
+                    label="Add disc"
+                    filter=DISC_FILTER
+                    value=discs.adding
+                    @edit=move |p| discs.adding.set(p)
+                    @pick=move |p: String| {
+                        discs.add(&p);
+                        discs.adding.set(String::new());
+                    }
+                    @submit=move |()| {
+                        discs.add(&discs.adding.get_untracked());
+                        discs.adding.set(String::new());
+                    }
+                />
                 <Row gap=Spacing::Sm shrink=0.0>
                     <Button
                         enabled=move || !discs.adding.get().trim().is_empty()
@@ -224,7 +224,7 @@ pub fn DiscShelfWindow() -> impl View {
                             discs.adding.set(String::new());
                         }
                     >"Add to shelf"</Button>
-                    <Button tooltip="Share a folder with the guest as a disc" @click=move || discs.pick(true)>
+                    <Button tooltip="Share a folder with the guest as a disc" @click=move || discs.share_folder()>
                         "Add folder…"
                     </Button>
                     <Button

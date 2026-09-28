@@ -175,6 +175,12 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    as with Qt on Wayland. Still missing: a text colour for warnings,
    a file dialog's start folder (step 2), a text input's focus leaving
    and an elide mode (step 3), and a view's size (step 4).
+   Widgets mitsuami won't have are ours, as `#[component]`s in their own
+   module. The first is `src/path_field.rs`, `PathField` (the caption,
+   the text input and Browse…, as `PathField.qml`): the form, the shader
+   editor and the disc shelf's Add disc field all use it. `@edit` gets a
+   typed or picked path, `@pick` only a picked one (the shelf adds it at
+   once).
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
    packager, then the flip**: every package ships this as `2ksbox`,
    `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's

@@ -9,7 +9,7 @@
 //! and sentence comes from the core too.
 
 use crate::machines::Library;
-use launcher_core::browse::{self, Filter};
+use crate::path_field::PathField;
 use launcher_core::bundle::{Accel, Boot, CpuSpeed, Family, Optimization};
 use launcher_core::shader_library::{self, ProfileEntry};
 use launcher_core::wizard::{
@@ -307,46 +307,6 @@ fn Picker(
     }
 }
 
-/// A label, a text field for a path, and "Browse…" with the platform's
-/// file dialog, offering the core's extensions for the field.
-#[component]
-fn PathField(
-    #[prop(into)] label: String,
-    value: Value<String>,
-    on_edit: Callback<String>,
-    filter: Option<Filter<'static>>,
-    #[prop(default)] folder: bool,
-    #[prop(default, into)] placeholder: String,
-) -> impl View {
-    let (title, picked) = (label.clone(), on_edit.clone());
-    let browse = move || {
-        let mut request = OpenFile::new().title(title.clone());
-        if folder {
-            request = request.directories();
-        }
-        if let Some(filter) = filter {
-            request = request.filter(FileFilter::new(filter.0, browse::extensions(filter)));
-        }
-        let picked = picked.clone();
-        spawn_local(async move {
-            if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {
-                // A sandboxed dialog hands back the portal's copy; the
-                // bundle wants the file's own path.
-                let path = browse::picked(&path);
-                browse::remember(&path);
-                picked.call(path.display().to_string());
-            }
-        });
-    };
-    view! {
-        <Row gap=Spacing::Sm align=Align::Center>
-            <Text width=LABEL_W>{label.clone()}</Text>
-            <TextInput grow=1.0 a11y_label=label value=value placeholder=placeholder @input=move |s| on_edit.call(s)/>
-            <Button @click=browse>"Browse…"</Button>
-        </Row>
-    }
-}
-
 #[component]
 fn GeneralPage() -> impl View {
     let wiz = use_store::<Wizard>();
@@ -536,6 +496,8 @@ fn AudioPage() -> impl View {
             <Note text=get(wiz, |f| joined(f.music_notes()))/>
             <Show when=get(wiz, Form::soundfont_applies)>
                 <PathField
+                label_width=LABEL_W
+                    label_width=LABEL_W
                     label="SoundFont (optional)"
                     filter=SOUNDFONT_FILTER
                     value=get(wiz, |f| f.soundfont.clone())
@@ -544,6 +506,8 @@ fn AudioPage() -> impl View {
             </Show>
             <Show when=get(wiz, Form::mt32_roms_applies)>
                 <PathField
+                label_width=LABEL_W
+                    label_width=LABEL_W
                     label="MT-32 ROMs"
                     folder=true
                     placeholder="Folder with your CM-32L control and PCM ROMs"
@@ -607,6 +571,8 @@ fn StoragePage() -> impl View {
             </Show>
             <Show when=move || wiz.read(|f| f.is_editing() || f.existing_disk)>
                 <PathField
+                label_width=LABEL_W
+                    label_width=LABEL_W
                     label="Disk path"
                     filter=DISK_FILTER
                     value=get(wiz, |f| f.disk_path.clone())
@@ -625,12 +591,14 @@ fn StoragePage() -> impl View {
                 </Row>
             </Show>
             <PathField
+                label_width=LABEL_W
                 label="Install media (optional)"
                 filter=MEDIA_FILTER
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
             <PathField
+                label_width=LABEL_W
                 label="Floppy (optional)"
                 filter=FLOPPY_FILTER
                 value=get(wiz, |f| f.floppy.clone())

@@ -22,6 +22,7 @@ mod clone;
 mod discs;
 mod firstrun;
 mod machines;
+mod path_field;
 mod shaders;
 mod shot;
 mod snaps;
