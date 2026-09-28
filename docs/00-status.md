@@ -336,7 +336,7 @@ tracks, plus the items no track owns.
     installer (6d; the MSIX covers the Store, above), the shader preview as a `QQuickRhiItem` (doc 07),
     screenshots for a Flathub submission, `CDSHELF.EXE`'s Win98 (ASPI)
     run.
-10a. **M19, the launcher on mitsuami.** shader profiles, first run, the app ID and
+10a. **M19, the launcher on mitsuami.** Shader profiles, first run, the app ID and
     icon, and the flip (`tracks/m19-mitsuami-launcher.md`).
 11. **M5, CD-ROM.** Triage FIFA 2002's no-match. Age of Mythology disc 1
     as a second SafeDisc 2 title. SecuROM (needs DPM in `mds.rs`).
