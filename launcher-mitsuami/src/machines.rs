@@ -15,6 +15,7 @@
 //! that key rather than holding a copy: a player exiting changes only its
 //! row's "Running" label.
 
+use crate::wizard::{Wizard, WizardWindow};
 use launcher_core::machines::Machines;
 use mitsuami::prelude::*;
 use std::cell::RefCell;
@@ -61,6 +62,18 @@ impl Library {
         }
     }
 
+    /// Rescan the library from disk, after a window wrote a bundle.
+    pub fn refresh(&self) {
+        self.write(|m| {
+            m.refresh();
+            true
+        });
+    }
+
+    fn bundle_path(&self, dir: &Path) -> Option<PathBuf> {
+        self.model.with_untracked(|m| row_of(&m.borrow(), dir).and_then(|row| m.borrow().bundle_path(row)))
+    }
+
     fn dirs(&self) -> Vec<PathBuf> {
         self.read(|m| m.entries().iter().map(|e| e.dir.clone()).collect())
     }
@@ -103,9 +116,19 @@ fn row_of(machines: &Machines, dir: &Path) -> Option<usize> {
 #[component]
 pub fn MachinesWindow() -> impl View {
     let library = use_store::<Library>();
+    let wizard = use_store::<Wizard>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm();
+    crate::shot::arm(&["", "create"]);
+    if let Some(arg) = crate::shot::screen("wizard") {
+        wizard.open_for_screen(&arg);
+    }
+    if let Some(arg) = crate::shot::screen("edit") {
+        wizard.edit_for_screen(&arg);
+    }
+    if let Some(arg) = crate::shot::screen("create") {
+        wizard.create_for_screen(&arg, library);
+    }
     view! {
         <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0>
             <Toolbar>
@@ -123,10 +146,11 @@ pub fn MachinesWindow() -> impl View {
                 </Column>
             </Show>
             <Row gap=Spacing::Sm>
-                <Button enabled=false>"New machine…"</Button>
+                <Button @click=move || wizard.open_fresh()>"New machine…"</Button>
                 <Button enabled=false>"Disc shelf…"</Button>
                 <Button enabled=false>"Shader profiles…"</Button>
             </Row>
+            <WizardWindow/>
         </Column>
     }
 }
@@ -145,8 +169,9 @@ fn MachineList() -> impl View {
 #[component]
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
+    let wizard = use_store::<Wizard>();
     let dir = Rc::new(dir);
-    let (d1, d2, d3, d4, d5) = (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
+    let (d1, d2, d3, d4, d5, d6) = (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
     view! {
         <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
             <Text max_lines=1 width=NAME_W>
@@ -164,7 +189,11 @@ fn MachineRow(dir: PathBuf) -> impl View {
             }>
                 <Text width=60>"Running"</Text>
             </Show>
-            <Button enabled=false>"Edit…"</Button>
+            <Button @click=move || {
+                if let Some(bundle) = library.bundle_path(&d6) {
+                    wizard.open_edit(bundle);
+                }
+            }>"Edit…"</Button>
             <Button enabled=false>"Discs…"</Button>
             <Button enabled=false>"Snapshots…"</Button>
             <Button enabled=false>"Clone…"</Button>

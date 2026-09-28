@@ -48,7 +48,15 @@ LAUNCHER_SHOT=/tmp/main.png ./target/debug/launcher-mitsuami
 ```
 
 `LAUNCHER_SHOT` captures the window's content (not its title or toolbar)
-after `LAUNCHER_SHOT_DELAY_MS` (800) and exits. Broadway's screen is 1024
+after `LAUNCHER_SHOT_DELAY_MS` (800) and exits. `LAUNCHER_SCREEN` picks
+the window and what it opens on:
+
+| `LAUNCHER_SCREEN` | Shows |
+|---|---|
+| (unset) | the machine window |
+| `wizard[:<family>[:<page>]]` | a fresh form, on `win98` / `xp` / `dos` / `other` and a page by its sidebar index |
+| `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
+| `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | Broadway's screen is 1024
 wide, so a 1060 window is cut at the right edge there. The debug verbs are
 `launcher_core::cli`'s, as in every front end.
 
@@ -60,16 +68,32 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    state, the 500 ms reap. Written with `view!`, `#[component]` and a
    `Store` (user: the easy macros). The buttons for windows not ported
    yet are there, disabled.
-2. **The machine form** (`WizardWindow.qml`, the biggest): a settings
-   window, a page per section, over `wizard::Form`; opened by New
-   machine and Edit.
+2. **The machine form (done 2026-09-27).** `src/wizard.rs`: one
+   `Signal<Form>` in a `Wizard` store; every control reads it and every
+   edit is `Form`'s own method, so what a field does to the ones under it
+   stays the core's. An application-modal `Window` opened by New machine
+   and Edit…, a platform list as the sidebar, one page per section, the
+   core's lists, notes and warnings, the platform file dialog for the
+   four path fields (the MT-32 ROMs pick a folder), `browse::picked` and
+   `remember` on what it returns. Reopening the same machine returns to
+   its page. Checked headless: every page, a DOS machine created (the
+   core's DOS defaults in its `machine.toml`) and one opened for editing.
+   Not yet driven by hand on a desktop. What mitsuami lacks for it:
+   - **Text colour.** A warning is the Callout style, not the Qt
+     window's amber: `Text` has no tone or colour.
+   - **A dialog's start folder.** `OpenFile` has none, so Browse… opens
+     where the platform likes, not at `browse::browse_start` (the field's
+     own folder, or the last one picked).
+   - The optimizations disclosure closes when the page changes (each page
+     is rebuilt by its `Show`); the Qt window keeps it open.
 3. **Disc shelf, snapshots, clone** (the per-machine windows).
 4. **Shader profiles and the editor with the live preview**
    (`launcher_core::preview` frames into an `Image`).
 5. **First run** (the preset offer and its progress in the toolbar).
 6. **What Qt does that mitsuami has no call for yet**: the app ID
    (Wayland's `app_id`, which the desktop entry is matched by; GTK takes
-   the program name today) and the window icon.
+   the program name today), the window icon, a text colour for warnings
+   and a file dialog's start folder (step 2).
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
    packager, then the flip**: every package ships this as `2ksbox`,
    `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's

@@ -12,9 +12,23 @@ use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
 use std::time::Duration;
 
+/// `LAUNCHER_SCREEN=<window>[:<arg>]` names the window to photograph
+/// (none: the machine window) and what to open it on; this is `<arg>` when
+/// it names `window`.
+pub fn screen(window: &str) -> Option<String> {
+    let screen = std::env::var("LAUNCHER_SCREEN").ok()?;
+    let (name, arg) = screen.split_once(':').unwrap_or((&screen, ""));
+    (name == window).then(|| arg.to_owned())
+}
+
 /// Call from inside a window's content, which is where the window and the
-/// `Ui` are provided.
-pub fn arm() {
+/// `Ui` are provided. Only a window whose `screens` hold the one
+/// `LAUNCHER_SCREEN` names (`""` for none) is photographed.
+pub fn arm(screens: &[&str]) {
+    let named = std::env::var("LAUNCHER_SCREEN").unwrap_or_default();
+    if !screens.contains(&named.split(':').next().unwrap_or("")) {
+        return;
+    }
     let Some(path) = std::env::var_os("LAUNCHER_SHOT").filter(|p| !p.is_empty()).map(std::path::PathBuf::from)
     else {
         return;

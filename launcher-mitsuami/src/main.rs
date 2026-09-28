@@ -20,6 +20,7 @@
 
 mod machines;
 mod shot;
+mod wizard;
 
 use mitsuami::prelude::*;
 
