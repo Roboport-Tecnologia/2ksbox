@@ -14,6 +14,7 @@ use crate::machines::Library;
 use crate::shaders::Shaders;
 use launcher_core::firstrun::{FirstRun, Message, Step};
 use launcher_core::shader_library;
+use mitsuami::core::{CurrentWindow, NodeId, Ui};
 use mitsuami::prelude::*;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -36,7 +37,8 @@ impl Store for Offer {
 /// Where the answers come from: the platform's alert, or a script.
 #[derive(Clone)]
 enum Answers {
-    Alert,
+    /// The platform's alert, over this window.
+    Alert(Ui, NodeId),
     Script(Rc<RefCell<VecDeque<String>>>),
 }
 
@@ -45,12 +47,12 @@ impl Answers {
     /// `None` when a script has run out (the question stays up).
     async fn ask(&self, message: &Message, buttons: &[&str], style: AlertStyle) -> Option<usize> {
         match self {
-            Answers::Alert => {
+            Answers::Alert(ui, window) => {
                 let mut request = Alert::new(message.headline.clone()).message(message.detail.clone()).style(style);
                 for button in buttons {
                     request = request.button(*button);
                 }
-                Some(alert(request).await)
+                Some(ui.alert(Some(*window), request).await)
             }
             Answers::Script(script) => {
                 let detail = message.detail.replace('\n', " ");
@@ -81,13 +83,26 @@ impl Offer {
                 let words = script.split(',').filter(|w| !w.is_empty()).map(str::to_owned).collect();
                 Answers::Script(Rc::new(RefCell::new(words)))
             }
-            None => Answers::Alert,
+            None => match (inject::<Ui>(), inject::<CurrentWindow>()) {
+                (Some(ui), Some(CurrentWindow(window))) => Answers::Alert(ui, window),
+                _ => return,
+            },
         };
         if !self.model.with_untracked(FirstRun::open) {
             return;
         }
         let offer = *self;
-        spawn_local(async move { offer.run(answers, library, shaders).await });
+        spawn_local(async move {
+            // Not before the backend has made the window. Kirigami's alert
+            // sits in a window's overlay, and with no window it answers its
+            // last button at once, which the core recorded as a "no": a KDE
+            // start never offered the download (user report). A tick runs
+            // the ready tasks before it commits (which makes the window),
+            // and a zero sleep is ready on its first poll, so it's a timer
+            // that puts the question after the first commit.
+            sleep(Duration::from_millis(1)).await;
+            offer.run(answers, library, shaders).await
+        });
     }
 
     async fn run(self, answers: Answers, library: Library, shaders: Shaders) {

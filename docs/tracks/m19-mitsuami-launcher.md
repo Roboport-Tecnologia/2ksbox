@@ -156,6 +156,16 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    the real alerts on a desktop, and a download that runs (the toolbar
    line). The core's `firstrun::TITLE` has no place: a platform alert
    has a headline and a message, not a window title.
+   - **Fixed after a report from the user: the KDE build never offered.**
+     The offer asked while the machine window was still being built.
+     Kirigami's alert lives in a window's overlay, and with no window it
+     answers its last button at once, here "No", which the core recorded
+     as the user's answer (GTK's alert needs no window, so GTK asked).
+     The offer now waits on a 1 ms timer, which resumes only after a
+     tick has committed the window, and names that window as the alert's
+     parent. Checked on Qt's offscreen platform: the question shows over
+     the window and no marker is written. A mitsuami issue too: an alert
+     with no window to go in should wait for one, not answer.
 6. **What Qt does that mitsuami has no call for yet**: the app ID
    (Wayland's `app_id`, which the desktop entry is matched by; GTK takes
    the program name today), the window icon, a text colour for warnings,
