@@ -47,6 +47,13 @@ GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 GTK_USE_PORTAL=0 \
 LAUNCHER_SHOT=/tmp/main.png ./target/debug/launcher-mitsuami
 ```
 
+`LAUNCHER_SHOT_TREE=1` also prints every node's kind and frame, which is
+how a layout that comes out wrong is found. One such: **a container that
+must fit its window needs `min_height=0`** (on the window's column and on
+any row between it and a scroll view), because a flex item is at least as
+tall as its content, as in CSS. Without it the form's long System page
+pushed Cancel and Create out of the window instead of scrolling.
+
 `LAUNCHER_SHOT` captures the window's content (not its title or toolbar)
 after `LAUNCHER_SHOT_DELAY_MS` (800) and exits. `LAUNCHER_SCREEN` picks
 the window and what it opens on:
@@ -54,7 +61,7 @@ the window and what it opens on:
 | `LAUNCHER_SCREEN` | Shows |
 |---|---|
 | (unset) | the machine window |
-| `wizard[:<family>[:<page>]]` | a fresh form, on `win98` / `xp` / `dos` / `other` and a page by its sidebar index |
+| `wizard[:<family>[:<page>[:open]]]` | a fresh form, on `win98` / `xp` / `dos` / `other` and a page by its sidebar index; `:open` opens the optimizations list |
 | `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
 | `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | Broadway's screen is 1024
 wide, so a 1060 window is cut at the right edge there. The debug verbs are

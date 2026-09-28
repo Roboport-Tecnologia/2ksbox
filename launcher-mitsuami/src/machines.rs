@@ -130,7 +130,7 @@ pub fn MachinesWindow() -> impl View {
         wizard.create_for_screen(&arg, library);
     }
     view! {
-        <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0>
+        <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
             <Toolbar>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
             </Toolbar>

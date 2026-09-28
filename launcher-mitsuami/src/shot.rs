@@ -40,6 +40,11 @@ pub fn arm(screens: &[&str]) {
     };
     spawn_local(async move {
         sleep(Duration::from_millis(delay)).await;
+        if std::env::var_os("LAUNCHER_SHOT_TREE").is_some() {
+            if let Some(tree) = ui.inspect(window) {
+                print_tree(&tree, 0);
+            }
+        }
         let code = match ui.capture(window).await {
             Ok(image) => match write_png(&path, &image) {
                 Ok(()) => {
@@ -67,4 +72,14 @@ fn write_png(path: &std::path::Path, image: &mitsuami::core::backend::Image) -> 
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header()?.write_image_data(&image.rgba)?;
     Ok(())
+}
+
+/// `LAUNCHER_SHOT_TREE=1`: every node's kind and frame, for a layout
+/// that comes out wrong.
+fn print_tree(node: &mitsuami::core::NodeInfo, depth: usize) {
+    let f = node.frame;
+    eprintln!("{:indent$}{:?} {:.0},{:.0} {:.0}x{:.0}", "", node.kind, f.origin.x, f.origin.y, f.size.width, f.size.height, indent = depth * 2);
+    for child in &node.children {
+        print_tree(child, depth + 1);
+    }
 }

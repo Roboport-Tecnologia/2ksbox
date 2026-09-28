@@ -172,9 +172,14 @@ pub fn WizardWindow() -> impl View {
             open=move || wiz.is_open()
             @close_request=move || wiz.close()
         >
-            <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0>
+            // `min_height=0` on the column and the row: a flex item is at
+            // least as tall as its content unless told otherwise (as in
+            // CSS), so without them a long page grew the window's content
+            // past the window and pushed the buttons out, instead of the
+            // scroll view taking only the room left.
+            <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
                 {crate::shot::arm(&["wizard", "edit"])}
-                <Row gap=Spacing::Md grow=1.0>
+                <Row gap=Spacing::Md grow=1.0 min_height=0>
                     <Sections/>
                     <ScrollView grow=1.0>
                         <Column gap=Spacing::Md padding_x=Spacing::Sm>
@@ -191,7 +196,7 @@ pub fn WizardWindow() -> impl View {
                 <Show when=get(wiz, |f| f.error.is_some())>
                     <Text text_style=TextStyle::Callout>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
                 </Show>
-                <Row gap=Spacing::Sm justify=Justify::End>
+                <Row gap=Spacing::Sm justify=Justify::End shrink=0.0>
                     <Button role=ButtonRole::Cancel @click=move || wiz.close()>"Cancel"</Button>
                     <Button role=ButtonRole::Default @click=move || wiz.submit(library)>
                         {get(wiz, |f| if f.is_editing() { "Save" } else { "Create" }.to_owned())}
@@ -367,7 +372,8 @@ fn GeneralPage() -> impl View {
 #[component]
 fn SystemPage() -> impl View {
     let wiz = use_store::<Wizard>();
-    let expanded = signal(false);
+    // Open from the start for a headless shot that ends in `:open`.
+    let expanded = signal(std::env::var("LAUNCHER_SCREEN").is_ok_and(|s| s.ends_with(":open")));
     view! {
         <Column gap=Spacing::Md>
             <Row gap=Spacing::Sm align=Align::Center>
