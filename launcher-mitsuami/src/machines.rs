@@ -16,6 +16,7 @@
 //! row's "Running" label.
 
 use crate::clone::{CloneWindow, Cloner};
+use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
 use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
@@ -134,6 +135,7 @@ pub fn MachinesWindow() -> impl View {
     let cloner = use_store::<Cloner>();
     let snaps = use_store::<Snaps>();
     let discs = use_store::<Discs>();
+    let shaders = use_store::<Shaders>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
     crate::shot::arm(&["", "create", "clonego"]);
@@ -183,6 +185,17 @@ pub fn MachinesWindow() -> impl View {
             discs.set_boot(boot);
         }
     }
+    // `profiles`: the profile list; `editor:<preset>[;<image>[;<p>=<v>]]`:
+    // the editor on a preset and a picture, the preview rendered.
+    if crate::shot::screen("profiles").is_some() {
+        shaders.open_list();
+    }
+    if let Some(preset) = crate::shot::screen("saveprofile") {
+        crate::shaders::save_probe(shaders, &preset);
+    }
+    if let Some(arg) = crate::shot::screen("editor") {
+        crate::shaders::edit_preset(shaders, &arg);
+    }
     if let Some(bundle) = crate::shot::screen("clonego") {
         cloner.open_for(Path::new(&bundle), false);
         cloner.submit(library);
@@ -209,12 +222,14 @@ pub fn MachinesWindow() -> impl View {
             <Row gap=Spacing::Sm>
                 <Button @click=move || wizard.open_fresh()>"New machine…"</Button>
                 <Button @click=move || discs.open_library(library)>"Disc shelf…"</Button>
-                <Button enabled=false>"Shader profiles…"</Button>
+                <Button @click=move || shaders.open_list()>"Shader profiles…"</Button>
             </Row>
             <WizardWindow/>
             <CloneWindow/>
             <SnapshotsWindow/>
             <DiscShelfWindow/>
+            <ShaderProfilesWindow/>
+            <ShaderEditorWindow/>
         </Column>
     }
 }

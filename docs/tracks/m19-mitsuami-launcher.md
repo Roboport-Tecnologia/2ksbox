@@ -68,6 +68,9 @@ the window and what it opens on:
 | `snapshots:<machine.toml>[:ask=<name>]` | the snapshot tree, with a row's Restore asking |
 | `shelf[:<disc>]` | the shared shelf, with a disc added through its Add field (writes the shelf) |
 | `discs:<machine.toml>[:boot=<disc>]` | the shelf for a machine, with a disc ticked to boot with (writes the bundle) |
+| `profiles` | the shader profile list |
+| `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
+| `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
 | `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | Broadway's screen is 1024
 wide, so a 1060 window is cut at the right edge there. The debug verbs are
 `launcher_core::cli`'s, as in every front end.
@@ -117,14 +120,34 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
      being typed in.
    - **An elide mode.** A disc's folder is cut at its end, where Qt cuts
      it at its start and keeps the useful part.
-4. **Shader profiles and the editor with the live preview**
-   (`launcher_core::preview` frames into an `Image`).
+4. **Shader profiles and the editor with the live preview (done
+   2026-09-27).** `shaders.rs`: the profile list (default, edit, delete,
+   "No default", the preset collection's download row) and the editor
+   (name, preset, the parameters as box + slider + description, the
+   preview image). The preview is the core's render path
+   (`launcher_core::preview`) and its frame goes into an `Image` as
+   pixels, with no BMP on disk as in Qt. Checked headless: the CRT
+   Aperture preset over an XP screenshot, the same with BRIGHTNESS
+   overridden to 0.3 (the preview renders again, darker), and a profile
+   saved and listed. Not driven: dragging a slider, the download, an
+   animated preset. Two things learned:
+   - **No view is told its size.** The preview renders at its area's
+     size, so the editor takes the area's node from `after_build` and
+     reads `Ui::frame` on a 30 ms tick, rendering again when the size,
+     the inputs or an animated preset's clock moved. A resize event on
+     any view would replace the tick (another mitsuami gap).
+   - **The preview's wgpu device must not be dropped at exit.** The
+     reactive runtime is torn down with the main thread's thread-locals,
+     and wgpu's queue, dropped then, touched a wgpu thread-local already
+     gone: the process aborted after a shot was written. The device is
+     dropped when the editor closes and held in a `ManuallyDrop`, so one
+     still alive at exit is never dropped.
 5. **First run** (the preset offer and its progress in the toolbar).
 6. **What Qt does that mitsuami has no call for yet**: the app ID
    (Wayland's `app_id`, which the desktop entry is matched by; GTK takes
    the program name today), the window icon, a text colour for warnings,
    a file dialog's start folder (step 2), a text input's focus leaving
-   and an elide mode (step 3).
+   and an elide mode (step 3), and a view's size (step 4).
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
    packager, then the flip**: every package ships this as `2ksbox`,
    `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's

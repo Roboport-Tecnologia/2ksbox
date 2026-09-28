@@ -21,6 +21,7 @@
 mod clone;
 mod discs;
 mod machines;
+mod shaders;
 mod shot;
 mod snaps;
 mod wizard;
