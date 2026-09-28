@@ -16,6 +16,7 @@
 //! row's "Running" label.
 
 use crate::clone::{CloneWindow, Cloner};
+use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
 use launcher_core::machines::Machines;
@@ -72,6 +73,17 @@ impl Library {
         });
     }
 
+    /// The shared disc shelf's file.
+    pub fn disc_library_path(&self) -> PathBuf {
+        self.model.with_untracked(|m| m.borrow().disc_library_path.clone())
+    }
+
+    /// Hand the shelf to every running machine's drive again, after the
+    /// shelf window wrote it.
+    pub fn republish_shelf(&self) {
+        self.model.with_untracked(|m| m.borrow().republish_shelf());
+    }
+
     fn bundle_path(&self, dir: &Path) -> Option<PathBuf> {
         self.model.with_untracked(|m| row_of(&m.borrow(), dir).and_then(|row| m.borrow().bundle_path(row)))
     }
@@ -121,6 +133,7 @@ pub fn MachinesWindow() -> impl View {
     let wizard = use_store::<Wizard>();
     let cloner = use_store::<Cloner>();
     let snaps = use_store::<Snaps>();
+    let discs = use_store::<Discs>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
     crate::shot::arm(&["", "create", "clonego"]);
@@ -153,6 +166,23 @@ pub fn MachinesWindow() -> impl View {
             snaps.ask(&name);
         }
     }
+    // `shelf[:<disc>]`: the shared shelf, with a disc added through its
+    // Add field; `discs:<machine.toml>[:boot=<disc>]`: the shelf for a
+    // machine, with a disc ticked to boot with.
+    if let Some(add) = crate::shot::screen("shelf") {
+        discs.open_library(library);
+        discs.add(&add);
+    }
+    if let Some(arg) = crate::shot::screen("discs") {
+        let (bundle, boot) = match arg.split_once(":boot=") {
+            Some((bundle, disc)) => (bundle.to_owned(), Some(PathBuf::from(disc))),
+            None => (arg, None),
+        };
+        discs.open_for(PathBuf::from(bundle), library, false);
+        if boot.is_some() {
+            discs.set_boot(boot);
+        }
+    }
     if let Some(bundle) = crate::shot::screen("clonego") {
         cloner.open_for(Path::new(&bundle), false);
         cloner.submit(library);
@@ -178,12 +208,13 @@ pub fn MachinesWindow() -> impl View {
             </Show>
             <Row gap=Spacing::Sm>
                 <Button @click=move || wizard.open_fresh()>"New machine…"</Button>
-                <Button enabled=false>"Disc shelf…"</Button>
+                <Button @click=move || discs.open_library(library)>"Disc shelf…"</Button>
                 <Button enabled=false>"Shader profiles…"</Button>
             </Row>
             <WizardWindow/>
             <CloneWindow/>
             <SnapshotsWindow/>
+            <DiscShelfWindow/>
         </Column>
     }
 }
@@ -205,9 +236,19 @@ fn MachineRow(dir: PathBuf) -> impl View {
     let wizard = use_store::<Wizard>();
     let cloner = use_store::<Cloner>();
     let snaps = use_store::<Snaps>();
+    let discs = use_store::<Discs>();
     let dir = Rc::new(dir);
-    let (d1, d2, d3, d4, d5, d6, d7, d8) =
-        (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
+    let (d1, d2, d3, d4, d5, d6, d7, d8, d9) = (
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir.clone(),
+        dir,
+    );
     view! {
         <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
             <Text max_lines=1 width=NAME_W>
@@ -230,7 +271,11 @@ fn MachineRow(dir: PathBuf) -> impl View {
                     wizard.open_edit(bundle);
                 }
             }>"Edit…"</Button>
-            <Button enabled=false>"Discs…"</Button>
+            <Button @click=move || {
+                if let Some(bundle) = library.bundle_path(&d9) {
+                    discs.open_for(bundle, library, library.is_running(&d9));
+                }
+            }>"Discs…"</Button>
             <Button @click=move || {
                 if let Some(bundle) = library.bundle_path(&d8) {
                     snaps.open_for(&bundle, library.is_running(&d8));

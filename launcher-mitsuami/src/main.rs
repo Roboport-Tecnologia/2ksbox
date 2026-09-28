@@ -19,6 +19,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod clone;
+mod discs;
 mod machines;
 mod shot;
 mod snaps;
