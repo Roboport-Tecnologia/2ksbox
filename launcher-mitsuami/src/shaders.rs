@@ -376,6 +376,11 @@ pub fn ShaderEditorWindow() -> impl View {
                     label_width=LABEL_W
                     label="Preset (.slangp)"
                     filter=PRESET_FILTER
+                    // Presets live where nobody would navigate by hand.
+                    empty_dir=move || match shaders.preset_state() {
+                        PresetState::Ready(dir) => Some(dir),
+                        _ => None,
+                    }
                     value=move || shaders.read(|e| e.preset_path.clone())
                     @edit=move |p| shaders.edit(|e| {
                         e.preset_path = p;

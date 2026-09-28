@@ -3,12 +3,20 @@
 //! Every window with a path in it uses this one.
 //!
 //! Typing is still allowed (a path the user already knows, or one on a
-//! mount the dialog can't reach). What the dialog offers and where a pick
-//! lands are `launcher_core::browse`'s (`extensions`, `picked`,
-//! `remember`), as in every front end.
+//! mount the dialog can't reach). What the dialog offers, where it opens
+//! and where a pick lands are `launcher_core::browse`'s (`extensions`,
+//! `browse_start`, `picked`, `remember`), as in every front end.
+//!
+//! `LAUNCHER_PICK=<label>=<path>` is the probe's way in, as `launcher-qt`'s
+//! `pickdisc` is: the field with that caption prints the dialog it would
+//! open (`pick <label>: start …, filters …`), then takes `<path>` as the
+//! dialog's answer, down the same line a real pick goes. The dialog itself
+//! is modal and needs a human.
 
 use launcher_core::browse::{self, Filter};
 use mitsuami::prelude::*;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// `value` is what the field shows, and the owner's model decides it: an
 /// edit (typed or picked) goes out through `@edit`, and the value comes
@@ -23,34 +31,74 @@ pub fn PathField(
     label_width: Length,
     value: Value<String>,
     #[prop(default, into)] placeholder: String,
-    /// The extensions the dialog offers; `None` offers every file.
+    /// The extensions the dialog offers first; "All files" always follows,
+    /// since a filter that hides the file someone is looking for is worse
+    /// than none. `None` offers every file.
     filter: Option<Filter<'static>>,
     /// The dialog picks a folder instead of a file.
     #[prop(default)]
     folder: bool,
+    /// Where the dialog opens while the field is empty, before the last
+    /// folder browsed (`browse::browse_start`). Only the shader editor's
+    /// preset field has one: the preset collection.
+    #[prop(default = Value::Static(None))]
+    empty_dir: Value<Option<PathBuf>>,
     on_edit: Callback<String>,
     on_pick: Callback<String>,
     on_submit: Callback<()>,
 ) -> impl View {
-    let (title, edited, picked) = (label.clone(), on_edit.clone(), on_pick);
+    // Decided when it opens: the value, and the last folder any dialog was
+    // browsing, change between one click and the next.
+    let request = {
+        let (title, value) = (label.clone(), value.clone());
+        move || {
+            let mut request = OpenFile::new().title(title.clone());
+            if folder {
+                request = request.directories();
+            } else if let Some(filter) = filter {
+                request = request
+                    .filter(FileFilter::new(filter.0, browse::extensions(filter)))
+                    .filter(FileFilter::all("All files"));
+            }
+            match browse::browse_start(&value.get(), empty_dir.get().as_deref()) {
+                Some(start) => request.start_folder(start),
+                None => request,
+            }
+        }
+    };
+    let accept = {
+        let (edited, picked) = (on_edit.clone(), on_pick);
+        move |path: &Path| {
+            // A sandboxed dialog hands back the portal's copy; the bundle
+            // wants the file's own path.
+            let path = browse::picked(path);
+            browse::remember(&path);
+            let path = path.display().to_string();
+            edited.call(path.clone());
+            picked.call(path);
+        }
+    };
+    if let Some(path) = scripted_pick(&label) {
+        let (label, request, accept) = (label.clone(), request.clone(), accept.clone());
+        spawn_local(async move {
+            // Once the window is up, as a click would be.
+            sleep(Duration::from_millis(300)).await;
+            let request = request();
+            let globs = |f: &FileFilter| if f.is_all() { "*".to_owned() } else { f.extensions.join(" ") };
+            let filters: Vec<String> = request.filters.iter().map(|f| format!("{} ({})", f.name, globs(f))).collect();
+            eprintln!(
+                "[launcher] pick {label}: start {}, filters [{}]",
+                request.start_folder.as_deref().map_or("(platform's)".into(), |p| p.display().to_string()),
+                filters.join(" | "),
+            );
+            accept(&path);
+        });
+    }
     let browse = move || {
-        let mut request = OpenFile::new().title(title.clone());
-        if folder {
-            request = request.directories();
-        }
-        if let Some(filter) = filter {
-            request = request.filter(FileFilter::new(filter.0, browse::extensions(filter)));
-        }
-        let (edited, picked) = (edited.clone(), picked.clone());
+        let (request, accept) = (request(), accept.clone());
         spawn_local(async move {
             if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {
-                // A sandboxed dialog hands back the portal's copy; the
-                // bundle wants the file's own path.
-                let path = browse::picked(&path);
-                browse::remember(&path);
-                let path = path.display().to_string();
-                edited.call(path.clone());
-                picked.call(path);
+                accept(&path);
             }
         });
     };
@@ -68,4 +116,11 @@ pub fn PathField(
             <Button @click=browse>"Browse…"</Button>
         </Row>
     }
+}
+
+/// `LAUNCHER_PICK=<label>=<path>`'s path, for the field with that caption.
+fn scripted_pick(label: &str) -> Option<PathBuf> {
+    let pick = std::env::var("LAUNCHER_PICK").ok()?;
+    let (field, path) = pick.split_once('=')?;
+    (field == label).then(|| path.into())
 }

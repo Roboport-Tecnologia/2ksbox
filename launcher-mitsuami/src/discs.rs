@@ -139,7 +139,10 @@ impl Discs {
     /// A folder to share, picked in the platform's dialog. A disc file is
     /// the Add disc field's `PathField`.
     fn share_folder(&self) {
-        let request = OpenFile::new().title("Share a folder with the guest").directories();
+        let mut request = OpenFile::new().title("Share a folder with the guest").directories();
+        if let Some(start) = browse::browse_start("", None) {
+            request = request.start_folder(start);
+        }
         let discs = *self;
         spawn_local(async move {
             if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {

@@ -97,9 +97,7 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    Not yet driven by hand on a desktop. What mitsuami lacks for it:
    - **Text colour.** A warning is the Callout style, not the Qt
      window's amber: `Text` has no tone or colour.
-   - **A dialog's start folder.** `OpenFile` has none, so Browse… opens
-     where the platform likes, not at `browse::browse_start` (the field's
-     own folder, or the last one picked).
+   - A dialog's start folder: done in step 6 (mitsuami 6beec2e).
    - The optimizations disclosure closes when the page changes (each page
      is rebuilt by its `Show`); the Qt window keeps it open.
 3. **Clone, snapshots and the disc shelf (done 2026-09-27).** `clone.rs`,
@@ -172,15 +170,27 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    `main.rs`: `paths::APP_ID` and the 256 px PNG `launcher-qt` uses);
    under Sway the window's `app_id` is `com._2ksbox.Launcher`. GTK shows
    only the theme's icon by that name, so a run from the build has none,
-   as with Qt on Wayland. Still missing: a text colour for warnings,
-   a file dialog's start folder (step 2), a text input's focus leaving
-   and an elide mode (step 3), and a view's size (step 4).
+   as with Qt on Wayland. Still missing: a text colour for warnings, a
+   text input's focus leaving and an elide mode (step 3), and a view's
+   size (step 4).
    Widgets mitsuami won't have are ours, as `#[component]`s in their own
    module. The first is `src/path_field.rs`, `PathField` (the caption,
    the text input and Browse…, as `PathField.qml`): the form, the shader
    editor and the disc shelf's Add disc field all use it. `@edit` gets a
    typed or picked path, `@pick` only a picked one (the shelf adds it at
-   once).
+   once). What its dialog needed went into mitsuami 6beec2e
+   (`OpenFile::start_folder`, `FileFilter::all`), so it does what the Qt
+   field does: it opens at `browse::browse_start` (the field's folder,
+   else `empty_dir`, which the preset field sets to the preset
+   collection, else the last folder browsed), and "All files" follows the
+   field's filter. The shelf's Add folder… starts at the last folder too.
+   `LAUNCHER_PICK=<label>=<path>` is the probe, as `pickdisc` is for Qt:
+   the field with that caption prints the dialog it would open
+   (`pick <label>: start …, filters […]`) and takes `<path>` as its
+   answer. With `LAUNCHER_SCREEN=shelf` and a `Game [1996].cue`, the disc
+   goes on the shelf under its own name, the field empties, and the next
+   pick starts in its folder (checked 2026-09-28, with
+   `LAUNCHER_BROWSE_MEMORY` on a scratch file).
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
    packager, then the flip**: every package ships this as `2ksbox`,
    `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's
