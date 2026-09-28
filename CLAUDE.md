@@ -54,7 +54,8 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   workspace, so `cargo build` never needs Qt. **The egui front end was
   deleted** (ADR-017, user decision); don't bring it back.
 - **The Qt front end is the one that ships** (ADR-015) as `2ksbox` in
-  every package; `scripts/build.sh` has a `qt` stage. Every packager opens
+  every package, until `launcher-mitsuami/` (ADR-023, track M19: native
+  widgets through mitsuami, pinned by git rev) reaches parity and replaces it; `scripts/build.sh` has a `qt` stage. Every packager opens
   a **real window offscreen** (`QT_QPA_PLATFORM=offscreen` +
   `LAUNCHER_QT_SHOT`) and requires a PNG, because a missing Qt platform
   plugin or QML module is invisible to every other check.

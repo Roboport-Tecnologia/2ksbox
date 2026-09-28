@@ -1,0 +1,34 @@
+[package]
+name = "launcher-mitsuami"
+version = "0.0.1"
+# mitsuami is edition 2024 and needs Rust 1.95; the root workspace's
+# `stable` toolchain is newer than both.
+edition = "2024"
+# ADR-009: it links no QEMU code (it spawns the player as a separate
+# process), and does link permissively licensed crates.
+license = "GPL-2.0-or-later"
+description = "Companion launcher, a native front end over launcher-core on mitsuami (ADR-023, track M19)."
+
+# Its own workspace, excluded from the root one like `launcher-qt`, so a
+# plain `cargo build` at the repository root never needs GTK 4 (or Qt,
+# with the `kde` feature) development files. Build it from this
+# directory.
+[workspace]
+
+[features]
+default = ["gtk"]
+# The Linux toolkit (ADR-023): GTK 4 by default, Kirigami with `kde`.
+# Neither makes a difference on macOS or Windows.
+gtk = ["mitsuami/gtk"]
+kde = ["mitsuami/kde"]
+
+[dependencies]
+# Every rule and every sentence a window shows (ADR-014).
+launcher-core = { path = "../launcher-core" }
+# Pinned to a commit (user decision): bump `rev` to take a newer mitsuami.
+# For work on both at once, a `[patch]` in a local, uncommitted
+# `.cargo/config.toml` points it at a checkout (docs/tracks/m19-mitsuami-launcher.md).
+mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "ba81173f9a7be1aac462260387469c45331864be", default-features = false }
+# The headless screenshot (`LAUNCHER_SHOT`), the one image encoding this
+# crate does itself.
+png = "0.18"

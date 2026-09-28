@@ -748,3 +748,34 @@ to start, but it ties the driver to a Windows build machine and to the
 WDK's licence. Stretching the XP-model driver: no path to DWM exists
 there.
 
+
+## ADR-023: The launcher moves to mitsuami, native widgets on every platform (2026-09-27)
+
+**Status.** Accepted; supersedes ADR-015 once track M19 flips what the
+packages ship. Until then `launcher-qt` ships and ADR-015 holds.
+
+**Decision** (user decision). The launcher's next front end is
+`launcher-mitsuami/`, on mitsuami (`github.com/Roboport-Tecnologia/mitsuami`,
+the user's own Rust toolkit): AppKit on macOS, WinUI 3 on Windows, GTK 4
+on Linux by default, and Kirigami with the `kde` feature. It is a second
+thin view over `launcher-core` until it has every window, then it replaces
+`launcher-qt` in every package, as egui went (ADR-017). It depends on
+mitsuami by a **pinned git revision** (user decision), bumped by hand.
+
+**Why.** Each platform's own controls, not Qt Quick's approximation of
+them; no Qt to carry on macOS and Windows; the toolkit is written against
+this launcher's needs (its `ARCHITECTURE.md` §10 lists what 2ksbox
+drove: `NumberInput`, `Image`, tooltips, modal windows, the toolbar,
+lists).
+
+**Costs.** The Windows launcher needs MSVC and the Windows App Runtime
+2.4 (user: a native Windows build is fine), so it leaves the Linux cross
+build; the player and QEMU stay on it (separate processes). The Linux
+build needs GTK 4.10+ development files; the Flatpak either moves to a
+GNOME runtime or builds with `kde` on `org.kde.Platform`, decided when
+it is packaged.
+
+**Unchanged.** ADR-014: every rule and every sentence stays in
+`launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami
+takes its pixels in an `Image`); the player keeps winit (a mitsuami player
+is a separate question, `spikes/player-gtk`).

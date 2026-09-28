@@ -664,6 +664,16 @@ is the smallest front end and a test (the `capi` check). Another front
 end owes the table above, and `lc_editor_read_frame` hands over RGB8
 for the preview.
 
+## The next front end: mitsuami
+
+`launcher-mitsuami/` (ADR-023, track M19) is the same view over
+`launcher-core` in mitsuami's platform widgets: AppKit, WinUI 3, GTK 4, or
+Kirigami. It owes the table above like any front end, and replaces
+`launcher-qt` once it has every window. Each window is a `#[component]`
+reading a `Store` that holds the core model; a keyed platform `List`
+keeps a row mounted while its key lives, so rows read their fields from
+the model by key instead of holding copies.
+
 ## Shipping Qt
 
 ### What shipping Qt costs

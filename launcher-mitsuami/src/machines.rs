@@ -1,0 +1,173 @@
+//! The machine library window, over `launcher_core::machines::Machines`:
+//! the scan, the running-player map, what "Play" does (publish the shelf,
+//! derive the monitor socket from the bundle directory, spawn) and the
+//! reap that notices a player exiting.
+//!
+//! The model is the `Library` store's. It is not itself a signal's value:
+//! `reap` needs it mutably every half second, and a signal's `update`
+//! would redraw every row each time whether a player exited or not. It
+//! sits in a `RefCell` beside a version signal that moves only when the
+//! model did, and every view reads it through `Library::read`, which
+//! tracks that version.
+//!
+//! The list is keyed by bundle directory, and a keyed row stays mounted
+//! while its key does, so a row reads its fields through the model by
+//! that key rather than holding a copy: a player exiting changes only its
+//! row's "Running" label.
+
+use launcher_core::machines::Machines;
+use mitsuami::prelude::*;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
+
+/// The widths of the three text columns, shared by the header and every
+/// row so they line up.
+const NAME_W: f32 = 190.0;
+const FAMILY_W: f32 = 80.0;
+const SHADER_W: f32 = 170.0;
+
+#[derive(Clone, Copy)]
+pub struct Library {
+    /// Never set: a `Copy` handle on the model, so the store is `Copy`.
+    model: Signal<Rc<RefCell<Machines>>>,
+    version: Signal<u64>,
+    /// The line at the end of the toolbar: what "Play" last did.
+    pub status: Signal<String>,
+}
+
+impl Store for Library {
+    fn create() -> Library {
+        Library {
+            model: signal(Rc::new(RefCell::new(Machines::load()))),
+            version: signal(0),
+            status: signal(String::new()),
+        }
+    }
+}
+
+impl Library {
+    /// Read the model, as a dependency of the calling view.
+    fn read<R>(&self, f: impl FnOnce(&Machines) -> R) -> R {
+        self.version.get();
+        self.model.with_untracked(|m| f(&m.borrow()))
+    }
+
+    /// Change the model, and say so if `f` reports that it did.
+    fn write(&self, f: impl FnOnce(&mut Machines) -> bool) {
+        if self.model.with_untracked(|m| f(&mut m.borrow_mut())) {
+            self.version.update(|v| *v += 1);
+        }
+    }
+
+    fn dirs(&self) -> Vec<PathBuf> {
+        self.read(|m| m.entries().iter().map(|e| e.dir.clone()).collect())
+    }
+
+    /// One of a row's text fields, by its bundle directory.
+    fn field(&self, dir: &Path, f: impl FnOnce(&Machines, usize) -> Option<String>) -> String {
+        self.read(|m| row_of(m, dir).and_then(|row| f(m, row)).unwrap_or_default())
+    }
+
+    fn is_running(&self, dir: &Path) -> bool {
+        self.read(|m| m.is_running_dir(dir))
+    }
+
+    fn play(&self, dir: &Path) {
+        self.write(|m| {
+            let Some(row) = row_of(m, dir) else { return false };
+            let (line, started) = match m.play(row) {
+                Ok(line) => (line, true),
+                Err(e) => (e, false),
+            };
+            self.status.set(line);
+            started
+        })
+    }
+
+    /// Reap any player that exited. A child process cannot push that news,
+    /// so the window polls, as the Qt window's `Timer` does.
+    async fn poll(self) {
+        loop {
+            sleep(Duration::from_millis(500)).await;
+            self.write(|m| !m.reap().is_empty());
+        }
+    }
+}
+
+fn row_of(machines: &Machines, dir: &Path) -> Option<usize> {
+    machines.entries().iter().position(|e| e.dir == dir)
+}
+
+#[component]
+pub fn MachinesWindow() -> impl View {
+    let library = use_store::<Library>();
+    // The window's task, which ends with it.
+    spawn_local(library.poll());
+    crate::shot::arm();
+    view! {
+        <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0>
+            <Toolbar>
+                <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
+            </Toolbar>
+            <Text text_style=TextStyle::Title>"Machines"</Text>
+            <Row padding_x=Spacing::Md gap=Spacing::Md>
+                <Text text_style=TextStyle::Headline width=NAME_W>"Name"</Text>
+                <Text text_style=TextStyle::Headline width=FAMILY_W>"Family"</Text>
+                <Text text_style=TextStyle::Headline width=SHADER_W>"Shader"</Text>
+            </Row>
+            <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineList/> }>
+                <Column grow=1.0 align=Align::Center justify=Justify::Center>
+                    <Text>{move || library.read(|m| format!("No machines yet.\n{}", m.library_dir.display()))}</Text>
+                </Column>
+            </Show>
+            <Row gap=Spacing::Sm>
+                <Button enabled=false>"New machine…"</Button>
+                <Button enabled=false>"Disc shelf…"</Button>
+                <Button enabled=false>"Shader profiles…"</Button>
+            </Row>
+        </Column>
+    }
+}
+
+#[component]
+fn MachineList() -> impl View {
+    let library = use_store::<Library>();
+    view! {
+        <List each=move || library.dirs() key=|d: &PathBuf| d.clone() grow=1.0 let:dir>
+            <MachineRow dir=dir/>
+        </List>
+    }
+}
+
+/// One machine: its name, family and shader, and what can be done to it.
+#[component]
+fn MachineRow(dir: PathBuf) -> impl View {
+    let library = use_store::<Library>();
+    let dir = Rc::new(dir);
+    let (d1, d2, d3, d4, d5) = (dir.clone(), dir.clone(), dir.clone(), dir.clone(), dir);
+    view! {
+        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
+            <Text max_lines=1 width=NAME_W>
+                {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
+            </Text>
+            <Text max_lines=1 width=FAMILY_W>
+                {move || library.field(&d2, |m, row| m.machine(row).map(|x| x.family.label().to_string()))}
+            </Text>
+            <Text max_lines=1 width=SHADER_W grow=1.0>
+                {move || library.field(&d3, |m, row| Some(m.shader_label_at(row)))}
+            </Text>
+            <Show when=move || library.is_running(&d4) fallback=move || {
+                let dir = d5.clone();
+                view! { <Button width=60 @click=move || library.play(&dir)>"Play"</Button> }
+            }>
+                <Text width=60>"Running"</Text>
+            </Show>
+            <Button enabled=false>"Edit…"</Button>
+            <Button enabled=false>"Discs…"</Button>
+            <Button enabled=false>"Snapshots…"</Button>
+            <Button enabled=false>"Clone…"</Button>
+        </Row>
+    }
+}

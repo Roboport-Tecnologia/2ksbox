@@ -2,6 +2,7 @@
 # `launcher-qt` is its own workspace (so the root build never needs Qt),
 # so it has its own target directory that `/target` above doesn't cover.
 /launcher-qt/target
+/launcher-mitsuami/target
 # written by cxx-qt-build for the QML language server; holds this
 # machine's absolute build path
 /launcher-qt/.qmlls.ini
