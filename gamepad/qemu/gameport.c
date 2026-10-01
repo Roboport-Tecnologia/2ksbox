@@ -33,7 +33,7 @@
 #include "qemu/timer.h"
 #include "qemu/error-report.h"
 #include "hw/isa/isa.h"
-#include "hw/qdev-properties.h"
+#include "hw/core/qdev-properties.h"
 #include "qom/object.h"
 
 #include "gameport.h"
@@ -255,14 +255,13 @@ static void gameport_unrealizefn(DeviceState *dev)
     }
 }
 
-static Property gameport_properties[] = {
+static const Property gameport_properties[] = {
     /* The standard base. A property because it costs nothing and the
      * eight ports are a card's decode, not an architectural constant. */
     DEFINE_PROP_UINT32("iobase", GameportState, iobase, 0x200),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
-static void gameport_class_initfn(ObjectClass *klass, void *data)
+static void gameport_class_initfn(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 

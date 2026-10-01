@@ -34,25 +34,11 @@ machine: dead as one burst, 300 frames at 57 fps paced.
 
 -global isa-pit.reinject=off restores upstream's behaviour (the A/B).
 
-diff --git a/include/hw/intc/i8259.h b/include/hw/intc/i8259.h
---- a/include/hw/intc/i8259.h
-+++ b/include/hw/intc/i8259.h
-@@ -18,5 +18,11 @@
- qemu_irq *kvm_i8259_init(ISABus *bus);
- int pic_get_output(PICCommonState *s);
- int pic_read_irq(PICCommonState *s);
-+/*
-+ * 2ksbox: called when the CPU acknowledges the master PIC's IRQ 0, so the
-+ * PIT can raise a tick it owes the guest (i8254.c, "reinject").
-+ */
-+extern void (*pic_irq0_intack_hook)(void *opaque);
-+extern void *pic_irq0_intack_opaque;
- 
- #endif
 diff --git a/hw/intc/i8259.c b/hw/intc/i8259.c
+index 8f2aa1f0fb..0236f3dca9 100644
 --- a/hw/intc/i8259.c
 +++ b/hw/intc/i8259.c
-@@ -56,6 +56,8 @@
+@@ -53,6 +53,8 @@ struct PICClass {
  static int64_t irq_time[16];
  #endif
  PICCommonState *isa_pic;
@@ -61,7 +47,7 @@ diff --git a/hw/intc/i8259.c b/hw/intc/i8259.c
  static PICCommonState *slave_pic;
  
  /* return the highest priority found in mask (highest = smallest
-@@ -171,6 +173,9 @@
+@@ -168,6 +170,9 @@ static void pic_intack(PICCommonState *s, int irq)
          s->irr &= ~(1 << irq);
      }
      pic_update_irq(s);
@@ -71,42 +57,8 @@ diff --git a/hw/intc/i8259.c b/hw/intc/i8259.c
  }
  
  int pic_read_irq(PICCommonState *s)
-diff --git a/include/hw/timer/i8254_internal.h b/include/hw/timer/i8254_internal.h
---- a/include/hw/timer/i8254_internal.h
-+++ b/include/hw/timer/i8254_internal.h
-@@ -48,6 +48,12 @@
-     QEMUTimer *irq_timer;
-     qemu_irq irq;
-     uint32_t irq_disabled;
-+    /* 2ksbox (reinject): the level last driven onto the IRQ line, and the
-+     * ticks whose edge reached the PIC while the one before was still
-+     * pending there */
-+    int out_level;
-+    uint32_t owed;
-+    int64_t owed_last;      /* when the last owed edge was raised: one per half period */
- } PITChannelState;
- 
- struct PITCommonState {
-@@ -55,6 +61,7 @@
-     MemoryRegion ioports;
-     uint32_t iobase;
-     bool overdue_irq;
-+    bool reinject;
-     PITChannelState channels[3];
- };
- 
-diff --git a/hw/timer/i8254_common.c b/hw/timer/i8254_common.c
---- a/hw/timer/i8254_common.c
-+++ b/hw/timer/i8254_common.c
-@@ -241,6 +241,7 @@
- static Property pit_common_properties[] = {
-     DEFINE_PROP_UINT32("iobase", PITCommonState, iobase,  -1),
-     DEFINE_PROP_BOOL("overdue-irq", PITCommonState, overdue_irq, true),
-+    DEFINE_PROP_BOOL("reinject", PITCommonState, reinject, true),
-     DEFINE_PROP_END_OF_LIST(),
- };
- 
 diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
+index a777a4525f..833e7fc748 100644
 --- a/hw/timer/i8254.c
 +++ b/hw/timer/i8254.c
 @@ -28,6 +28,8 @@
@@ -116,9 +68,9 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
 +#include "hw/intc/i8259.h"
 +#include "hw/isa/i8259_internal.h"
  #include "qom/object.h"
+ #include "trace.h"
  
- //#define DEBUG_PIT
-@@ -48,6 +50,7 @@
+@@ -49,6 +51,7 @@ struct PITClass {
  };
  
  static void pit_irq_timer_update(PITChannelState *s, int64_t current_time);
@@ -126,7 +78,7 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
  
  static int pit_get_count(PITChannelState *s)
  {
-@@ -111,6 +114,7 @@
+@@ -112,6 +115,7 @@ static inline void pit_load_count(PITChannelState *s, int val)
          val = 0x10000;
      s->count_load_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
      s->count = val;
@@ -134,7 +86,7 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
      pit_irq_timer_update(s, s->count_load_time);
  }
  
-@@ -293,6 +297,10 @@
+@@ -299,6 +303,10 @@ static void pit_irq_timer_update(PITChannelState *s, int64_t current_time)
      }
      expire_time = pit_get_next_transition_time(s, current_time);
      irq_level = pit_get_out(s, current_time);
@@ -145,12 +97,10 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
      qemu_set_irq(s->irq, irq_level);
  #ifdef DEBUG_PIT
      printf("irq_level=%d next_delay=%f\n",
-@@ -304,8 +312,85 @@
-         timer_mod(s->irq_timer, expire_time);
-     else
+@@ -312,6 +320,83 @@ static void pit_irq_timer_update(PITChannelState *s, int64_t current_time)
          timer_del(s->irq_timer);
-+}
-+
+ }
+ 
 +/*
 + * 2ksbox: a tick whose edge arrives while the last one is still pending at
 + * the PIC is not lost (-global isa-pit.reinject=off restores upstream).
@@ -201,8 +151,8 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
 +    if (isa_pic && (isa_pic->irr & 1) && !(isa_pic->imr & 1) && s->owed < cap) {
 +        s->owed++;
 +    }
- }
- 
++}
++
 +static void pit_irq0_acked(void *opaque)
 +{
 +    PITChannelState *s = opaque;
@@ -231,7 +181,7 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
  static void pit_irq_timer(void *opaque)
  {
      PITChannelState *s = opaque;
-@@ -379,6 +464,11 @@
+@@ -385,6 +470,11 @@ static void pit_realizefn(DeviceState *dev, Error **errp)
  
      qdev_init_gpio_in(dev, pit_irq_control, 1);
  
@@ -242,4 +192,57 @@ diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
 +
      pc->parent_realize(dev, errp);
  }
+ 
+diff --git a/hw/timer/i8254_common.c b/hw/timer/i8254_common.c
+index 02a87fddf5..b5fdd0cde8 100644
+--- a/hw/timer/i8254_common.c
++++ b/hw/timer/i8254_common.c
+@@ -239,6 +239,7 @@ static const VMStateDescription vmstate_pit_common = {
+ static const Property pit_common_properties[] = {
+     DEFINE_PROP_UINT32("iobase", PITCommonState, iobase,  -1),
+     DEFINE_PROP_BOOL("overdue-irq", PITCommonState, overdue_irq, true),
++    DEFINE_PROP_BOOL("reinject", PITCommonState, reinject, true),
+ };
+ 
+ static void pit_common_class_init(ObjectClass *klass, const void *data)
+diff --git a/include/hw/intc/i8259.h b/include/hw/intc/i8259.h
+index 1f2420231f..fc25c55831 100644
+--- a/include/hw/intc/i8259.h
++++ b/include/hw/intc/i8259.h
+@@ -18,5 +18,11 @@ qemu_irq *i8259_init(ISABus *bus, qemu_irq parent_irq_in);
+ qemu_irq *kvm_i8259_init(ISABus *bus);
+ int pic_get_output(PICCommonState *s);
+ int pic_read_irq(PICCommonState *s);
++/*
++ * 2ksbox: called when the CPU acknowledges the master PIC's IRQ 0, so the
++ * PIT can raise a tick it owes the guest (i8254.c, "reinject").
++ */
++extern void (*pic_irq0_intack_hook)(void *opaque);
++extern void *pic_irq0_intack_opaque;
+ 
+ #endif
+diff --git a/include/hw/timer/i8254_internal.h b/include/hw/timer/i8254_internal.h
+index f320e61ee1..0c4d286d66 100644
+--- a/include/hw/timer/i8254_internal.h
++++ b/include/hw/timer/i8254_internal.h
+@@ -48,6 +48,12 @@ typedef struct PITChannelState {
+     QEMUTimer *irq_timer;
+     qemu_irq irq;
+     uint32_t irq_disabled;
++    /* 2ksbox (reinject): the level last driven onto the IRQ line, and the
++     * ticks whose edge reached the PIC while the one before was still
++     * pending there */
++    int out_level;
++    uint32_t owed;
++    int64_t owed_last;      /* when the last owed edge was raised: one per half period */
+ } PITChannelState;
+ 
+ struct PITCommonState {
+@@ -55,6 +61,7 @@ struct PITCommonState {
+     MemoryRegion ioports;
+     uint32_t iobase;
+     bool overdue_irq;
++    bool reinject;
+     PITChannelState channels[3];
+ };
  

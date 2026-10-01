@@ -19,6 +19,8 @@ re-enters through a bottom half. REQUEST SENSE carries an ASCQ. The new
 IDEState fields are not migrated (snapshots with a cdimage medium are
 unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 
+diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
+index 0ea149ad8c..2f39dfbdee 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
 @@ -30,11 +30,19 @@
@@ -30,7 +32,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +/* win98-xp-virt (patch 51, doc 17 §5.3): the disc model behind a cdimage medium */
 +#include "block/cdimage.h"
 +#include "block/libdisc.h"
-+#include "sysemu/replay.h"
++#include "system/replay.h"
 +#endif
  
  #define ATAPI_SECTOR_BITS (2 + BDRV_SECTOR_BITS)
@@ -196,7 +198,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +        timer_del(s->atapi_play_timer);
 +    }
 +    if (s->atapi_voice) {
-+        AUD_set_active_out(s->atapi_voice, 0);
++        audio_be_set_active_out(s->atapi_be, s->atapi_voice, 0);
 +    }
 +    s->atapi_audio_frame_len = 0;
 +    s->atapi_audio_status = status;
@@ -254,7 +256,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +
 +    while (avail > 0 && s->atapi_audio_status == 0x11) {
 +        if (s->atapi_audio_frame_pos < s->atapi_audio_frame_len) {
-+            int n = AUD_write(s->atapi_voice,
++            int n = audio_be_write(s->atapi_be, s->atapi_voice,
 +                              s->atapi_audio_frame + s->atapi_audio_frame_pos,
 +                              MIN(avail, s->atapi_audio_frame_len - s->atapi_audio_frame_pos));
 +            if (n <= 0) {
@@ -266,7 +268,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +        }
 +        if (s->atapi_play_lba >= s->atapi_play_end) {
 +            s->atapi_audio_status = 0x13;
-+            AUD_set_active_out(s->atapi_voice, 0);
++            audio_be_set_active_out(s->atapi_be, s->atapi_voice, 0);
 +            return;
 +        }
 +        {
@@ -279,7 +281,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +                libdisc_read_raw(disc, s->atapi_play_lba, raw) < 0) {
 +                /* a data sector or a lost medium inside the range: error stop */
 +                s->atapi_audio_status = 0x14;
-+                AUD_set_active_out(s->atapi_voice, 0);
++                audio_be_set_active_out(s->atapi_be, s->atapi_voice, 0);
 +                return;
 +            }
 +            atapi_audio_route(s, raw);
@@ -299,7 +301,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +    s->atapi_audio_frame_len = 0;
 +    if (s->atapi_voice) {
 +        s->atapi_audio_status = 0x11;
-+        AUD_set_active_out(s->atapi_voice, 1);
++        audio_be_set_active_out(s->atapi_be, s->atapi_voice, 1);
 +        return;
 +    }
 +    if (!s->atapi_play_timer) {
@@ -350,13 +352,13 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +}
 +#endif
 +
-+void ide_atapi_audio_init(IDEState *s, QEMUSoundCard *card)
++void ide_atapi_audio_init(IDEState *s, AudioBackend *be)
 +{
 +    struct audsettings as = { 44100, 2, AUDIO_FORMAT_S16, 0 };
 +
-+    s->atapi_card = card;
++    s->atapi_be = be;
 +#ifdef CONFIG_CDIMAGE
-+    s->atapi_voice = AUD_open_out(card, NULL, "cd-audio", s, atapi_audio_cb, &as);
++    s->atapi_voice = audio_be_open_out(be, NULL, "cd-audio", s, atapi_audio_cb, &as);
 +#else
 +    (void)as;
 +#endif
@@ -368,7 +370,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +        timer_del(s->atapi_play_timer);
 +    }
 +    if (s->atapi_voice) {
-+        AUD_set_active_out(s->atapi_voice, 0);
++        audio_be_set_active_out(s->atapi_be, s->atapi_voice, 0);
 +    }
 +    s->atapi_audio_frame_len = 0;
 +    s->atapi_audio_status = 0x15;
@@ -381,7 +383,71 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  static void cd_data_to_raw(uint8_t *buf, int lba)
  {
      /* sync bytes */
-@@ -186,6 +527,13 @@ void ide_atapi_cmd_ok(IDEState *s)
+@@ -88,13 +429,14 @@ static void cd_data_to_raw(uint8_t *buf, int lba)
+     memset(buf, 0, 288);
+ }
+ 
++static void cd_read_sector_done(IDEState *s);
++
+ static void cd_read_sector_cb(void *opaque, int ret)
+ {
+     IDEState *s = opaque;
+     int et = s->elementary_transfer_size;
+     int skip = s->io_buffer_index;
+     int nsec = DIV_ROUND_UP(skip + et, s->cd_sector_size);
+-    uint8_t *buf;
+     int i;
+ 
+     trace_cd_read_sector_cb(s->lba, ret);
+@@ -116,6 +458,16 @@ static void cd_read_sector_cb(void *opaque, int ret)
+         }
+     }
+ 
++    cd_read_sector_done(s);
++}
++
++/* The burst's sectors are in io_buffer: hand them to the guest. */
++static void cd_read_sector_done(IDEState *s)
++{
++    int et = s->elementary_transfer_size;
++    int skip = s->io_buffer_index;
++    uint8_t *buf;
++
+     s->status &= ~BUSY_STAT;
+ 
+     s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO;
+@@ -146,6 +498,30 @@ static int cd_read_sector(IDEState *s)
+     int skip = s->io_buffer_index;
+     int nsec = DIV_ROUND_UP(skip + et, s->cd_sector_size);
+ 
++#ifdef CONFIG_CDIMAGE
++    if (s->atapi_disc_read) {
++        /*
++         * The model fills synchronously, in the READ CD shape the command
++         * asked for, so there is nothing to unpack. atapi_disc_read_sector
++         * advances s->lba per sector; cd_read_sector_done advances it for
++         * the whole burst, re-reading a boundary sector next time.
++         */
++        int lba = s->lba;
++        int i;
++
++        assert(nsec * s->cd_sector_size <= s->io_buffer_total_len);
++        for (i = 0; i < nsec; i++) {
++            if (atapi_disc_read_sector(s, s->io_buffer + i * s->cd_sector_size,
++                                       s->cd_sector_size) < 0) {
++                return 0; /* the sense is set and the command has ended */
++            }
++        }
++        s->lba = lba;
++        cd_read_sector_done(s);
++        return 0;
++    }
++#endif
++
+     if (s->cd_sector_size != 2048 && s->cd_sector_size != 2352) {
+         block_acct_invalid(blk_get_stats(s->blk), BLOCK_ACCT_READ);
+         return -EINVAL;
+@@ -184,6 +560,13 @@ void ide_atapi_cmd_ok(IDEState *s)
  void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
  {
      trace_ide_atapi_cmd_error(s, sense_key, asc);
@@ -395,7 +461,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      s->error = sense_key << 4;
      s->status = READY_STAT | ERR_STAT;
      s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO | ATAPI_INT_REASON_CD;
-@@ -195,6 +543,12 @@ void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
+@@ -193,6 +576,12 @@ void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
      ide_bus_set_irq(s->bus);
  }
  
@@ -408,24 +474,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  void ide_atapi_io_error(IDEState *s, int ret)
  {
      /* XXX: handle more errors */
-@@ -229,6 +583,16 @@ void ide_atapi_cmd_reply_end(IDEState *s)
- 
-         /* see if a new sector must be read */
-         if (s->lba != -1 && s->io_buffer_index >= s->cd_sector_size) {
-+#ifdef CONFIG_CDIMAGE
-+            if (s->atapi_disc_read) {
-+                /* the model fills synchronously: no callback, no recursion */
-+                if (atapi_disc_read_sector(s, s->io_buffer,
-+                                           s->io_buffer_total_len) < 0) {
-+                    return;
-+                }
-+                s->io_buffer_index = 0;
-+            } else
-+#endif
-             if (!s->elementary_transfer_size) {
-                 ret = cd_read_sector(s);
-                 if (ret < 0) {
-@@ -419,6 +783,90 @@ eot:
+@@ -407,6 +796,90 @@ eot:
      ide_set_inactive(s, false);
  }
  
@@ -516,7 +565,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  /* start a CD-ROM read command with DMA */
  /* XXX: test if DMA is available */
  static void ide_atapi_cmd_read_dma(IDEState *s, int lba, int nb_sectors,
-@@ -445,6 +893,12 @@ static void ide_atapi_cmd_read(IDEState *s, int lba, int nb_sectors,
+@@ -433,6 +906,12 @@ static void ide_atapi_cmd_read(IDEState *s, int lba, int nb_sectors,
      trace_ide_atapi_cmd_read(s, s->atapi_dma ? "dma" : "pio",
                               lba, nb_sectors);
      if (s->atapi_dma) {
@@ -529,7 +578,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
          ide_atapi_cmd_read_dma(s, lba, nb_sectors, sector_size);
      } else {
          ide_atapi_cmd_read_pio(s, lba, nb_sectors, sector_size);
-@@ -697,6 +1151,7 @@ static void cmd_request_sense(IDEState *s, uint8_t *buf)
+@@ -685,6 +1164,7 @@ static void cmd_request_sense(IDEState *s, uint8_t *buf)
      buf[2] = s->sense_key;
      buf[7] = 10;
      buf[12] = s->asc;
@@ -537,7 +586,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  
      if (s->sense_key == UNIT_ATTENTION) {
          s->sense_key = NO_SENSE;
-@@ -799,7 +1254,7 @@ static void cmd_inquiry(IDEState *s, uint8_t *buf)
+@@ -787,7 +1267,7 @@ static void cmd_inquiry(IDEState *s, uint8_t *buf)
          buf[6] = 0;    /* reserved */
          buf[7] = 0;    /* reserved */
          padstr8(buf + 8, 8, "QEMU");
@@ -546,7 +595,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
          padstr8(buf + 32, 4, s->version);
          idx = 36;
      }
-@@ -809,12 +1264,69 @@ static void cmd_inquiry(IDEState *s, uint8_t *buf)
+@@ -797,12 +1277,69 @@ static void cmd_inquiry(IDEState *s, uint8_t *buf)
      ide_atapi_cmd_reply(s, idx, max_len);
  }
  
@@ -616,7 +665,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      /* only feature 0 is supported */
      if (buf[2] != 0 || buf[3] != 0) {
          ide_atapi_cmd_error(s, ILLEGAL_REQUEST,
-@@ -904,6 +1416,17 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
+@@ -892,6 +1429,17 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
              buf[19] = 0;
              buf[21] = 0;
              buf[23] = 0;
@@ -634,7 +683,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  
              ide_atapi_cmd_reply(s, 24, max_len);
              break;
-@@ -941,6 +1464,19 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
+@@ -929,6 +1477,19 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
              buf[27] = 0;
              buf[28] = 0;
              buf[29] = 0;
@@ -654,7 +703,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
              ide_atapi_cmd_reply(s, 30, max_len);
              break;
          default:
-@@ -1000,28 +1536,61 @@ static void cmd_read(IDEState *s, uint8_t* buf)
+@@ -988,28 +1549,61 @@ static void cmd_read(IDEState *s, uint8_t* buf)
          return;
      }
  
@@ -689,11 +738,11 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +                                 unsigned int nb_sectors)
  {
 -    unsigned int nb_sectors, lba, transfer_request;
--
--    /* Total logical sectors of ATAPI_SECTOR_SIZE(=2048) bytes */
--    uint64_t total_sectors = s->nb_sectors >> 2;
 +    unsigned int transfer_request;
  
+-    /* Total logical sectors of ATAPI_SECTOR_SIZE(=2048) bytes */
+-    uint64_t total_sectors = s->nb_sectors >> 2;
+-
 -    nb_sectors = (buf[6] << 16) | (buf[7] << 8) | buf[8];
 -    if (nb_sectors == 0) {
 -        ide_atapi_cmd_ok(s);
@@ -730,7 +779,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      transfer_request = buf[9] & 0xf8;
      if (transfer_request == 0x00) {
          /* nothing */
-@@ -1050,6 +1619,48 @@ static void cmd_read_cd(IDEState *s, uint8_t* buf)
+@@ -1038,6 +1632,48 @@ static void cmd_read_cd(IDEState *s, uint8_t* buf)
      }
  }
  
@@ -779,7 +828,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  static void cmd_seek(IDEState *s, uint8_t* buf)
  {
      unsigned int lba;
-@@ -1091,6 +1702,17 @@ static void cmd_start_stop_unit(IDEState *s, uint8_t* buf)
+@@ -1079,6 +1715,17 @@ static void cmd_start_stop_unit(IDEState *s, uint8_t* buf)
          }
      }
  
@@ -797,7 +846,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      ide_atapi_cmd_ok(s);
  }
  
-@@ -1119,6 +1741,18 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
+@@ -1107,6 +1754,18 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
      msf = (buf[1] >> 1) & 1;
      start_track = buf[6];
  
@@ -816,7 +865,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      switch(format) {
      case 0:
          len = cdrom_read_toc(total_sectors, buf, msf, start_track);
-@@ -1169,6 +1803,14 @@ static void cmd_read_disc_information(IDEState *s, uint8_t* buf)
+@@ -1157,6 +1816,14 @@ static void cmd_read_disc_information(IDEState *s, uint8_t* buf)
          return;
      }
  
@@ -831,7 +880,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      memset(buf, 0, 34);
      buf[1] = 32;
      buf[2] = 0xe; /* last session complete, disc finalized */
-@@ -1246,6 +1888,235 @@ static void cmd_set_speed(IDEState *s, uint8_t* buf)
+@@ -1234,6 +1901,235 @@ static void cmd_set_speed(IDEState *s, uint8_t* buf)
      ide_atapi_cmd_ok(s);
  }
  
@@ -1067,7 +1116,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  enum {
      /*
       * Only commands flagged as ALLOW_UA are allowed to run under a
-@@ -1289,15 +2160,24 @@ static const struct AtapiCmd {
+@@ -1277,15 +2173,24 @@ static const struct AtapiCmd {
      [ 0x25 ] = { cmd_read_cdvd_capacity,            CHECK_READY },
      [ 0x28 ] = { cmd_read, /* (10) */               CHECK_READY },
      [ 0x2b ] = { cmd_seek,                          CHECK_READY | NONDATA },
@@ -1092,7 +1141,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      [ 0xbe ] = { cmd_read_cd,                       CHECK_READY | CONDDATA },
      /* [1] handler detects and reports not ready condition itself */
  };
-@@ -1308,6 +2188,14 @@ void ide_atapi_cmd(IDEState *s)
+@@ -1296,6 +2201,14 @@ void ide_atapi_cmd(IDEState *s)
      const struct AtapiCmd *cmd = &atapi_cmd_table[s->io_buffer[0]];
  
      trace_ide_atapi_cmd(s, s->io_buffer[0]);
@@ -1107,33 +1156,11 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  
      if (trace_event_get_state_backends(TRACE_IDE_ATAPI_CMD_PACKET)) {
          g_autoptr(GString) str =
---- a/hw/ide/ide-internal.h
-+++ b/hw/ide/ide-internal.h
-@@ -296,6 +296,10 @@
- #define ASC_SAVING_PARAMETERS_NOT_SUPPORTED  0x39
- #define ASC_DATA_PHASE_ERROR                 0x4b
- #define ASC_MEDIA_REMOVAL_PREVENTED          0x53
-+/* win98-xp-virt (patch 51, doc 17): the disc model's sense */
-+#define ASC_LUN_COMMUNICATION_FAILURE        0x08
-+#define ASC_UNRECOVERED_READ_ERROR           0x11
-+#define ASC_ILLEGAL_MODE_FOR_THIS_TRACK      0x64
- 
- #define CFA_NO_ERROR            0x00
- #define CFA_MISC_ERROR          0x09
-@@ -404,6 +408,10 @@
- 
- void ide_atapi_cmd_ok(IDEState *s);
- void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc);
-+void ide_atapi_cmd_error_ascq(IDEState *s, int sense_key, int asc, int ascq);
-+void ide_atapi_medium_changed(IDEState *s);
-+void ide_atapi_audio_init(IDEState *s, QEMUSoundCard *card);
-+void ide_atapi_data_out_done(IDEState *s);
- void ide_atapi_dma_restart(IDEState *s);
- void ide_atapi_io_error(IDEState *s, int ret);
- 
+diff --git a/hw/ide/core.c b/hw/ide/core.c
+index befbab9486..de6b0259f5 100644
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -1209,6 +1209,8 @@
+@@ -1211,6 +1211,8 @@ static void ide_cd_change_cb(void *opaque, bool load, Error **errp)
      s->cdrom_changed = 1;
      s->events.new_media = true;
      s->events.eject_request = false;
@@ -1142,7 +1169,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      ide_bus_set_irq(s->bus);
  }
  
-@@ -1393,6 +1395,7 @@
+@@ -1395,6 +1397,7 @@ static void ide_reset(IDEState *s)
      s->io_buffer_index = 0;
      s->cd_sector_size = 0;
      s->atapi_dma = 0;
@@ -1150,7 +1177,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      s->tray_locked = 0;
      s->tray_open = 0;
      /* ATA DMA state */
-@@ -2382,7 +2385,8 @@
+@@ -2391,7 +2394,8 @@ void ide_ctrl_write(void *opaque, uint32_t addr, uint32_t val)
  static bool ide_is_pio_out(IDEState *s)
  {
      if (s->end_transfer_func == ide_sector_write ||
@@ -1160,7 +1187,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
          return false;
      } else if (s->end_transfer_func == ide_sector_read ||
                 s->end_transfer_func == ide_transfer_stop ||
-@@ -2642,6 +2646,14 @@
+@@ -2651,6 +2655,14 @@ int ide_init_drive(IDEState *s, IDEDevice *dev, IDEDriveKind kind, Error **errp)
          snprintf(s->drive_serial_str, sizeof(s->drive_serial_str),
                   "QM%05d", s->drive_serial);
      }
@@ -1175,7 +1202,7 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
      if (dev->model) {
          pstrcpy(s->drive_model_str, sizeof(s->drive_model_str), dev->model);
      } else {
-@@ -2816,6 +2828,14 @@
+@@ -2825,6 +2837,14 @@ void ide_bus_set_irq(IDEBus *bus)
  
  void ide_exit(IDEState *s)
  {
@@ -1184,13 +1211,13 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +        s->atapi_play_timer = NULL;
 +    }
 +    if (s->atapi_voice) {
-+        AUD_close_out(s->atapi_card, s->atapi_voice);
++        audio_be_close_out(s->atapi_be, s->atapi_voice);
 +        s->atapi_voice = NULL;
 +    }
      timer_free(s->sector_write_timer);
      qemu_vfree(s->smart_selftest_data);
      qemu_vfree(s->io_buffer);
-@@ -2835,6 +2855,7 @@
+@@ -2844,6 +2864,7 @@ static EndTransferFunc* transfer_end_table[] = {
          ide_atapi_cmd_reply_end,
          ide_atapi_cmd,
          ide_dummy_transfer_stop,
@@ -1198,9 +1225,11 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
  };
  
  static int transfer_end_table_idx(EndTransferFunc *fn)
+diff --git a/hw/ide/ide-dev.c b/hw/ide/ide-dev.c
+index 5d478588c6..7e40eb6511 100644
 --- a/hw/ide/ide-dev.c
 +++ b/hw/ide/ide-dev.c
-@@ -188,7 +188,23 @@
+@@ -187,7 +187,23 @@ static void ide_hd_realize(IDEDevice *dev, Error **errp)
  
  static void ide_cd_realize(IDEDevice *dev, Error **errp)
  {
@@ -1213,38 +1242,66 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +        return;
 +    }
 +    /* win98-xp-virt (patch 51): the CD-DA voice when audiodev= was given */
-+    if (dev->card.state) {
++    if (dev->audio_be) {
 +        IDEBus *bus = DO_UPCAST(IDEBus, qbus, dev->qdev.parent_bus);
 +        IDEState *s = bus->ifs + dev->unit;
 +
-+        if (!AUD_register_card("ide-cd", &dev->card, errp)) {
++        if (!audio_be_check(&dev->audio_be, errp)) {
 +            return;
 +        }
-+        ide_atapi_audio_init(s, &dev->card);
++        ide_atapi_audio_init(s, dev->audio_be);
 +    }
  }
  
- static Property ide_hd_properties[] = {
-@@ -220,6 +236,8 @@
+ static const Property ide_hd_properties[] = {
+@@ -218,6 +234,8 @@ static const TypeInfo ide_hd_info = {
  
- static Property ide_cd_properties[] = {
+ static const Property ide_cd_properties[] = {
      DEFINE_IDE_DEV_PROPERTIES(),
-+    /* win98-xp-virt (patch 51): CD-DA through a host audiodev (doc 17 §5.4) */
-+    DEFINE_AUDIO_PROPERTIES(IDEDrive, dev.card),
-     DEFINE_PROP_END_OF_LIST(),
++    /* 2ksbox (patch 51): CD-DA through a host audiodev (doc 17 §5.4) */
++    DEFINE_AUDIO_PROPERTIES(IDEDrive, dev.audio_be),
  };
  
+ static void ide_cd_class_init(ObjectClass *klass, const void *data)
+diff --git a/hw/ide/ide-internal.h b/hw/ide/ide-internal.h
+index 281d07c9d5..cb7c17909e 100644
+--- a/hw/ide/ide-internal.h
++++ b/hw/ide/ide-internal.h
+@@ -296,6 +296,10 @@
+ #define ASC_SAVING_PARAMETERS_NOT_SUPPORTED  0x39
+ #define ASC_DATA_PHASE_ERROR                 0x4b
+ #define ASC_MEDIA_REMOVAL_PREVENTED          0x53
++/* win98-xp-virt (patch 51, doc 17): the disc model's sense */
++#define ASC_LUN_COMMUNICATION_FAILURE        0x08
++#define ASC_UNRECOVERED_READ_ERROR           0x11
++#define ASC_ILLEGAL_MODE_FOR_THIS_TRACK      0x64
+ 
+ #define CFA_NO_ERROR            0x00
+ #define CFA_MISC_ERROR          0x09
+@@ -404,6 +408,10 @@ void ide_abort_command(IDEState *s);
+ 
+ void ide_atapi_cmd_ok(IDEState *s);
+ void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc);
++void ide_atapi_cmd_error_ascq(IDEState *s, int sense_key, int asc, int ascq);
++void ide_atapi_medium_changed(IDEState *s);
++void ide_atapi_audio_init(IDEState *s, AudioBackend *be);
++void ide_atapi_data_out_done(IDEState *s);
+ void ide_atapi_dma_restart(IDEState *s);
+ void ide_atapi_io_error(IDEState *s, int ret);
+ 
+diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
+index f5eaaf68e6..3f9c67c1db 100644
 --- a/include/hw/ide/ide-dev.h
 +++ b/include/hw/ide/ide-dev.h
 @@ -23,6 +23,7 @@
- #include "sysemu/dma.h"
- #include "hw/qdev-properties.h"
+ #include "system/dma.h"
+ #include "hw/core/qdev-properties.h"
  #include "hw/block/block.h"
-+#include "audio/audio.h"
++#include "qemu/audio.h"
  
  typedef struct IDEDevice IDEDevice;
  typedef struct IDEState IDEState;
-@@ -140,6 +141,25 @@
+@@ -140,6 +141,25 @@ struct IDEState {
      uint8_t *smart_selftest_data;
      /* AHCI */
      int ncq_queues;
@@ -1263,19 +1320,19 @@ unsupported). CDIMAGE_TRACE=1 prints every packet, reply and sense.
 +    int64_t atapi_play_start_ns;
 +    uint8_t atapi_audio_port[4], atapi_audio_vol[4];
 +    QEMUTimer *atapi_play_timer;
-+    QEMUSoundCard *atapi_card;      /* the ide-cd device's, when audiodev= is set */
++    AudioBackend *atapi_be;         /* the ide-cd device's, when audiodev= is set */
 +    SWVoiceOut *atapi_voice;        /* 44100 Hz stereo S16, opened at realize */
 +    uint8_t atapi_audio_frame[2352]; /* the sector being written to the voice */
 +    int atapi_audio_frame_pos, atapi_audio_frame_len;
  };
  
  struct IDEDeviceClass {
-@@ -165,6 +185,8 @@
+@@ -165,6 +185,8 @@ struct IDEDevice {
       */
      uint16_t rotation_rate;
      bool win2k_install_hack;
 +    /* win98-xp-virt (patch 51): ide-cd audiodev= for CD-DA (doc 17 §5.4) */
-+    QEMUSoundCard card;
++    AudioBackend *audio_be;
  };
  
  typedef struct IDEDrive {

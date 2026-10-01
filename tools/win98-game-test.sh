@@ -91,6 +91,10 @@
 #                       a Win98 machine), or no MPU-401 at all
 #   QEMU_TCG_OPTS=a=off,b=on  accelerator switches for an A/B (the convention of
 #                       the Python guest tools): -accel tcg,<them>
+#   BOARD=name          the machine type (pc-i440fx-9.2): the launcher's for
+#                       a bundle from before it recorded one, which every
+#                       image here is. A newer board is new hardware to an
+#                       installed Windows 98 (track M21)
 #   EXTRA="args"        more QEMU arguments, word-split (-perfmap, say, for
 #                       `perf report` to name the vCPU's generated code.
 #                       The map is /tmp/perf-<pid>.map, a line per
@@ -341,7 +345,16 @@ echo "==> booting ${VGA:-d3dpt}, discs: ${CDS:-none}, ${RUN_SECS}s of run -> $OU
 # The MPU-401 finds the bank relative to the cwd unless told, so tell it.
 export LIBSYNTH_SF2="${LIBSYNTH_SF2:-$ROOT/soundfonts/TimGM6mb.sf2}"
 read -ra EXTRA_ARGS <<< "${EXTRA:-}"
-MACHINE=(-L "$ROOT/qemu/pc-bios" -machine pc,hpet=off -m 256 -accel "tcg${QEMU_TCG_OPTS:+,$QEMU_TCG_OPTS}"
+# The Voodoo 2 in the launcher's slot (bundle.rs: addr=0x05). Anywhere else
+# it is a card the guest has never seen: Windows 98 installs it again and
+# sits at "restart to finish configuring the new hardware", and RUN.BAT
+# never runs.
+for i in "${!EXTRA_ARGS[@]}"; do
+  case "${EXTRA_ARGS[$i]}" in
+    voodoo2|voodoo2,*) [[ "${EXTRA_ARGS[$i]}" == *addr=* ]] || EXTRA_ARGS[$i]+=",addr=0x05" ;;
+  esac
+done
+MACHINE=(-L "$ROOT/qemu/pc-bios" -machine "${BOARD:-pc-i440fx-9.2},hpet=off" -m 256 -accel "tcg${QEMU_TCG_OPTS:+,$QEMU_TCG_OPTS}"
          "${DRIVES[@]}" "${VGAARGS[@]}" "${USBARGS[@]}"
          -net none -rtc base=localtime -msg timestamp=on
          -debugcon file:"$OUT/dbg.log" -qmp unix:"$SOCK",server,nowait

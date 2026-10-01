@@ -4,7 +4,7 @@ uses it to redirect framebuffer binding 0 to the FBO that stands in for the
 window's default framebuffer.
 
 diff --git a/hw/mesa/mesagl_impl.c b/hw/mesa/mesagl_impl.c
-index 7309197..dcb0eaf 100644
+index 730919713d..dcb0eaf473 100644
 --- a/hw/mesa/mesagl_impl.c
 +++ b/hw/mesa/mesagl_impl.c
 @@ -1795,3 +1795,16 @@ void InitMesaGLExt(void)
@@ -25,7 +25,7 @@ index 7309197..dcb0eaf 100644
 +    return old;
 +}
 diff --git a/hw/mesa/mesagl_impl.h b/hw/mesa/mesagl_impl.h
-index a1e5306..7643297 100644
+index a1e5306c06..7643297cbb 100644
 --- a/hw/mesa/mesagl_impl.h
 +++ b/hw/mesa/mesagl_impl.h
 @@ -71,6 +71,8 @@ void FiniMesaGL(void);

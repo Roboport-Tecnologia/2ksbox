@@ -56,7 +56,7 @@ swaps it over QMP, and a shelf rewritten in a new order would leave a
 remembered slot pointing at the wrong disc.
 
 diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
-index 0bd89fe..5be3236 100644
+index 2f39dfbdee..c0cef9c65b 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
 @@ -31,6 +31,11 @@
@@ -71,7 +71,7 @@ index 0bd89fe..5be3236 100644
  #ifdef CONFIG_CDIMAGE
  /* win98-xp-virt (patch 51, doc 17 §5.3): the disc model behind a cdimage medium */
  #include "block/cdimage.h"
-@@ -2148,6 +2153,286 @@ enum {
+@@ -2161,6 +2166,286 @@ enum {
      CONDDATA = 0x08,
  };
  
@@ -358,7 +358,7 @@ index 0bd89fe..5be3236 100644
  static const struct AtapiCmd {
      void (*handler)(IDEState *s, uint8_t *buf);
      int flags;
-@@ -2179,6 +2464,15 @@ static const struct AtapiCmd {
+@@ -2192,6 +2477,15 @@ static const struct AtapiCmd {
      [ 0xbd ] = { cmd_mechanism_status,              0 },
      [ 0xb9 ] = { cmd_read_cd_msf,                   CHECK_READY | CONDDATA },
      [ 0xbe ] = { cmd_read_cd,                       CHECK_READY | CONDDATA },
@@ -375,12 +375,12 @@ index 0bd89fe..5be3236 100644
  };
  
 diff --git a/hw/ide/ide-dev.c b/hw/ide/ide-dev.c
-index 59d67a6..9633b28 100644
+index 7e40eb6511..4ee613af07 100644
 --- a/hw/ide/ide-dev.c
 +++ b/hw/ide/ide-dev.c
-@@ -205,6 +205,23 @@ static void ide_cd_realize(IDEDevice *dev, Error **errp)
+@@ -204,6 +204,23 @@ static void ide_cd_realize(IDEDevice *dev, Error **errp)
          }
-         ide_atapi_audio_init(s, &dev->card);
+         ide_atapi_audio_init(s, dev->audio_be);
      }
 +    /* win98-xp-virt (patch 52): the disc shelf when shelf= was given.
 +     * The ATAPI handlers only ever see an IDEState, so both the shelf
@@ -401,18 +401,18 @@ index 59d67a6..9633b28 100644
 +    }
  }
  
- static Property ide_hd_properties[] = {
-@@ -238,6 +255,8 @@ static Property ide_cd_properties[] = {
+ static const Property ide_hd_properties[] = {
+@@ -236,6 +253,8 @@ static const Property ide_cd_properties[] = {
      DEFINE_IDE_DEV_PROPERTIES(),
-     /* win98-xp-virt (patch 51): CD-DA through a host audiodev (doc 17 §5.4) */
-     DEFINE_AUDIO_PROPERTIES(IDEDrive, dev.card),
-+    /* win98-xp-virt (patch 52): the disc shelf file (cdshelf/cdshelf_proto.h) */
+     /* 2ksbox (patch 51): CD-DA through a host audiodev (doc 17 §5.4) */
+     DEFINE_AUDIO_PROPERTIES(IDEDrive, dev.audio_be),
++    /* 2ksbox (patch 52): the disc shelf file (cdshelf/cdshelf_proto.h) */
 +    DEFINE_PROP_STRING("shelf", IDEDrive, dev.shelf),
-     DEFINE_PROP_END_OF_LIST(),
  };
  
+ static void ide_cd_class_init(ObjectClass *klass, const void *data)
 diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
-index 4a467a3..dc0ba7a 100644
+index 3f9c67c1db..da4aa1bf60 100644
 --- a/include/hw/ide/ide-dev.h
 +++ b/include/hw/ide/ide-dev.h
 @@ -160,6 +160,21 @@ struct IDEState {
@@ -440,8 +440,8 @@ index 4a467a3..dc0ba7a 100644
 @@ -187,6 +202,9 @@ struct IDEDevice {
      bool win2k_install_hack;
      /* win98-xp-virt (patch 51): ide-cd audiodev= for CD-DA (doc 17 §5.4) */
-     QEMUSoundCard card;
-+    /* win98-xp-virt (patch 52): ide-cd shelf=<file>, the disc shelf the
+     AudioBackend *audio_be;
++    /* 2ksbox (patch 52): ide-cd shelf=<file>, the disc shelf the
 +     * in-guest CDSHELF program lists and loads from (cdshelf/cdshelf_proto.h) */
 +    char *shelf;
  };

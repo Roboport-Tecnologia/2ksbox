@@ -1,34 +1,38 @@
-diff --git a/audio/audio.c b/audio/audio.c
-index ff8b2f2..ab5f0f0 100644
---- a/audio/audio.c
-+++ b/audio/audio.c
-@@ -1965,6 +1965,58 @@ void audio_set_volume_out(SWVoiceOut *sw, Volume *vol)
-     }
+diff --git a/audio/audio-be.c b/audio/audio-be.c
+index ee065fa496..8ed9e4b475 100644
+--- a/audio/audio-be.c
++++ b/audio/audio-be.c
+@@ -169,6 +169,65 @@ void audio_be_set_volume_out(AudioBackend *be, SWVoiceOut *sw, Volume *vol)
+     klass->set_volume_out(be, sw, vol);
  }
  
-+/* 2ksbox, patch 61: the sound card's analog inputs (audio.h) */
++/* 2ksbox, patch 61: the sound card's analog inputs (qemu/audio.h) */
 +#define AUDIO_MIXIN_VOICES 4
 +
 +static struct {
-+    SWVoiceOut *sw[AUDIO_MIXIN_VOICES];
++    struct {
++        AudioBackend *be;
++        SWVoiceOut *sw;
++    } voice[AUDIO_MIXIN_VOICES];
 +    bool set;
 +    int mute;
 +    uint8_t lvol, rvol;
 +} audio_mixin[AUDIO_MIXIN_COUNT];
 +
-+void audio_mixin_attach(AudioMixIn in, SWVoiceOut *sw)
++void audio_mixin_attach(AudioMixIn in, AudioBackend *be, SWVoiceOut *sw)
 +{
 +    int i;
 +
 +    for (i = 0; i < AUDIO_MIXIN_VOICES; i++) {
-+        if (!audio_mixin[in].sw[i]) {
-+            audio_mixin[in].sw[i] = sw;
++        if (!audio_mixin[in].voice[i].sw) {
++            audio_mixin[in].voice[i].be = be;
++            audio_mixin[in].voice[i].sw = sw;
 +            break;
 +        }
 +    }
 +    if (audio_mixin[in].set) {
-+        AUD_set_volume_out(sw, audio_mixin[in].mute, audio_mixin[in].lvol,
-+                           audio_mixin[in].rvol);
++        audio_be_set_volume_out_lr(be, sw, audio_mixin[in].mute,
++                                   audio_mixin[in].lvol, audio_mixin[in].rvol);
 +    }
 +}
 +
@@ -37,8 +41,9 @@ index ff8b2f2..ab5f0f0 100644
 +    int i;
 +
 +    for (i = 0; i < AUDIO_MIXIN_VOICES; i++) {
-+        if (audio_mixin[in].sw[i] == sw) {
-+            audio_mixin[in].sw[i] = NULL;
++        if (audio_mixin[in].voice[i].sw == sw) {
++            audio_mixin[in].voice[i].be = NULL;
++            audio_mixin[in].voice[i].sw = NULL;
 +        }
 +    }
 +}
@@ -52,46 +57,19 @@ index ff8b2f2..ab5f0f0 100644
 +    audio_mixin[in].lvol = lvol;
 +    audio_mixin[in].rvol = rvol;
 +    for (i = 0; i < AUDIO_MIXIN_VOICES; i++) {
-+        if (audio_mixin[in].sw[i]) {
-+            AUD_set_volume_out(audio_mixin[in].sw[i], mute, lvol, rvol);
++        if (audio_mixin[in].voice[i].sw) {
++            audio_be_set_volume_out_lr(audio_mixin[in].voice[i].be,
++                                       audio_mixin[in].voice[i].sw,
++                                       mute, lvol, rvol);
 +        }
 +    }
 +}
 +
- void AUD_set_volume_in (SWVoiceIn *sw, int mute, uint8_t lvol, uint8_t rvol)
+ void audio_be_set_volume_in(AudioBackend *be, SWVoiceIn *sw, Volume *vol)
  {
-     Volume vol = { .mute = mute, .channels = 2, .vol = { lvol, rvol } };
-diff --git a/audio/audio.h b/audio/audio.h
-index fcc2230..4448361 100644
---- a/audio/audio.h
-+++ b/audio/audio.h
-@@ -135,6 +135,24 @@ typedef struct Volume {
- void audio_set_volume_out(SWVoiceOut *sw, Volume *vol);
- void audio_set_volume_in(SWVoiceIn *sw, Volume *vol);
- 
-+/*
-+ * 2ksbox, patch 61: the analog inputs of the machine's sound card. On a
-+ * real PC the FM chip and the CD drive's audio cable ran into the sound
-+ * card's mixer, whose volume registers scaled them; here each is a voice
-+ * of its own device. A source attaches its voice to its input, the card
-+ * sets the input's volume, and whichever comes first, the other finds
-+ * it. A machine with no card that sets one plays every input at unity.
-+ */
-+typedef enum AudioMixIn {
-+    AUDIO_MIXIN_FM,
-+    AUDIO_MIXIN_CD,
-+    AUDIO_MIXIN_COUNT
-+} AudioMixIn;
-+
-+void audio_mixin_attach(AudioMixIn in, SWVoiceOut *sw);
-+void audio_mixin_detach(AudioMixIn in, SWVoiceOut *sw);
-+void audio_mixin_set_volume(AudioMixIn in, int mute, uint8_t lvol, uint8_t rvol);
-+
- SWVoiceIn *AUD_open_in (
-     QEMUSoundCard *card,
-     SWVoiceIn *sw,
+     AudioBackendClass *klass = AUDIO_BACKEND_GET_CLASS(be);
 diff --git a/hw/audio/sb16.c b/hw/audio/sb16.c
-index b575d99..f67c32e 100644
+index 8d1de37125..1252ee6e91 100644
 --- a/hw/audio/sb16.c
 +++ b/hw/audio/sb16.c
 @@ -23,6 +23,7 @@
@@ -99,10 +77,10 @@ index b575d99..f67c32e 100644
  
  #include "qemu/osdep.h"
 +#include <math.h>
- #include "hw/audio/soundhw.h"
- #include "audio/audio.h"
- #include "hw/irq.h"
-@@ -119,6 +120,7 @@ struct SB16State {
+ #include "hw/audio/model.h"
+ #include "qemu/audio.h"
+ #include "hw/core/irq.h"
+@@ -118,6 +119,7 @@ struct SB16State {
  #define SAMPLE_RATE_MAX 45000
  
  static void SB_audio_callback (void *opaque, int free);
@@ -110,7 +88,7 @@ index b575d99..f67c32e 100644
  
  static int magic_of_irq (int irq)
  {
-@@ -229,6 +231,7 @@ static void continue_dma8 (SB16State *s)
+@@ -228,6 +230,7 @@ static void continue_dma8 (SB16State *s)
              SB_audio_callback,
              &as
              );
@@ -118,7 +96,7 @@ index b575d99..f67c32e 100644
      }
  
      control (s, 1);
-@@ -392,6 +395,7 @@ static void dma_cmd (SB16State *s, uint8_t cmd, uint8_t d0, int dma_len)
+@@ -391,6 +394,7 @@ static void dma_cmd (SB16State *s, uint8_t cmd, uint8_t d0, int dma_len)
              SB_audio_callback,
              &as
              );
@@ -126,15 +104,15 @@ index b575d99..f67c32e 100644
      }
  
      control (s, 1);
-@@ -894,6 +898,7 @@ static void legacy_reset (SB16State *s)
+@@ -893,6 +897,7 @@ static void legacy_reset (SB16State *s)
          SB_audio_callback,
          &as
          );
 +    sb16_apply_volumes (s);
  
      /* Not sure about that... */
-     /* AUD_set_active_out (s->voice, 1); */
-@@ -1092,15 +1097,111 @@ static void reset_mixer (SB16State *s)
+     /* audio_be_set_active_out (s->voice, 1); */
+@@ -1091,15 +1096,111 @@ static void reset_mixer (SB16State *s)
      /* d5=output filt, d1=stereo switch */
      s->mixer_regs[0x0e] = 0;
  
@@ -216,9 +194,9 @@ index b575d99..f67c32e 100644
 +    int master_l = sb16_level (m[0x30]) + (m[0x41] >> 6) * 6;
 +    int master_r = sb16_level (m[0x31]) + (m[0x42] >> 6) * 6;
 +
-+    AUD_set_volume_out (s->voice, 0,
-+                        sb16_vol (master_l + sb16_level (m[0x32])),
-+                        sb16_vol (master_r + sb16_level (m[0x33])));
++    audio_be_set_volume_out_lr (s->audio_be, s->voice, 0,
++                                sb16_vol (master_l + sb16_level (m[0x32])),
++                                sb16_vol (master_r + sb16_level (m[0x33])));
 +    audio_mixin_set_volume (AUDIO_MIXIN_FM, 0,
 +                            sb16_vol (master_l + sb16_level (m[0x34])),
 +                            sb16_vol (master_r + sb16_level (m[0x35])));
@@ -254,7 +232,7 @@ index b575d99..f67c32e 100644
      }
  }
  
-@@ -1164,6 +1265,8 @@ static void mixer_write_datab(void *opaque, uint32_t nport, uint32_t val)
+@@ -1163,6 +1264,8 @@ static void mixer_write_datab(void *opaque, uint32_t nport, uint32_t val)
      }
  
      s->mixer_regs[s->mixer_nreg] = val;
@@ -263,7 +241,7 @@ index b575d99..f67c32e 100644
  }
  
  static uint32_t mixer_read(void *opaque, uint32_t nport)
-@@ -1319,6 +1422,7 @@ static int sb16_post_load (void *opaque, int version_id)
+@@ -1325,6 +1428,7 @@ static int sb16_post_load (void *opaque, int version_id)
                  SB_audio_callback,
                  &as
                  );
@@ -271,7 +249,7 @@ index b575d99..f67c32e 100644
          }
  
          control (s, 1);
-@@ -1431,6 +1535,7 @@ static void sb16_realizefn (DeviceState *dev, Error **errp)
+@@ -1437,6 +1541,7 @@ static void sb16_realizefn (DeviceState *dev, Error **errp)
      s->csp_regs[9] = 0xf8;
  
      reset_mixer (s);
@@ -280,30 +258,59 @@ index b575d99..f67c32e 100644
      if (!s->aux_ts) {
          error_setg(errp, "warning: Could not create auxiliary timer");
 diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
-index 33a1cb9..1c7c438 100644
+index d0a9e05e68..804e381c07 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -405,6 +405,11 @@ void ide_atapi_audio_init(IDEState *s, QEMUSoundCard *card)
-     s->atapi_card = card;
+@@ -426,6 +426,11 @@ void ide_atapi_audio_init(IDEState *s, AudioBackend *be)
+     s->atapi_be = be;
  #ifdef CONFIG_CDIMAGE
-     s->atapi_voice = AUD_open_out(card, NULL, "cd-audio", s, atapi_audio_cb, &as);
+     s->atapi_voice = audio_be_open_out(be, NULL, "cd-audio", s, atapi_audio_cb, &as);
 +    if (s->atapi_voice) {
 +        /* the drive's analog out, cabled to the sound card's CD input:
 +         * that card's CD volume scales it (patch 61) */
-+        audio_mixin_attach(AUDIO_MIXIN_CD, s->atapi_voice);
++        audio_mixin_attach(AUDIO_MIXIN_CD, be, s->atapi_voice);
 +    }
  #else
      (void)as;
  #endif
 diff --git a/hw/ide/core.c b/hw/ide/core.c
-index bb376e6..7000499 100644
+index de6b0259f5..5ca27f7c3d 100644
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -2833,6 +2833,7 @@ void ide_exit(IDEState *s)
+@@ -2842,6 +2842,7 @@ void ide_exit(IDEState *s)
          s->atapi_play_timer = NULL;
      }
      if (s->atapi_voice) {
 +        audio_mixin_detach(AUDIO_MIXIN_CD, s->atapi_voice);
-         AUD_close_out(s->atapi_card, s->atapi_voice);
+         audio_be_close_out(s->atapi_be, s->atapi_voice);
          s->atapi_voice = NULL;
      }
+diff --git a/include/qemu/audio.h b/include/qemu/audio.h
+index cff8a334f3..4ce2c0d231 100644
+--- a/include/qemu/audio.h
++++ b/include/qemu/audio.h
+@@ -131,6 +131,24 @@ bool audio_be_is_active_out(AudioBackend *be, SWVoiceOut *sw);
+ void audio_be_set_volume_out(AudioBackend *be, SWVoiceOut *sw, Volume *vol);
+ void audio_be_set_volume_in(AudioBackend *be, SWVoiceIn *sw, Volume *vol);
+ 
++/*
++ * 2ksbox, patch 61: the analog inputs of the machine's sound card. On a
++ * real PC the FM chip and the CD drive's audio cable ran into the sound
++ * card's mixer, whose volume registers scaled them; here each is a voice
++ * of its own device. A source attaches its voice to its input, the card
++ * sets the input's volume, and whichever comes first, the other finds
++ * it. A machine with no card that sets one plays every input at unity.
++ */
++typedef enum AudioMixIn {
++    AUDIO_MIXIN_FM,
++    AUDIO_MIXIN_CD,
++    AUDIO_MIXIN_COUNT
++} AudioMixIn;
++
++void audio_mixin_attach(AudioMixIn in, AudioBackend *be, SWVoiceOut *sw);
++void audio_mixin_detach(AudioMixIn in, SWVoiceOut *sw);
++void audio_mixin_set_volume(AudioMixIn in, int mute, uint8_t lvol, uint8_t rvol);
++
+ static inline void
+ audio_be_set_volume_out_lr(AudioBackend *be, SWVoiceOut *sw,
+                            bool mut, uint8_t lvol, uint8_t rvol) {

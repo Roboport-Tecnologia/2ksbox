@@ -16,7 +16,7 @@ share ends up holding the helpers and no backend at all, which is what
 the weak marks were trying to arrange.
 
 diff --git a/hw/mesa/mglcntx_linux.c b/hw/mesa/mglcntx_linux.c
-index 1ac5aa5..4568b18 100644
+index ed4d8b1596..a14acd80b5 100644
 --- a/hw/mesa/mglcntx_linux.c
 +++ b/hw/mesa/mglcntx_linux.c
 @@ -30,11 +30,14 @@
@@ -176,6 +176,8 @@ index 1ac5aa5..4568b18 100644
  {
      char fname[64];
      uint32_t *argsp = (uint32_t *)(name + ALIGNED((strnlen(name, sizeof(fname))+1)));
+diff --git a/hw/mesa/mglcntx_mingw.c b/hw/mesa/mglcntx_mingw.c
+index c1fbe0c3aa..4920ddef67 100644
 --- a/hw/mesa/mglcntx_mingw.c
 +++ b/hw/mesa/mglcntx_mingw.c
 @@ -30,7 +30,19 @@
@@ -199,7 +201,7 @@ index 1ac5aa5..4568b18 100644
  #include <GL/wgl.h>
  #include "system/whpx.h"
  
-@@ -757,6 +769,9 @@
+@@ -757,6 +769,9 @@ void MGLFuncHandler(const char *name)
  
  #endif //CONFIG_WIN32
  
@@ -209,7 +211,7 @@ index 1ac5aa5..4568b18 100644
  int CompareAttribArray(const int *attrib)
  {
      static struct {
-@@ -939,3 +954,5 @@
+@@ -939,3 +954,5 @@ void mesastat(PPERFSTAT s)
      s->stat = &profile_stat;
      s->last = &profile_last;
  }

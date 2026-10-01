@@ -30,7 +30,7 @@
 #include "qemu/error-report.h"
 #include "qemu/option.h"
 #include "qemu/cutils.h"
-#include "qapi/qmp/qdict.h"
+#include "qobject/qdict.h"
 #include "block/cdimage.h"
 #include "block/libdisc.h"
 

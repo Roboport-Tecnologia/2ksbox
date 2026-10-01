@@ -38,10 +38,10 @@ Not ours: `hw/display` carries no other patch of the queue, and this is
 Test: `tools/vga-dirty-guest-test.py` (mode 13h, both adapters).
 
 diff --git a/hw/display/vga.c b/hw/display/vga.c
-index b074b58c90..a1a929229a 100644
+index cb0e28b79b..9bc496c8ee 100644
 --- a/hw/display/vga.c
 +++ b/hw/display/vga.c
-@@ -948,7 +948,7 @@ void vga_mem_writeb(VGACommonState *s, hwaddr addr, uint32_t val)
+@@ -951,7 +951,7 @@ void vga_mem_writeb(VGACommonState *s, hwaddr addr, uint32_t val)
              printf("vga: chain4: [0x" HWADDR_FMT_plx "]\n", addr);
  #endif
              s->plane_updated |= mask; /* only used to detect font change */

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure the prepared QEMU tree with a uv-managed Python, so the build
 # never depends on whichever interpreter wins the host PATH race.
-# Python version pinned in .python-version (QEMU 9.2.x supports <= 3.13,
+# Python version pinned in .python-version (QEMU 11.1 supports <= 3.13,
 # and 3.14 only with a real distlib: see QEMU_PYTHON below).
 #
 # Usage: scripts/configure-qemu.sh [--windows] [extra configure flags...]
@@ -32,8 +32,8 @@
 # QEMU_PYTHON=<interpreter> uses that one and never consults uv. It is for
 # a sandbox that has a suitable Python and cannot fetch one (the Flatpak:
 # no uv in the SDK, no network during the build). Its version is checked,
-# because the failure is obscure where it bites. QEMU 9.2's mkvenv
-# supports 3.8-3.13, and 3.14 works only with the real `distlib`
+# because the failure is obscure where it bites. QEMU 11.1's mkvenv
+# supports 3.9-3.13, and 3.14 works only with the real `distlib`
 # installed, since pip >= 26 trimmed the vendored copy mkvenv falls back
 # to (3.14 with distlib configures and builds; MSYS2 has no older Python).
 set -euo pipefail
@@ -81,10 +81,10 @@ import sys
 v = sys.version_info[:2]
 if v == (3, 14):
     import distlib.scripts, distlib.version
-elif not (3, 8) <= v <= (3, 13):
+elif not (3, 9) <= v <= (3, 13):
     sys.exit(1)
 ' 2>/dev/null || {
-    echo "$1=$PYTHON is $("$PYTHON" -V 2>&1); QEMU 9.2.x needs 3.8–3.13, or 3.14 with the distlib package"
+    echo "$1=$PYTHON is $("$PYTHON" -V 2>&1); QEMU 11.1 needs 3.9–3.13, or 3.14 with the distlib package"
     exit 1; }
 }
 if [ -n "${QEMU_PYTHON:-}" ]; then
@@ -140,7 +140,7 @@ echo "==> cargo build --release -p libsynth${CARGO_TARGET:+ --target $CARGO_TARG
 
 mkdir -p "$BUILD"
 cd "$BUILD"
-# --disable-werror: pinned 9.2.x trips new-toolchain warnings (glibc const strstr)
+# --disable-werror: a pinned release trips new-toolchain warnings (glibc const strstr)
 # --extra-cflags: vendored Khronos GL headers (third_party/khronos/README.md)
 # -fPIC: objects are also linked into libqemu-embed-<target> (shared)
 EXTRA_CFLAGS="-I$ROOT/third_party/khronos -fPIC"
@@ -314,7 +314,6 @@ fi
   --disable-libiscsi \
   --disable-libnfs \
   --disable-rbd \
-  --disable-glusterfs \
   --disable-blkio \
   --disable-png \
   --disable-vnc-jpeg \
@@ -328,7 +327,7 @@ fi
 # QEMU's configure writes `werror = true` into its native file for git
 # checkouts on Linux/Windows; meson re-applies native-file options on
 # auto-regeneration, overriding the -Dwerror=false from --disable-werror and
-# breaking the pinned 9.2.x build on new toolchains. Strip it.
+# breaking a pinned release on new toolchains. Strip it.
 sed -i.bak '/^werror = true$/d' "$BUILD/config-meson.cross" && rm -f "$BUILD/config-meson.cross.bak"
 # keep the edited native file from looking newer than build.ninja (spurious regen)
 touch -r "$BUILD/build.ninja" "$BUILD/config-meson.cross"

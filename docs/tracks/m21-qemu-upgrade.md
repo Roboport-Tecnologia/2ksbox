@@ -319,6 +319,65 @@ gets `LEGACY_BOARD` (9.2's), and `CURRENT_BOARD` moves to
   the OpenGL pass-through, and a Voodoo 2 title. The TCG fast paths are
   absent, so guests run slower; that's expected here.
 
+#### Where step 2 stands
+
+- The submodule is at v11.1.2. qemu-3dfx's patch is ported into
+  `patches/qemu-3dfx/00-qemu111x-mesa.patch` (our tree, not a fork: the
+  ADR-001 amendment), OpenGL half only, which folds 02 and 74.
+- 35 patches ported: 00, 04, 10, 13, 14, 20-embed-audio, 22, 23, 25 to
+  28, 30 to 32, 34, 40, 41, 50 to 56, 60 to 62, 64 to 66, 70 to 73, and
+  one new one, 75 (11.0 never finalizes an audio backend a device uses,
+  so the `wav` audiodev's header kept lengths of 0 and the `music` and
+  `sb-mixer` checks read silence). The TCG patches wait in
+  `patches/qemu-pending/` as their 9.2 versions.
+  Dropped: 01, 07, 08, 09 (upstream), 02 and 74 (folded), 21 (user), and
+  46, 68, 69 (obsolete upstream, to confirm on their platforms in step
+  4). 29 moved to step 3: with no fast path in the tree it would add
+  switches for nothing, and its context is 15, 16 and 19's.
+- What needed more than context: 51's PIO path fills a whole DRQ burst
+  from the disc model and shares the async callback's completion half;
+  61's mixer-input table moved to `audio/audio-be.c` and keeps each
+  voice's `AudioBackend`; `embed/embedaudio.c` is the QOM type
+  `audio-embed`; 20 needs the `audio_get_pdo_out`/`_in` cases or
+  `-audiodev embed` aborts; the embed library's keys go through Linux
+  keycodes (11.1's input layer) and its listener through
+  `qemu_console_register_listener`; `mglcntx_embed.c` includes epoxy
+  before the khronos headers; the Voodoo shim uses
+  `cpu_translate_for_debug` and `address_space_ldl_le`.
+- The player never exited (SIGTERM, a QMP `quit`, a guest power-off
+  alike): since 10.0 QEMU's exit notifiers take the BQL (`e7bc0204e5`),
+  and they run in the player's `exit()`, on the main thread, while the
+  `qemu` thread had ended still holding the BQL `qemu_init` gave it.
+  `qemu_embed_destroy` now gives the BQL and the replay lock back after
+  `qemu_cleanup`, as upstream's `qemu_default_main` does. It showed as
+  `pad-guest-xp` hanging after it had passed: the script waits for the
+  player it terminated.
+- The gate (2026-10-01), on Linux:
+  - `scripts/test.sh` (host): 42 pass, 5 fail. `x87-fast` and
+    `optimizations` want the step 3 switches; `icons` and
+    `exec-no-device` are the 9.2 baseline's; `package` fails because this
+    worktree's `build/` is a symlink (`package-linux.sh` compares the
+    stage path as spelled with the path the binary resolves).
+  - `scripts/test.sh guest`: XP's checks all pass (cdimage, dirdisc,
+    ddvm, the G9/G8/F9 scenes against native and the rig, pad-guest-xp).
+    DOS: atapi, atapi-read-error, midi, vbe-palette, pad and the four
+    Voodoo 2 runs pass; x87, rep, smc and sse want the step 3 switches;
+    pit-guest fails as on the 9.2 baseline (the 15.6 ms waits at 13 %).
+  - Win98, `base98-br` on `pc-i440fx-9.2` in the player: GLQuake's
+    `timedemo demo1` on our OpenGL, 969 frames, 171.0 fps (the host's
+    Radeon through Mesa); on 3dfx's MiniGL and the Voodoo 2, 48.9 fps.
+    No 9.2 figure for either yet; step 3 measures both.
+  - `tools/win98-game-test.sh` now boots `pc-i440fx-9.2` (`BOARD=`) and
+    puts an `EXTRA` Voodoo 2 in the launcher's slot, 0x05. On 11.1's `pc`
+    with the card elsewhere, Windows 98 found new hardware and stopped
+    at "restart to finish", so RUN.BAT never ran.
+- How the port was done, for step 3: a full-history QEMU clone at
+  `/mnt/data2/david/work/qemu-m21`, branch `m21`, one commit per patch
+  on top of an overlay commit (`hw/3dfx`, `hw/mesa`, `hw/voodoo/86box`,
+  the overlay files that patches edit; the other overlays are untracked
+  there), compiled in a scratch build dir, then exported as the queue
+  with each 9.2 patch's description kept.
+
 ### 3. The TCG patches, one group at a time
 
 In this order, each group with its own battery and its own benchmark A/B

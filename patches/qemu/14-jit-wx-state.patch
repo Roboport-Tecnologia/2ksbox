@@ -10,9 +10,11 @@ skips the redundant calls; it starts as unknown, so a thread's first request in
 either direction is made for real (the main thread is in execute mode when
 tcg_prologue_init asks for write; a skipped call there faults and spins).
 
+diff --git a/include/qemu/osdep.h b/include/qemu/osdep.h
+index 1ec5b42230..f8577bbefa 100644
 --- a/include/qemu/osdep.h
 +++ b/include/qemu/osdep.h
-@@ -802,14 +802,31 @@ size_t qemu_get_host_physmem(void);
+@@ -845,14 +845,31 @@ size_t qemu_get_host_physmem(void);
   * for the current thread.
   */
  #ifdef __APPLE__
@@ -46,6 +48,8 @@ tcg_prologue_init asks for write; a skipped call there faults and spins).
  }
  #else
  static inline void qemu_thread_jit_write(void) {}
+diff --git a/util/osdep.c b/util/osdep.c
+index 4a8b8b5a90..39c46f9239 100644
 --- a/util/osdep.c
 +++ b/util/osdep.c
 @@ -31,6 +31,10 @@
@@ -56,6 +60,6 @@ tcg_prologue_init asks for write; a skipped call there faults and spins).
 +__thread int qemu_thread_jit_state = -1;
 +#endif
 +
- static const char *hw_version = QEMU_HW_VERSION;
- 
  int socket_set_cork(int fd, int v)
+ {
+ #if defined(SOL_TCP) && defined(TCP_CORK)

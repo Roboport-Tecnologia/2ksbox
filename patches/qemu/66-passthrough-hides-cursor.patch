@@ -20,21 +20,11 @@ dpy_mouse_publish, is what the voodoo-guest-d3dpt check reads: a cursor set
 on d3dpt-vga must be published shown before the Voodoo takes the monitor,
 hidden while it has it, and shown after.
 
-diff --git a/ui/trace-events b/ui/trace-events
---- a/ui/trace-events
-+++ b/ui/trace-events
-@@ -1,6 +1,7 @@
- # See docs/devel/tracing.rst for syntax documentation.
- 
- # console.c
-+dpy_mouse_publish(int x, int y, int on, int passthrough) "x=%d y=%d on=%d passthrough=%d"
- console_gfx_new(void) ""
- console_gfx_reuse(int index) "%d"
- console_gfx_close(int index) "%d"
 diff --git a/ui/console.c b/ui/console.c
+index c9993de913..cdf57a5b92 100644
 --- a/ui/console.c
 +++ b/ui/console.c
-@@ -126,9 +126,26 @@
+@@ -143,9 +143,26 @@ static void gui_setup_refresh(DisplayState *ds)
      }
  }
  
@@ -60,8 +50,8 @@ diff --git a/ui/console.c b/ui/console.c
 +    }
  }
  
- void graphic_hw_update_done(QemuConsole *con)
-@@ -687,7 +704,8 @@
+ void qemu_console_hw_update_done(QemuConsole *con)
+@@ -619,7 +636,8 @@ dcl_set_graphic_cursor(DisplayChangeListener *dcl, QemuGraphicConsole *con)
          dcl->ops->dpy_cursor_define(dcl, con->cursor);
      }
      if (con && dcl->ops->dpy_mouse_set) {
@@ -71,8 +61,8 @@ diff --git a/ui/console.c b/ui/console.c
      }
  }
  
-@@ -946,13 +964,23 @@
- void dpy_mouse_set(QemuConsole *c, int x, int y, bool on)
+@@ -888,18 +906,31 @@ void qemu_console_text_resize(QemuConsole *con, int w, int h)
+ void qemu_console_set_mouse(QemuConsole *c, int x, int y, bool on)
  {
      QemuGraphicConsole *con = QEMU_GRAPHIC_CONSOLE(c);
 -    DisplayState *s = c->ds;
@@ -81,7 +71,6 @@ diff --git a/ui/console.c b/ui/console.c
      con->cursor_x = x;
      con->cursor_y = y;
      con->cursor_on = on;
--    if (!qemu_console_is_visible(c)) {
 +    dpy_mouse_publish(c);
 +}
 +
@@ -94,11 +83,11 @@ diff --git a/ui/console.c b/ui/console.c
 +    bool on = con->cursor_on && !c->ui_info.passthrough;
 +
 +    trace_dpy_mouse_publish(con->cursor_x, con->cursor_y, on, c->ui_info.passthrough);
-+    if (!s || !qemu_console_is_visible(c)) {
-         return;
-     }
++    if (!s) {
++        return;
++    }
      QLIST_FOREACH(dcl, &s->listeners, next) {
-@@ -960,7 +988,7 @@
+         if (c != dcl->con) {
              continue;
          }
          if (dcl->ops->dpy_mouse_set) {
@@ -107,3 +96,15 @@ diff --git a/ui/console.c b/ui/console.c
          }
      }
  }
+diff --git a/ui/trace-events b/ui/trace-events
+index 339a61f341..1fc89e8c8b 100644
+--- a/ui/trace-events
++++ b/ui/trace-events
+@@ -1,6 +1,7 @@
+ # See docs/devel/tracing.rst for syntax documentation.
+ 
+ # console.c
++dpy_mouse_publish(int x, int y, int on, int passthrough) "x=%d y=%d on=%d passthrough=%d"
+ console_gfx_new(void) ""
+ console_gfx_reuse(int index) "%d"
+ console_gfx_close(int index) "%d"

@@ -9,6 +9,8 @@ the patch. Doc 20 §1 and §5.
 QEMU has no MPU-401 at all, and its sb16 carries no OPL — so before
 this, a guest's *music* had nowhere to go, whatever its sound card.
 
+diff --git a/hw/audio/meson.build b/hw/audio/meson.build
+index 2154cbdb57..3c5f6a93d2 100644
 --- a/hw/audio/meson.build
 +++ b/hw/audio/meson.build
 @@ -11,6 +11,11 @@ system_ss.add(when: 'CONFIG_MARVELL_88W8618', if_true: files('marvell_88w8618.c'
@@ -23,9 +25,11 @@ this, a guest's *music* had nowhere to go, whatever its sound card.
  system_ss.add(when: 'CONFIG_VT82C686', if_true: files('via-ac97.c'))
  system_ss.add(when: 'CONFIG_WM8750', if_true: files('wm8750.c'))
  system_ss.add(when: ['CONFIG_VIRTIO_SND', 'CONFIG_VIRTIO'], if_true: files('virtio-snd.c'))
+diff --git a/meson.build b/meson.build
+index 72917ee927..17bae9d379 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2025,6 +2025,25 @@ if get_option('libdisc_dir') != ''
+@@ -2026,6 +2026,25 @@ if get_option('libdisc_dir') != ''
                                 link_args: libdisc_libs)
  endif
  
@@ -51,7 +55,7 @@ this, a guest's *music* had nowhere to go, whatever its sound card.
  lzo = not_found
  if not get_option('lzo').auto() or have_system
    lzo = cc.find_library('lzo2', has_headers: ['lzo/lzo1x.h'],
-@@ -2441,6 +2460,7 @@ config_host_data.set('CONFIG_POSIX', host_os != 'windows')
+@@ -2465,6 +2484,7 @@ config_host_data.set('CONFIG_POSIX', host_os != 'windows')
  config_host_data.set('CONFIG_WIN32', host_os == 'windows')
  config_host_data.set('CONFIG_LZO', lzo.found())
  config_host_data.set('CONFIG_CDIMAGE', libdisc.found())
@@ -59,7 +63,7 @@ this, a guest's *music* had nowhere to go, whatever its sound card.
  config_host_data.set('CONFIG_MPATH', mpathpersist.found())
  config_host_data.set('CONFIG_BLKIO', blkio.found())
  if blkio.found()
-@@ -4855,6 +4875,7 @@ summary_info += {'TPM support':       have_tpm}
+@@ -5055,6 +5075,7 @@ summary_info += {'IGVM support':      igvm}
  summary_info += {'libssh support':    libssh}
  summary_info += {'lzo support':       lzo}
  summary_info += {'cdimage (libdisc)':  libdisc}
@@ -67,9 +71,11 @@ this, a guest's *music* had nowhere to go, whatever its sound card.
  summary_info += {'snappy support':    snappy}
  summary_info += {'bzip2 support':     libbzip2}
  summary_info += {'lzfse support':     liblzfse}
+diff --git a/meson_options.txt b/meson_options.txt
+index f419eee112..e0bf1015d6 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -198,6 +198,8 @@ option('lzfse', type : 'feature', value : 'auto',
+@@ -204,6 +204,8 @@ option('lzfse', type : 'feature', value : 'auto',
         description: 'lzfse support for DMG images')
  option('libdisc_dir', type : 'string', value : '',
         description: 'directory holding liblibdisc.a (win98-xp-virt: the CD-ROM image block driver, block/cdimage.c)')
@@ -77,4 +83,4 @@ this, a guest's *music* had nowhere to go, whatever its sound card.
 +       description: 'directory holding liblibsynth.a (win98-xp-virt: the music engines behind hw/audio/opl3.c and hw/audio/mpu401.c)')
  option('lzo', type : 'feature', value : 'auto',
         description: 'lzo compression support')
- option('rbd', type : 'feature', value : 'auto',
+ option('pvg', type: 'feature', value: 'auto',

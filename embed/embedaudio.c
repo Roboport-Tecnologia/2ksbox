@@ -57,11 +57,19 @@
 #include "qemu/timer.h"
 #include "qapi/error.h"
 #include "qemu/module.h"
-#include "audio/audio.h"
+#include "qemu/audio.h"
+#include "qom/object.h"
 #include "libqemu_embed.h"
 
 #define AUDIO_CAP "embed"
 #include "audio/audio_int.h"
+
+#define TYPE_AUDIO_EMBED "audio-embed"
+OBJECT_DECLARE_SIMPLE_TYPE(AudioEmbed, AUDIO_EMBED)
+
+struct AudioEmbed {
+    AudioMixengBackend parent_obj;
+};
 
 static uint8_t *ring_base;
 static size_t ring_size;               /* power of two */
@@ -199,7 +207,7 @@ static size_t embed_buffer_get_free(HWVoiceOut *hw)
     }
     tick(vo, hw);
     /* What a device may deliver now: what is owed, but never more than the
-     * burst. This is asked by every AUD_write, not only by the mixer tick
+     * burst. This is asked by every audio_be_write, not only by the mixer tick
      * (a DMA card writes from i8257's bottom half between ticks), so it
      * bounds how far a device, and so the guest's play cursor, runs ahead
      * of the ring between two ticks. */
@@ -297,10 +305,10 @@ static void restart(EmbedVoiceOut *vo)
     vo->empty = false;
 }
 
-static int embed_init_out(HWVoiceOut *hw, struct audsettings *as, void *drv_opaque)
+static int embed_init_out(HWVoiceOut *hw, struct audsettings *as)
 {
     EmbedVoiceOut *vo = container_of(hw, EmbedVoiceOut, hw);
-    Audiodev *dev = drv_opaque;
+    Audiodev *dev = hw->s->dev;
     int64_t period_ns = hw->s && hw->s->period_ticks > 0 ? hw->s->period_ticks
                                                           : 10 * SCALE_MS;
 
@@ -341,40 +349,33 @@ static void embed_enable_out(HWVoiceOut *hw, bool enable)
     }
 }
 
-static void *embed_audio_init(Audiodev *dev, Error **errp)
+static void audio_embed_class_init(ObjectClass *klass, const void *data)
 {
-    return dev;   /* non-NULL = success */
+    AudioMixengBackendClass *k = AUDIO_MIXENG_BACKEND_CLASS(klass);
+
+    k->max_voices_out = 1;
+    k->max_voices_in = 0;
+    k->voice_size_out = sizeof(EmbedVoiceOut);
+    k->voice_size_in = 0;
+
+    k->init_out = embed_init_out;
+    k->fini_out = embed_fini_out;
+    k->write = embed_write;
+    k->buffer_get_free = embed_buffer_get_free;
+    k->get_buffer_out = embed_get_buffer_out;
+    k->put_buffer_out = embed_put_buffer_out;
+    k->run_buffer_out = audio_generic_run_buffer_out;
+    k->enable_out = embed_enable_out;
 }
 
-static void embed_audio_fini(void *opaque)
-{
-}
-
-static struct audio_pcm_ops embed_pcm_ops = {
-    .init_out        = embed_init_out,
-    .fini_out        = embed_fini_out,
-    .write           = embed_write,
-    .buffer_get_free = embed_buffer_get_free,
-    .get_buffer_out  = embed_get_buffer_out,
-    .put_buffer_out  = embed_put_buffer_out,
-    .run_buffer_out  = audio_generic_run_buffer_out,
-    .enable_out      = embed_enable_out,
+/* -audiodev embed: QEMU makes an audiodev's backend as type audio-<driver> */
+static const TypeInfo audio_types[] = {
+    {
+        .name = TYPE_AUDIO_EMBED,
+        .parent = TYPE_AUDIO_MIXENG_BACKEND,
+        .instance_size = sizeof(AudioEmbed),
+        .class_init = audio_embed_class_init,
+    },
 };
 
-static struct audio_driver embed_audio_driver = {
-    .name           = "embed",
-    .descr          = "Ring buffer into the embedding application",
-    .init           = embed_audio_init,
-    .fini           = embed_audio_fini,
-    .pcm_ops        = &embed_pcm_ops,
-    .max_voices_out = 1,
-    .max_voices_in  = 0,
-    .voice_size_out = sizeof(EmbedVoiceOut),
-    .voice_size_in  = 0,
-};
-
-static void register_audio_embed(void)
-{
-    audio_driver_register(&embed_audio_driver);
-}
-type_init(register_audio_embed);
+DEFINE_TYPES(audio_types)

@@ -1213,7 +1213,7 @@ pub struct Machine {
 /// The board a new machine is created on: the versioned name of the
 /// QEMU this launcher ships (`Machine::board`). Moves with the `qemu`
 /// submodule.
-pub const CURRENT_BOARD: &str = "pc-i440fx-9.2";
+pub const CURRENT_BOARD: &str = "pc-i440fx-11.1";
 
 /// The board of a bundle written before `Machine::board` existed: 9.2's
 /// `pc`, which every machine ran then.

@@ -33,7 +33,7 @@ volume descriptor, read seconds earlier. The head now stays where playback
 ended, and a seek puts it where it was sent, which is also what makes Win9x's
 seek-as-stop report the position its own MCI shows.
 diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
-index a8ba896..33a1cb9 100644
+index 97adb48268..5e6da0003f 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
 @@ -230,6 +230,16 @@ static void atapi_audio_stop(IDEState *s, uint8_t status)
@@ -61,7 +61,7 @@ index a8ba896..33a1cb9 100644
  }
  
  /*
-@@ -1719,6 +1728,31 @@ static void cmd_seek(IDEState *s, uint8_t* buf)
+@@ -1732,6 +1741,31 @@ static void cmd_seek(IDEState *s, uint8_t* buf)
          return;
      }
  

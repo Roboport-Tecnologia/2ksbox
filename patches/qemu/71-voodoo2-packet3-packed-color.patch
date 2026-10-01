@@ -33,7 +33,7 @@ rather than an edit there. Drop it when upstream 86Box has the fix and
 scripts/sync-86box-voodoo.sh brings it in.
 
 diff --git a/hw/voodoo/86box/vid_voodoo_fifo.c b/hw/voodoo/86box/vid_voodoo_fifo.c
-index c0fcfe3..720b8f8 100644
+index c0fcfe3498..720b8f8fdd 100644
 --- a/hw/voodoo/86box/vid_voodoo_fifo.c
 +++ b/hw/voodoo/86box/vid_voodoo_fifo.c
 @@ -613,21 +613,29 @@ voodoo_fifo_thread(void *param)

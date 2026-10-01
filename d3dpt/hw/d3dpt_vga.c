@@ -38,7 +38,7 @@
 #include "qemu/timer.h"
 #include "qapi/error.h"
 #include "hw/pci/pci_device.h"
-#include "hw/qdev-properties.h"
+#include "hw/core/qdev-properties.h"
 #include "ui/console.h"
 #include "ui/qemu-pixman.h"
 #include "qom/object.h"
@@ -270,7 +270,7 @@ static void fb_switch(D3dptVgaState *s, const D3dptLinearMode *m)
                                              NULL, 0);
         ds = qemu_create_displaysurface_pixman(s->shadow);
     }
-    dpy_gfx_replace_surface(s->vga.con, ds);
+    qemu_console_set_surface(s->vga.con, ds);
     s->lin = *m;
     s->lin_on = true;
     s->full_update = true;
@@ -297,7 +297,7 @@ static void fb_update_span(D3dptVgaState *s, int y0, int y1)
             }
         }
     }
-    dpy_gfx_update(s->vga.con, 0, y0, s->lin.w, y1 - y0);
+    qemu_console_update(s->vga.con, 0, y0, s->lin.w, y1 - y0);
 }
 
 /* The vertical blank the guest waits on (REG_FRAMES).
@@ -364,7 +364,7 @@ static void fb_flip_rate(D3dptVgaState *s)
     s->flips_last = s->flips;
 }
 
-static void d3dpt_vga_gfx_update(void *opaque)
+static bool d3dpt_vga_gfx_update(void *opaque)
 {
     D3dptVgaState *s = opaque;
     D3dptLinearMode m;
@@ -379,7 +379,7 @@ static void d3dpt_vga_gfx_update(void *opaque)
              * for a moment: a real return to VGA (BSOD, full-screen console,
              * reboot) is only delayed by that. */
             if (qemu_clock_get_ms(QEMU_CLOCK_REALTIME) < s->vga_grace_until) {
-                return;
+                return true;
             }
             /* back to the VGA core: it recreates its own surface */
             s->lin_on = false;
@@ -402,7 +402,7 @@ static void d3dpt_vga_gfx_update(void *opaque)
                             sig[0], sig[1], sig[2], sig[3], sig[4], sig[5], sig[6], sig[7]);
             }
         }
-        return;
+        return true;
     }
 
     if (s->gamma_dirty) {
@@ -434,7 +434,7 @@ static void d3dpt_vga_gfx_update(void *opaque)
                                                       DIRTY_MEMORY_VGA);
         g_free(snap);
         fb_update_span(s, 0, m.h);
-        return;
+        return true;
     }
 
     snap = memory_region_snapshot_and_clear_dirty(&s->vga.vram, m.offset,
@@ -457,6 +457,7 @@ static void d3dpt_vga_gfx_update(void *opaque)
         fb_update_span(s, ys, y);
     }
     g_free(snap);
+    return true;
 }
 
 static void d3dpt_vga_invalidate(void *opaque)
@@ -474,7 +475,7 @@ static void d3dpt_vga_invalidate(void *opaque)
     s->vga.hw_ops->invalidate(&s->vga);
 }
 
-static void d3dpt_vga_text_update(void *opaque, console_ch_t *chardata)
+static void d3dpt_vga_text_update(void *opaque, uint32_t *chardata)
 {
     D3dptVgaState *s = opaque;
 
@@ -599,8 +600,8 @@ static void fb_cursor_clear(D3dptVgaState *s)
     c->data[0] = 0;
     s->cur_defined = false;
     s->cur_on = false;
-    dpy_mouse_set(s->vga.con, s->cur_x, s->cur_y, false);
-    dpy_cursor_define(s->vga.con, c);
+    qemu_console_set_mouse(s->vga.con, s->cur_x, s->cur_y, false);
+    qemu_console_set_cursor(s->vga.con, c);
     cursor_unref(c);
 }
 
@@ -625,7 +626,7 @@ static void fb_cursor_define(D3dptVgaState *s, bool on)
     memcpy(c->data, memory_region_get_ram_ptr(&s->vga.vram) + s->cur_addr, bytes);
     c->hot_x = s->cur_hot_x;
     c->hot_y = s->cur_hot_y;
-    dpy_cursor_define(s->vga.con, c);
+    qemu_console_set_cursor(s->vga.con, c);
     cursor_unref(c);
     s->cur_defined = true;
     if (s->cur_defines++ < 4) {
@@ -697,7 +698,7 @@ static void fb_cursor_move(D3dptVgaState *s)
                     s->cur_x, s->cur_y, s->r_w, s->r_h);
     }
     s->cur_shown = on;
-    dpy_mouse_set(s->vga.con, s->cur_x, s->cur_y, on);
+    qemu_console_set_mouse(s->vga.con, s->cur_x, s->cur_y, on);
 }
 
 static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
@@ -809,7 +810,7 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         if (s->cur_defined && s->cur_on) {
             fb_cursor_move(s);      /* the sprite follows the linear mode */
         }
-        graphic_hw_invalidate(s->vga.con);
+        qemu_console_hw_invalidate(s->vga.con);
         break;
     case D3DPT_FB_REG_WIDTH:
         s->r_w = val;
@@ -966,7 +967,7 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
     vga_init(vga, OBJECT(dev), pci_address_space(dev),
              pci_address_space_io(dev), true);
     /* one console; the VGA core's ops run through ours while ENABLE is 0 */
-    vga->con = graphic_console_init(DEVICE(dev), 0, &d3dpt_vga_gfx_ops, s);
+    vga->con = qemu_graphic_console_create(DEVICE(dev), 0, &d3dpt_vga_gfx_ops, s);
     s->cur_flip_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, fb_cursor_flip_idle, s);
 
     memory_region_init_io(&s->regs, OBJECT(dev), &d3dpt_vga_regs_ops, s,
@@ -1010,7 +1011,7 @@ static void d3dpt_vga_reset(DeviceState *dev)
     d3d_reset(s);
 }
 
-static Property d3dpt_vga_properties[] = {
+static const Property d3dpt_vga_properties[] = {
     DEFINE_PROP_UINT32("vgamem_mb", D3dptVgaState, vga.vram_size_mb, D3DPT_FB_VRAM_MB),
     DEFINE_PROP_BOOL("global-vmstate", D3dptVgaState, vga.global_vmstate, false),
     DEFINE_PROP_UINT32("ddflags", D3dptVgaState, ddflags, 0),
@@ -1045,10 +1046,9 @@ static Property d3dpt_vga_properties[] = {
      * 3DMark 99 loading screen on the PC). On means the pixels in VRAM are
      * right and this device's incremental path is what lost them. */
     DEFINE_PROP_BOOL("full-frames", D3dptVgaState, full_frames, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
-static void d3dpt_vga_class_init(ObjectClass *klass, void *data)
+static void d3dpt_vga_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);

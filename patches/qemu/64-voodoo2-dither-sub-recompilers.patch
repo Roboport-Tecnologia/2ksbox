@@ -26,7 +26,7 @@ rather than an edit there. Drop it when upstream 86Box has the fix and
 scripts/sync-86box-voodoo.sh brings it in.
 
 diff --git a/hw/voodoo/86box/vid_voodoo_codegen_arm64.h b/hw/voodoo/86box/vid_voodoo_codegen_arm64.h
-index fd51eef..bdfd1b3 100644
+index fd51eefddd..bdfd1b3b8b 100644
 --- a/hw/voodoo/86box/vid_voodoo_codegen_arm64.h
 +++ b/hw/voodoo/86box/vid_voodoo_codegen_arm64.h
 @@ -3757,6 +3757,70 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params,
@@ -101,7 +101,7 @@ index fd51eef..bdfd1b3 100644
          addlong(ARM64_UXTL_8H_8B(4, 4));
  
 diff --git a/hw/voodoo/86box/vid_voodoo_codegen_x86-64.h b/hw/voodoo/86box/vid_voodoo_codegen_x86-64.h
-index 0d2729b..cf8e692 100644
+index 0d2729b97b..cf8e692adf 100644
 --- a/hw/voodoo/86box/vid_voodoo_codegen_x86-64.h
 +++ b/hw/voodoo/86box/vid_voodoo_codegen_x86-64.h
 @@ -2520,12 +2520,109 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params,

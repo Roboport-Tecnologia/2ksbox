@@ -23,10 +23,10 @@ does exactly what it does on the real part.
 -global isa-pit.overdue-irq=off restores upstream's behaviour (the A/B).
 
 diff --git a/hw/timer/i8254.c b/hw/timer/i8254.c
-index 058fc61..6cc327c 100644
+index 1a8b6bf9ab..a777a4525f 100644
 --- a/hw/timer/i8254.c
 +++ b/hw/timer/i8254.c
-@@ -123,6 +123,36 @@ static void pit_latch_count(PITChannelState *s)
+@@ -124,6 +124,36 @@ static void pit_latch_count(PITChannelState *s)
      }
  }
  
@@ -63,15 +63,15 @@ index 058fc61..6cc327c 100644
  static void pit_ioport_write(void *opaque, hwaddr addr,
                               uint64_t val, unsigned size)
  {
-@@ -131,6 +161,7 @@ static void pit_ioport_write(void *opaque, hwaddr addr,
-     PITChannelState *s;
+@@ -134,6 +164,7 @@ static void pit_ioport_write(void *opaque, hwaddr addr,
+     trace_pit_ioport_write(addr, val);
  
      addr &= 3;
 +    pit_deliver_overdue(pit);
      if (addr == 3) {
          channel = val >> 6;
          if (channel == 3) {
-@@ -204,6 +235,7 @@ static uint64_t pit_ioport_read(void *opaque, hwaddr addr,
+@@ -207,6 +238,7 @@ static uint64_t pit_ioport_read(void *opaque, hwaddr addr,
          /* Mode/Command register is write only, read is ignored */
          return 0;
      }
@@ -80,19 +80,19 @@ index 058fc61..6cc327c 100644
      s = &pit->channels[addr];
      if (s->status_latched) {
 diff --git a/hw/timer/i8254_common.c b/hw/timer/i8254_common.c
-index 28fdabc..a96e715 100644
+index 419d4cd6e5..02a87fddf5 100644
 --- a/hw/timer/i8254_common.c
 +++ b/hw/timer/i8254_common.c
-@@ -240,6 +240,7 @@ static const VMStateDescription vmstate_pit_common = {
+@@ -238,6 +238,7 @@ static const VMStateDescription vmstate_pit_common = {
  
- static Property pit_common_properties[] = {
+ static const Property pit_common_properties[] = {
      DEFINE_PROP_UINT32("iobase", PITCommonState, iobase,  -1),
 +    DEFINE_PROP_BOOL("overdue-irq", PITCommonState, overdue_irq, true),
-     DEFINE_PROP_END_OF_LIST(),
  };
  
+ static void pit_common_class_init(ObjectClass *klass, const void *data)
 diff --git a/include/hw/timer/i8254_internal.h b/include/hw/timer/i8254_internal.h
-index 1761deb..f320e61 100644
+index 1761deb4cf..f320e61ee1 100644
 --- a/include/hw/timer/i8254_internal.h
 +++ b/include/hw/timer/i8254_internal.h
 @@ -54,6 +54,7 @@ struct PITCommonState {

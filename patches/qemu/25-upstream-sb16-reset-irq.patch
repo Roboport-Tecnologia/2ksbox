@@ -34,9 +34,11 @@ A DSP reset clears the pending interrupt and drops the line, and cancels a
 silence block that has not expired: without that, the timer fires after the
 reset and asserts the line behind the guest's back.
 
+diff --git a/hw/audio/sb16.c b/hw/audio/sb16.c
+index 1838d3ef7b..8d1de37125 100644
 --- a/hw/audio/sb16.c
 +++ b/hw/audio/sb16.c
-@@ -198,6 +198,11 @@ static void aux_timer (void *opaque)
+@@ -197,6 +197,11 @@ static void aux_timer (void *opaque)
  {
      SB16State *s = opaque;
      s->can_write = 1;
@@ -48,7 +50,7 @@ reset and asserts the line behind the guest's back.
      qemu_irq_raise (s->pic);
  }
  
-@@ -801,6 +806,7 @@ static void complete (SB16State *s)
+@@ -800,6 +805,7 @@ static void complete (SB16State *s)
                  bytes = samples << s->fmt_stereo << (s->fmt_bits == 16);
                  ticks = muldiv64(bytes, NANOSECONDS_PER_SECOND, freq);
                  if (ticks < NANOSECONDS_PER_SECOND / 1024) {
@@ -56,7 +58,7 @@ reset and asserts the line behind the guest's back.
                      qemu_irq_raise (s->pic);
                  }
                  else {
-@@ -895,11 +901,13 @@ static void legacy_reset (SB16State *s)
+@@ -894,11 +900,13 @@ static void legacy_reset (SB16State *s)
  
  static void reset (SB16State *s)
  {
