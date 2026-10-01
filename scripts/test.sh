@@ -343,11 +343,11 @@ machinedetails_check() { # what the machine window shows of a chosen machine (do
   xp="$(target/release/launcherx --new xp "XP box" "$dir/xp.qcow2")" || { echo "--new xp failed"; return 1; }
   dos="$(target/release/launcherx --new dos "DOS box" "$dir/dos.qcow2")" || { echo "--new dos failed"; return 1; }
   o="$(target/release/launcherx --machine-details "$xp" 2>&1)" || { echo "--machine-details failed: $o"; return 1; }
-  # The line under the name, then a group per page of the form, in its
-  # order, with the form's own labels.
+  # The line under the name, then a group per page of the form with the
+  # form's own labels: System, Storage, then the rest in the form's order.
   [ "$(head -1 <<<"$o")" = "XP · Stopped" ] || { echo "xp subtitle: $(head -1 <<<"$o")"; rc=1; }
   groups="$(tail -n +2 <<<"$o" | cut -f1 | uniq | tr '\n' ' ')"
-  [ "$groups" = "System Display Audio Input Network Storage " ] || { echo "xp groups: $groups"; rc=1; }
+  [ "$groups" = "System Storage Display Audio Input Network " ] || { echo "xp groups: $groups"; rc=1; }
   grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }
   grep -qx $'Storage\tHard disk\txp.qcow2' <<<"$o" || { echo "xp's disk is not its file name"; rc=1; }
   grep -qx $'Storage\tCD at boot\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }

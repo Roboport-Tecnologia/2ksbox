@@ -125,8 +125,10 @@ impl Machines {
     }
 
     /// What the window shows of the selected machine, a group per page
-    /// of the machine form, in its order. Only what the form would show
-    /// for this family: no Direct3D row on a machine without our adapter.
+    /// of the machine form: System, then Storage (what is in the drives
+    /// is what is most often looked for, user), then the rest in the
+    /// form's order. Only what the form would show for this family: no
+    /// Direct3D row on a machine without our adapter.
     pub fn details(&self, row: usize) -> Vec<DetailGroup> {
         let Some(entry) = self.entries.get(row) else { return Vec::new() };
         details(&entry.machine, self.shader_label(entry))
@@ -254,10 +256,6 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
                 ("Acceleration", machine.effective_accel().label().to_owned()),
             ],
         },
-        DetailGroup { title: Section::Display.label(), rows: display },
-        DetailGroup { title: Section::Audio.label(), rows: audio },
-        DetailGroup { title: Section::Input.label(), rows: input },
-        DetailGroup { title: Section::Network.label(), rows: vec![("Networking", on_off(machine.network))] },
         DetailGroup {
             title: Section::Storage.label(),
             rows: vec![
@@ -267,6 +265,10 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
                 ("Boot from", machine.effective_boot().label().to_owned()),
             ],
         },
+        DetailGroup { title: Section::Display.label(), rows: display },
+        DetailGroup { title: Section::Audio.label(), rows: audio },
+        DetailGroup { title: Section::Input.label(), rows: input },
+        DetailGroup { title: Section::Network.label(), rows: vec![("Networking", on_off(machine.network))] },
     ]
 }
 

@@ -52,8 +52,9 @@ player line runs a machine with nothing else.
   `Machines::subtitle` (family and state); double-click or Return starts
   one. Beside them: the chosen machine's name, Start and its windows
   (Settings, Discs, Snapshots, Clone), then its settings in a group
-  per page of the form (`Machines::details`, `launcherx
-  --machine-details`). The details show only what the form shows for
+  per page of the form, Storage second (`Machines::details`, `launcherx
+  --machine-details`; user: the drives are what is most often looked
+  for). The details show only what the form shows for
   that family (no Direct3D row without our adapter), and a path shows
   its file name. The toolbar keeps what is not about one machine: New
   machine, Disc shelf, Shader profiles and the status line; no button
