@@ -533,8 +533,11 @@ A TLB flush no longer empties the jump cache. An entry carries the
 cache's generation in the pc word's high half, a flush bumps the
 generation, and `tb_lookup()` re-validates a stale entry against the pc's
 current mapping and re-stamps it. The cache is 65,536 entries instead of
-4,096. Win98's VMM writes the same CR3 2,400 times a second.
-**Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
+4,096. Win98's VMM writes the same CR3 2,400 times a second. The
+generation bump returns early on a CPU with no jump cache, as upstream's
+clear does: without TCG (qtest, KVM) `loadvm`'s `tlb_flush` still lands
+there, and the i386 QEMU crashed on it (2026-10-01, the `tpm-qtest`
+check on a Mac). **Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
 physical page.
 
 ### 43-eob-chain
