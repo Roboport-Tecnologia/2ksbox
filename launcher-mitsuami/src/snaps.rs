@@ -19,8 +19,8 @@ use std::time::Duration;
 
 const TAKEN_W: f32 = 180.0;
 const STATE_W: f32 = 80.0;
-/// Restore and the trash button.
-const ACTIONS_W: f32 = 140.0;
+/// Restore and the trash button, with room after it (user).
+const ACTIONS_W: f32 = 152.0;
 
 #[derive(Clone, Copy)]
 pub struct Snaps {
@@ -248,7 +248,7 @@ fn SnapshotTable() -> impl View {
                 });
             };
             view! {
-                <Row gap=Spacing::Sm align=Align::Center>
+                <Row gap=Spacing::Sm padding_end=Spacing::Md align=Align::Center>
                     <Button enabled=move || !snaps.busy() @click=restore>"Restore"</Button>
                     <Button
                         icon=crate::machines::icons::TRASH

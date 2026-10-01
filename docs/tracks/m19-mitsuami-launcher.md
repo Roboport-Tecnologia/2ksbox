@@ -157,7 +157,8 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    empty at each opening, Take snapshot its default button. Restore and
    Delete ask in the platform's alert, Cancel the default (the questions
    are the core's `Snapshots::restore_question` / `delete_question`), so
-   the actions column is only as wide as Restore and the trash button;
+   the actions column is only as wide as Restore and the trash button,
+   plus a margin after the trash button (user, 2026-10-01);
    the Qt window still asks on Restore's button and deletes without
    asking. Checked by clicks through Broadway's page on a scratch tree: a
    snapshot taken from the sheet landed under the current one, Cancel
