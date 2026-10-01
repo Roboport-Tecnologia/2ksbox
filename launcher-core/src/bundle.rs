@@ -812,9 +812,10 @@ impl Accel {
             // (`crate::player::hw_accel_label`). Offered only where the
             // host has it (`wizard::Form::accel_choices`), so the label
             // needs no "required" beside "Automatic" (user).
-            Accel::Kvm if cfg!(target_os = "windows") => "WHPX",
-            Accel::Kvm if cfg!(target_os = "linux") => "KVM",
-            Accel::Kvm => "Hardware acceleration",
+            Accel::Kvm if cfg!(target_os = "windows") => "Hardware virtualization (WHPX)",
+            Accel::Kvm if cfg!(target_os = "linux") => "Hardware virtualization (KVM)",
+            Accel::Kvm if cfg!(target_os = "macos") => "Hardware virtualization (HVF)",
+            Accel::Kvm => "Hardware virtualization",
             Accel::Tcg => "Emulation",
         }
     }
