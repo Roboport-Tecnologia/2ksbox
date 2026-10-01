@@ -99,8 +99,10 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    platform list of machines down the leading side (an icon, the name,
    and the core's `subtitle`, "XP · Stopped"), selection by bundle
    directory with the first machine chosen until one is, and beside it a
-   details pane: the name, Start as the window's default button, the
-   per-machine windows, and the core's `details`, one `Group` per page of
+   details pane: the name, with Start (the window's default button) and
+   a More menu button (Settings, Discs, Snapshots, Clone) at its right on
+   the same row since 2026-10-01 (user), and the core's `details`, one
+   `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
    its machine. The toolbar keeps New, Shelf, Shaders (named so since
    2026-10-01, user; an empty library's button stays New machine),

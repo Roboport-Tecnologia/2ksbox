@@ -370,40 +370,46 @@ fn Details() -> impl View {
     let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
     let bundle = move || library.bundle_path(&current());
     let running = move || library.is_running(&current());
+    // Everything but Start, each opening its window on this machine.
+    let more = move || {
+        (
+            MenuItem::new("Settings").on_select(move || {
+                if let Some(bundle) = bundle() {
+                    wizard.open_edit(bundle);
+                }
+            }),
+            MenuItem::new("Discs").on_select(move || {
+                if let Some(bundle) = bundle() {
+                    discs.open_for(bundle, library, running());
+                }
+            }),
+            MenuItem::new("Snapshots").on_select(move || {
+                if let Some(bundle) = bundle() {
+                    snaps.open_for(&bundle, running());
+                }
+            }),
+            MenuItem::new("Clone").enabled(move || !cloner.busy()).on_select(move || {
+                if let Some(bundle) = bundle() {
+                    cloner.open_for(&bundle, running());
+                }
+            }),
+        )
+    };
     view! {
         <ScrollView grow=1.0 min_width=0>
             <Column padding=Spacing::Xl gap=Spacing::Lg>
-                <Column gap=Spacing::Xs>
-                    <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
-                    <Text color=Color::SecondaryLabel>{field(|m, row| Some(m.subtitle(row)))}</Text>
-                </Column>
-                <Row gap=Spacing::Sm>
+                <Row gap=Spacing::Md align=Align::Center>
+                    <Column gap=Spacing::Xs grow=1.0 min_width=0>
+                        <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
+                        <Text color=Color::SecondaryLabel>{field(|m, row| Some(m.subtitle(row)))}</Text>
+                    </Column>
                     <Button
                         role=ButtonRole::Default
                         icon=icons::START
                         enabled=move || !running()
                         @click=move || library.play(&current())
                     >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
-                    <Button icon=icons::SETTINGS @click=move || {
-                        if let Some(bundle) = bundle() {
-                            wizard.open_edit(bundle);
-                        }
-                    }>"Settings"</Button>
-                    <Button icon=icons::DISCS @click=move || {
-                        if let Some(bundle) = bundle() {
-                            discs.open_for(bundle, library, running());
-                        }
-                    }>"Discs"</Button>
-                    <Button icon=icons::SNAPSHOTS @click=move || {
-                        if let Some(bundle) = bundle() {
-                            snaps.open_for(&bundle, running());
-                        }
-                    }>"Snapshots"</Button>
-                    <Button icon=icons::CLONE enabled=move || !cloner.busy() @click=move || {
-                        if let Some(bundle) = bundle() {
-                            cloner.open_for(&bundle, running());
-                        }
-                    }>"Clone"</Button>
+                    <MenuButton menu=more()>"More"</MenuButton>
                 </Row>
                 <For
                     each=move || library.details(&current())
@@ -451,17 +457,11 @@ pub(crate) mod icons {
     pub const START: &str = platform! {
         macos => "play.fill", gtk => "media-playback-start-symbolic", kde => "media-playback-start", windows => "\u{E768}",
     };
-    pub const SETTINGS: &str = platform! {
-        macos => "gearshape", gtk => "emblem-system-symbolic", kde => "configure", windows => "\u{E713}",
-    };
     pub const DISCS: &str = platform! {
         macos => "opticaldisc", gtk => "media-optical-symbolic", kde => "media-optical", windows => "\u{E958}",
     };
     pub const SNAPSHOTS: &str = platform! {
         macos => "camera", gtk => "camera-photo-symbolic", kde => "camera-photo", windows => "\u{E722}",
-    };
-    pub const CLONE: &str = platform! {
-        macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
     };
     pub const CLEAR: &str = platform! {
         macos => "xmark.circle", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E894}",
