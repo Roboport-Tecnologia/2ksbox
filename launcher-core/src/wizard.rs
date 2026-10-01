@@ -671,7 +671,8 @@ impl Form {
             (Accel::Tcg, _) if self.family.is_modern() => {
                 "Emulated. Windows 11 takes minutes to start this way.".to_string()
             }
-            (Accel::Tcg, _) => "Emulated. This is what everything here is tuned for.".to_string(),
+            // Every era family runs `-cpu pentium3` (bundle::qemu_args).
+            (Accel::Tcg, _) => "Emulated Pentium 3 equivalent CPU. Suitable for older OSes.".to_string(),
         };
         if self.family.is_modern() && self.accel == Accel::Auto && !self.hw_accel() {
             text.push_str("\nWindows 11 takes minutes to start this way.");
