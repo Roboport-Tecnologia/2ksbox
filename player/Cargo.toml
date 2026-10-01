@@ -22,6 +22,9 @@ gilrs = ["dep:gilrs"]
 # time: patch 63 reserves TCG's code buffer next to the helpers when the
 # image loads, before main(), and a later dlopen loses that (doc 22 §5.0).
 qemu-x86_64 = ["qemu-embed/qemu-x86_64"]
+# The player for Windows 11 on Arm (M20 step 4), on an Arm host: links
+# libqemu-embed-aarch64, the same way (`target/qemu-aarch64`).
+qemu-aarch64 = ["qemu-embed/qemu-aarch64"]
 
 [dependencies]
 qemu-embed = { path = "../qemu-embed" }

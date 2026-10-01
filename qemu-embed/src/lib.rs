@@ -11,8 +11,15 @@ use std::ptr;
 pub const API_VERSION: u32 = 8;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
-/// 11, track M20), and so QEMU's own name for itself.
-pub const QEMU_NAME: &str = if cfg!(feature = "qemu-x86_64") { "qemu-system-x86_64" } else { "qemu-system-i386" };
+/// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
+/// name for itself.
+pub const QEMU_NAME: &str = if cfg!(feature = "qemu-x86_64") {
+    "qemu-system-x86_64"
+} else if cfg!(feature = "qemu-aarch64") {
+    "qemu-system-aarch64"
+} else {
+    "qemu-system-i386"
+};
 pub const FMT_XRGB8888: u32 = 1;
 
 #[repr(C)]

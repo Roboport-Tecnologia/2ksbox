@@ -1,0 +1,31 @@
+diff --git a/OvmfPkg/QemuRamfbDxe/QemuRamfb.c b/OvmfPkg/QemuRamfbDxe/QemuRamfb.c
+index 5a1044f..4f96db1 100644
+--- a/OvmfPkg/QemuRamfbDxe/QemuRamfb.c
++++ b/OvmfPkg/QemuRamfbDxe/QemuRamfb.c
+@@ -54,6 +54,26 @@ STATIC EFI_GRAPHICS_OUTPUT_MODE_INFORMATION  mQemuRamfbModeInfo[] = {
+     0,    // Version
+     1024, // HorizontalResolution
+     768,  // VerticalResolution
++  },{
++    // 2ksbox: the sizes past 1024x768 an operating system that keeps the
++    // firmware's framebuffer (Windows on Arm's Basic Display) can have.
++    // 1280x800 is ArmVirtQemu's PcdVideoHorizontal/VerticalResolution,
++    // which the boot manager sets when it is in this list.
++    0,    // Version
++    1280, // HorizontalResolution
++    800,  // VerticalResolution
++  },{
++    0,    // Version
++    1440, // HorizontalResolution
++    900,  // VerticalResolution
++  },{
++    0,    // Version
++    1600, // HorizontalResolution
++    900,  // VerticalResolution
++  },{
++    0,    // Version
++    1920, // HorizontalResolution
++    1080, // VerticalResolution
+   }
+ };
+ 

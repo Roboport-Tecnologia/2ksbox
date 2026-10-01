@@ -102,8 +102,9 @@ struct EditTarget {
     /// same reason: gaining or losing the USB controller is a hardware
     /// change (`pad_warning`).
     pad: Pad,
-    /// A Windows 11 machine's firmware variables and TPM state, which
-    /// the form has no fields for and must not lose.
+    /// A Windows 11 machine's processor, firmware variables and TPM
+    /// state, which the form has no fields for and must not lose.
+    arch: Option<bundle::Arch>,
     efi_vars: Option<PathBuf>,
     tpm_state: Option<PathBuf>,
 }
@@ -362,6 +363,7 @@ impl Form {
                 video: machine.effective_video().unwrap_or(Video::Std),
                 sound: machine.effective_sound(),
                 pad: machine.effective_pad(),
+                arch: machine.arch,
                 efi_vars: machine.efi_vars.clone(),
                 tpm_state: machine.tpm_state.clone(),
             }),
@@ -499,14 +501,19 @@ impl Form {
                  and an ES1370 sound card.\n\
                  No 3D: the display driver and the Direct3D and OpenGL pass-through are Windows-only.",
             ),
-            // Linux only so far: QEMU has no TPM on a Windows host yet,
-            // and a Mac gets Windows 11 on Arm later (track M20).
+            // Not on a Windows host yet: QEMU has no TPM there (track
+            // M20). On an Arm host, Windows 11 on Arm (step 4).
+            Family::Win11 if !cfg!(target_os = "windows") && self.arch() == bundle::Arch::Aarch64 => Some(
+                "Windows 11 on Arm: UEFI and a TPM 2.0. \
+                 Install from Microsoft's Windows 11 ISO for Arm64.\n\
+                 Most x64 apps run, through Windows' own emulation. Drivers must be built for Arm64.",
+            ),
             Family::Win11 if cfg!(target_os = "linux") => Some(
                 "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO (x64).\n\
                  Needs hardware acceleration. Emulated, Windows 11 takes minutes to start.",
             ),
-            Family::Win11 => Some("Windows 11 machines don't run on this computer yet. They run on Linux for now."),
+            Family::Win11 => Some("Windows 11 machines don't run on this computer yet."),
             _ => None,
         }
     }
@@ -612,7 +619,24 @@ impl Form {
     /// Whether this host has hardware acceleration, so "Automatic" in
     /// the picker can say what it means here.
     pub fn have_kvm(&self) -> bool {
-        self.have_kvm
+        self.hw_accel()
+    }
+
+    /// Whether this host's hardware acceleration can run this machine. A
+    /// Mac's hypervisor runs only a guest of the host's own architecture,
+    /// so there it is Windows 11 on Arm alone, never the era's i386
+    /// (`bundle::Machine::accel_args`).
+    fn hw_accel(&self) -> bool {
+        self.have_kvm && (!cfg!(target_os = "macos") || (self.family.is_modern() && self.arch() == bundle::Arch::native()))
+    }
+
+    /// A Windows 11 machine's processor: the edited machine's own, the
+    /// host's for a new one (`bundle::Machine::reference`).
+    fn arch(&self) -> bundle::Arch {
+        match &self.editing {
+            Some(edit) => edit.arch.unwrap_or_default(),
+            None => bundle::Arch::native(),
+        }
     }
 
     pub fn accel_note(&self) -> AccelNote {
@@ -620,7 +644,7 @@ impl Form {
         // has, because "No KVM on this host" on a Windows machine is
         // both wrong and unactionable.
         let hw = player::hw_accel_label().unwrap_or("Hardware acceleration");
-        let mut text = match (self.accel, self.have_kvm) {
+        let mut text = match (self.accel, self.hw_accel()) {
             (Accel::Auto, true) => format!("{hw} is available and will be used."),
             (Accel::Auto, false) => format!("No {hw} on this host, so the machine will be emulated."),
             (Accel::Kvm, true) => format!("{hw} is available."),
@@ -630,14 +654,14 @@ impl Form {
             }
             (Accel::Tcg, _) => "Emulated. This is what everything here is tuned for.".to_string(),
         };
-        if self.family.is_modern() && self.accel == Accel::Auto && !self.have_kvm {
+        if self.family.is_modern() && self.accel == Accel::Auto && !self.hw_accel() {
             text.push_str("\nWindows 11 takes minutes to start this way.");
         }
-        if self.family == Family::Win98 && self.accel != Accel::Tcg && self.have_kvm {
+        if self.family == Family::Win98 && self.accel != Accel::Tcg && self.hw_accel() {
             text.push('\n');
             text.push_str(&format!("Under {hw} Windows 98 runs at full host speed, which triggers its fast-CPU bugs."));
         }
-        AccelNote { text, warning: matches!((self.accel, self.have_kvm), (Accel::Kvm, false)) }
+        AccelNote { text, warning: matches!((self.accel, self.hw_accel()), (Accel::Kvm, false)) }
     }
 
     /// What this host will give the guest's 3D, under the acceleration
@@ -916,7 +940,7 @@ impl Form {
         self.cpu_speed.icount_shift().is_none()
             && match self.accel {
                 Accel::Kvm => true,
-                Accel::Auto => self.have_kvm,
+                Accel::Auto => self.hw_accel(),
                 Accel::Tcg => false,
             }
     }
@@ -1426,6 +1450,7 @@ impl Form {
                 soundfont: None,
                 mt32_roms: None,
                 pad: None,
+                arch: edit.arch,
                 efi_vars: edit.efi_vars.clone(),
                 tpm_state: edit.tpm_state.clone(),
                 optimizations: Optimizations::default(),

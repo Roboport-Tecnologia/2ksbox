@@ -1,0 +1,36 @@
+diff --git a/ArmVirtPkg/ArmVirtQemu.dsc b/ArmVirtPkg/ArmVirtQemu.dsc
+index 713710c..1fcf8d7 100644
+--- a/ArmVirtPkg/ArmVirtQemu.dsc
++++ b/ArmVirtPkg/ArmVirtQemu.dsc
+@@ -525,6 +525,13 @@
+   #
+   MdeModulePkg/Bus/Pci/NvmExpressDxe/NvmExpressDxe.inf
+ 
++  #
++  # AHCI and ATAPI (2ksbox: the disk and CD-ROM of Windows 11 on Arm)
++  #
++  MdeModulePkg/Bus/Pci/SataControllerDxe/SataControllerDxe.inf
++  MdeModulePkg/Bus/Ata/AtaAtapiPassThru/AtaAtapiPassThru.inf
++  MdeModulePkg/Bus/Ata/AtaBusDxe/AtaBusDxe.inf
++
+   #
+   # SMBIOS Support
+   #
+diff --git a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+index 3890600..db78a75 100644
+--- a/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
++++ b/ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc
+@@ -135,6 +135,13 @@ READ_LOCK_STATUS   = TRUE
+   #
+   INF MdeModulePkg/Bus/Pci/NvmExpressDxe/NvmExpressDxe.inf
+ 
++  #
++  # AHCI and ATAPI (2ksbox: the disk and CD-ROM of Windows 11 on Arm)
++  #
++  INF MdeModulePkg/Bus/Pci/SataControllerDxe/SataControllerDxe.inf
++  INF MdeModulePkg/Bus/Ata/AtaAtapiPassThru/AtaAtapiPassThru.inf
++  INF MdeModulePkg/Bus/Ata/AtaBusDxe/AtaBusDxe.inf
++
+   #
+   # SMBIOS Support
+   #

@@ -1,0 +1,45 @@
+The era's devices stay out of a target with no ISA bus (2ksbox, track
+M20 step 4, 2026-10-01).
+
+`aarch64-softmmu` (Windows 11 on Arm, built on Arm hosts) is the first
+target of ours that is not a PC. Two things the queue adds assumed one:
+
+- `hw/audio/meson.build` added OPL3 and the MPU-401 (patch 60) whenever
+  libsynth was found, and both are ISA devices, so the Arm emulator and
+  its embed library failed to link (`isa_address_space_io`). They now
+  need `CONFIG_ISA_BUS` too.
+- libqemu-embed compiled `embed/mglcntx_embed.c` (the OpenGL
+  pass-through's window-less backend) and `embed/embedfx.c` (the UI
+  provider that calls it) for every target, while `hw/mesa` is in
+  `i386_system_ss` alone. Both are now compiled for the x86 targets
+  only; `embed/libqemu_embed.c` registers the provider only there.
+
+diff --git a/hw/audio/meson.build b/hw/audio/meson.build
+index a245403..5258f63 100644
+--- a/hw/audio/meson.build
++++ b/hw/audio/meson.build
+@@ -15,7 +15,7 @@ system_ss.add(when: 'CONFIG_SB16', if_true: files('sb16.c'))
+ # routine reads, and the MPU-401 QEMU has never had — over libsynth's
+ # engines. Both files are overlaid by scripts/prepare-qemu.sh, and they
+ # are built exactly when that staticlib was given (doc 20 §5).
+-system_ss.add(when: libsynth, if_true: files('opl3.c', 'mpu401.c'))
++system_ss.add(when: [libsynth, 'CONFIG_ISA_BUS'], if_true: files('opl3.c', 'mpu401.c'))
+ system_ss.add(when: 'CONFIG_VT82C686', if_true: files('via-ac97.c'))
+ system_ss.add(when: 'CONFIG_WM8750', if_true: files('wm8750.c'))
+ system_ss.add(when: ['CONFIG_VIRTIO_SND', 'CONFIG_VIRTIO'], if_true: files('virtio-snd.c'))
+diff --git a/meson.build b/meson.build
+index d893bae..6b3600a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -4306,7 +4306,10 @@ foreach target : target_dirs
+   # win98-xp-virt: QEMU as an embeddable shared library (embed/libqemu_embed.h)
+   if target.endswith('-softmmu')
+     shared_library('qemu-embed-' + target_name,
+-                   files('embed/libqemu_embed.c', 'embed/embedaudio.c', 'embed/embedfx.c', 'embed/mglcntx_embed.c'),
++                   files('embed/libqemu_embed.c', 'embed/embedaudio.c')
++                   # the OpenGL pass-through (hw/mesa) is the x86 targets' alone
++                   + (config_target['TARGET_BASE_ARCH'] == 'i386' ?
++                      files('embed/embedfx.c', 'embed/mglcntx_embed.c') : []),
+                    c_args: c_args,
+                    include_directories: target_inc,
+                    dependencies: arch_deps + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),

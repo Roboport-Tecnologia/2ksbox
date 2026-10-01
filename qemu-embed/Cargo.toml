@@ -14,3 +14,5 @@ build = "build.rs"
 # libqemu-embed-i386. One QEMU per binary, linked: see the player's
 # feature of the same name.
 qemu-x86_64 = []
+# libqemu-embed-aarch64: Windows 11 on Arm under the host's hypervisor.
+qemu-aarch64 = []

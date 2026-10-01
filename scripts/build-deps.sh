@@ -334,10 +334,10 @@ for p in sys.argv[1:]:
     s = open(p).read()
     pub = {}
     for key in ("Libs", "Requires"):
-        priv = re.search(r"^%s\.private:\s*(.*)$" % key, s, re.M)
+        priv = re.search(r"^%s\.private:[ \t]*(.*)$" % key, s, re.M)
         if not priv or not priv.group(1).strip():
             continue
-        m = re.search(r"^%s:\s*(.*)$" % key, s, re.M)
+        m = re.search(r"^%s:[ \t]*(.*)$" % key, s, re.M)
         merged = ((m.group(1).strip() + " ") if m else "") + priv.group(1).strip()
         s = re.sub(r"^%s\.private:.*$\n?" % key, "", s, flags=re.M)
         if m:

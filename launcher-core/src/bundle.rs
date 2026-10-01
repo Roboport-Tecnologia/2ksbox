@@ -64,6 +64,63 @@ impl Family {
     }
 }
 
+/// A modern machine's processor, which is the Windows it can install:
+/// x64 Windows 11 on an x86_64 guest, Windows 11 on Arm on an aarch64
+/// one (track M20). A machine keeps the one it was made with, because its
+/// installed disk only boots on that. A new one gets the host's own,
+/// which the host's hypervisor runs (`Arch::native`); the other would be
+/// emulated. The era's families are always i386 and have no field.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Arch {
+    /// The default for a bundle that does not say, which is every
+    /// Windows 11 machine made before the Arm one existed.
+    #[default]
+    X86_64,
+    /// Windows 11 on Arm on QEMU's `virt` machine (M20 step 4).
+    Aarch64,
+}
+
+impl Arch {
+    /// The host's own architecture, which its hypervisor (KVM, HVF,
+    /// WHPX) can run.
+    pub fn native() -> Arch {
+        if cfg!(target_arch = "aarch64") {
+            Arch::Aarch64
+        } else {
+            Arch::X86_64
+        }
+    }
+
+    /// QEMU's name for it: `qemu-system-<target>`, `libqemu-embed-<target>`.
+    pub fn qemu_target(self) -> &'static str {
+        match self {
+            Arch::X86_64 => "x86_64",
+            Arch::Aarch64 => "aarch64",
+        }
+    }
+
+    /// EDK2's code for it in `pc-bios`: QEMU's secure build on x86_64
+    /// (unpacked there by `scripts/prepare-qemu.sh`); on aarch64 our own
+    /// build (`scripts/build-edk2.sh`), since QEMU's has no Secure Boot,
+    /// which Windows 11's setup requires, and no AHCI driver.
+    pub fn efi_code_file(self) -> &'static str {
+        match self {
+            Arch::X86_64 => "edk2-x86_64-secure-code.fd",
+            Arch::Aarch64 => "2ksbox-aarch64-code.fd",
+        }
+    }
+
+    /// The empty variable store a machine's own is made from (the x86_64
+    /// firmware uses QEMU's i386 template; aarch64 our build's own).
+    pub fn efi_vars_template(self) -> &'static str {
+        match self {
+            Arch::X86_64 => "edk2-i386-vars.fd",
+            Arch::Aarch64 => "2ksbox-aarch64-vars.fd",
+        }
+    }
+}
+
 /// How fast the guest's CPU is allowed to be, named after the machine it
 /// feels like rather than after the knob underneath.
 ///
@@ -1230,6 +1287,11 @@ pub struct Machine {
     /// says so at start. Absent from every bundle that has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_qemu_args: Vec<String>,
+    /// Windows 11 (M20): the guest's processor (`Arch`). Absent = x86_64,
+    /// what every Windows 11 machine was before Windows 11 on Arm; a new
+    /// machine is written with the host's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<Arch>,
     /// Windows 11 (M20): the firmware's variable store, a qcow2 the size
     /// of EDK2's (boot entries, Secure Boot keys). A qcow2 rather than
     /// the raw file EDK2 ships so live snapshots can hold it, as they
@@ -1451,6 +1513,7 @@ impl Machine {
             mt32_roms: None,
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
+            arch: family.is_modern().then(Arch::native),
             efi_vars: None,
             tpm_state: None,
             optimizations: Optimizations::default(),
@@ -1501,12 +1564,19 @@ impl Machine {
     fn accel_args(&self) -> Vec<String> {
         let mut tcg = "tcg".to_string();
         tcg.push_str(&self.optimization_props(Knob::Tcg));
+        // A Mac's hypervisor runs only a guest of its own architecture,
+        // and QEMU builds `hvf` only into that target: Windows 11 on Arm
+        // on Apple Silicon (M20 step 4). Never the era's i386, whose
+        // QEMU would warn on every boot that it has no such accelerator.
+        let hvf = cfg!(target_os = "macos") && self.qemu_target() == Arch::native().qemu_target();
         match self.effective_accel() {
             // "Hardware acceleration, required", spelled the way this
-            // host spells it (`whpx` on Windows), so a machine directory
-            // copied between hosts keeps its meaning.
+            // host spells it (`whpx` on Windows, `hvf` on a Mac), so a
+            // machine directory copied between hosts keeps its meaning.
             Accel::Kvm if cfg!(target_os = "windows") => vec!["-accel".into(), "whpx".into()],
+            Accel::Kvm if cfg!(target_os = "macos") => vec!["-accel".into(), "hvf".into()],
             Accel::Kvm => vec!["-accel".into(), "kvm".into()],
+            Accel::Auto if hvf => vec!["-accel".into(), "hvf".into(), "-accel".into(), tcg],
             Accel::Auto if cfg!(target_os = "linux") => {
                 vec!["-accel".into(), "kvm".into(), "-accel".into(), tcg]
             }
@@ -1922,14 +1992,20 @@ impl Machine {
     }
 
     /// Which QEMU runs this machine: `i386` for the era's families,
-    /// `x86_64` for Windows 11. Each player binary links one
+    /// the machine's `Arch` for Windows 11. Each player binary links one
     /// (`player::player_binary_for`).
     pub fn qemu_target(&self) -> &'static str {
         if self.family.is_modern() {
-            "x86_64"
+            self.effective_arch().qemu_target()
         } else {
             "i386"
         }
+    }
+
+    /// A modern machine's processor: its own, or x86_64 for a bundle
+    /// that does not say (`arch`).
+    pub fn effective_arch(&self) -> Arch {
+        self.arch.unwrap_or_default()
     }
 
     /// The firmware's variable store (`efi_vars`), or `efivars.qcow2`
@@ -1961,6 +2037,9 @@ impl Machine {
     /// * The RTC in local time, which is what Windows reads it as.
     /// * The PS/2 keyboard the q35 has; the tablet and a pad on xHCI.
     fn modern_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
+        if self.effective_arch() == Arch::Aarch64 {
+            return self.arm_args(pc_bios_dir, shelf);
+        }
         let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
         let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), "q35,smm=on".into()];
         args.extend(self.accel_args());
@@ -1974,7 +2053,7 @@ impl Machine {
             "-global".into(),
             "driver=cfi.pflash01,property=secure,value=on".into(),
             "-drive".into(),
-            format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(EFI_CODE_FILE)),
+            format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(Arch::X86_64.efi_code_file())),
             "-drive".into(),
             format!(
                 "if=pflash,format=qcow2,unit=1,file={}",
@@ -2013,14 +2092,88 @@ impl Machine {
         args.extend(self.extra_qemu_args.iter().cloned());
         args
     }
+
+    /// Windows 11 on Arm's machine (M20 step 4): QEMU's `virt` board, the
+    /// host's own CPU under its hypervisor (HVF on a Mac), UEFI and a
+    /// TPM 2.0, and only devices Windows on Arm drives in the box.
+    ///
+    /// * `virt` with a GICv3, which Windows on Arm requires. The board
+    ///   has no IDE, PS/2 or VGA of its own.
+    /// * Our own EDK2 build (`scripts/build-edk2.sh`: Secure Boot
+    ///   available, off; AHCI; ramfb up to 1920x1080) and the machine's
+    ///   own variables, as on x86_64.
+    /// * The TPM on `tpm-tis-device`, the `virt` board's TPM interface;
+    ///   QEMU writes its ACPI table.
+    /// * An ICH9 AHCI controller named `ide`, so the disk and the CD-ROM
+    ///   sit on `ide.0` and `ide.1` as on the q35 (`cdrom_args`), and live
+    ///   snapshots work (NVMe cannot be migrated, as on x86_64). Windows
+    ///   on Arm drives it in the box; QEMU's own aarch64 EDK2 does not,
+    ///   which is one reason the firmware is ours.
+    /// * The screen is `ramfb`: EDK2 draws on it and Windows keeps it
+    ///   through its Basic Display driver, at the size the firmware set
+    ///   (1280x800; another from the firmware's setup screen).
+    /// * Keyboard and pointer on xHCI, since there is no PS/2. The
+    ///   tablet, or a relative mouse with the seamless pointer off.
+    /// * With networking, `virtio-net`, whose driver (`netkvm`) comes
+    ///   from virtio-win's ISO: Windows on Arm has none for an e1000e.
+    /// * `-cpu max`: the host's CPU under HVF, all of TCG's otherwise.
+    fn arm_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
+        let arch = Arch::Aarch64;
+        let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
+        let mut args =
+            vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), "virt,gic-version=3".into()];
+        args.extend(self.accel_args());
+        args.extend([
+            "-m".into(),
+            self.ram_mb.to_string(),
+            "-smp".into(),
+            default_cpus(self.family).to_string(),
+            "-cpu".into(),
+            "max".into(),
+            "-drive".into(),
+            format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(arch.efi_code_file())),
+            "-drive".into(),
+            format!(
+                "if=pflash,format=qcow2,unit=1,file={}",
+                opt_value(&self.effective_efi_vars().display().to_string())
+            ),
+            "-tpmdev".into(),
+            format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
+            "-device".into(),
+            "tpm-tis-device,tpmdev=tpm0".into(),
+            "-rtc".into(),
+            "base=localtime".into(),
+            "-device".into(),
+            "ich9-ahci,id=ide".into(),
+            "-drive".into(),
+            format!("file={},if=none,id=disk0", opt_value(&self.disk.display().to_string())),
+            "-device".into(),
+            "ide-hd,bus=ide.0,drive=disk0".into(),
+            "-device".into(),
+            "ramfb".into(),
+            "-device".into(),
+            "qemu-xhci".into(),
+            "-device".into(),
+            "usb-kbd".into(),
+            "-device".into(),
+            if self.seamless_mouse { "usb-tablet" } else { "usb-mouse" }.into(),
+        ]);
+        if self.effective_pad() == Pad::Usb {
+            args.extend(["-device".into(), "usb-gamepad".into()]);
+        }
+        if self.network {
+            args.extend(["-netdev".into(), "user,id=n0".into()]);
+            args.extend(["-device".into(), "virtio-net-pci,netdev=n0".into()]);
+        } else {
+            args.extend(["-nic".into(), "none".into()]);
+        }
+        args.extend(self.audio_args());
+        args.extend(self.cdrom_args(shelf));
+        args.extend(self.extra_qemu_args.iter().cloned());
+        args
+    }
 }
 
-/// EDK2's secure x86_64 build in `pc-bios` (unpacked there by
-/// `scripts/prepare-qemu.sh`).
-pub const EFI_CODE_FILE: &str = "edk2-x86_64-secure-code.fd";
-/// The empty variable store a machine's own is made from (the x86_64
-/// firmware uses the i386 template).
-pub const EFI_VARS_TEMPLATE: &str = "edk2-i386-vars.fd";
 /// A modern machine's variable store, in its bundle directory.
 pub const EFI_VARS_FILE: &str = "efivars.qcow2";
 /// A modern machine's TPM state, in its bundle directory.

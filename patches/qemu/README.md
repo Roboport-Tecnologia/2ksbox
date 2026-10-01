@@ -867,3 +867,27 @@ TPM, a restart on the same file and a savevm / loadvm round trip
 through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
 with `TPM=libtpms` for Windows 11. **Drop:** never (upstream QEMU has no
 in-process TPM).
+
+### 76-hvf-arm-macos12
+Arm HVF on the macOS 12 floor (track M20 step 4). QEMU 9.2's Arm
+Hypervisor.framework accelerator sizes the VM's IPA space with the VM
+configuration calls macOS 13 added, unguarded, so `aarch64-softmmu` (the
+Windows 11 on Arm target, built on Arm hosts) failed the floor's
+`-Werror=unguarded-availability-new`. Each call now runs under
+`__builtin_available(macOS 13, *)`; on 12 the VM is made with no
+configuration (a 36-bit IPA space) and one that needs more is refused.
+**Test:** the build on the floor; a Windows 11 on Arm boot under HVF.
+The macOS 12 path is unrun (no macOS 12 host with HVF here).
+**Drop:** when the floor is macOS 13 or later, or upstream guards it.
+
+### 77-arm-target-no-era-devices
+The era's devices stay out of a target with no ISA bus (track M20 step
+4). `aarch64-softmmu`, Windows 11 on Arm's QEMU on an Arm host, is the
+first target of ours that is not a PC: OPL3 and the MPU-401 (patch 60)
+now also need `CONFIG_ISA_BUS`, and libqemu-embed compiles
+`embed/mglcntx_embed.c` (the `hw/mesa` backend) and `embed/embedfx.c`
+(its UI provider, registered under `TARGET_I386`) only for the x86
+targets, where `hw/mesa` is built. `embed/libqemu_embed.c` itself calls
+the gameport only under `CONFIG_GAMEPORT`. **Test:** the Arm build links;
+the x86 targets are unchanged (`scripts/test.sh host`). **Drop:** with
+patches 60 and 10, or when they say the same.

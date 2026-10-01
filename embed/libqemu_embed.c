@@ -23,6 +23,9 @@
  * absent. */
 #include "usb-gamepad.h"
 #include "gameport.h"
+/* CONFIG_GAMEPORT: the gameport is an ISA device, which the aarch64
+ * target (Windows 11 on Arm) does not build. */
+#include CONFIG_DEVICES
 
 #ifdef _WIN32
 #include <io.h>                 /* _open_osfhandle() for qemu_embed_socket_to_fd */
@@ -274,7 +277,10 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
     register_displaychangelistener(&e->dcl);
     /* qemu-3dfx: window-less context provider (doc 12) */
     fx_instance = e;
+#ifdef TARGET_I386
+    /* qemu-3dfx's OpenGL pass-through, the x86 targets' alone (patch 77) */
     embed_fx_register();
+#endif
     return e;
 }
 
@@ -436,7 +442,12 @@ void qemu_embed_pad_state(qemu_embed_t *e, const uint8_t *axes,
 bool qemu_embed_pad_present(qemu_embed_t *e)
 {
     (void)e;
-    return usb_gamepad_present() || gameport_present();
+#ifdef CONFIG_GAMEPORT
+    if (gameport_present()) {
+        return true;
+    }
+#endif
+    return usb_gamepad_present();
 }
 
 /* Runs on the main loop under BQL. */
@@ -520,7 +531,9 @@ static void bh_input_drain(void *opaque)
              * is cheaper than asking twice and keeps this file out of
              * the business of knowing which path the bundle chose. */
             usb_gamepad_set_state(axes, (uint8_t)ev->b, (uint16_t)ev->c);
+#ifdef CONFIG_GAMEPORT
             gameport_set_state(axes, (uint8_t)ev->b, (uint16_t)ev->c);
+#endif
             break;
         }
         }

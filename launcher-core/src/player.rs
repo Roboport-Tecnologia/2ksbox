@@ -79,7 +79,18 @@ pub fn hw_accel_available() -> bool {
     {
         whpx_present()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    // Hypervisor.framework's own answer (`kern.hv_support`): an Apple
+    // Silicon Mac, or an Intel one with VT-x, not inside a VM without
+    // nested virtualization.
+    #[cfg(target_os = "macos")]
+    {
+        let mut on: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>();
+        let out = (&mut on as *mut libc::c_int).cast();
+        let r = unsafe { libc::sysctlbyname(c"kern.hv_support".as_ptr(), out, &mut len, std::ptr::null_mut(), 0) };
+        r == 0 && on == 1
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         false
     }
@@ -218,7 +229,7 @@ pub fn target_player_binary(target: &str) -> PathBuf {
 
 /// What has to exist on disk before `machine` can start, made if it does
 /// not: a modern machine's firmware variable store, a qcow2 copy of
-/// EDK2's empty one (`bundle::EFI_VARS_TEMPLATE`). Its TPM needs nothing
+/// EDK2's empty one for its processor (`bundle::Arch::efi_vars_template`). Its TPM needs nothing
 /// made; a missing state file is a TPM libtpms manufactures on the first
 /// start. `spawn` calls this, and `--prepare` for a script that runs
 /// QEMU itself.
@@ -230,7 +241,7 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     if vars.exists() {
         return Ok(());
     }
-    let template = pc_bios_dir().join(crate::bundle::EFI_VARS_TEMPLATE);
+    let template = pc_bios_dir().join(machine.effective_arch().efi_vars_template());
     let bin = qemu_img_binary();
     let status = crate::console::command(&bin)
         .args(["convert", "-f", "raw", "-O", "qcow2"])

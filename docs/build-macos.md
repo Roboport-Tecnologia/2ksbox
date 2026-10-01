@@ -14,6 +14,8 @@ xcode-select --install                       # Apple clang + git
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install ninja meson cmake pkg-config gnu-sed uv   # build tools only ("The libraries" below)
 brew install mingw-w64 xorriso nasm mtools   # guest-tools ISO, the Wine pair, the DOS batteries
+brew install autoconf automake libtool       # libtpms (the Windows 11 TPM) builds from its git tarball
+brew install llvm lld                        # Windows 11 on Arm's firmware (scripts/build-edk2.sh)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -25,6 +27,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   about an hour, and `configure-qemu.sh`, the `qt` stage and the
   packager use nothing else. meson, ninja, cmake and pkg-config are
   needed to build them and ship nothing.
+- **llvm and lld** build EDK2 for the aarch64 `virt` board (`build.sh`'s
+  `edk2` stage, `scripts/build-edk2.sh`, track M20 step 4): Apple's
+  clang cannot link the ELF images EDK2 turns into PE. The firmware is
+  ours because QEMU's prebuilt one has neither Secure Boot nor an AHCI
+  driver. Build tools only, like the rest of this list.
 - **gnu-sed**: qemu-3dfx's `sign_commit` uses GNU `sed -i`, so
   `prepare-qemu.sh` puts gnu-sed's `gnubin` first on `PATH`.
 - **No XQuartz and no SDL2.** QEMU has no display of its own

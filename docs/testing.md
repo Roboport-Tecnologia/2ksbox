@@ -365,6 +365,16 @@ swtpm TPM. `install` runs setup from `tools/win11-spike/autounattend.xml`
 firmware, TPM and Secure Boot on COM1; `boot` times power-on to the
 desktop and ends with the power button. `ACCEL=tcg`, `OUT=`, `SMP=`,
 `MEM=`, `VNC=`, `SHOT=`, `SETTLE=`; needs `swtpm`, `xorriso`, `7z`.
+`ARCH=aarch64` (M20 step 4) is Windows 11 on Arm from Microsoft's Arm64
+ISO on `qemu-system-aarch64`'s `virt` board under HVF, the launcher's
+machine: our EDK2 (`scripts/build-edk2.sh`; `FW_ARM=edk2` for QEMU's,
+which needs `SB_BYPASS=1`), the disk and CDs on AHCI, `tpm-tis-device`
+with the libtpms TPM, `ramfb`, HD Audio. Windows does not make the
+board's PL011 a COM port, so the guest also writes its lines to a FAT
+disk on USB (`OUT/report.img`), which the script reads with mtools;
+`PROBE=1` on `boot` runs `tools/win11-spike/probe.ps1` from it elevated
+(the TPM through `tpmtool` and WMI, every storage, display, sound and
+USB device, the volumes). `LANG_ISO=en-US` stands in for `7z`.
 
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),

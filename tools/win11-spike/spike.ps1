@@ -1,9 +1,16 @@
 # M20 step 1: runs once at the first logon (autounattend.xml). Reports what
 # Windows sees on COM1, which tools/win11-spike.py timestamps, then shuts
-# down so the script knows the install finished.
-$port = New-Object System.IO.Ports.SerialPort COM1, 115200
-$port.Open()
-function say($s) { $port.WriteLine("W11-INFO $s") }
+# down so the script knows the install finished. Windows on Arm has no COM1
+# on QEMU's virt board (its PL011 is not a COM port there), so every line
+# also goes to w11.log on the FAT disk labelled REPORT, which the script
+# reads from the host (M20 step 4).
+$port = $null
+try { $port = New-Object System.IO.Ports.SerialPort COM1, 115200; $port.Open() } catch { $port = $null }
+$report = (Get-Volume -FileSystemLabel REPORT -ErrorAction SilentlyContinue | Select-Object -First 1).DriveLetter
+function say($s) {
+  if ($port) { $port.WriteLine("W11-INFO $s") }
+  if ($report) { Add-Content -Path "${report}:\w11.log" -Value "W11-INFO $s" }
+}
 
 $v = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 say "build=$($v.CurrentBuild).$($v.UBR) version=$($v.DisplayVersion) edition=$($v.EditionID)"
@@ -22,12 +29,17 @@ foreach ($d in Get-CimInstance Win32_PnPEntity | Where-Object { $_.ConfigManager
 
 # Every later logon says when the desktop came up. Explorer runs the Run
 # key once it has started, so the line is "the desktop is there".
-$logon = 'powershell -NoProfile -WindowStyle Hidden -Command "$p=New-Object System.IO.Ports.SerialPort COM1,115200;$p.Open();$p.WriteLine(''W11-DESKTOP'');$p.Close()"'
+Set-Content -Path C:\Windows\w11desktop.ps1 -Value @'
+try { $p = New-Object System.IO.Ports.SerialPort COM1,115200; $p.Open(); $p.WriteLine('W11-DESKTOP'); $p.Close() } catch {}
+$r = (Get-Volume -FileSystemLabel REPORT -ErrorAction SilentlyContinue | Select-Object -First 1).DriveLetter
+if ($r) { Add-Content -Path "${r}:\w11.log" -Value 'W11-DESKTOP' }
+'@
+$logon = 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Windows\w11desktop.ps1'
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name W11Spike -Value $logon
 
 # A full shutdown each time: fast startup would make the next boot a
 # resume and the boot timing meaningless.
 powercfg /h off
 say "done"
-$port.Close()
+if ($port) { $port.Close() }
 shutdown /s /t 5

@@ -22,13 +22,19 @@
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
 #           -> ninja: qemu-system-i386, qemu-system-x86_64, qemu-img,
 #           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (x86_64 is
-#           Windows 11's, linked by a player of its own; see `rust`)
+#           Windows 11's, linked by a player of its own; see `rust`), and
+#           on an Arm host qemu-system-aarch64 and libqemu-embed-aarch64
+#           (Windows 11 on Arm)
+#   edk2    Arm hosts: build-edk2.sh, the firmware of Windows 11 on Arm
+#           (EDK2's ArmVirtQemu with Secure Boot and AHCI) into
+#           qemu/pc-bios. Needs clang and lld (Homebrew's on a Mac)
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
 #           build/qemu. Then `cargo check --release --workspace` keeps the
 #           one non-default member, `launcher-capi`, compiling. On Linux
-#           also Windows 11's player, into target/qemu-x86_64.
+#           also Windows 11's player, into target/qemu-x86_64; on an Arm
+#           host Windows 11 on Arm's, into target/qemu-aarch64.
 #   qt      cargo build --release in launcher-qt/ (its own workspace):
 #           the Qt 6 / QML launcher that every package ships (ADR-015).
 #           Needs Qt 6 development files. Without them the stage is
@@ -68,7 +74,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -89,7 +95,7 @@ while [ $# -gt 0 ]; do
     -t|--test) RUN_TEST=1; shift ;;
     --x86_64) X86_64=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    deps|qemu|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
+    deps|qemu|edk2|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -124,7 +130,7 @@ fi
 
 EXPLICIT=""
 if [ ${#STAGES[@]} -eq 0 ]; then
-  STAGES=(deps qemu rust qt dxvk exec guest)
+  STAGES=(deps qemu edk2 rust qt dxvk exec guest)
 else
   EXPLICIT=1
 fi
@@ -365,10 +371,33 @@ if want qemu; then
         cargo build --release -p libdisc -p libsynth ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"}
       fi
       say "qemu: ninja"
+      # Windows 11 on Arm's QEMU, on an Arm host (configure-qemu.sh).
+      ARM=()
+      if grep -q '^build qemu-system-aarch64' "$QB/build.ninja"; then
+        ARM=(qemu-system-aarch64 "libqemu-embed-aarch64.$SO")
+      fi
       ninja -C "$QB" ${JOBS[@]+"${JOBS[@]}"} \
-        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO" "libqemu-embed-x86_64.$SO"
+        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO" "libqemu-embed-x86_64.$SO" \
+        ${ARM[@]+"${ARM[@]}"}
       BUILT+=(qemu)
     fi
+  fi
+fi
+
+# --- edk2 -------------------------------------------------------------
+# Windows 11 on Arm's firmware, where QEMU has the aarch64 target. Its own
+# stamp (build/edk2/.stamp) makes an unchanged run a no-op.
+if want edk2; then
+  if [ -n "$ROSETTA" ] || ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
+    skip edk2 "an x86 host runs no Windows 11 on Arm" || true
+  elif [ "$(uname -s)" = Darwin ] && ! [ -x /opt/homebrew/opt/lld/bin/ld.lld ]; then
+    skip edk2 "no lld (brew install llvm lld; build tools only)" || true
+  elif [ "$(uname -s)" != Darwin ] && ! { have clang && have ld.lld; }; then
+    skip edk2 "no clang / lld" || true
+  else
+    say "edk2: build-edk2.sh"
+    scripts/build-edk2.sh
+    BUILT+=(edk2)
   fi
 fi
 
@@ -389,6 +418,17 @@ if want rust; then
     if [ "$(uname -s)" = Linux ]; then
       say "rust: the x86_64 player (Windows 11)"
       cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64 ${JOBS[@]+"${JOBS[@]}"}
+    fi
+    # Windows 11 on Arm's player, where QEMU has the aarch64 target (an
+    # Arm host, configure-qemu.sh). On a Mac it needs Hypervisor.framework's
+    # entitlement even ad-hoc signed, and cargo's relink drops it, so it
+    # is signed again on every build.
+    if [ -f "build/qemu/libqemu-embed-aarch64.$SO" ] && [ -z "$ROSETTA" ]; then
+      say "rust: the aarch64 player (Windows 11 on Arm)"
+      cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64 ${JOBS[@]+"${JOBS[@]}"}
+      if [ "$(uname -s)" = Darwin ]; then
+        codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player
+      fi
     fi
     # The member that is not a default member (Cargo.toml):
     # `launcher-capi`, a cdylib + staticlib of the whole launcher that

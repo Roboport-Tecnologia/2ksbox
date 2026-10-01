@@ -292,6 +292,12 @@ fi
 # PPM and converts it itself (tools/qmpc.py), while VNC's JPEG encoding
 # serves a viewer nothing scripted opens. Both were two more libraries in
 # every package for nothing.
+# The targets: i386 for the era's machines, x86_64 for Windows 11, and on
+# an Arm host aarch64 too, Windows 11 on Arm under the host's hypervisor
+# (HVF on a Mac, KVM on Linux; track M20 step 4). An x86 host has no use
+# for it: emulated, Windows on Arm is slower than x64 Windows emulated.
+TARGETS=i386-softmmu,x86_64-softmmu
+case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
 "$ROOT/qemu/configure" \
   --python="$PYTHON" \
   --disable-werror \
@@ -326,7 +332,7 @@ fi
   --disable-vnc-jpeg \
   --extra-cflags="$EXTRA_CFLAGS" \
   ${CFG[@]+"${CFG[@]}"} \
-  --target-list=i386-softmmu,x86_64-softmmu \
+  --target-list="$TARGETS" \
   -Dlibdisc_dir="$LIBDISC_DIR" \
   -Dlibsynth_dir="$LIBSYNTH_DIR" \
   "$@"

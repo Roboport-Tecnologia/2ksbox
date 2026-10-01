@@ -1,5 +1,5 @@
-//! Links libqemu-embed-i386, or libqemu-embed-x86_64 with the
-//! `qemu-x86_64` feature, from the QEMU build dir (override with
+//! Links libqemu-embed-i386, or libqemu-embed-x86_64 / -aarch64 with the
+//! `qemu-x86_64` / `qemu-aarch64` feature, from the QEMU build dir (override with
 //! QEMU_EMBED_LIB_DIR) and bakes an rpath so `cargo run` finds it.
 use std::path::PathBuf;
 
@@ -26,7 +26,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=QEMU_EMBED_LIB_DIR");
     warn_if_overlay_stale(&manifest);
     println!("cargo:rustc-link-search=native={}", dir.display());
-    let target = if std::env::var_os("CARGO_FEATURE_QEMU_X86_64").is_some() { "x86_64" } else { "i386" };
+    let target = if std::env::var_os("CARGO_FEATURE_QEMU_X86_64").is_some() {
+        "x86_64"
+    } else if std::env::var_os("CARGO_FEATURE_QEMU_AARCH64").is_some() {
+        "aarch64"
+    } else {
+        "i386"
+    };
     println!("cargo:rustc-link-lib=dylib=qemu-embed-{target}");
     // Exported to dependents as DEP_QEMU_EMBED_LIBDIR (via `links`), so
     // binaries can bake an rpath. Link-args here would not propagate.

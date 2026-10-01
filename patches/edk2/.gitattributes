@@ -1,0 +1,2 @@
+# EDK2 keeps CRLF line endings, and so must its patches.
+*.patch -text

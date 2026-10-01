@@ -67,9 +67,11 @@ Also: [testing](testing.md), [macOS](build-macos.md),
 
 `scripts/build.sh` is the one command, and the one to run after every
 `git pull`; it redoes only what changed. `--help` lists the stages
-(`deps qemu rust qt dxvk exec guest`; `deps` is macOS only, QEMU's
-libraries and Qt built from source, [build-macos.md](build-macos.md)
-"The libraries"). Naming stages builds only those,
+(`deps qemu edk2 rust qt dxvk exec guest`; `deps` builds QEMU's
+libraries from source, on macOS Qt too, [build-macos.md](build-macos.md)
+"The libraries"; `edk2` is an Arm host's alone, Windows 11 on Arm's
+firmware, `scripts/build-edk2.sh` and `patches/edk2/README.md`). Naming
+stages builds only those,
 `--test` follows with `scripts/test.sh host`, and a stage whose tools
 are missing is skipped with the reason in the closing summary. What it
 runs, for driving one stage by hand:
@@ -81,6 +83,10 @@ ninja -C build/qemu qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io \
   libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS
 cargo build --release        # default members; the player links libqemu-embed-i386
 cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player
+# an Arm host (M20 step 4): ninja also builds qemu-system-aarch64 and libqemu-embed-aarch64, then
+scripts/build-edk2.sh        # Windows 11 on Arm's firmware into qemu/pc-bios
+cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64   # its player
+codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player   # a Mac: HVF
 cargo check --release --workspace          # launcher-capi, the one non-default member
 (cd launcher-qt && cargo build --release)  # the Qt launcher; its own workspace
 # Direct3D pass-through (doc 14):
