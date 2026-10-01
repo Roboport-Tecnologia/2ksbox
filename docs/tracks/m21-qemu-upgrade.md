@@ -460,13 +460,20 @@ harness (`m21-base` worktree at main, QEMU 9.2.4).
   "no Voodoo^2" dialog on the desktop (the image's Glide helper; neither
   harness adds the card); the other three played, and whether 9.2 ever
   does this is not known (three runs, all played).
-- The ~3 % is self-modifying-code work: in Blood
-  `tb_invalidate_phys_range_fast` (the TB-list walks of patches 15/24)
-  is 29.4 % of QEMU on 11.1 against 24.7 % on 9.2, the time in the walk's
-  `tb->size` load, and `info jit` 30 s into the level holds 28,747 TBs
-  on 11.1 against 18,268 (invalidations 582k against 571k): longer page
-  lists. Why 11.1 keeps more TBs is open (duplicate translations under a
-  flag that differs, or blocks no longer freed).
+- The ~3 % is not one 11.1 change. Blood spends 30-40 % of QEMU on
+  both trees in patch 24's soft-immediate walk
+  (`soft_imm_absorbs__locked`, inlined into
+  `tb_invalidate_phys_range_fast`): ~1.4 M absorbed code-page writes a
+  second, each walking the page's whole TB list, 73-90 TBs, ~118 M TB
+  visits a second on both trees (counters in a debug build of each,
+  2026-10-01). The lists are long because the absorbed blocks never die
+  and Win98's lazy FPU switching keeps up to three copies of each, one
+  per CR0.TS/MP combination (the same page holds 141 TBs on 9.2, 143 on
+  11.1, same flags). `info jit`'s "TB count" (18,268 against 28,747) is
+  translations since the last flush, not live blocks, and is no lead.
+  What remains of the gap is small and spread out: walks a little longer
+  where sampled, and 11.1's dirty-bitmap calls (`physical_memory_*`, ~1 %
+  more of QEMU).
 - `tools/w98-blood-fps.py` reads 11.1's trace lines too (no `pid@epoch:`
   prefix; the `-msg timestamp=on` time instead).
 
