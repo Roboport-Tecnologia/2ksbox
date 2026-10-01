@@ -346,6 +346,14 @@ Local only; each works on a raw copy or overlay of an image.
 
 ## Other tools
 
+`tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
+Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a
+swtpm TPM. `install` runs setup from `tools/win11-spike/autounattend.xml`
+(one click on the product key page) and `spike.ps1` reports the build,
+firmware, TPM and Secure Boot on COM1; `boot` times power-on to the
+desktop and ends with the power button. `ACCEL=tcg`, `OUT=`, `SMP=`,
+`MEM=`, `VNC=`, `SHOT=`, `SETTLE=`; needs `swtpm`, `xorriso`, `7z`.
+
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),
 `tools/upload-server.py [dir] [port]` (getting files off the rig: one plain upload form on port 8000, files into `dir`, nothing overwritten; it prints the LAN address to open).
