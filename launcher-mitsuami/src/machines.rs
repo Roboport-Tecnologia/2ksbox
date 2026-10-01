@@ -481,6 +481,9 @@ pub(crate) mod icons {
     pub const EJECT: &str = platform! {
         macos => "eject", gtk => "media-eject-symbolic", kde => "media-eject", windows => "",
     };
+    pub const DOWNLOAD: &str = platform! {
+        macos => "square.and.arrow.down", gtk => "folder-download-symbolic", kde => "download", windows => "\u{E896}",
+    };
     pub const TRASH: &str = platform! {
         macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
     };

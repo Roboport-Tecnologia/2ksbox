@@ -353,6 +353,12 @@ impl Shelf {
         }
     }
 
+    /// Whether the guest-tools ISO `add_guest_tools` would add is on the
+    /// shelf already, for a check mark on its menu item.
+    pub fn has_guest_tools(&self) -> bool {
+        disc_library::guest_tools_iso().is_some_and(|iso| self.library.position(&iso).is_some())
+    }
+
     pub fn remove(&mut self, path: &Path) {
         if let Some(i) = self.library.position(path) {
             let disc = self.library.discs.remove(i);

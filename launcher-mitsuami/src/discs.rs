@@ -166,6 +166,7 @@ pub fn DiscShelfWindow() -> impl View {
             MenuSeparator::new(),
             MenuItem::new("Guest tools ISO")
                 .enabled(has_guest_tools)
+                .checked(move || discs.read(Shelf::has_guest_tools))
                 .on_select(move || discs.edit(Shelf::add_guest_tools)),
         )
     };
@@ -178,7 +179,7 @@ pub fn DiscShelfWindow() -> impl View {
             open=move || discs.read(|s| s.open)
             @close_request=move || discs.close(library)
         >
-            <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
+            <Column padding=Spacing::Xl gap=Spacing::Lg grow=1.0 min_height=0>
                 {crate::shot::arm(&["discs", "shelf"])}
                 <Show when=move || discs.read(Shelf::for_machine)>
                     <DriveCard/>
@@ -190,9 +191,14 @@ pub fn DiscShelfWindow() -> impl View {
                     </Text>
                     <MenuButton icon=icons::NEW menu=add_menu()>"Add"</MenuButton>
                 </Row>
+                <Show when=move || discs.read(|s| s.discs().is_empty()) fallback=|| view! { <DiscList/> }>
+                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
+                        <Text color=Color::SecondaryLabel>"No discs yet."</Text>
+                    </Column>
+                </Show>
+                // On its own under the list, as in the design.
                 <Group
-                    grow=1.0
-                    min_height=0
+                    shrink=0.0
                     file_drop={FileDrop::extensions(DISC_FILTER.1.iter().copied()).and_folders()}
                     @drop={move |paths: Vec<PathBuf>| {
                         discs.drop_over.set(false);
@@ -202,18 +208,16 @@ pub fn DiscShelfWindow() -> impl View {
                     }}
                     @drop_hover={move |over: bool| discs.drop_over.set(over)}
                 >
-                    <Show when=move || discs.read(|s| s.discs().is_empty()) fallback=|| view! { <DiscList/> }>
-                        <Column grow=1.0 align=Align::Center justify=Justify::Center>
-                            <Text color=Color::SecondaryLabel>"No discs yet."</Text>
-                        </Column>
-                    </Show>
-                    <Text text_style=TextStyle::Caption color=Color::SecondaryLabel align_self=Align::Center>
-                        {move || if discs.drop_over.get() {
-                            "Release to add"
-                        } else {
-                            "Drop disc images or folders here"
-                        }.to_owned()}
-                    </Text>
+                    <Row gap=Spacing::Sm align=Align::Center justify=Justify::Center padding_y=Spacing::Sm>
+                        <Icon name=icons::DOWNLOAD color=Color::SecondaryLabel icon_size=16.0 />
+                        <Text color=Color::SecondaryLabel>
+                            {move || if discs.drop_over.get() {
+                                "Release to add"
+                            } else {
+                                "Drop disc images or folders here"
+                            }.to_owned()}
+                        </Text>
+                    </Row>
                 </Group>
                 <Show when=move || discs.read(|s| s.error().is_some())>
                     <Text color=Color::Error>{move || discs.read(|s| s.error().unwrap_or_default().to_owned())}</Text>
@@ -237,7 +241,7 @@ fn DriveCard() -> impl View {
                     color=move || if has_disc() { Color::Accent } else { Color::SecondaryLabel }
                     icon_size=32.0
                 />
-                <Column gap=Spacing::Xs grow=1.0 min_width=0>
+                <Column gap=Spacing::None grow=1.0 min_width=0>
                     <Text text_style=TextStyle::Title max_lines=1>{move || card().map(|c| c.title).unwrap_or_default()}</Text>
                     <Text text_style=TextStyle::Caption color=Color::SecondaryLabel max_lines=1 truncation=Truncation::Middle>
                         {move || card().map(|c| c.detail).unwrap_or_default()}
@@ -255,15 +259,19 @@ fn DriveCard() -> impl View {
 fn DiscList() -> impl View {
     let discs = use_store::<Discs>();
     view! {
-        <List
-            each=move || discs.read(|s| s.discs().iter().map(|d| d.path.clone()).collect::<Vec<_>>())
-            key=|p: &PathBuf| p.clone()
-            grow=1.0
-            min_height=0
-            let:path
-        >
-            <DiscRow path=path/>
-        </List>
+        // A plain column on the window's own background, not a `List`,
+        // which every platform draws as a framed box (user).
+        <ScrollView grow=1.0 min_height=0>
+            <Column gap=Spacing::Sm>
+                <For
+                    each=move || discs.read(|s| s.discs().iter().map(|d| d.path.clone()).collect::<Vec<_>>())
+                    key=|p: &PathBuf| p.clone()
+                    let:path
+                >
+                    <DiscRow path=path/>
+                </For>
+            </Column>
+        </ScrollView>
     }
 }
 
@@ -290,21 +298,27 @@ fn DiscRow(path: PathBuf) -> impl View {
         move || discs.read(|s| row(&path).is_some_and(|r| s.row_in_drive(r)))
     };
     view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
+        <Row padding_y=Spacing::Sm gap=Spacing::Lg align=Align::Center>
             <Icon name={let path = p3.clone(); move || {
                 discs.read(|s| row(&path).and_then(|r| s.row_kind(r))).map_or(icons::DISCS, kind_icon).to_owned()
             }} color=Color::SecondaryLabel icon_size=20.0 />
-            <Column gap=Spacing::Xs grow=1.0 min_width=0>
+            <Column gap=Spacing::None grow=1.0 min_width=0>
                 <Show when={editing.clone()} fallback={let path = p4.clone(); move || {
                     let path = path.clone();
                     let label = {
                         let path = path.clone();
                         move || field(&path, |s, r| s.discs()[r].label.clone())
                     };
+                    // The pencil floats past the label's end, taking no
+                    // room in the row.
                     view! {
-                        <Row gap=Spacing::Xs align=Align::Center>
+                        <Row align_self=Align::Start min_width=0>
                             <Text max_lines=1 shrink=1.0 min_width=0>{label.clone()}</Text>
                             <Button
+                                absolute
+                                start={Length::Percent(100.0)}
+                                top={Length::Px(-7.0)}
+                                margin_start=Spacing::Xs
                                 icon=icons::EDIT
                                 icon_only=true
                                 button_style=ButtonStyle::Borderless

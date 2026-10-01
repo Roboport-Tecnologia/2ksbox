@@ -163,9 +163,14 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    it has a "CD drive" card on top (the disc's kind icon, its label, the
    core's detail line, Eject; or "Tray empty"), then "Library" with the
    core's count and an Add menu button (Disc image…, Folder as disc…,
-   Guest tools ISO), then the rows in a `Group` that takes dropped
-   images and folders. A row is its kind's icon, the label with a pencil
-   that turns it into a field (written on Enter or focus leaving), the
+   Guest tools ISO, checked once it is on the shelf), then the rows, and
+   under them a `Group` of its own that takes dropped images and folders.
+   The rows are a plain column in a `ScrollView`, not a `List`, so they
+   sit on the window's background with no frame (user). A row is its
+   kind's icon, the label with a pencil floating past its end (absolute,
+   taking no room; to show only on hover once mitsuami has hover, which
+   the user is adding) that turns it into a field (written on Enter or
+   focus leaving), the
    core's "Disc image · ~/path" line, ▶ (Insert) or "In drive", and the
    trash button. The rules are doc 07's "One drive": Insert sets the boot
    disc, and on a running machine swaps the disc now too; the card polls
