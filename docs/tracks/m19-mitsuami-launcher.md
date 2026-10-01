@@ -166,7 +166,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    Guest tools ISO, checked once it is on the shelf), then the rows, and
    under them a `Group` of its own that takes dropped images and folders.
    The rows are a plain column in a `ScrollView`, not a `List`, so they
-   sit on the window's background with no frame (user). A row is its
+   sit on the window's background with no frame (user); the scroll view
+   runs to the window's edges with the side padding inside it, so the
+   scroll bar stays clear of the buttons (user). A row is its
    kind's icon, the label with a pencil floating past its end (absolute,
    taking no room; to show only on hover once mitsuami has hover, which
    the user is adding) that turns it into a field (written on Enter or

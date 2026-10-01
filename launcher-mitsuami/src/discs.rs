@@ -179,12 +179,12 @@ pub fn DiscShelfWindow() -> impl View {
             open=move || discs.read(|s| s.open)
             @close_request=move || discs.close(library)
         >
-            <Column padding=Spacing::Xl gap=Spacing::Lg grow=1.0 min_height=0>
+            <Column padding_y=Spacing::Xl gap=Spacing::Lg grow=1.0 min_height=0>
                 {crate::shot::arm(&["discs", "shelf"])}
                 <Show when=move || discs.read(Shelf::for_machine)>
                     <DriveCard/>
                 </Show>
-                <Row gap=Spacing::Sm align=Align::Center>
+                <Row margin_x=Spacing::Xl shrink=0.0 gap=Spacing::Sm align=Align::Center>
                     <Text text_style=TextStyle::Headline>"Library"</Text>
                     <Text text_style=TextStyle::Caption color=Color::SecondaryLabel grow=1.0>
                         {move || discs.read(Shelf::count_label)}
@@ -192,12 +192,13 @@ pub fn DiscShelfWindow() -> impl View {
                     <MenuButton icon=icons::NEW menu=add_menu()>"Add"</MenuButton>
                 </Row>
                 <Show when=move || discs.read(|s| s.discs().is_empty()) fallback=|| view! { <DiscList/> }>
-                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
+                    <Column margin_x=Spacing::Xl grow=1.0 align=Align::Center justify=Justify::Center>
                         <Text color=Color::SecondaryLabel>"No discs yet."</Text>
                     </Column>
                 </Show>
                 // On its own under the list, as in the design.
                 <Group
+                    margin_x=Spacing::Xl
                     shrink=0.0
                     file_drop={FileDrop::extensions(DISC_FILTER.1.iter().copied()).and_folders()}
                     @drop={move |paths: Vec<PathBuf>| {
@@ -220,7 +221,7 @@ pub fn DiscShelfWindow() -> impl View {
                     </Row>
                 </Group>
                 <Show when=move || discs.read(|s| s.error().is_some())>
-                    <Text color=Color::Error>{move || discs.read(|s| s.error().unwrap_or_default().to_owned())}</Text>
+                    <Text margin_x=Spacing::Xl color=Color::Error>{move || discs.read(|s| s.error().unwrap_or_default().to_owned())}</Text>
                 </Show>
             </Column>
         </Window>
@@ -234,7 +235,7 @@ fn DriveCard() -> impl View {
     let card = move || discs.read(Shelf::drive_card);
     let has_disc = move || card().is_some_and(|c| c.kind.is_some());
     view! {
-        <Group title="CD drive">
+        <Group margin_x=Spacing::Xl shrink=0.0 title="CD drive">
             <Row gap=Spacing::Md align=Align::Center>
                 <Icon
                     name=move || card().and_then(|c| c.kind).map_or(icons::DISCS, kind_icon).to_owned()
@@ -262,7 +263,7 @@ fn DiscList() -> impl View {
         // A plain column on the window's own background, not a `List`,
         // which every platform draws as a framed box (user).
         <ScrollView grow=1.0 min_height=0>
-            <Column gap=Spacing::Sm>
+            <Column padding_x=Spacing::Xl gap=Spacing::Sm>
                 <For
                     each=move || discs.read(|s| s.discs().iter().map(|d| d.path.clone()).collect::<Vec<_>>())
                     key=|p: &PathBuf| p.clone()
