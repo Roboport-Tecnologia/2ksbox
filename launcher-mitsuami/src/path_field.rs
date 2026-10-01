@@ -20,9 +20,7 @@ use std::time::Duration;
 
 /// `value` is what the field shows, and the owner's model decides it: an
 /// edit (typed or picked) goes out through `@edit`, and the value comes
-/// back through the binding. `@pick` is the same path when it came from
-/// the dialog, for a field where choosing a file is the whole answer (the
-/// disc shelf's adder acts on it at once); `@edit` has it first.
+/// back through the binding.
 #[component]
 pub fn PathField(
     #[prop(into)] label: String,
@@ -44,8 +42,6 @@ pub fn PathField(
     #[prop(default = Value::Static(None))]
     empty_dir: Value<Option<PathBuf>>,
     on_edit: Callback<String>,
-    on_pick: Callback<String>,
-    on_submit: Callback<()>,
 ) -> impl View {
     // Decided when it opens: the value, and the last folder any dialog was
     // browsing, change between one click and the next.
@@ -67,15 +63,13 @@ pub fn PathField(
         }
     };
     let accept = {
-        let (edited, picked) = (on_edit.clone(), on_pick);
+        let edited = on_edit.clone();
         move |path: &Path| {
             // A sandboxed dialog hands back the portal's copy; the bundle
             // wants the file's own path.
             let path = browse::picked(path);
             browse::remember(&path);
-            let path = path.display().to_string();
-            edited.call(path.clone());
-            picked.call(path);
+            edited.call(path.display().to_string());
         }
     };
     if let Some(path) = scripted_pick(&label) {
@@ -111,7 +105,6 @@ pub fn PathField(
                 value=value
                 placeholder=placeholder
                 @input=move |s| on_edit.call(s)
-                @submit=move || on_submit.call(())
             />
             <Button @click=browse>"Browse…"</Button>
         </Row>

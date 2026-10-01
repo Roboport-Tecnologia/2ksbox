@@ -334,6 +334,57 @@ shelforder_check() { # the disc shelf is in order by label, all the way to the g
   [ "$o" = "Age of Empires" ] || { echo "a disc added later did not land in order (first row: $o)"; rc=1; }
   return $rc
 }
+drive_check() { # the shelf's one drive: the boot disc when stopped, the tray when running
+  local rc=0 dir="$OUT/drive" bundle o sock qpid i
+  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/Patch 1.3"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  : >"$dir/disk.qcow2"
+  truncate -s 2M "$dir/zork.iso" "$dir/guest-tools-3dfx-0000000.iso"
+  bundle="$(target/release/launcherx --new xp Drive "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
+  target/release/launcherx --discs add "$dir/zork.iso" "$dir/Patch 1.3" "$dir/guest-tools-3dfx-0000000.iso" >/dev/null \
+    || { echo "--discs add failed"; return 1; }
+  # Stopped, empty: the card says so, and every row is a kind of its own.
+  o="$(target/release/launcherx --drive "$bundle" 2>&1)" || { echo "--drive failed: $o"; return 1; }
+  grep -qx $'running\tfalse' <<<"$o" || { echo "a stopped machine reads as running: $o"; rc=1; }
+  grep -q $'^drive\tempty\tTray empty\tThe machine boots without a disc' <<<"$o" || { echo "empty card: $o"; rc=1; }
+  grep -q $'^-\tdisc\tzork\tDisc image · ' <<<"$o" || { echo "zork's row: $o"; rc=1; }
+  grep -q $'^-\tfolder\tPatch 1.3\tFolder · ' <<<"$o" || { echo "the folder's row: $o"; rc=1; }
+  grep -q $'^-\ttools\tguest-tools-3dfx-0000000\tGuest tools · ' <<<"$o" || { echo "guest tools' row: $o"; rc=1; }
+  # Insert on a stopped machine is the boot disc, written to the bundle.
+  o="$(target/release/launcherx --drive "$bundle" insert "$dir/zork.iso" 2>&1)" || { echo "insert failed: $o"; return 1; }
+  grep -q $'^drive\tdisc\tzork\t' <<<"$o" || { echo "the card after insert: $o"; rc=1; }
+  grep -q $'^in-drive\tdisc\tzork\t' <<<"$o" || { echo "zork is not marked in the drive: $o"; rc=1; }
+  grep -qx $'Storage\tCD at boot\tzork.iso' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+    || { echo "the bundle does not boot with zork"; rc=1; }
+  # Running: the card is the tray, read from the monitor. A paused QEMU
+  # with the machine's CD drive stands in for the player.
+  if [ -x build/qemu/qemu-system-i386 ]; then
+    sock="$(target/release/launcherx --qmp-socket "$bundle")"
+    mkdir -p "$(dirname "$sock")"; rm -f "$sock"
+    build/qemu/qemu-system-i386 -machine pc -S -display none -nodefaults \
+      -drive "if=none,id=cd0,media=cdrom,file=$dir/zork.iso" -device ide-cd,bus=ide.1,id=ide1-cd0,drive=cd0 \
+      -qmp "unix:$sock,server=on,wait=off" >"$dir/qemu.log" 2>&1 & qpid=$!
+    for i in $(seq 100); do [ -S "$sock" ] && break; sleep 0.05; done
+    o="$(target/release/launcherx --drive "$bundle" 2>&1)"
+    grep -qx $'running\ttrue' <<<"$o" || { echo "a running machine reads as stopped: $o"; rc=1; }
+    grep -q $'^drive\tdisc\tzork\t' <<<"$o" || { echo "the running card: $o"; rc=1; }
+    # A folder goes in as isodir: and comes back out of query-block as the folder.
+    o="$(target/release/launcherx --drive "$bundle" insert "$dir/Patch 1.3" 2>&1)"
+    grep -q $'^drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the card after a live folder insert: $o"; rc=1; }
+    grep -q $'^in-drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the folder is not marked in the drive: $o"; rc=1; }
+    grep -qx $'Storage\tCD at boot\tPatch 1.3' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+      || { echo "a live insert did not set the boot disc too"; rc=1; }
+    o="$(target/release/launcherx --drive "$bundle" eject 2>&1)"
+    grep -q $'^drive\tempty\tTray empty\tInsert a disc from the library' <<<"$o" || { echo "the card after a live eject: $o"; rc=1; }
+    grep -qx $'Storage\tCD at boot\tEmpty' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+      || { echo "a live eject did not empty the boot drive too"; rc=1; }
+    kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
+  else
+    echo "  (no build/qemu/qemu-system-i386: the running card is not checked)"
+  fi
+  return $rc
+}
 machinedetails_check() { # what the machine window shows of a chosen machine (doc 07)
   local rc=0 dir="$OUT/machinedetails" xp dos o groups
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -2435,6 +2486,7 @@ host_stage() {
   if [ -x target/release/launcherx ]; then
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true
+    run_check drive drive.log drive_check || true
     run_check machine-details machine-details.log machinedetails_check || true
     if command -v bwrap >/dev/null; then
       run_check accel-choices accel-choices.log accelchoices_check || true

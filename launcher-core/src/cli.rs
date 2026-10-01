@@ -568,6 +568,37 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 }
             }
         }
+        "--drive" => {
+            // Headless equivalent of the shelf window opened for a
+            // machine: its drive card, then each disc with its kind and
+            // whether it is the one in the drive. `insert`/`eject` are the
+            // card's and the rows' buttons, which set the boot disc and,
+            // on a running machine, swap the disc now as well.
+            let usage = "usage: --drive <machine.toml> [insert <disc>|eject]";
+            let path: PathBuf = args.next().expect(usage).into();
+            let mut shelf = shelf::Shelf::default();
+            shelf.open_for_path(path, &disc_library::default_path());
+            match (args.next().as_deref(), args.next()) {
+                (Some("insert"), Some(disc)) => shelf.insert(Path::new(&disc)),
+                (Some("eject"), None) => shelf.eject(),
+                (None, _) => {}
+                _ => panic!("{usage}"),
+            }
+            if let Err(e) = shelf.last_result() {
+                eprintln!("[drive] {e}");
+                return Some(1);
+            }
+            println!("running\t{}", shelf.running());
+            if let Some(card) = shelf.drive_card() {
+                let kind = card.kind.map_or("empty", |k| k.key());
+                println!("drive\t{kind}\t{}\t{}", card.title, card.detail);
+            }
+            for (row, disc) in shelf.discs().iter().enumerate() {
+                let kind = shelf.row_kind(row).map_or("", |k| k.key());
+                let mark = if shelf.row_in_drive(row) { "in-drive" } else { "-" };
+                println!("{mark}\t{kind}\t{}\t{}", disc.label, shelf.row_detail(row));
+            }
+        }
         "--snapshots" => {
             // Headless equivalent of the "Snapshots…" window: the same
             // operations its buttons run, over a bundle's disk.

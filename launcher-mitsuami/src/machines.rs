@@ -206,21 +206,23 @@ pub fn MachinesWindow() -> impl View {
         snaps.open_for(Path::new(&bundle), false);
         snaps.ask_name();
     }
-    // `shelf[:<disc>]`: the shared shelf, with a disc added through its
-    // Add field; `discs:<machine.toml>[:boot=<disc>]`: the shelf for a
-    // machine, with a disc ticked to boot with.
+    // `shelf[:<disc>]`: the shared shelf, with a disc added as the Add
+    // menu would; `discs:<machine.toml>[:insert=<disc>]`: the shelf for a
+    // machine, with a disc's ▶ pressed.
     if let Some(add) = crate::shot::screen("shelf") {
         discs.open_library(library);
-        discs.add(&add);
+        if !add.is_empty() {
+            discs.add(Path::new(&add));
+        }
     }
     if let Some(arg) = crate::shot::screen("discs") {
-        let (bundle, boot) = match arg.split_once(":boot=") {
+        let (bundle, insert) = match arg.split_once(":insert=") {
             Some((bundle, disc)) => (bundle.to_owned(), Some(PathBuf::from(disc))),
             None => (arg, None),
         };
-        discs.open_for(PathBuf::from(bundle), library, false);
-        if boot.is_some() {
-            discs.set_boot(boot);
+        discs.open_for(PathBuf::from(bundle), library);
+        if let Some(disc) = insert {
+            discs.insert(&disc);
         }
     }
     // `profiles`: the profile list; `editor:<preset>[;<image>[;<p>=<v>]]`:
@@ -380,7 +382,7 @@ fn Details() -> impl View {
             }),
             MenuItem::new("Discs").on_select(move || {
                 if let Some(bundle) = bundle() {
-                    discs.open_for(bundle, library, running());
+                    discs.open_for(bundle, library);
                 }
             }),
             MenuItem::new("Snapshots").on_select(move || {
@@ -465,6 +467,19 @@ pub(crate) mod icons {
     };
     pub const CLEAR: &str = platform! {
         macos => "xmark.circle", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E894}",
+    };
+    pub const FOLDER: &str = platform! {
+        macos => "folder", gtk => "folder-symbolic", kde => "folder", windows => "\u{E8B7}",
+    };
+    pub const TOOLS: &str = platform! {
+        macos => "wrench.and.screwdriver", gtk => "applications-engineering-symbolic", kde => "tools", windows => "\u{E90F}",
+    };
+    pub const EDIT: &str = platform! {
+        macos => "pencil", gtk => "document-edit-symbolic", kde => "document-edit", windows => "\u{E70F}",
+    };
+    /// Segoe Fluent Icons has no eject glyph: the button shows its caption.
+    pub const EJECT: &str = platform! {
+        macos => "eject", gtk => "media-eject-symbolic", kde => "media-eject", windows => "",
     };
     pub const TRASH: &str = platform! {
         macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",

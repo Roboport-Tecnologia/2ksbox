@@ -86,6 +86,63 @@ pub fn default_label(path: &Path) -> String {
     name.map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
 
+/// What a shelf entry is, for its icon and the word under its label.
+/// Image formats are not told apart: an `.iso`, a `.cue` and an `.mds`
+/// are all a disc to the person picking one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscKind {
+    Disc,
+    /// A host folder served as a generated disc (`qemu_medium`).
+    Folder,
+    /// One of our guest-tools ISOs, any revision (`guest_tools_iso`).
+    GuestTools,
+}
+
+impl DiscKind {
+    /// Decided from the path each time, like `qemu_medium`.
+    pub fn of(path: &Path) -> DiscKind {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if path.is_dir() {
+            DiscKind::Folder
+        } else if name.starts_with("guest-tools-") && name.ends_with(".iso") {
+            DiscKind::GuestTools
+        } else {
+            DiscKind::Disc
+        }
+    }
+
+    /// A stable name for a front end to pick an icon by.
+    pub fn key(self) -> &'static str {
+        match self {
+            DiscKind::Disc => "disc",
+            DiscKind::Folder => "folder",
+            DiscKind::GuestTools => "tools",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DiscKind::Disc => "Disc image",
+            DiscKind::Folder => "Folder",
+            DiscKind::GuestTools => "Guest tools",
+        }
+    }
+}
+
+/// A path as a row shows it: the home directory as `~`.
+pub fn display_path(path: &Path) -> String {
+    let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
+    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => Path::new("~").join(rest).display().to_string(),
+        None => path.display().to_string(),
+    }
+}
+
+/// The line under a disc's label: what it is and where it lives.
+pub fn detail(path: &Path) -> String {
+    format!("{} · {}", DiscKind::of(path).label(), display_path(path))
+}
+
 /// The shelf's order: by label, the way a shelf of discs is looked
 /// through.
 ///

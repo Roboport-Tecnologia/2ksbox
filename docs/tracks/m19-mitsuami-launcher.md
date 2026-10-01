@@ -77,8 +77,8 @@ and photograph the screen it is on:
 | `clonego:<machine.toml>` | presses Clone, and shows the machine window once the copy has landed (writes into the library) |
 | `snapshots:<machine.toml>` | the snapshot tree |
 | `takesnapshot:<machine.toml>` | the snapshot tree with Take snapshot's name sheet open |
-| `shelf[:<disc>]` | the shared shelf, with a disc added through its Add field (writes the shelf) |
-| `discs:<machine.toml>[:boot=<disc>]` | the shelf for a machine, with a disc ticked to boot with (writes the bundle) |
+| `shelf[:<disc>]` | the shared shelf, with a disc added as the Add menu would (writes the shelf) |
+| `discs:<machine.toml>[:insert=<disc>]` | the shelf for a machine, with a disc's ▶ pressed (writes the bundle) |
 | `profiles` | the shader profile list |
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
@@ -158,8 +158,21 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    snapshot taken from the sheet landed under the current one, Cancel
    took none; in each alert Cancel changed nothing, Restore moved the
    current snapshot, Delete removed the row. The shelf's
-   rows are keyed by path (it is kept in label order); Boot is a
-   checkbox (unticked: an empty tray), where Qt has a checkable button.
+   rows are keyed by path (it is kept in label order).
+   **The shelf redone 2026-10-01 (user's design):** opened on a machine
+   it has a "CD drive" card on top (the disc's kind icon, its label, the
+   core's detail line, Eject; or "Tray empty"), then "Library" with the
+   core's count and an Add menu button (Disc image…, Folder as disc…,
+   Guest tools ISO), then the rows in a `Group` that takes dropped
+   images and folders. A row is its kind's icon, the label with a pencil
+   that turns it into a field (written on Enter or focus leaving), the
+   core's "Disc image · ~/path" line, ▶ (Insert) or "In drive", and the
+   trash button. The rules are doc 07's "One drive": Insert sets the boot
+   disc, and on a running machine swaps the disc now too; the card polls
+   the running drive every 2 s and only touches the window when it
+   changed (`probe_live` / `live_changed`). The typed-path field is gone.
+   Checked headless on Broadway: the card with a disc and empty, five
+   rows of the three kinds. Not driven: the pencil, a drop, the menu.
    Checked headless on a scratch machine with a real qcow2: a clone copied
    byte for byte, a three-snapshot tree built with `--snapshots` shown
    with its branch, discs added and one set to boot with. Not driven: a
@@ -259,21 +272,17 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    Widgets mitsuami won't have are ours, as `#[component]`s in their own
    module. The first is `src/path_field.rs`, `PathField` (the caption,
    the text input and Browse…, as `PathField.qml`): the form, the shader
-   editor and the disc shelf's Add disc field all use it. `@edit` gets a
-   typed or picked path, `@pick` only a picked one (the shelf adds it at
-   once). What its dialog needed went into mitsuami 6beec2e
+   editor use it (the shelf's Add disc field until 2026-10-01). `@edit`
+   gets a typed or picked path. What its dialog needed went into mitsuami 6beec2e
    (`OpenFile::start_folder`, `FileFilter::all`), so it does what the Qt
    field does: it opens at `browse::browse_start` (the field's folder,
    else `empty_dir`, which the preset field sets to the preset
    collection, else the last folder browsed), and "All files" follows the
-   field's filter. The shelf's Add folder… starts at the last folder too.
+   field's filter. The shelf's Add menu starts at the last folder too.
    `LAUNCHER_PICK=<label>=<path>` is the probe, as `pickdisc` is for Qt:
    the field with that caption prints the dialog it would open
    (`pick <label>: start …, filters […]`) and takes `<path>` as its
-   answer. With `LAUNCHER_SCREEN=shelf` and a `Game [1996].cue`, the disc
-   goes on the shelf under its own name, the field empties, and the next
-   pick starts in its folder (checked 2026-09-28, with
-   `LAUNCHER_BROWSE_MEMORY` on a scratch file).
+   answer.
 7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
    packager, then the flip**: every package ships this as `2ksbox`,
    `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's

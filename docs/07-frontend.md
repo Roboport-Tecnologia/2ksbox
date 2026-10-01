@@ -335,6 +335,18 @@ The fields, and why each is what it is:
   and profile libraries), because a rip belongs to the person, not the
   machine that installed it first. A machine keeps only which disc is in
   its drive at boot.
+- **One drive** (2026-10-01, user): a machine's shelf shows its CD drive
+  as a card above the list, and a row's Insert (▶) and the card's Eject
+  act on it whether the machine is up or not. Stopped, they set the boot
+  disc; running, they swap the disc now and set the boot disc too, so
+  the drive still holds it after a restart. While the machine runs the
+  card is what the drive holds this moment, read with `query-block`
+  (`control::cd_medium`) and polled, because `CDSHELF` and the guest's
+  own eject change it too; the matching row reads "In drive". A disc's
+  kind is disc, folder or guest tools (`DiscKind`), not its image
+  format. `launcherx --drive` prints the card and rows; the `drive`
+  check runs it against a paused QEMU. The Qt window keeps its separate
+  Boot and live Insert until mitsuami replaces it.
 - **Sorted by label**, case-insensitively, with **digit runs compared as
   numbers** (`disc 10` after `disc 2`). It is an invariant of
   `DiscLibrary`, not a sort each view does, because the flat file the
