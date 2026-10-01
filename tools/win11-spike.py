@@ -38,6 +38,14 @@ Environment:
   FW_ARM=2ksbox        aarch64 firmware: ours (2ksbox-aarch64-*.fd), or edk2
                        for QEMU's prebuilt one (no Secure Boot, no AHCI: the
                        disk goes on NVMe, the CDs on USB)
+  GPU=ramfb            aarch64: the screen, ramfb (Windows' Basic Display on the
+                       firmware's framebuffer) or virtio-gpu-pci (viogpudo,
+                       from the drivers disc)
+  NET=1                a network card (aarch64: virtio-net, whose driver is on
+                       the drivers disc; x86_64: e1000e) on QEMU's user network
+  DRIVERS=<iso>        aarch64: the drivers disc in a CD drive of its own
+                       (default build/virtio-win/2ksbox-drivers-arm64.iso when
+                       it exists; DRIVERS= for none)
   SB_BYPASS=1          install: setup's LabConfig BypassSecureBootCheck
                        (needed on FW_ARM=edk2 only)
   LANG_ISO=en-US       the ISO's language, when 7z is not there to read it
@@ -63,6 +71,9 @@ ARCH = os.environ.get("ARCH", "x86_64")
 ARM = ARCH == "aarch64"
 OURS = os.environ.get("FW_ARM", "2ksbox") == "2ksbox"
 SB_BYPASS = os.environ.get("SB_BYPASS", "") == "1"
+NET = os.environ.get("NET", "") == "1"
+GPU = os.environ.get("GPU", "ramfb")
+DRIVERS = os.environ.get("DRIVERS", os.path.join(ROOT, "build/virtio-win/2ksbox-drivers-arm64.iso"))
 ACCEL = os.environ.get("ACCEL", "hvf" if ARM and sys.platform == "darwin" else "kvm")
 SMP = os.environ.get("SMP", "4")
 MEM = os.environ.get("MEM", "4096")
@@ -301,6 +312,13 @@ def run_qemu(cds):
                      "-device", "scsi-cd,bus=ub%d.0,drive=cd%d%s" % (i, i, boot)]
         else:
             args += ["-device", "ide-cd,drive=cd%d,bus=ide.%d%s" % (i, i + (ARM and OURS), boot)]
+    if ARM and DRIVERS and os.path.exists(DRIVERS):
+        n = len(cds) + (ARM and OURS)
+        args += ["-drive", "if=none,id=drv,media=cdrom,readonly=on,file=" + DRIVERS,
+                 "-device", "ide-cd,drive=drv,bus=ide.%d" % n]
+    if NET:
+        nic = "virtio-net-pci" if ARM else "e1000e"
+        args += ["-netdev", "user,id=n0", "-device", nic + ",netdev=n0"]
     if ARM:
         # after the CDs: plugged first, the firmware made its one USB
         # boot entry for this disk and never tried the ISO
@@ -326,9 +344,9 @@ def arm_args(tpmdev):
             "-device", "tpm-tis-device,tpmdev=tpm0",
             "-drive", "if=none,id=d0,format=qcow2,file=" + DISK,
             *disk,
-            "-device", "ramfb",
+            "-device", GPU,
             "-device", "qemu-xhci", "-device", "usb-tablet", "-device", "usb-kbd",
-            "-nic", "none",
+            *([] if NET else ["-nic", "none"]),
             # HD Audio, the launcher's Windows 11 sound card
             "-audiodev", "none,id=snd",
             "-device", "ich9-intel-hda,addr=0x1b", "-device", "hda-duplex,audiodev=snd",
@@ -347,7 +365,7 @@ def x86_args(tpmdev, cpu):
             "-drive", "if=none,id=d0,format=qcow2,file=" + DISK,
             "-device", "nvme,drive=d0,serial=w11spike,bootindex=1",
             "-device", "qemu-xhci", "-device", "usb-tablet", "-device", "usb-kbd",
-            "-nic", "none",
+            *([] if NET else ["-nic", "none"]),
             "-vga", "std",
             "-display", "vnc=127.0.0.1:" + VNC if VNC else "none"]
 
@@ -490,7 +508,7 @@ def click(qmp, x, y, w=1280, h=800):
 
 
 UAC_YES = (538, 546)    # 1280x800; focus starts on No
-UAC_YES_ARM = (298, 444)    # 800x600, ramfb at the firmware's size
+UAC_YES_ARM = (298, 444)    # 800x600: QEMU's aarch64 firmware's ramfb (FW_ARM=edk2)
 
 
 PROBE_CMD = ("powershell -ep bypass -c \"& ((Get-Volume -FileSystemLabel REPORT).DriveLetter"
@@ -508,7 +526,10 @@ def probe(q, qmp, serial, shots):
     for attempt in range(4):
         time.sleep(10)
         shots.take("uac-%d.png" % attempt)
-        click(qmp, *UAC_YES_ARM, w=800, h=600)
+        if OURS:
+            click(qmp, *UAC_YES)            # our firmware's 1280x800
+        else:
+            click(qmp, *UAC_YES_ARM, w=800, h=600)
         r = wait(q, serial, shots, "W11-PROBE done", 60)
         if r:
             break

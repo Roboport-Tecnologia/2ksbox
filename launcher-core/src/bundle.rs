@@ -2114,8 +2114,13 @@ impl Machine {
     ///   (1280x800; another from the firmware's setup screen).
     /// * Keyboard and pointer on xHCI, since there is no PS/2. The
     ///   tablet, or a relative mouse with the seamless pointer off.
-    /// * With networking, `virtio-net`, whose driver (`netkvm`) comes
-    ///   from virtio-win's ISO: Windows on Arm has none for an e1000e.
+    /// * With networking, `virtio-net`. Windows on Arm has no driver for
+    ///   it (nor for an e1000e); the drivers disc does.
+    /// * The drivers disc (`disc_library::arm_drivers_iso`, virtio-win's
+    ///   ARM64 NetKVM and viogpudo) in a CD drive of its own on `ide.2`,
+    ///   always: Windows Setup installs what it finds under the disc's
+    ///   `$WinPEDriver$`, and an installed Windows can be pointed at it.
+    ///   The user's own discs keep `ide.1` and the shelf.
     /// * `-cpu max`: the host's CPU under HVF, all of TCG's otherwise.
     fn arm_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
         let arch = Arch::Aarch64;
@@ -2169,6 +2174,14 @@ impl Machine {
         }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        if let Some(iso) = crate::disc_library::arm_drivers_iso() {
+            args.extend([
+                "-drive".into(),
+                format!("if=none,id=drivers0,media=cdrom,readonly=on,file={}", opt_value(&iso.display().to_string())),
+                "-device".into(),
+                "ide-cd,bus=ide.2,drive=drivers0".into(),
+            ]);
+        }
         args.extend(self.extra_qemu_args.iter().cloned());
         args
     }

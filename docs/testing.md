@@ -375,7 +375,11 @@ board's PL011 a COM port, so the guest also writes its lines to a FAT
 disk on USB (`OUT/report.img`), which the script reads with mtools;
 `PROBE=1` on `boot` runs `tools/win11-spike/probe.ps1` from it elevated
 (the TPM through `tpmtool` and WMI, every storage, display, sound and
-USB device, the volumes). `LANG_ISO=en-US` stands in for `7z`.
+USB device, the network adapters and addresses, the driver store, the
+volumes). `LANG_ISO=en-US` stands in for `7z`. `NET=1` adds a network
+card (`virtio-net` on aarch64, whose driver comes from the drivers disc,
+`build/virtio-win/2ksbox-drivers-arm64.iso`, attached when it exists,
+`DRIVERS=` for none); `GPU=virtio-gpu-pci` swaps ramfb for virtio-gpu.
 
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),

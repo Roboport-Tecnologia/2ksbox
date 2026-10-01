@@ -506,6 +506,7 @@ impl Form {
             Family::Win11 if !cfg!(target_os = "windows") && self.arch() == bundle::Arch::Aarch64 => Some(
                 "Windows 11 on Arm: UEFI and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO for Arm64.\n\
+                 A second CD drive holds the network and display drivers, and setup installs them.\n\
                  Most x64 apps run, through Windows' own emulation. Drivers must be built for Arm64.",
             ),
             Family::Win11 if cfg!(target_os = "linux") => Some(

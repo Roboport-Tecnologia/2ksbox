@@ -245,6 +245,23 @@ pub fn write_shelf_file(library: &DiscLibrary, path: &Path) -> std::io::Result<(
 /// guest walks the reply with a fixed stride and a bounded buffer.
 pub const MAX_SHELF_ENTRIES: usize = 256;
 
+/// Windows 11 on Arm's drivers disc (`scripts/build-virtio-win.sh`):
+/// virtio-win's ARM64 network and display drivers, which Windows on Arm
+/// has none of in the box. Shipped as `share/2ksbox/drivers/`, built
+/// into `build/virtio-win` in a checkout; `LAUNCHER_ARM_DRIVERS_ISO`
+/// overrides both. `None` when it is not there, and the machine then
+/// starts without it (`player::prepare` says so).
+pub fn arm_drivers_iso() -> Option<PathBuf> {
+    let path = match std::env::var("LAUNCHER_ARM_DRIVERS_ISO") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => crate::paths::resource("share/2ksbox/drivers", "build/virtio-win").join(ARM_DRIVERS_ISO),
+    };
+    path.is_file().then(|| path.canonicalize().unwrap_or(path))
+}
+
+/// The drivers disc's file name, in either place.
+pub const ARM_DRIVERS_ISO: &str = "2ksbox-drivers-arm64.iso";
+
 /// The newest guest-tools ISO (`guest-tools/build-wrappers.sh` writes
 /// `guest-tools/out/guest-tools-3dfx-<rev>.iso`), for doc 07's
 /// "one-click guest-tools ISO attach". Shipped as

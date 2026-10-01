@@ -28,6 +28,9 @@
 #   edk2    Arm hosts: build-edk2.sh, the firmware of Windows 11 on Arm
 #           (EDK2's ArmVirtQemu with Secure Boot and AHCI) into
 #           qemu/pc-bios. Needs clang and lld (Homebrew's on a Mac)
+#   virtio  Arm hosts: build-virtio-win.sh, Windows 11 on Arm's drivers
+#           disc (virtio-win's ARM64 network and display drivers, from a
+#           pinned download) into build/virtio-win. Needs xorriso
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
@@ -74,7 +77,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -95,7 +98,7 @@ while [ $# -gt 0 ]; do
     -t|--test) RUN_TEST=1; shift ;;
     --x86_64) X86_64=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    deps|qemu|edk2|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
+    deps|qemu|edk2|virtio|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -130,7 +133,7 @@ fi
 
 EXPLICIT=""
 if [ ${#STAGES[@]} -eq 0 ]; then
-  STAGES=(deps qemu edk2 rust qt dxvk exec guest)
+  STAGES=(deps qemu edk2 virtio rust qt dxvk exec guest)
 else
   EXPLICIT=1
 fi
@@ -398,6 +401,21 @@ if want edk2; then
     say "edk2: build-edk2.sh"
     scripts/build-edk2.sh
     BUILT+=(edk2)
+  fi
+fi
+
+# --- virtio -----------------------------------------------------------
+# Windows 11 on Arm's drivers disc, beside its firmware. Its own stamp
+# (build/virtio-win/.stamp); the first run downloads virtio-win's ISO.
+if want virtio; then
+  if [ -n "$ROSETTA" ] || ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
+    skip virtio "an x86 host runs no Windows 11 on Arm" || true
+  elif ! have xorriso; then
+    skip virtio "no xorriso" || true
+  else
+    say "virtio: build-virtio-win.sh"
+    scripts/build-virtio-win.sh
+    BUILT+=(virtio)
   fi
 fi
 

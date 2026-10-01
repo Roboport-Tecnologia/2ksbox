@@ -67,10 +67,11 @@ Also: [testing](testing.md), [macOS](build-macos.md),
 
 `scripts/build.sh` is the one command, and the one to run after every
 `git pull`; it redoes only what changed. `--help` lists the stages
-(`deps qemu edk2 rust qt dxvk exec guest`; `deps` builds QEMU's
+(`deps qemu edk2 virtio rust qt dxvk exec guest`; `deps` builds QEMU's
 libraries from source, on macOS Qt too, [build-macos.md](build-macos.md)
-"The libraries"; `edk2` is an Arm host's alone, Windows 11 on Arm's
-firmware, `scripts/build-edk2.sh` and `patches/edk2/README.md`). Naming
+"The libraries"; `edk2` and `virtio` are an Arm host's alone, Windows
+11 on Arm's firmware (`scripts/build-edk2.sh`, `patches/edk2/README.md`)
+and drivers disc (`scripts/build-virtio-win.sh`)). Naming
 stages builds only those,
 `--test` follows with `scripts/test.sh host`, and a stage whose tools
 are missing is skipped with the reason in the closing summary. What it
@@ -85,6 +86,7 @@ cargo build --release        # default members; the player links libqemu-embed-i
 cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player
 # an Arm host (M20 step 4): ninja also builds qemu-system-aarch64 and libqemu-embed-aarch64, then
 scripts/build-edk2.sh        # Windows 11 on Arm's firmware into qemu/pc-bios
+scripts/build-virtio-win.sh  # its drivers disc, build/virtio-win/2ksbox-drivers-arm64.iso
 cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64   # its player
 codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player   # a Mac: HVF
 cargo check --release --workspace          # launcher-capi, the one non-default member

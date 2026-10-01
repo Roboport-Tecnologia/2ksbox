@@ -237,6 +237,14 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     if !machine.family.is_modern() {
         return Ok(());
     }
+    // Not fatal: the machine starts, and only its network and display
+    // drivers are missing
+    if machine.effective_arch() == crate::bundle::Arch::Aarch64 && crate::disc_library::arm_drivers_iso().is_none() {
+        eprintln!(
+            "launcher: no {} (scripts/build-virtio-win.sh): Windows on Arm gets no network or display driver",
+            crate::disc_library::ARM_DRIVERS_ISO
+        );
+    }
     let vars = machine.effective_efi_vars();
     if vars.exists() {
         return Ok(());

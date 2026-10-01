@@ -15,6 +15,9 @@ foreach ($c in 'SCSIAdapter','HDC','DiskDrive','CDROM','Display','MEDIA','AudioE
     say "dev class=$c status=$($d.Status) name=$($d.FriendlyName) id=$($d.InstanceId)"
   }
 }
+foreach ($a in Get-NetAdapter) { say "adapter $($a.Name) | $($a.InterfaceDescription) | $($a.Status) | $($a.LinkSpeed)" }
+foreach ($i in Get-NetIPAddress -AddressFamily IPv4) { say "ip $($i.InterfaceAlias) $($i.IPAddress)" }
+foreach ($l in (pnputil /enum-drivers 2>&1 | Select-String -Pattern 'Original Name|Provider Name' )) { say "store $("$l".Trim())" }
 foreach ($v in Get-Volume) { say "vol $($v.DriveLetter) label=$($v.FileSystemLabel) type=$($v.DriveType) fs=$($v.FileSystem)" }
 foreach ($a in Get-CimInstance Win32_SoundDevice) { say "sound $($a.Name) status=$($a.Status)" }
 foreach ($g in Get-CimInstance Win32_VideoController) { say "video $($g.Name) $($g.CurrentHorizontalResolution)x$($g.CurrentVerticalResolution)" }
