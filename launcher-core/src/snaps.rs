@@ -271,6 +271,12 @@ impl Snapshots {
         self.run("snapshot-delete", name, &format!("deleted \u{201c}{name}\u{201d}"), r);
     }
 
+    /// What a front end asks before `drop_snapshot`: a headline naming
+    /// the snapshot, and the line under it.
+    pub fn delete_question(name: &str) -> (String, &'static str) {
+        (format!("Delete the snapshot “{name}”?"), "This can't be undone.")
+    }
+
     /// What a front end asks before `revert`: a headline naming the
     /// snapshot, and the line under it.
     pub fn restore_question(name: &str) -> (String, &'static str) {

@@ -141,14 +141,15 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    parent with the "current" mark, taken, VM state, Restore and a trash
    button, tooltip "Delete") and Take snapshot is on the window's
    toolbar: it opens a sheet (`Modality::Window`) asking for the name,
-   empty at each opening, Take snapshot its default button. Restore asks
-   in the platform's alert, Cancel the default (the question is the
-   core's `Snapshots::restore_question`), so the actions column is only
-   as wide as Restore and the trash button; the Qt window still asks on
-   the button. Checked by clicks through Broadway's page on a scratch
-   tree: a snapshot taken from the sheet landed under the current one,
-   Cancel took none; Cancel in Restore's alert kept the current
-   snapshot, Restore moved it. The shelf's
+   empty at each opening, Take snapshot its default button. Restore and
+   Delete ask in the platform's alert, Cancel the default (the questions
+   are the core's `Snapshots::restore_question` / `delete_question`), so
+   the actions column is only as wide as Restore and the trash button;
+   the Qt window still asks on Restore's button and deletes without
+   asking. Checked by clicks through Broadway's page on a scratch tree: a
+   snapshot taken from the sheet landed under the current one, Cancel
+   took none; in each alert Cancel changed nothing, Restore moved the
+   current snapshot, Delete removed the row. The shelf's
    rows are keyed by path (it is kept in label order); Boot is a
    checkbox (unticked: an empty tray), where Qt has a checkable button.
    Checked headless on a scratch machine with a real qcow2: a clone copied

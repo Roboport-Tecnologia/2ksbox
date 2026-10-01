@@ -12,7 +12,7 @@
 
 use launcher_core::snaps::Snapshots;
 use launcher_core::snapshots::Snapshot;
-use mitsuami::core::{CurrentWindow, Ui};
+use mitsuami::core::{CurrentWindow, NodeId, Ui};
 use mitsuami::prelude::*;
 use std::path::Path;
 use std::time::Duration;
@@ -174,6 +174,26 @@ fn TakeSnapshotWindow() -> impl View {
     }
 }
 
+/// Ask the core's question in the platform's alert, and run `then` if the
+/// answer is `yes`. Cancel first: the first is the default, and Return
+/// should not restore or delete.
+fn ask(
+    ui: &Ui,
+    window: Option<NodeId>,
+    (headline, detail): (String, &'static str),
+    style: AlertStyle,
+    yes: &str,
+    then: impl FnOnce() + 'static,
+) {
+    let alert = Alert::new(headline).message(detail).style(style).button("Cancel").button(yes);
+    let asker = ui.clone();
+    ui.spawn_local(async move {
+        if asker.alert(window, alert).await == 1 {
+            then();
+        }
+    });
+}
+
 /// The snapshots under column headers: the name, indented under its parent
 /// with the "current" mark on the one the disk descends from, when it was
 /// taken, its VM state, and its two buttons.
@@ -212,27 +232,20 @@ fn SnapshotTable() -> impl View {
         TableColumn::new("", move |id: String| {
             let name = field(&id, |s| s.name.clone());
             let n1 = name.clone();
-            let ui = ui.clone();
+            let (ui1, ui2) = (ui.clone(), ui.clone());
             let restore = move || {
                 let name = n1();
-                let (headline, detail) = Snapshots::restore_question(&name);
-                // Cancel first: the first is the default, and Return
-                // should not restore.
-                let alert = Alert::new(headline)
-                    .message(detail)
-                    .style(AlertStyle::Warning)
-                    .button("Cancel")
-                    .button("Restore");
-                let asker = ui.clone();
-                ui.spawn_local(async move {
-                    if asker.alert(window, alert).await == 1 {
-                        snaps.run(|m| m.revert(&name));
-                    }
+                let question = Snapshots::restore_question(&name);
+                ask(&ui1, window, question, AlertStyle::Warning, "Restore", move || {
+                    snaps.run(|m| m.revert(&name))
                 });
             };
             let delete = move || {
                 let name = name();
-                snaps.run(|m| m.drop_snapshot(&name));
+                let question = Snapshots::delete_question(&name);
+                ask(&ui2, window, question, AlertStyle::Critical, "Delete", move || {
+                    snaps.run(|m| m.drop_snapshot(&name))
+                });
             };
             view! {
                 <Row gap=Spacing::Sm align=Align::Center>
