@@ -305,13 +305,18 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // running machine, a name already in the library) and the
             // same copy. With no name it takes the one the window offers.
             // `--same-disk` is the window's checkbox: no copy of the disk.
-            let usage = "usage: --clone <machine.toml> [--same-disk] [new name]";
+            // `--new-tpm` the other one (a Windows 11 machine's).
+            let usage = "usage: --clone <machine.toml> [--same-disk] [--new-tpm] [new name]";
             let path: PathBuf = args.next().expect(usage).into();
             let mut window = clone_machine::CloneMachine::default();
             window.open_for_path(&path, false);
             let mut name = args.next();
-            if name.as_deref() == Some("--same-disk") {
-                window.same_disk = true;
+            loop {
+                match name.as_deref() {
+                    Some("--same-disk") => window.same_disk = true,
+                    Some("--new-tpm") => window.new_tpm = true,
+                    _ => break,
+                }
                 name = args.next();
             }
             if let Some(name) = name {

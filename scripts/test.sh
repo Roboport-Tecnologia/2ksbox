@@ -442,10 +442,22 @@ win11snap_check() { # a Windows 11 machine's offline snapshot holds its firmware
   printf 'second' > "$tpm"
   op restore "a b" || return 1
   [ "$(cat "$tpm")" = first ] || { echo "the restore did not put the TPM's state back (holds: $(cat "$tpm"))"; rc=1; }
+  # Clone (user decision): the TPM is copied with the machine unless the
+  # window's "new TPM" box is ticked, which leaves the state file and the
+  # snapshots' copies of it behind.
+  local clone
+  clone="$(target/release/launcherx --clone "$bundle" "Same TPM" 2>/dev/null)" || { echo "--clone failed"; return 1; }
+  cmp -s "$tpm" "$(dirname "$clone")/tpm.permall" || { echo "a plain clone did not copy the TPM's state"; rc=1; }
+  [ -n "$(ls "$(dirname "$clone")"/tpm-snapshots 2>/dev/null)" ] || { echo "a plain clone did not copy the snapshot's TPM"; rc=1; }
+  grep -q "tpm_state = \"$(dirname "$clone")/tpm.permall\"" "$clone" || { echo "the clone's tpm_state does not name its own file"; rc=1; }
+  clone="$(target/release/launcherx --clone "$bundle" --new-tpm "New TPM" 2>/dev/null)" || { echo "--clone --new-tpm failed"; return 1; }
+  [ ! -e "$(dirname "$clone")/tpm.permall" ] || { echo "a new-TPM clone copied the TPM's state"; rc=1; }
+  [ -z "$(ls "$(dirname "$clone")"/tpm-snapshots 2>/dev/null)" ] || { echo "a new-TPM clone copied the snapshots' TPM"; rc=1; }
+  [ -f "$(dirname "$clone")/efivars.qcow2" ] && [ -f "$(dirname "$clone")/disk.qcow2" ] || { echo "a new-TPM clone lost its disk or variables"; rc=1; }
   op delete "a b" || return 1
   has "a b" && { echo "the delete left the snapshot on the variable store"; rc=1; }
   [ -z "$(ls "$bdir"/tpm-snapshots 2>/dev/null)" ] || { echo "the delete left the TPM's copy"; rc=1; }
-  [ $rc = 0 ] && echo "take, restore and delete cover the variable store and the TPM"
+  [ $rc = 0 ] && echo "take, restore, clone and delete cover the variable store and the TPM"
   return $rc
 }
 

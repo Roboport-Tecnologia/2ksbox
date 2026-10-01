@@ -76,6 +76,11 @@ player line runs a machine with nothing else.
   so such a clone of a running machine goes ahead. `launcherx --clone
   <machine.toml> [--same-disk] [name]` and `lc_machines_clone` (its
   `same_disk` argument) are the same model.
+  A Windows 11 machine's TPM is copied with the rest (the clone has the
+  same TPM identity, and BitLocker keeps working) unless **"Give the
+  copy a new TPM"** is ticked (user decision, 2026-10-01): then its state
+  file and the snapshots' copies of it stay behind, and the clone's
+  first start makes a new TPM.
 - **Not built:** last-frame thumbnails in the grid, and bundle
   import/export.
 

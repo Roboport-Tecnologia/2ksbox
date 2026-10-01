@@ -113,6 +113,13 @@ pub fn CloneWindow() -> impl View {
                     checked=move || cloner.read(|c| c.same_disk)
                     @change=move |on| cloner.edit(|c| c.same_disk = on)
                 >{get(|c| c.same_disk_label().to_owned())}</Checkbox>
+                <Show when=move || cloner.read(CloneMachine::tpm_applies)>
+                    <Checkbox
+                        enabled=move || !cloner.busy()
+                        checked=move || cloner.read(|c| c.new_tpm)
+                        @change=move |on| cloner.edit(|c| c.new_tpm = on)
+                    >{get(|c| c.new_tpm_label().to_owned())}</Checkbox>
+                </Show>
                 // A warning: the stronger style, as mitsuami has no text
                 // colour (the form's warnings, track doc step 2).
                 <Show when=move || cloner.read(|c| c.warning().is_some())>
