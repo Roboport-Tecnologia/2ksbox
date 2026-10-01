@@ -359,6 +359,31 @@ machinedetails_check() { # what the machine window shows of a chosen machine (do
   return $rc
 }
 
+accelchoices_check() { # the acceleration picker offers hardware acceleration only where the host has it
+  local rc=0 dir="$OUT/accelchoices" bundle o nokvm=(bwrap --bind / / --dev /dev)
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  # This host, as it is.
+  o="$(target/release/launcherx --kvm 2>/dev/null)"
+  if [ "$(head -1 <<<"$o")" = available ]; then
+    grep -qx 'choices: Automatic, KVM, Emulation' <<<"$o" || { echo "with KVM: $o"; rc=1; }
+  else
+    grep -qx 'choices: Automatic, Emulation' <<<"$o" || { echo "without KVM: $o"; rc=1; }
+  fi
+  # A host with no KVM at all: a fresh /dev, with no /dev/kvm in it.
+  o="$("${nokvm[@]}" target/release/launcherx --kvm 2>/dev/null)"
+  [ "$(head -1 <<<"$o")" = "not available" ] || { echo "bwrap left /dev/kvm: $o"; return 1; }
+  grep -qx 'choices: Automatic, Emulation' <<<"$o" || { echo "a new machine without KVM: $o"; rc=1; }
+  # A machine already set to it keeps the entry, so the picker shows it.
+  : >"$dir/disk.qcow2"
+  bundle="$(target/release/launcherx --new xp "On KVM" "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
+  target/release/launcherx --wizard-edit "$bundle" - - kvm >/dev/null 2>&1 || { echo "--wizard-edit kvm failed"; return 1; }
+  o="$("${nokvm[@]}" target/release/launcherx --kvm "$bundle" 2>/dev/null)"
+  grep -qx 'choices: Automatic, KVM, Emulation' <<<"$o" || { echo "a KVM machine without KVM: $o"; rc=1; }
+  return $rc
+}
+
 clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   local rc=0 dir="$OUT/clone" img=build/qemu/qemu-img io=build/qemu/qemu-io
   local bundle disk copy copy_disk o args outside twin sock qpid i
@@ -2411,9 +2436,12 @@ host_stage() {
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true
     run_check machine-details machine-details.log machinedetails_check || true
+    if command -v bwrap >/dev/null; then
+      run_check accel-choices accel-choices.log accelchoices_check || true
+    else skip accel-choices "needs bwrap, for a /dev with no /dev/kvm"; fi
   else
     skip dirshelf "needs target/release/launcherx"; skip shelforder "needs target/release/launcherx"
-    skip machine-details "needs target/release/launcherx"
+    skip machine-details "needs target/release/launcherx"; skip accel-choices "needs target/release/launcherx"
   fi
   if [ -x target/release/launcherx ] && [ -x build/qemu/qemu-img ] && [ -x build/qemu/qemu-io ]; then
     run_check clone clone.log clone_check || true

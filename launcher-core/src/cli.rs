@@ -126,6 +126,17 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // What the wizard's acceleration hint reads, on its own:
             // this host's answer, not the bundle's setting.
             println!("{}", if player::hw_accel_available() { "available" } else { "not available" });
+            // And the acceleration picker's entries, on a new XP machine
+            // or the one given (`--kvm [machine.toml]`): hardware
+            // acceleration only where it is here, or where the machine
+            // already asks for it.
+            let mut form = wizard::Form::default();
+            match args.next() {
+                Some(bundle) => form.open_edit_path(PathBuf::from(bundle)),
+                None => form.open_new(Family::Xp),
+            }
+            let choices: Vec<_> = form.accel_choices().iter().map(|a| a.label()).collect();
+            println!("choices: {}", choices.join(", "));
         }
         "--host-check" => {
             // The other half of `--kvm`: what this host can do for the

@@ -171,11 +171,16 @@ The fields, and why each is what it is:
 - **Memory** is bounded per family (`bundle::ram_mb_range`: Win98
   32–512, since more will not boot; XP 64–3072, DOS 4–256, Other
   16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
-- **Acceleration** is Automatic / hardware-required / Emulation,
+- **Acceleration** is Automatic / hardware only / Emulation,
   `accel = "auto" | "kvm" | "tcg"` on every host. `kvm` means "hardware
   acceleration, required", spelled `whpx` on Windows at spawn (labels
-  "KVM (required)" / "WHPX (required)"), and refuses to start without
-  it. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
+  "KVM" / "WHPX"), and refuses to start without it. The picker offers it
+  only where this host can run the machine with it
+  (`Form::accel_choices`; user, 2026-10-01: "(required)" beside
+  Automatic read as nonsense), so on a host without it the list is
+  Automatic and Emulation; a machine already set to it keeps the entry,
+  under the note that it won't start. `launcherx --kvm [machine.toml]`
+  prints the list. The Qt window still lists all three. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
   `whpx` then `tcg` on Windows), not a probe of ours that could be stale
   by spawn time; on macOS it is TCG. `player::hw_accel_available()`
   backs only the hint beside the picker: Linux opens `/dev/kvm` for

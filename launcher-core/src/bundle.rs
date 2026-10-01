@@ -809,10 +809,12 @@ impl Accel {
             Accel::Auto => "Automatic",
             // Named for what this host has: the same setting, spelled
             // the way this host spells it
-            // (`crate::player::hw_accel_label`).
-            Accel::Kvm if cfg!(target_os = "windows") => "WHPX (required)",
-            Accel::Kvm if cfg!(target_os = "linux") => "KVM (required)",
-            Accel::Kvm => "Hardware acceleration (required)",
+            // (`crate::player::hw_accel_label`). Offered only where the
+            // host has it (`wizard::Form::accel_choices`), so the label
+            // needs no "required" beside "Automatic" (user).
+            Accel::Kvm if cfg!(target_os = "windows") => "WHPX",
+            Accel::Kvm if cfg!(target_os = "linux") => "KVM",
+            Accel::Kvm => "Hardware acceleration",
             Accel::Tcg => "Emulation",
         }
     }

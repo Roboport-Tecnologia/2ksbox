@@ -623,6 +623,15 @@ impl Form {
         self.hw_accel()
     }
 
+    /// The acceleration picker's entries. Hardware acceleration alone is
+    /// offered only where this host can run the machine with it, so a
+    /// machine that would not start is never one pick away. A machine
+    /// already set to it keeps the entry, so the picker can show what it
+    /// is, under the note that says it won't start here.
+    pub fn accel_choices(&self) -> Vec<Accel> {
+        Accel::ALL.into_iter().filter(|&a| a != Accel::Kvm || self.hw_accel() || self.accel == Accel::Kvm).collect()
+    }
+
     /// Whether this host's hardware acceleration can run this machine. A
     /// Mac's hypervisor runs only a guest of the host's own architecture,
     /// so there it is Windows 11 on Arm alone, never the era's i386

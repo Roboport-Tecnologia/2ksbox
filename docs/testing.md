@@ -56,6 +56,7 @@ copy).
 | `cdimage` | the `cdimage` block driver (patch 50) through QEMU's block layer |
 | `dirdisc` | a folder served as `isodir:` reads back identical through xorriso/bsdtar, qemu-img and SeaBIOS's ATAPI probe (M5g) |
 | `dirshelf`, `shelforder` | a folder on the disc shelf and on the boot drive; the shelf is one list in one order |
+| `accel-choices` | the acceleration picker offers hardware acceleration only where the host has it (`launcherx --kvm`), checked on this host and under `bwrap` with a `/dev` that has no `/dev/kvm`; a machine already set to it keeps the entry (doc 07) |
 | `machine-details` | what the machine window shows of a chosen machine (`launcherx --machine-details`): the family and state under its name, a group per page of the form with the form's labels (System, Storage, then the form's order), a disk by its file name, no Direct3D row on a machine without our adapter (doc 07) |
 | `clone`, `qt-clone` | **Clone…** gives a machine with its own disk copy and snapshots, the original untouched; refused while the machine runs (doc 07); "same hard disk" boots the original's disk, copies none of it, warns, and goes ahead while the machine runs; the Qt window is as tall as its content (`;show` and the layout line), and its checkbox reaches the model (`;same`) |
 | `snapshot-tree` | the snapshot window's tree over a real qcow2 (doc 07): take, restore, take again gives siblings, not a line; a delete moves the branch up; a snapshot deleted or taken by hand is dropped from the record or shown at the top level; the clone carries the tree |

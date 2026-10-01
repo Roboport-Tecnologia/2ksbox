@@ -391,9 +391,13 @@ fn SystemPage() -> impl View {
             </Show>
             <Picker
                 label="Acceleration"
-                options=labels(&Accel::ALL, Accel::label)
-                selected=get(wiz, |f| index_of(&Accel::ALL, f.accel()))
-                @choose=move |i| wiz.edit(|f| f.choose_accel(Accel::ALL[i]))
+                options=get(wiz, |f| labels(&f.accel_choices(), Accel::label))
+                selected=get(wiz, |f| index_of(&f.accel_choices(), f.accel()))
+                @choose=move |i| wiz.edit(|f| {
+                    if let Some(&accel) = f.accel_choices().get(i) {
+                        f.choose_accel(accel);
+                    }
+                })
                 is_default=get(wiz, Form::accel_is_default)
                 @reset=move |()| wiz.edit(Form::reset_accel)
             />
