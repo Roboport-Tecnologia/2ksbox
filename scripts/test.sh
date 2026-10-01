@@ -367,7 +367,7 @@ accelchoices_check() { # the acceleration picker offers hardware acceleration on
   # This host, as it is.
   o="$(target/release/launcherx --kvm 2>/dev/null)"
   if [ "$(head -1 <<<"$o")" = available ]; then
-    grep -qx 'choices: Automatic, Hardware virtualization (KVM), Emulation' <<<"$o" || { echo "with KVM: $o"; rc=1; }
+    grep -qx 'choices: Automatic, Hardware virtualization, Emulation' <<<"$o" || { echo "with KVM: $o"; rc=1; }
   else
     grep -qx 'choices: Automatic, Emulation' <<<"$o" || { echo "without KVM: $o"; rc=1; }
   fi
@@ -380,7 +380,7 @@ accelchoices_check() { # the acceleration picker offers hardware acceleration on
   bundle="$(target/release/launcherx --new xp "On KVM" "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
   target/release/launcherx --wizard-edit "$bundle" - - kvm >/dev/null 2>&1 || { echo "--wizard-edit kvm failed"; return 1; }
   o="$("${nokvm[@]}" target/release/launcherx --kvm "$bundle" 2>/dev/null)"
-  grep -qx 'choices: Automatic, Hardware virtualization (KVM), Emulation' <<<"$o" || { echo "a KVM machine without KVM: $o"; rc=1; }
+  grep -qx 'choices: Automatic, Hardware virtualization, Emulation' <<<"$o" || { echo "a KVM machine without KVM: $o"; rc=1; }
   return $rc
 }
 

@@ -45,15 +45,14 @@ pub fn player_binary() -> PathBuf {
     crate::paths::checkout("target").join(profile).join(name)
 }
 
-/// What this host's hardware acceleration is called, for the wizard's
-/// picker and its hints: KVM on Linux, WHPX on Windows (doc 07's
-/// "acceleration: …" indicator). macOS gets no name: the Apple Silicon
-/// machines this project targets cannot run an x86 guest natively, so
-/// there is nothing to offer.
+/// What this host's hardware virtualization is called, for the hint
+/// under the wizard's acceleration picker: KVM on Linux, WHPX on
+/// Windows, HVF on macOS (where it runs Windows 11 on Arm only).
 pub fn hw_accel_label() -> Option<&'static str> {
     match () {
         _ if cfg!(target_os = "linux") => Some("KVM"),
         _ if cfg!(target_os = "windows") => Some("WHPX"),
+        _ if cfg!(target_os = "macos") => Some("HVF"),
         _ => None,
     }
 }

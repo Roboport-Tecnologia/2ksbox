@@ -173,9 +173,10 @@ The fields, and why each is what it is:
   16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
 - **Acceleration** is Automatic / hardware only / Emulation,
   `accel = "auto" | "kvm" | "tcg"` on every host. `kvm` means "hardware
-  acceleration, required", spelled `whpx` on Windows at spawn (labelled
-  "Hardware virtualization (KVM)", "(WHPX)" on Windows, "(HVF)" on
-  macOS; user), and refuses to start without it. The picker offers it
+  acceleration, required", spelled `whpx` on Windows at spawn, and
+  refuses to start without it. The picker says "Hardware virtualization";
+  the note under it names this host's kind, "Hardware virtualization
+  (KVM)" (WHPX on Windows, HVF on macOS; user). The picker offers it
   only where this host can run the machine with it
   (`Form::accel_choices`; user, 2026-10-01: "(required)" beside
   Automatic read as nonsense), so on a host without it the list is

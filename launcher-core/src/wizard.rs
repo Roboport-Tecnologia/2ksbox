@@ -116,6 +116,12 @@ pub struct AccelNote {
     pub warning: bool,
 }
 
+/// A sentence's first letter in upper case.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
 pub struct Form {
     /// Whether the window is up. A front end owns the window; this is
     /// the model's own answer to "should it be".
@@ -650,14 +656,17 @@ impl Form {
     }
 
     pub fn accel_note(&self) -> AccelNote {
-        // KVM on Linux, WHPX on Windows: the note names what this host
-        // has, because "No KVM on this host" on a Windows machine is
-        // both wrong and unactionable.
-        let hw = player::hw_accel_label().unwrap_or("Hardware acceleration");
+        // "Hardware virtualization (KVM)" on Linux, WHPX on Windows, HVF
+        // on macOS: the picker's entry says only "Hardware
+        // virtualization", and the note names what this host has (user).
+        let hw = match player::hw_accel_label() {
+            Some(kind) => format!("hardware virtualization ({kind})"),
+            None => "hardware virtualization".to_owned(),
+        };
         let mut text = match (self.accel, self.hw_accel()) {
-            (Accel::Auto, true) => format!("{hw} is available and will be used."),
+            (Accel::Auto, true) => format!("{} is available and will be used.", capitalized(&hw)),
             (Accel::Auto, false) => format!("No {hw} on this host, so the machine will be emulated."),
-            (Accel::Kvm, true) => format!("{hw} is available."),
+            (Accel::Kvm, true) => format!("{} is available.", capitalized(&hw)),
             (Accel::Kvm, false) => format!("No {hw} on this host. This machine won't start."),
             (Accel::Tcg, _) if self.family.is_modern() => {
                 "Emulated. Windows 11 takes minutes to start this way.".to_string()

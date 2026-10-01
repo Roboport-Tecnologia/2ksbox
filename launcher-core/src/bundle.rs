@@ -807,14 +807,10 @@ impl Accel {
     pub fn label(self) -> &'static str {
         match self {
             Accel::Auto => "Automatic",
-            // Named for what this host has: the same setting, spelled
-            // the way this host spells it
-            // (`crate::player::hw_accel_label`). Offered only where the
-            // host has it (`wizard::Form::accel_choices`), so the label
-            // needs no "required" beside "Automatic" (user).
-            Accel::Kvm if cfg!(target_os = "windows") => "Hardware virtualization (WHPX)",
-            Accel::Kvm if cfg!(target_os = "linux") => "Hardware virtualization (KVM)",
-            Accel::Kvm if cfg!(target_os = "macos") => "Hardware virtualization (HVF)",
+            // Offered only where the host has it
+            // (`wizard::Form::accel_choices`), so it needs no "required"
+            // beside "Automatic"; the note under the picker names this
+            // host's kind (`crate::player::hw_accel_label`) (user).
             Accel::Kvm => "Hardware virtualization",
             Accel::Tcg => "Emulation",
         }

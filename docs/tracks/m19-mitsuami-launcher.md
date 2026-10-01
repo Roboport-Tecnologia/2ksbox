@@ -213,7 +213,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    colour, the platform's own where Qt fixes one: warnings are
    `Color::Warning` (amber on GTK, Breeze's orange on KDE), every error
    line `Color::Error` (they were the Callout style), the preview's
-   placeholder `SecondaryLabel`, each at its note's size as Qt does
+   placeholder `SecondaryLabel`, and since 2026-10-01 every note under a
+   form control `SecondaryLabel` too (user), each at its note's size as
+   Qt does
    (checked headless on `clone:<machine>:same`, which shows both). A disc label is now also written when its field loses
    focus (`@blur`, as Qt's `editingFinished`; not driven headless).
    mitsuami 4cdac37 closed the last two: `Truncation::Start` cuts a

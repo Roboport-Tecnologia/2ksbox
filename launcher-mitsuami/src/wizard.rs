@@ -280,19 +280,20 @@ fn on(wiz: Wizard, section: Section) -> impl Fn() -> bool + 'static {
 fn Note(text: Value<String>) -> impl View {
     view! {
         <Show when={let text = text.clone(); move || !text.get().is_empty()}>
-            <Text text_style=TextStyle::Caption>{text.clone()}</Text>
+            <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{text.clone()}</Text>
         </Show>
     }
 }
 
 /// A note that can be a warning (a machine that will refuse to start),
-/// then in the platform's warning colour, as the Qt window's amber.
+/// then in the platform's warning colour, as the Qt window's amber;
+/// otherwise in the secondary colour, as every note under a control.
 #[component]
 fn AccelLine(note: Value<(String, bool)>) -> impl View {
     let (n1, n2, n3) = (note.clone(), note.clone(), note);
     view! {
         <Show when=move || !n1.get().0.is_empty()>
-            <Text text_style=TextStyle::Caption color={let n2 = n2.clone(); move || if n2.get().1 { Color::Warning } else { Color::Label }}>
+            <Text text_style=TextStyle::Caption color={let n2 = n2.clone(); move || if n2.get().1 { Color::Warning } else { Color::SecondaryLabel }}>
                 {let n3 = n3.clone(); move || n3.get().0}
             </Text>
         </Show>
