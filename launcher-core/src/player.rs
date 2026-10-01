@@ -267,6 +267,35 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     }
 }
 
+/// Why `machine` cannot start on this host, in the sentence a front end
+/// shows, or `None` when it can. Windows 11 alone has limits: no Windows
+/// host yet (QEMU 9.2 has no TPM there), and on a Mac only Windows 11 on
+/// Arm, never x64 (user decision 2026-10-01: the Mac build has no x86_64
+/// QEMU or player, so an x64 bundle copied from Linux stops here rather
+/// than on a missing binary).
+pub fn cannot_start(machine: &Machine) -> Option<&'static str> {
+    if machine.family != crate::bundle::Family::Win11 {
+        return None;
+    }
+    if cfg!(target_os = "windows") {
+        return Some("Windows 11 machines don't run on this computer yet.");
+    }
+    if cfg!(target_os = "macos") && machine.effective_arch() != crate::bundle::Arch::Aarch64 {
+        return Some(mac_x64_refusal());
+    }
+    None
+}
+
+/// The sentence for x64 Windows 11 on a Mac. An Intel Mac has no Windows
+/// 11 at all: its hypervisor runs only x64, which the Mac does not get.
+pub fn mac_x64_refusal() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "Windows 11 for x64 doesn't run on a Mac. Make a Windows 11 on Arm machine instead."
+    } else {
+        "Windows 11 doesn't run on an Intel Mac."
+    }
+}
+
 /// Spawn `player` on `machine`. Inherits the launcher's stdout/stderr
 /// when there is a terminal to inherit. When there is not (a
 /// double-clicked launcher on Windows, which has no console and gives
@@ -286,6 +315,9 @@ pub fn spawn(
     qmp_socket: Option<&std::path::Path>,
     shelf: Option<&std::path::Path>,
 ) -> std::io::Result<Child> {
+    if let Some(why) = cannot_start(machine) {
+        return Err(std::io::Error::other(why));
+    }
     prepare(machine)?;
     let mut args = machine.qemu_args(&pc_bios_dir(), shelf);
     if let Some(extra) = qmp_socket.and_then(crate::control::qmp_args) {

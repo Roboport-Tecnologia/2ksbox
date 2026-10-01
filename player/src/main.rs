@@ -65,6 +65,9 @@ struct Gpu {
     /// the mode sweep renders to a fixed surface size instead of the window's,
     /// so what it checks does not depend on what the compositor handed us
     forced_surface: Option<(u32, u32)>,
+    /// The adapter on show takes the window's size as its mode (virtio-gpu
+    /// with Windows' viogpudo, M20), so the window is not held to the mode.
+    follows_window: bool,
 }
 
 impl Gpu {
@@ -235,6 +238,7 @@ impl Gpu {
             geom: (0.0, 0.0, 1.0, 1.0),
             warned_no_scanline_params: false,
             forced_surface: None,
+            follows_window: false,
         }
     }
 
@@ -257,6 +261,16 @@ impl Gpu {
 
     /// The host surface changed: the picture's own size did not, so the
     /// mode analysis stands and only the fit is redone.
+    /// Whether the adapter on show takes the window's size, as the embed
+    /// library says on each wake; the window's floor follows it.
+    fn set_follows_window(&mut self, on: bool) {
+        if self.follows_window != on {
+            self.follows_window = on;
+            eprintln!("[display] the guest {} the window's size", if on { "takes" } else { "no longer takes" });
+            self.apply_min_size();
+        }
+    }
+
     fn resize(&mut self, w: u32, h: u32) {
         self.config.width = w.max(1);
         self.config.height = h.max(1);
@@ -676,6 +690,13 @@ impl Gpu {
     fn apply_min_size(&self) {
         if self.forced_surface.is_some() {
             return; // headless sweep/calib: the surface is ours, not the window's
+        }
+        if self.follows_window {
+            // the guest's mode is the window's size, whatever it is; the
+            // floor is only a usable desktop
+            self.window
+                .set_min_inner_size(Some(winit::dpi::LogicalSize::new(640, 480)));
+            return;
         }
         let m = self.mode;
         if m.scanlines == 0 {
@@ -1420,6 +1441,23 @@ impl App {
         self.apply_cursor();
     }
 
+    /// The window's drawable size and DPI to the guest's adapter, which
+    /// takes it as its mode when it can (`Qemu::set_window_size`). Physical
+    /// pixels, so a HiDPI screen gets a sharp 1:1 picture (user decision;
+    /// Windows' scaling is the user's to set). Sent on every resize: Windows
+    /// 11 on Arm's viogpudo takes the size only when it starts, so a
+    /// resize shows after Windows restarts, and QEMU keeps the last size
+    /// for it.
+    fn tell_window_size(&self) {
+        let (Some(vm), Some(gpu)) = (self.vm(), self.gpu.as_ref()) else { return };
+        if gpu.forced_surface.is_some() {
+            return;
+        }
+        let size = gpu.window.inner_size();
+        let dpi = (96.0 * gpu.window.scale_factor()).round() as u32;
+        vm.set_window_size(size.width, size.height, dpi);
+    }
+
     /// (Re)draw the prompt, at the size the window has now.
     fn show_prompt(&mut self) {
         let (Some(p), Some(gpu)) = (self.confirm_close.as_mut(), self.gpu.as_mut()) else { return };
@@ -1740,6 +1778,7 @@ impl ApplicationHandler for App {
                 qmp_exec_done: false,
             }
         });
+        self.tell_window_size();
         #[cfg(target_os = "macos")]
         kbcapture::quit_closes_window();
         self.kbd_off = !kbcapture::on_at_start();
@@ -1779,6 +1818,7 @@ impl ApplicationHandler for App {
                 if let Some(gpu) = self.gpu.as_mut() {
                     gpu.resize(size.width, size.height);
                 }
+                self.tell_window_size();
                 self.show_prompt();
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
@@ -2127,6 +2167,10 @@ impl ApplicationHandler for App {
         self.update_guest_cursor(event_loop);
         if self.pointer_inside {
             self.apply_cursor();
+        }
+        let follows = self.vm().is_some_and(|vm| vm.display_follows_window());
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.set_follows_window(follows);
         }
         // dma-buf ring slots are imported here, not on redraw: an occluded
         // window gets no usable swapchain image but must still keep up

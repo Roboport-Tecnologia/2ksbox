@@ -81,9 +81,9 @@ runs, for driving one stage by hand:
 scripts/prepare-qemu.sh      # overlay qemu-3dfx + embed/, the patch queue, sign_commit
 scripts/configure-qemu.sh    # uv-managed Python; also builds libdisc and libsynth
 ninja -C build/qemu qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io \
-  libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS
+  libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS, which has no x86_64 target
 cargo build --release        # default members; the player links libqemu-embed-i386
-cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player
+cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player (Linux)
 # an Arm host (M20 step 4): ninja also builds qemu-system-aarch64 and libqemu-embed-aarch64, then
 scripts/build-edk2.sh        # Windows 11 on Arm's firmware into qemu/pc-bios
 scripts/build-virtio-win.sh  # its drivers disc, build/virtio-win/2ksbox-drivers-arm64.iso

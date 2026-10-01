@@ -20,7 +20,7 @@
 #           docs/development.md), and libtpms with its libcrypto; the
 #           rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
-#           -> ninja: qemu-system-i386, qemu-system-x86_64, qemu-img,
+#           -> ninja: qemu-system-i386, qemu-system-x86_64 (not on a Mac), qemu-img,
 #           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (x86_64 is
 #           Windows 11's, linked by a player of its own; see `rust`), and
 #           on an Arm host qemu-system-aarch64 and libqemu-embed-aarch64
@@ -374,14 +374,16 @@ if want qemu; then
         cargo build --release -p libdisc -p libsynth ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"}
       fi
       say "qemu: ninja"
-      # Windows 11 on Arm's QEMU, on an Arm host (configure-qemu.sh).
-      ARM=()
-      if grep -q '^build qemu-system-aarch64' "$QB/build.ninja"; then
-        ARM=(qemu-system-aarch64 "libqemu-embed-aarch64.$SO")
-      fi
+      # Windows 11's QEMUs, where configure-qemu.sh made them: x86_64
+      # everywhere but a Mac, aarch64 on an Arm host.
+      W11=()
+      for t in x86_64 aarch64; do
+        if grep -q "^build qemu-system-$t" "$QB/build.ninja"; then
+          W11+=("qemu-system-$t" "libqemu-embed-$t.$SO")
+        fi
+      done
       ninja -C "$QB" ${JOBS[@]+"${JOBS[@]}"} \
-        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO" "libqemu-embed-x86_64.$SO" \
-        ${ARM[@]+"${ARM[@]}"}
+        qemu-system-i386 qemu-img qemu-io "libqemu-embed-i386.$SO" ${W11[@]+"${W11[@]}"}
       BUILT+=(qemu)
     fi
   fi

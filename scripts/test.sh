@@ -2655,12 +2655,16 @@ host_stage() {
 
   # the libtpms TPM backend (patch 75, track M20) with no guest: qtest
   # drives tpm-crb's registers, and a fresh TPM, a restart on the same
-  # state file, and a savevm / loadvm round trip each have to hold
-  if [ -x build/qemu/qemu-system-x86_64 ]; then
+  # state file, and a savevm / loadvm round trip each have to hold. On
+  # the i386 QEMU where there is no x86_64 one (a Mac): its q35 has the
+  # same tpm-crb and backend
+  tpm_qemu=build/qemu/qemu-system-x86_64
+  [ -x "$tpm_qemu" ] || tpm_qemu=build/qemu/qemu-system-i386
+  if [ -x "$tpm_qemu" ]; then
     run_check tpm-qtest tpm-qtest.log env OUT="$OUT/tpm-qtest" \
-      tools/tpm-qtest.py build/qemu/qemu-system-x86_64 || true
+      tools/tpm-qtest.py "$tpm_qemu" || true
   else
-    skip tpm-qtest "needs build/qemu/qemu-system-x86_64"
+    skip tpm-qtest "needs build/qemu/qemu-system-x86_64 or -i386"
   fi
 
   # nothing shipped links or loads one of the optional host libraries we

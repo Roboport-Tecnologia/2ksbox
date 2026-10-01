@@ -519,6 +519,10 @@ impl Form {
                  A second CD drive holds the network and display drivers, and setup installs them.\n\
                  Most x64 apps run, through Windows' own emulation. Drivers must be built for Arm64.",
             ),
+            // No x64 Windows 11 on a Mac (user decision 2026-10-01): an
+            // x86_64 machine there (an Intel Mac's, or one copied from
+            // Linux) gets the refusal the player gives.
+            Family::Win11 if cfg!(target_os = "macos") => Some(crate::player::mac_x64_refusal()),
             Family::Win11 if cfg!(target_os = "linux") => Some(
                 "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO (x64).",

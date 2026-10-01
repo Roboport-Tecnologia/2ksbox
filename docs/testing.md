@@ -79,7 +79,7 @@ copy).
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
 | `machine-map` | `info mtree` of a PC machine: the `mesapt` pass-through region is there, and no Glide one (patch 74, ADR-020) and no SysBus `d3dpt` one (M16 step 7) |
 | `win11-snapshots` | a new Windows 11 machine's offline snapshot (take, restore, delete through `launcherx --snapshots`) covers its firmware variable store and a copy of its TPM state, with a snapshot name that has a space; a clone copies the TPM, and `--clone --new-tpm` leaves it behind (M20) |
-| `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64` |
+| `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64`, or `-i386` on a Mac |
 | `no-optionals` | no disabled library (libpng and libjpeg among them) is linked, named in a binary, or present as a QAPI audio enumerator; on a Mac, no Homebrew path in any load command of `libqemu-embed`, `qemu-system-i386` or `qemu-img`, whose libraries are our own static builds (`build-macos.md` "The libraries") |
 | `icons` | `scripts/gen-icons.sh --check` |
 | `package` | `scripts/package-linux.sh --no-tar` (or `package-macos.sh --no-sign --no-dmg` on a Mac) |
@@ -359,7 +359,9 @@ does. A fresh TPM (Startup, GetRandom, a PCR extend checked against
 SHA-256 computed in Python, an NV index), a second QEMU on the same state
 file (the index survives, the PCR is reset), and a savevm / loadvm round
 trip (PCR and index come back, and a third QEMU reads the snapshot's
-index from the file). `OUT=`.
+index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
+`scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
+`tpm-crb`.
 
 `tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
 Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a

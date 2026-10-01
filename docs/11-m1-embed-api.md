@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v8** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v9** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
@@ -74,6 +74,16 @@ Windows has no zero-copy slot; its 3D frames arrive through
   console whose surface is not a placeholder, and back to the default
   when there is none (`embed_live_console`); the move is one more
   `dpy_gfx_switch`, and input follows it.
+- **The window's size** (v9). `qemu_embed_set_window_size(w, h, dpi)`
+  passes the player window's drawable size in physical pixels to the
+  console on show as QEMU's `QemuUIInfo` (`dpy_set_ui_info`, with a
+  width and height in millimetres for that DPI): the first size at once,
+  later ones after QEMU's one-second settle, and the current one again on
+  a console switch. Only an adapter with a `ui_info` hook hears it
+  (virtio-gpu); `qemu_embed_display_follows_window` says whether the one
+  on show does, and the player then lets the window go below the guest's
+  mode. What the guest makes of it is its driver's: Windows 11 on Arm's
+  viogpudo takes it when it starts, not live (track M20).
   `dpy_gfx_check_format` accepts only `x8r8g8b8`, so QEMU shadows
   8/15/16/24 bpp into 32 bpp; 32 bpp modes are zero-copy (the surface
   points into VRAM, `hw/display/vga.c:1637`). All callbacks fire on the

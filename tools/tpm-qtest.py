@@ -3,6 +3,9 @@
 
   tools/tpm-qtest.py [qemu-system-x86_64]
 
+The i386 QEMU works as well (its q35 has the same tpm-crb), which is what
+scripts/test.sh runs on a Mac, where there is no x86_64 target.
+
 QEMU runs under qtest (`-accel qtest`): this script is the CPU. It drives
 `tpm-crb`'s registers and data buffer the way QEMU's own
 tests/qtest/tpm-util.c does, and sends raw TPM 2.0 commands to

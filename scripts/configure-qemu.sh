@@ -296,7 +296,10 @@ fi
 # an Arm host aarch64 too, Windows 11 on Arm under the host's hypervisor
 # (HVF on a Mac, KVM on Linux; track M20 step 4). An x86 host has no use
 # for it: emulated, Windows on Arm is slower than x64 Windows emulated.
-TARGETS=i386-softmmu,x86_64-softmmu
+# A Mac builds no x86_64: it runs Windows 11 on Arm only (user decision
+# 2026-10-01, track M20), and nothing there links that QEMU.
+TARGETS=i386-softmmu
+[ "$(uname -s)" = Darwin ] || TARGETS="$TARGETS,x86_64-softmmu"
 case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
 "$ROOT/qemu/configure" \
   --python="$PYTHON" \

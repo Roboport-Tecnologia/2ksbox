@@ -71,6 +71,8 @@ struct qemu_embed {
     void *ud;
     QemuConsole *con;
     bool follow_pending;    /* bh_follow_console scheduled */
+    uint32_t win_w, win_h, win_dpi;     /* qemu_embed_set_window_size, 0 = none */
+    bool win_seen;          /* the console was told a size at least once */
 
     QemuMutex in_lock;
     in_event in_q[IN_QUEUE_LEN];
@@ -166,6 +168,8 @@ void embed_fx_frame_ready(int slot)
  * the driver, its recovery), so following it needs no state of our own.
  * A machine with one adapter always gets that one.
  */
+static void embed_tell_window_size(qemu_embed_t *e, bool delay);
+
 static QemuConsole *embed_live_console(void)
 {
     QemuConsole *live = NULL;
@@ -197,9 +201,54 @@ static void bh_follow_console(void *opaque)
     g_autofree char *label = qemu_console_get_label(con);
     fprintf(stderr, "qemu-embed: showing console %d (%s)\n", qemu_console_get_index(con), label);
     unregister_displaychangelistener(&e->dcl);
-    e->con = con;
+    qatomic_set(&e->con, con);
     e->dcl.con = con;
     register_displaychangelistener(&e->dcl);
+    e->win_seen = false;
+    embed_tell_window_size(e, false);
+}
+
+/* The window's size to the console on show. `delay` is QEMU's own
+ * one-second settle, for a window being dragged; the first size a console
+ * hears goes at once, so a guest that starts drawing gets the window's size
+ * as its first mode. Main loop. */
+static void embed_tell_window_size(qemu_embed_t *e, bool delay)
+{
+    uint32_t w = qatomic_read(&e->win_w), h = qatomic_read(&e->win_h);
+    uint32_t dpi = qatomic_read(&e->win_dpi);
+    if (!w || !h || !dpy_ui_info_supported(e->con)) {
+        return;
+    }
+    QemuUIInfo info = *dpy_get_ui_info(e->con);
+    info.width = w;
+    info.height = h;
+    if (dpi) {
+        /* the size a monitor of this DPI would have: the EDID Windows picks
+         * its recommended scaling from */
+        info.width_mm = (uint16_t)MIN(w * 254u / (dpi * 10u), UINT16_MAX);
+        info.height_mm = (uint16_t)MIN(h * 254u / (dpi * 10u), UINT16_MAX);
+    }
+    dpy_set_ui_info(e->con, &info, delay && e->win_seen);
+    e->win_seen = true;
+}
+
+static void bh_window_size(void *opaque)
+{
+    embed_tell_window_size(opaque, true);
+}
+
+void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w, uint32_t h, uint32_t dpi)
+{
+    qatomic_set(&e->win_w, w);
+    qatomic_set(&e->win_h, h);
+    qatomic_set(&e->win_dpi, dpi);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_window_size, e);
+}
+
+bool qemu_embed_display_follows_window(qemu_embed_t *e)
+{
+    QemuConsole *con = qatomic_read(&e->con);
+    return con && dpy_ui_info_supported(con);
 }
 
 static void embed_dpy_refresh(DisplayChangeListener *dcl)
