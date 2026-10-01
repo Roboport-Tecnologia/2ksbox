@@ -271,6 +271,12 @@ impl Snapshots {
         self.run("snapshot-delete", name, &format!("deleted \u{201c}{name}\u{201d}"), r);
     }
 
+    /// What a front end asks before `revert`: a headline naming the
+    /// snapshot, and the line under it.
+    pub fn restore_question(name: &str) -> (String, &'static str) {
+        (format!("Restore “{name}”?"), "The machine's current state is discarded.")
+    }
+
     pub fn revert(&mut self, name: &str) {
         if self.running {
             return self.start_job("snapshot-load", name, true);

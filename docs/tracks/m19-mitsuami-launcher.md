@@ -75,7 +75,7 @@ and photograph the screen it is on:
 | `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
 | `clone:<machine.toml>[:same]` | the clone dialog on a machine, or sharing its disk |
 | `clonego:<machine.toml>` | presses Clone, and shows the machine window once the copy has landed (writes into the library) |
-| `snapshots:<machine.toml>[:ask=<name>]` | the snapshot tree, with a row's Restore asking |
+| `snapshots:<machine.toml>` | the snapshot tree |
 | `takesnapshot:<machine.toml>` | the snapshot tree with Take snapshot's name sheet open |
 | `shelf[:<disc>]` | the shared shelf, with a disc added through its Add field (writes the shelf) |
 | `discs:<machine.toml>[:boot=<disc>]` | the shelf for a machine, with a disc ticked to boot with (writes the bundle) |
@@ -141,9 +141,14 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    parent with the "current" mark, taken, VM state, Restore and a trash
    button, tooltip "Delete") and Take snapshot is on the window's
    toolbar: it opens a sheet (`Modality::Window`) asking for the name,
-   empty at each opening, Take snapshot its default button. Checked by
-   clicks through Broadway's page on a scratch tree: a snapshot taken
-   from the sheet landed under the current one, and Cancel took none. The shelf's
+   empty at each opening, Take snapshot its default button. Restore asks
+   in the platform's alert, Cancel the default (the question is the
+   core's `Snapshots::restore_question`), so the actions column is only
+   as wide as Restore and the trash button; the Qt window still asks on
+   the button. Checked by clicks through Broadway's page on a scratch
+   tree: a snapshot taken from the sheet landed under the current one,
+   Cancel took none; Cancel in Restore's alert kept the current
+   snapshot, Restore moved it. The shelf's
    rows are keyed by path (it is kept in label order); Boot is a
    checkbox (unticked: an empty tray), where Qt has a checkable button.
    Checked headless on a scratch machine with a real qcow2: a clone copied

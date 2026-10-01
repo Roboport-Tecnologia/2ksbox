@@ -184,17 +184,9 @@ pub fn MachinesWindow() -> impl View {
         cloner.open_for(Path::new(&bundle), false);
         cloner.set_same_disk(same);
     }
-    // `snapshots:<machine.toml>[:ask=<name>]`: the window on a machine,
-    // with a row's Restore asking.
-    if let Some(arg) = crate::shot::screen("snapshots") {
-        let (bundle, ask) = match arg.rsplit_once(":ask=") {
-            Some((bundle, name)) => (bundle.to_owned(), Some(name.to_owned())),
-            None => (arg, None),
-        };
+    // `snapshots:<machine.toml>`: the window on a machine.
+    if let Some(bundle) = crate::shot::screen("snapshots") {
         snaps.open_for(Path::new(&bundle), false);
-        if let Some(name) = ask {
-            snaps.ask(&name);
-        }
     }
     // `takesnapshot:<machine.toml>`: the window on a machine, with Take
     // snapshot's name sheet open.

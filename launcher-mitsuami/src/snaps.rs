@@ -3,8 +3,8 @@
 //! delete. Take snapshot is on the window's toolbar and asks for the name
 //! in a sheet. Which source the list comes from (the monitor for a running
 //! machine, `qemu-img` for a stopped one), the jobs and the tree are the
-//! core's. This window owns when to poll a job and how a restore is
-//! confirmed: a first click asks, a second one restores.
+//! core's. This window owns when to poll a job; a restore asks first in
+//! the platform's alert, with the core's question.
 //!
 //! Rows are keyed by snapshot id and read their fields by it: qcow2 reuses
 //! an id once its snapshot is deleted, and a keyed row stays mounted while
@@ -12,27 +12,26 @@
 
 use launcher_core::snaps::Snapshots;
 use launcher_core::snapshots::Snapshot;
+use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
 use std::path::Path;
 use std::time::Duration;
 
 const TAKEN_W: f32 = 180.0;
 const STATE_W: f32 = 80.0;
-/// Restore while it asks ("Discard current state?") and the trash button.
-const ACTIONS_W: f32 = 260.0;
+/// Restore and the trash button.
+const ACTIONS_W: f32 = 140.0;
 
 #[derive(Clone, Copy)]
 pub struct Snaps {
     model: Signal<Snapshots>,
-    /// The snapshot whose Restore was clicked once and now asks.
-    confirm: Signal<Option<String>>,
     /// Take snapshot's name sheet is open.
     naming: Signal<bool>,
 }
 
 impl Store for Snaps {
     fn create() -> Snaps {
-        Snaps { model: signal(Snapshots::default()), confirm: signal(None), naming: signal(false) }
+        Snaps { model: signal(Snapshots::default()), naming: signal(false) }
     }
 }
 
@@ -58,15 +57,8 @@ impl Snaps {
     }
 
     pub fn open_for(&self, bundle: &Path, running: bool) {
-        self.confirm.set(None);
         self.naming.set(false);
         self.run(|m| m.open_for_path(bundle, running));
-    }
-
-    /// For the headless `snapshots:<machine.toml>:ask=<name>` screen: the
-    /// state a first click on a row's Restore leaves.
-    pub fn ask(&self, name: &str) {
-        self.confirm.set(Some(name.to_owned()));
     }
 
     /// For the headless `takesnapshot:<machine.toml>` screen: Take
@@ -108,10 +100,7 @@ pub fn SnapshotsWindow() -> impl View {
                     <Button
                         icon=crate::machines::icons::SNAPSHOTS
                         enabled=move || !snaps.busy()
-                        @click=move || {
-                            snaps.confirm.set(None);
-                            snaps.naming.set(true);
-                        }
+                        @click=move || snaps.naming.set(true)
                     >"Take snapshot"</Button>
                 </Toolbar>
                 <Show when=move || snaps.read(Snapshots::running)>
@@ -191,6 +180,8 @@ fn TakeSnapshotWindow() -> impl View {
 #[component]
 fn SnapshotTable() -> impl View {
     let snaps = use_store::<Snaps>();
+    let ui = inject::<Ui>().expect("a window's component");
+    let window = inject::<CurrentWindow>().map(|CurrentWindow(w)| w);
     let field = move |id: &str, f: fn(&Snapshot) -> String| {
         let id = id.to_owned();
         move || snaps.field(&id, f)
@@ -220,27 +211,32 @@ fn SnapshotTable() -> impl View {
             .width(STATE_W),
         TableColumn::new("", move |id: String| {
             let name = field(&id, |s| s.name.clone());
-            let (n1, n2) = (name.clone(), name.clone());
-            let asking = move || snaps.confirm.get().is_some_and(|c| c == n1());
+            let n1 = name.clone();
+            let ui = ui.clone();
             let restore = move || {
-                let name = n2();
-                if snaps.confirm.get_untracked().as_deref() == Some(name.as_str()) {
-                    snaps.confirm.set(None);
-                    snaps.run(|m| m.revert(&name));
-                } else {
-                    snaps.confirm.set(Some(name));
-                }
+                let name = n1();
+                let (headline, detail) = Snapshots::restore_question(&name);
+                // Cancel first: the first is the default, and Return
+                // should not restore.
+                let alert = Alert::new(headline)
+                    .message(detail)
+                    .style(AlertStyle::Warning)
+                    .button("Cancel")
+                    .button("Restore");
+                let asker = ui.clone();
+                ui.spawn_local(async move {
+                    if asker.alert(window, alert).await == 1 {
+                        snaps.run(|m| m.revert(&name));
+                    }
+                });
             };
             let delete = move || {
-                snaps.confirm.set(None);
                 let name = name();
                 snaps.run(|m| m.drop_snapshot(&name));
             };
             view! {
                 <Row gap=Spacing::Sm align=Align::Center>
-                    <Button enabled=move || !snaps.busy() @click=restore>
-                        {move || if asking() { "Discard current state?" } else { "Restore" }.to_owned()}
-                    </Button>
+                    <Button enabled=move || !snaps.busy() @click=restore>"Restore"</Button>
                     <Button
                         icon=crate::machines::icons::TRASH
                         icon_only=true
