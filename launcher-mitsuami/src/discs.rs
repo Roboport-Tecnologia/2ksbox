@@ -316,9 +316,8 @@ fn DiscRow(path: PathBuf) -> impl View {
                 @blur=move || discs.commit_label(&path)
             />
             <Text max_lines=1 width=NAME_W shrink=0.0>{name}</Text>
-            // Cut at its end: mitsuami's Text has no elide mode, and the Qt
-            // window cuts a folder at its start (track doc, step 3).
-            <Text text_style=TextStyle::Caption max_lines=1 grow=1.0 min_width=0 tooltip=full>{dir}</Text>
+            // Cut at its start, which keeps the folders nearest the disc.
+            <Text text_style=TextStyle::Caption max_lines=1 truncation=Truncation::Start grow=1.0 min_width=0 tooltip=full>{dir}</Text>
         </Row>
     }
 }

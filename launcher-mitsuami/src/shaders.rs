@@ -5,24 +5,22 @@
 //! window as pixels in an `Image`, where the Qt build goes through a BMP on
 //! disk.
 //!
-//! The preview renders at the size of the area it sits in. mitsuami tells
-//! no view its size, so the editor reads the area's frame (`Ui::frame`,
-//! the node from `after_build`) on a short tick, and renders again when
-//! the size, the parameters or the picture changed, or when an animated
-//! shader's next frame is due.
+//! The preview renders at the size of the area it sits in (`use_size`),
+//! again when that size, the parameters or the picture changed, and, for
+//! an animated shader, when its next frame is due.
 
 use crate::machines::Library;
 use crate::path_field::PathField;
 use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PresetState, Presets};
 use launcher_core::preview::Preview;
 use launcher_core::shader_library::{self, ProfileEntry};
-use mitsuami::core::{NodeId, Ui};
+use mitsuami::core::Ui;
 use mitsuami::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const LABEL_W: f32 = 150.0;
 
@@ -312,7 +310,7 @@ fn ProfileRow(path: PathBuf) -> impl View {
     view! {
         <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
             <Text max_lines=1 width=170 shrink=0.0>{field(|e| e.profile.name.clone())}</Text>
-            <Text text_style=TextStyle::Caption max_lines=1 grow=1.0 min_width=0>
+            <Text text_style=TextStyle::Caption max_lines=1 truncation=Truncation::Start grow=1.0 min_width=0>
                 {field(|e| e.profile.preset.display().to_string())}
             </Text>
             <Show when=d1>
@@ -519,25 +517,34 @@ fn ParamRow(id: String) -> impl View {
 #[component]
 fn PreviewArea() -> impl View {
     let shaders = use_store::<Shaders>();
-    let area: Signal<Option<NodeId>> = signal(None);
-    let ui = inject::<Ui>();
-    // The render tick: the area's size, the editor's inputs and an
-    // animated shader's clock, checked every 30 ms.
-    spawn_local(async move {
-        let mut last_size = (0, 0);
-        let mut last_render = Instant::now();
-        loop {
-            sleep(Duration::from_millis(30)).await;
-            let (Some(ui), Some(id)) = (ui.as_ref(), area.get_untracked()) else { continue };
-            let Some(frame) = ui.frame(id) else { continue };
-            let size = (frame.size.width.round() as u32, frame.size.height.round() as u32);
-            let due = shaders.frame_interval().is_some_and(|i| last_render.elapsed() >= i);
-            if size != last_size || shaders.stale.get_untracked() || due {
-                last_size = size;
-                last_render = Instant::now();
-                shaders.stale.set(false);
-                shaders.render(size.0, size.1);
-            }
+    let area = node_ref();
+    let size = use_size(area);
+    let last_size = Cell::new((0, 0));
+    // An animated shader's next frame: one wake-up at a time, which marks
+    // the preview stale. On the `Ui` itself, as a task the effect spawned
+    // would be cancelled by its next run (each run disposes the last's).
+    let ui = inject::<Ui>().expect("a window's component");
+    let waking = Rc::new(Cell::new(false));
+    effect(move || {
+        // Both read on every run, so the effect follows both.
+        let stale = shaders.stale.get();
+        let size = size.get();
+        let size = (size.width.round() as u32, size.height.round() as u32);
+        if size == (0, 0) || (size == last_size.get() && !stale) {
+            return;
+        }
+        last_size.set(size);
+        shaders.stale.set(false);
+        shaders.render(size.0, size.1);
+        if let Some(interval) = shaders.frame_interval()
+            && !waking.replace(true)
+        {
+            let (waking, wait) = (waking.clone(), ui.sleep(interval));
+            ui.spawn_local(async move {
+                wait.await;
+                waking.set(false);
+                shaders.stale.set(true);
+            });
         }
     });
     let frame = move |f: fn(&Frame) -> f32| move || Length::from(shaders.frame.with(|x| x.as_ref().map_or(0.0, f)));
@@ -545,7 +552,8 @@ fn PreviewArea() -> impl View {
         let pixels = shaders.frame.with(|f| f.as_ref().map(|f| f.pixels.clone()));
         ImageSource::Pixels(pixels.unwrap_or_else(|| Pixels::new(1, 1, vec![0u8; 4])))
     };
-    let mut column = Column::new()
+    Column::new()
+        .node_ref(area)
         .grow(1.0)
         .min_height(0)
         .min_width(0)
@@ -568,9 +576,7 @@ fn PreviewArea() -> impl View {
                     shrink=0.0
                 />
             </Show>
-        });
-    column.element().after_build(move |_, id| area.set(Some(id)));
-    column
+        })
 }
 
 /// For the headless `saveprofile:<preset>` screen: a new profile named

@@ -114,8 +114,7 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    running machine's Insert / Eject and live snapshots, and typing a
    label. What mitsuami lacks for these:
    - A text input's focus leaving: done in step 6 (`@blur`).
-   - **An elide mode.** A disc's folder is cut at its end, where Qt cuts
-     it at its start and keeps the useful part.
+   - An elide mode: done in step 6 (mitsuami 4cdac37, `Truncation`).
 4. **Shader profiles and the editor with the live preview (done
    2026-09-27).** `shaders.rs`: the profile list (default, edit, delete,
    "No default", the preset collection's download row) and the editor
@@ -127,11 +126,15 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    overridden to 0.3 (the preview renders again, darker), and a profile
    saved and listed. Not driven: dragging a slider, the download, an
    animated preset. Two things learned:
-   - **No view is told its size.** The preview renders at its area's
-     size, so the editor takes the area's node from `after_build` and
-     reads `Ui::frame` on a 30 ms tick, rendering again when the size,
-     the inputs or an animated preset's clock moved. A resize event on
-     any view would replace the tick (another mitsuami gap).
+   - **The preview follows its area's size** (`use_size` on a
+     `node_ref`, since step 6; a 30 ms tick before). One effect renders
+     when the size changes or the inputs are stale; an animated preset
+     sleeps one frame interval and marks the preview stale, so a still
+     one runs no timer. That wake-up is spawned with `Ui::spawn_local`:
+     the free `spawn_local` belongs to the effect's scope, which each
+     run disposes, so the effect's own `stale = false` cancelled it and
+     the animation stopped after one frame. The effect also reads
+     `stale` before any `||`, or it stops following it.
    - **The preview's wgpu device must not be dropped at exit.** The
      reactive runtime is torn down with the main thread's thread-locals,
      and wgpu's queue, dropped then, touched a wgpu thread-local already
@@ -173,7 +176,13 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    placeholder `SecondaryLabel`, each at its note's size as Qt does
    (checked headless on `clone:<machine>:same`, which shows both). A disc label is now also written when its field loses
    focus (`@blur`, as Qt's `editingFinished`; not driven headless).
-   Still missing: an elide mode (step 3) and a view's size (step 4).
+   mitsuami 4cdac37 closed the last two: `Truncation::Start` cuts a
+   disc's folder and a profile's preset path at their start, as Qt's
+   `ElideLeft` (checked headless on GTK and KDE with a long folder), and
+   the shader preview follows its area through `use_size` (step 4;
+   checked headless: a still preset renders once per size, CRT Beans VGA
+   about 11 times a second, BRIGHTNESS 0.3 renders darker). What step 6
+   asked of mitsuami is done.
    Widgets mitsuami won't have are ours, as `#[component]`s in their own
    module. The first is `src/path_field.rs`, `PathField` (the caption,
    the text input and Browse…, as `PathField.qml`): the form, the shader
