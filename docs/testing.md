@@ -76,6 +76,7 @@ copy).
 | `sb16-irq` | a DSP reset over auto-init DMA raises no IRQ 5 edge; each silence block exactly one (patch 25) |
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
 | `machine-map` | `info mtree` of a PC machine: the `mesapt` pass-through region is there, and no Glide one (patch 74, ADR-020) and no SysBus `d3dpt` one (M16 step 7) |
+| `win11-snapshots` | a new Windows 11 machine's offline snapshot (take, restore, delete through `launcherx --snapshots`) covers its firmware variable store and a copy of its TPM state, with a snapshot name that has a space (M20) |
 | `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64` |
 | `no-optionals` | no disabled library (libpng and libjpeg among them) is linked, named in a binary, or present as a QAPI audio enumerator; on a Mac, no Homebrew path in any load command of `libqemu-embed`, `qemu-system-i386` or `qemu-img`, whose libraries are our own static builds (`build-macos.md` "The libraries") |
 | `icons` | `scripts/gen-icons.sh --check` |

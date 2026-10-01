@@ -386,6 +386,13 @@ and runs without live control.
   same snapshots `savevm` writes) and lists them with `qemu-img info
   --output=json`, since the table form cannot escape a tag with a space.
   `qemu-img`'s stderr is the window's error text.
+- **A Windows 11 machine's snapshot is three things** (track M20): the
+  disk, its firmware variable store (a qcow2 that takes the same
+  snapshot by name, live and offline; a live load or delete includes it
+  only when it holds that snapshot), and its TPM state, copied to
+  `tpm-snapshots/` after every take and put back by an offline restore
+  (a live load restores it from the vmstate). A snapshot taken before
+  these were covered restores the disk alone.
 - Each mode is refused in the other, because `qemu-img` writing an
   image QEMU has open corrupts it. Restore asks for confirmation (it has
   no undo, and it sits beside Delete).

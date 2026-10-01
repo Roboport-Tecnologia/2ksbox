@@ -22,6 +22,14 @@
 //!   bundle): a take records the snapshot the disk descended from, a
 //!   restore moves that pointer, and every read reconciles the file
 //!   against the disk. A snapshot with no record sits at the top level.
+//! * A Windows 11 machine's snapshot is more than its disk (track M20):
+//!   the firmware's variable store, a qcow2 that takes the same snapshot
+//!   by name, and the TPM's state file, copied into `tpm-snapshots/`
+//!   (`tpm_copy`) after every take and put back by an offline restore.
+//!   A live load needs no copy: the TPM's state rides in the snapshot's
+//!   vmstate and the backend writes the file back itself (patch 75). A
+//!   snapshot taken before any of this has neither, and restores the
+//!   disk alone, as it always did.
 //!
 //! The front end still owns when `poll` is called (Qt runs a `Timer`
 //! that stops when there is no job) and how a destructive restore is
@@ -47,6 +55,10 @@ pub struct Snapshots {
     bundle_dir: Option<PathBuf>,
     machine_name: String,
     disk: PathBuf,
+    /// A modern machine's firmware variables and TPM state (`None` on
+    /// the era's machines), which its snapshots carry too.
+    efi_vars: Option<PathBuf>,
+    tpm_state: Option<PathBuf>,
     /// The rows, in tree order (`snapshots::arrange`).
     list: Vec<Snapshot>,
     /// The tree's record, loaded with the window and saved on every
@@ -76,6 +88,8 @@ impl Snapshots {
             bundle_dir: Some(bundle_dir),
             machine_name: machine.name.clone(),
             disk: machine.disk.clone(),
+            efi_vars: machine.family.is_modern().then(|| machine.effective_efi_vars()),
+            tpm_state: machine.family.is_modern().then(|| machine.effective_tpm_state()),
             lineage,
             running,
             ..Default::default()
@@ -239,7 +253,10 @@ impl Snapshots {
         if self.running {
             return self.start_job("snapshot-save", name, false);
         }
-        let r = create(&self.disk, name).map_err(|e| e.to_string());
+        let r = create(&self.disk, name)
+            .map_err(|e| e.to_string())
+            .and_then(|()| self.efi_vars_op(name, Op::Take))
+            .and_then(|()| self.tpm_op(name, Op::Take));
         self.run("snapshot-save", name, &format!("took \u{201c}{name}\u{201d}"), r);
     }
 
@@ -247,7 +264,10 @@ impl Snapshots {
         if self.running {
             return self.start_job("snapshot-delete", name, false);
         }
-        let r = delete(&self.disk, name).map_err(|e| e.to_string());
+        let r = delete(&self.disk, name)
+            .map_err(|e| e.to_string())
+            .and_then(|()| self.efi_vars_op(name, Op::Delete))
+            .and_then(|()| self.tpm_op(name, Op::Delete));
         self.run("snapshot-delete", name, &format!("deleted \u{201c}{name}\u{201d}"), r);
     }
 
@@ -255,8 +275,46 @@ impl Snapshots {
         if self.running {
             return self.start_job("snapshot-load", name, true);
         }
-        let r = restore(&self.disk, name).map_err(|e| e.to_string());
+        let r = restore(&self.disk, name)
+            .map_err(|e| e.to_string())
+            .and_then(|()| self.efi_vars_op(name, Op::Restore))
+            .and_then(|()| self.tpm_op(name, Op::Restore));
         self.run("snapshot-load", name, &format!("restored \u{201c}{name}\u{201d}"), r);
+    }
+
+    /// The offline side of a modern machine's snapshot on its variable
+    /// store. A restore or delete of a snapshot the store does not have
+    /// (one taken before it was covered) leaves the store alone.
+    fn efi_vars_op(&self, name: &str, op: Op) -> Result<(), String> {
+        let Some(vars) = &self.efi_vars else { return Ok(()) };
+        if !vars.exists() {
+            return Ok(());
+        }
+        let has = || list(vars).map(|l| l.iter().any(|s| s.name == name)).unwrap_or(false);
+        let r = match op {
+            Op::Take => create(vars, name),
+            Op::Restore if has() => restore(vars, name),
+            Op::Delete if has() => delete(vars, name),
+            _ => Ok(()),
+        };
+        r.map_err(|e| format!("{}: {e}", vars.display()))
+    }
+
+    /// The TPM's side: its state file copied for a take, copied back for
+    /// an offline restore, the copy removed with the snapshot. Nothing
+    /// to copy back for a snapshot that has none.
+    fn tpm_op(&self, name: &str, op: Op) -> Result<(), String> {
+        let (Some(state), Some(dir)) = (&self.tpm_state, &self.bundle_dir) else { return Ok(()) };
+        let copy = tpm_copy(dir, name);
+        let r = match op {
+            Op::Take if state.exists() => {
+                std::fs::create_dir_all(copy.parent().unwrap_or(dir)).and_then(|()| std::fs::copy(state, &copy).map(|_| ()))
+            }
+            Op::Restore if copy.exists() => std::fs::copy(&copy, state).map(|_| ()),
+            Op::Delete if copy.exists() => std::fs::remove_file(&copy),
+            _ => Ok(()),
+        };
+        r.map_err(|e| format!("the TPM's state for \u{201c}{name}\u{201d}: {e}"))
     }
 
     /// Start a live snapshot job (`command` is the QMP verb) and leave
@@ -265,16 +323,28 @@ impl Snapshots {
         self.next_job += 1;
         let job_id = format!("launcher-{}", self.next_job);
         let disk = self.disk.clone();
+        let vars = self.efi_vars.clone();
         let mut resume_after = false;
         let result = self.control().and_then(|mut c| {
             let (node, _) = c.disk_node(&disk)?;
+            // A modern machine's variable store goes in the snapshot
+            // too: always into a new one, and into a load or delete only
+            // when it holds that snapshot (one taken before it was
+            // covered does not, and QEMU refuses a device that lacks it).
+            let mut also = Vec::new();
+            if let Some(vars) = &vars {
+                let (vars_node, snaps) = c.disk_node(vars)?;
+                if command == "snapshot-save" || snaps.iter().any(|s| s.name == tag) {
+                    also.push(vars_node);
+                }
+            }
             // A load replaces the guest's CPU/RAM state, which QEMU
             // requires the VM to be stopped for.
             if stop_first {
                 resume_after = c.is_running()?;
                 c.set_running(false)?;
             }
-            c.start_snapshot_job(command, &job_id, tag, &node)
+            c.start_snapshot_job(command, &job_id, tag, &node, &also)
         });
         match result {
             Ok(()) => {
@@ -352,7 +422,13 @@ impl Snapshots {
         // The tree follows only a job that succeeded: a failed load
         // left the disk where it was.
         let recorded = match (&outcome, &op) {
-            (Ok(()), Some((verb, tag))) => self.record(verb, tag),
+            (Ok(()), Some((verb, tag))) => self.record(verb, tag).and_then(|()| match verb.as_str() {
+                // The TPM's state as the snapshot left it, for an offline
+                // restore later; a live load restored it from the vmstate.
+                "snapshot-save" => self.tpm_op(tag, Op::Take),
+                "snapshot-delete" => self.tpm_op(tag, Op::Delete),
+                _ => Ok(()),
+            }),
             _ => Ok(()),
         };
         match outcome.and(reload).and(recorded) {
@@ -376,4 +452,18 @@ impl Snapshots {
             self.poll_job_now();
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum Op {
+    Take,
+    Restore,
+    Delete,
+}
+
+/// Where a snapshot's copy of the TPM's state lives: `tpm-snapshots/`
+/// in the bundle, the snapshot's name in hex so any name is a file name.
+pub fn tpm_copy(bundle_dir: &Path, name: &str) -> PathBuf {
+    let hex: String = name.bytes().map(|b| format!("{b:02x}")).collect();
+    bundle_dir.join("tpm-snapshots").join(format!("{hex}.permall"))
 }

@@ -419,6 +419,36 @@ clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   fi
   return $rc
 }
+win11snap_check() { # a Windows 11 machine's offline snapshot holds its firmware variables and TPM (M20)
+  local rc=0 dir="$OUT/win11snap" img=build/qemu/qemu-img bundle bdir vars tpm copy
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" LAUNCHER_QEMU_IMG_BIN="$img"
+  # The wizard's own machine, no guest: what the snapshot window does to
+  # the files is the whole question. A fresh TPM is a file libtpms
+  # writes on first start, so a stand-in is enough here.
+  bundle="$(target/release/launcherx --wizard-new win11 W11 64 2>/dev/null | tail -1)"
+  [ -f "$bundle" ] || { echo "--wizard-new made no bundle"; return 1; }
+  bdir="$(dirname "$bundle")"; vars="$bdir/efivars.qcow2"; tpm="$bdir/tpm.permall"
+  target/release/launcherx --prepare "$bundle" || { echo "--prepare failed"; return 1; }
+  [ -f "$vars" ] || { echo "--prepare made no $vars"; return 1; }
+  printf 'first' > "$tpm"
+  op() { target/release/launcherx --snapshots "$bundle" "$@" >/dev/null 2>&1 || { echo "--snapshots $* failed"; return 1; }; }
+  has() { "$img" snapshot -l "$vars" | grep -qF "  $1  "; }   # the name may have spaces
+  op take "a b" || return 1
+  has "a b" || { echo "the take put no snapshot on the variable store"; rc=1; }
+  copy="$(ls "$bdir"/tpm-snapshots/*.permall 2>/dev/null)"
+  [ -n "$copy" ] && [ "$(cat "$copy")" = first ] || { echo "the take kept no copy of the TPM's state"; rc=1; }
+  printf 'second' > "$tpm"
+  op restore "a b" || return 1
+  [ "$(cat "$tpm")" = first ] || { echo "the restore did not put the TPM's state back (holds: $(cat "$tpm"))"; rc=1; }
+  op delete "a b" || return 1
+  has "a b" && { echo "the delete left the snapshot on the variable store"; rc=1; }
+  [ -z "$(ls "$bdir"/tpm-snapshots 2>/dev/null)" ] || { echo "the delete left the TPM's copy"; rc=1; }
+  [ $rc = 0 ] && echo "take, restore and delete cover the variable store and the TPM"
+  return $rc
+}
+
 snaptree_check() { # the snapshot window's tree (doc 07): the launcher's own record over a qcow2, which keeps none
   local rc=0 dir="$OUT/snaptree" img=build/qemu/qemu-img bundle disk copy o want
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -829,7 +859,9 @@ qtwizard_fields_check() { # the fields, family by family
     n="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] of \([0-9]*\) .*/\1/p')"
     echo "  $f: shader $o"
     [ "$n" = 3 ] || { echo "$f: the shader profile combo has $n entries, not the default and the two profiles"; rc=1; }
-    [ "$shown" = "(default)" ] || { echo "$f: a new machine's shader profile combo shows [$shown], not the default"; rc=1; }
+    # A Windows 11 machine's default runs no shader, and the row says so.
+    want="(default)"; [ "$f" = win11 ] && want="(default) None"
+    [ "$shown" = "$want" ] || { echo "$f: a new machine's shader profile combo shows [$shown], not [$want]"; rc=1; }
     case "$o" in *"model 0 default true") ;; *) echo "$f: the model does not say the default: $o"; rc=1;; esac
   done
   # The optimization shortcuts beside boxes that were clicked by hand
@@ -2347,7 +2379,11 @@ host_stage() {
   else skip clone "needs target/release/launcherx, build/qemu/qemu-img and qemu-io"; fi
   if [ -x target/release/launcherx ] && [ -x build/qemu/qemu-img ]; then
     run_check snapshot-tree snapshot-tree.log snaptree_check || true
-  else skip snapshot-tree "needs target/release/launcherx and build/qemu/qemu-img"; fi
+    run_check win11-snapshots win11-snapshots.log win11snap_check || true
+  else
+    skip snapshot-tree "needs target/release/launcherx and build/qemu/qemu-img"
+    skip win11-snapshots "needs target/release/launcherx and build/qemu/qemu-img"
+  fi
   # The first-run shader offer and the starter profiles behind it. Needs
   # the preset collection to check what a "yes" writes, so it is skipped
   # on a checkout without the submodule rather than downloading 50 MB

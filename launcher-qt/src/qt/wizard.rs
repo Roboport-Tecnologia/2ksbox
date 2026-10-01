@@ -958,7 +958,7 @@ impl ffi::Wizard {
             floppy = qs(&f.floppy);
             boot = index_of(&Boot::ALL, f.boot);
             boot_note = qs_opt(f.boot_note());
-            shader_profile_labels = Form::shader_profile_labels(profiles)
+            shader_profile_labels = f.shader_profile_labels(profiles)
                 .into_iter()
                 .fold(QStringList::default(), |mut l, s| { l.append(qs(s)); l });
             shader_profile_index = f.shader_profile_index(profiles) as i32;

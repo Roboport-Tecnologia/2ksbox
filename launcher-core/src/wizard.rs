@@ -1109,15 +1109,15 @@ impl Form {
     }
 
     /// The shader picker's rows: the app default first (named after the
-    /// library's default profile when one is marked,
-    /// `shader_library::default_label`), then every profile of the
+    /// library's default profile when one is marked, or "None" on a
+    /// modern machine, `shader_library::default_label_for`), then every profile of the
     /// library by name, in `shader_library::scan`'s order. A front end hands the same `profiles` to the three verbs
     /// below, so a row is a profile and nothing in the widget translates
     /// between an index and an id. When the Qt window did that itself it
     /// needed a delegate of its own, and its combo box looked unlike the
     /// others in the form.
-    pub fn shader_profile_labels(profiles: &[ProfileEntry]) -> Vec<String> {
-        std::iter::once(shader_library::default_label(profiles))
+    pub fn shader_profile_labels(&self, profiles: &[ProfileEntry]) -> Vec<String> {
+        std::iter::once(shader_library::default_label_for(self.family, profiles))
             .chain(profiles.iter().map(|e| e.profile.name.clone()))
             .collect()
     }

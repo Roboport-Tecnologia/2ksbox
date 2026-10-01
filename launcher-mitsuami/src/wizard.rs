@@ -468,7 +468,7 @@ fn DisplayPage() -> impl View {
             </Show>
             <Picker
                 label="Shader profile"
-                options=move || wiz.profiles.with(|p| Form::shader_profile_labels(p))
+                options=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_labels(p)))
                 selected=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_index(p)))
                 @choose=move |i| wiz.profiles.with_untracked(|p| wiz.edit(|f| f.choose_shader_profile(p, i)))
                 is_default=get(wiz, Form::shader_profile_is_default)
