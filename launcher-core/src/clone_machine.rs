@@ -34,6 +34,12 @@
 //! * **A relative qcow2 backing file is made absolute** in the copy
 //!   (`qemu-img rebase -u`): the copy sits in another directory, where
 //!   the relative name points at nothing.
+//! * **A Windows 11 machine's TPM is copied too, unless the user asks for
+//!   a new one** (`new_tpm`, user decision 2026-10-01). A copy keeps
+//!   BitLocker and Windows Hello working on the clone, but both machines
+//!   then answer with one TPM identity (one endorsement key). A new TPM
+//!   is the state file left out, with the snapshots' copies of it
+//!   (`tpm-snapshots/`), so the clone's first start manufactures one.
 
 use crate::bundle::Machine;
 use crate::{library, player};
@@ -48,6 +54,9 @@ pub struct CloneMachine {
     /// "Use the same hard disk": the clone boots the original's disk
     /// instead of a copy. A front end writes it from its checkbox.
     pub same_disk: bool,
+    /// "Give the copy a new TPM" (Windows 11 only, `tpm_applies`). A
+    /// front end writes it from its checkbox.
+    pub new_tpm: bool,
     library_dir: PathBuf,
     source: Option<Source>,
     /// Whether the machine is up, the one thing that makes the window
@@ -88,6 +97,7 @@ impl Default for CloneMachine {
             open: false,
             name: String::new(),
             same_disk: false,
+            new_tpm: false,
             library_dir: library::default_dir(),
             source: None,
             running: false,
@@ -141,11 +151,26 @@ impl CloneMachine {
         "Use the same hard disk instead of copying it"
     }
 
+    /// Whether the TPM checkbox is a question: only a modern machine has
+    /// a TPM.
+    pub fn tpm_applies(&self) -> bool {
+        self.source.as_ref().is_some_and(|s| s.machine.family.is_modern())
+    }
+
+    /// The checkbox that starts the clone on a new TPM.
+    pub fn new_tpm_label(&self) -> &'static str {
+        "Give the copy a new TPM"
+    }
+
     /// What a clone is, with the size of what will be copied.
     pub fn note(&self) -> String {
         let Some(s) = &self.source else { return String::new() };
         if self.same_disk {
-            return format!("A new machine with the same settings, on the same disk ({}).", s.machine.disk.display());
+            return format!(
+                "A new machine with the same settings, on the same disk ({}).{}",
+                s.machine.disk.display(),
+                self.tpm_note()
+            );
         }
         let mut note = format!(
             "A new machine with the same settings and its own copy of the disk ({}), \
@@ -158,7 +183,19 @@ impl CloneMachine {
                 s.machine.disk.display()
             ));
         }
+        note.push_str(self.tpm_note());
         note
+    }
+
+    /// The TPM's sentence, on a machine that has one.
+    fn tpm_note(&self) -> &'static str {
+        match (self.tpm_applies(), self.new_tpm) {
+            (false, _) => "",
+            (true, false) => " The TPM is copied too, so both machines have the same TPM.",
+            (true, true) => {
+                " The copy gets a new TPM. If the original uses BitLocker, the copy will ask for its recovery key."
+            }
+        }
     }
 
     /// Drawn as a warning: the shared disk's rule, or why Clone is off
@@ -254,6 +291,18 @@ impl CloneMachine {
         } else {
             machine.disk = files[source.disk].1.clone();
             Some(source.disk)
+        };
+        // A new TPM: the state file and the snapshots' copies of it stay
+        // behind. The disk is found again by where it goes, since the
+        // list just shrank.
+        let disk = if self.new_tpm && source.machine.family.is_modern() {
+            let disk_to = disk.map(|i| files[i].1.clone());
+            let state = std::fs::canonicalize(source.machine.effective_tpm_state()).ok();
+            let copies = source.dir.join("tpm-snapshots");
+            files.retain(|(from, _)| std::fs::canonicalize(from).ok() != state && !from.starts_with(&copies));
+            disk_to.and_then(|to| files.iter().position(|(_, t)| t == &to))
+        } else {
+            disk
         };
         let total = files.iter().filter_map(|(from, _)| std::fs::metadata(from).ok()).map(|m| m.len()).sum();
         let dests = files.iter().map(|(_, to)| to.clone()).collect();
@@ -379,6 +428,8 @@ fn remap(machine: &mut Machine, from: &Path, to: &Path) {
         &mut machine.shader,
         &mut machine.soundfont,
         &mut machine.mt32_roms,
+        &mut machine.efi_vars,
+        &mut machine.tpm_state,
     ]
     .into_iter()
     .flatten()

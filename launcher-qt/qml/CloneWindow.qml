@@ -111,6 +111,14 @@ Window {
                 onToggled: root.cloner.shareDisk(checked)
             }
 
+            CheckBox {
+                text: root.cloner.newTpmLabel
+                visible: root.cloner.tpmApplies
+                enabled: !root.cloner.busy
+                checked: root.cloner.newTpm
+                onToggled: root.cloner.chooseNewTpm(checked)
+            }
+
             Label {
                 Layout.fillWidth: true
                 visible: text !== ""

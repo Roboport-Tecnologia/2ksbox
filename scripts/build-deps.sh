@@ -2,8 +2,8 @@
 # Build the libraries the macOS app carries from their upstream sources,
 # ourselves, into build/deps/<arch>. For QEMU: glib (with pcre2, and the
 # libffi and stub libintl its own tarball carries as subprojects, pinned
-# by its wrap files), pixman, libslirp and zstd, static, so
-# libqemu-embed-i386.dylib and qemu-img carry them and the app ships no
+# by its wrap files), pixman, libslirp, zstd, and libtpms with its
+# libcrypto, static, so libqemu-embed and qemu-img carry them and the app ships no
 # dependency dylib for QEMU's side. For the launcher: Qt 6 as frameworks,
 # qtbase with its own bundled zlib, png, jpeg, freetype, harfbuzz, pcre2
 # and double-conversion and none of the system libraries Homebrew's build
@@ -34,8 +34,9 @@
 # they ship nothing. Under Rosetta (scripts/build.sh --x86_64) the arch
 # defaults to x86_64, as everywhere else in that build.
 #
-# On Linux it builds QEMU's glib alone (pcre2, glib, and libslirp, the
-# one other library QEMU links that links glib), static, into
+# On Linux it builds QEMU's glib (pcre2, glib, and libslirp, the one
+# other library QEMU links that links glib) and libtpms with its
+# libcrypto (the TPM 2.0 of a Windows 11 box), static, into
 # build/deps/<arch>, which scripts/configure-qemu.sh links by default
 # there. QEMU's main loop iterates glib's global default GMainContext on
 # QEMU's thread; with one glib shared with its process, that is the
@@ -85,6 +86,8 @@ pcre2 10.48 pcre2-10.48.tar.bz2 b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b514
 glib 2.90.0 glib-2.90.0.tar.xz 17d15cac2af80a33271127408e0abc2748eb297c595c2a26409e81e14e7d1b8f https://download.gnome.org/sources/glib/2.90/glib-2.90.0.tar.xz
 pixman 0.46.4 pixman-0.46.4.tar.gz d09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c https://cairographics.org/releases/pixman-0.46.4.tar.gz
 libslirp 4.9.5 libslirp-v4.9.5.tar.gz f43e68b60b580647574ec4a0e2b6c600a56281e6c39f79426510832dc810f483 https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.gz
+openssl 3.5.9 openssl-3.5.9.tar.gz 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
+libtpms 0.10.2 libtpms-0.10.2.tar.gz edac03680f8a4a1c5c1d609a10e3f41e1a129e38ff5158f0c8deaedc719fb127 https://github.com/stefanberger/libtpms/archive/refs/tags/v0.10.2.tar.gz
 zstd 1.5.7 zstd-1.5.7.tar.gz eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3 https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
 qtbase 6.9.3 qtbase-everywhere-src-6.9.3.tar.xz c5a1a2f660356ec081febfa782998ae5ddbc5925117e64f50e4be9cd45b8dc6e https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qtbase-everywhere-src-6.9.3.tar.xz
 qtshadertools 6.9.3 qtshadertools-everywhere-src-6.9.3.tar.xz 629804ee86a35503e4b616f9ab5175caef3da07bd771cf88a24da3b5d4284567 https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qtshadertools-everywhere-src-6.9.3.tar.xz
@@ -92,7 +95,7 @@ qtdeclarative 6.9.3 qtdeclarative-everywhere-src-6.9.3.tar.xz 5a071b227229afbf5c
 qttools 6.9.3 qttools-everywhere-src-6.9.3.tar.xz 0cf7ab0e975fc57f5ce1375576a0a76e9ede25e6b01db3cf2339cd4d9750b4e9 https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qttools-everywhere-src-6.9.3.tar.xz
 qtimageformats 6.9.3 qtimageformats-everywhere-src-6.9.3.tar.xz 4fb26bdbfbd4b8e480087896514e11c33aba7b6b39246547355ea340c4572ffe https://download.qt.io/official_releases/qt/6.9/6.9.3/submodules/qtimageformats-everywhere-src-6.9.3.tar.xz
 '
-[ "$OS" = Darwin ] || PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp) ')
+[ "$OS" = Darwin ] || PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp|openssl|libtpms) ')
 
 # Our patches on a package: patches/deps/<name>/*.patch (git-format
 # diffs, filename order; patches/deps/README.md). The set is named by a
@@ -241,6 +244,25 @@ while read -r name ver tar sha url; do
     libslirp)
       run "${MESON[@]}" "$b" "$src"
       run ninja -C "$b" install ;;
+    openssl)
+      # libcrypto for libtpms (the TPM 2.0 behind `-tpmdev libtpms`, track
+      # M20). Static, no programs, no engines or loadable providers: the
+      # default provider is compiled in. The LTS line (3.5).
+      case "$OS-$ARCH" in
+        Darwin-arm64) target=darwin64-arm64-cc ;;
+        Darwin-x86_64) target=darwin64-x86_64-cc ;;
+        *) target="" ;;
+      esac
+      ( cd "$src" && run ./Configure $target --prefix="$PREFIX" --libdir=lib \
+          no-shared no-tests no-docs no-apps no-engine no-module no-dso \
+          && run make -j8 build_libs && run make install_dev && run make distclean ) ;;
+    libtpms)
+      # The TPM 2.0 itself (IBM's, from the TCG reference code), linked
+      # into QEMU by our backend (tpm/qemu/tpm_libtpms.c). The GitHub
+      # tarball has no configure; autogen.sh makes it and runs it.
+      ( cd "$src" && run ./autogen.sh --prefix="$PREFIX" --libdir="$PREFIX/lib" \
+          --disable-shared --enable-static --with-openssl --with-tpm2 \
+          && run make -j8 && run make install && run make distclean ) ;;
     zstd)
       # The library alone: no programs, no shared build.
       run make -C "$src/lib" -j8 libzstd.a CFLAGS="$CFLAGS"

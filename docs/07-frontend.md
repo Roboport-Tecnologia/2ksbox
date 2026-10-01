@@ -76,6 +76,11 @@ player line runs a machine with nothing else.
   so such a clone of a running machine goes ahead. `launcherx --clone
   <machine.toml> [--same-disk] [name]` and `lc_machines_clone` (its
   `same_disk` argument) are the same model.
+  A Windows 11 machine's TPM is copied with the rest (the clone has the
+  same TPM identity, and BitLocker keeps working) unless **"Give the
+  copy a new TPM"** is ticked (user decision, 2026-10-01): then its state
+  file and the snapshots' copies of it stay behind, and the clone's
+  first start makes a new TPM.
 - **Not built:** last-frame thumbnails in the grid, and bundle
   import/export.
 
@@ -386,6 +391,13 @@ and runs without live control.
   same snapshots `savevm` writes) and lists them with `qemu-img info
   --output=json`, since the table form cannot escape a tag with a space.
   `qemu-img`'s stderr is the window's error text.
+- **A Windows 11 machine's snapshot is three things** (track M20): the
+  disk, its firmware variable store (a qcow2 that takes the same
+  snapshot by name, live and offline; a live load or delete includes it
+  only when it holds that snapshot), and its TPM state, copied to
+  `tpm-snapshots/` after every take and put back by an offline restore
+  (a live load restores it from the vmstate). A snapshot taken before
+  these were covered restores the disk alone.
 - Each mode is refused in the other, because `qemu-img` writing an
   image QEMU has open corrupts it. Restore asks for confirmation (it has
   no undo, and it sits beside Delete).
@@ -821,8 +833,10 @@ checkout it was built from (`target/`, `build/qemu`, `qemu/pc-bios`,
 
 ```
 <prefix>/bin/2ksbox                            the launcher
-<prefix>/bin/2ksbox-player                     the player
-<prefix>/lib/2ksbox/libqemu-embed-i386.so
+<prefix>/bin/2ksbox-player                     the player (era machines)
+<prefix>/bin/2ksbox-player-x86_64              the player for Windows 11
+<prefix>/lib/2ksbox/libqemu-embed-i386.so      the QEMU each links
+<prefix>/lib/2ksbox/libqemu-embed-x86_64.so
 <prefix>/lib/2ksbox/…                          D3D executor + DXVK, wine/
 <prefix>/libexec/2ksbox/qemu-img               ours, patched, kept off PATH
 <prefix>/share/2ksbox/pc-bios/                 QEMU firmware (the player's -L)

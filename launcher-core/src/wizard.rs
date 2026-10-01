@@ -102,6 +102,10 @@ struct EditTarget {
     /// same reason: gaining or losing the USB controller is a hardware
     /// change (`pad_warning`).
     pad: Pad,
+    /// A Windows 11 machine's firmware variables and TPM state, which
+    /// the form has no fields for and must not lose.
+    efi_vars: Option<PathBuf>,
+    tpm_state: Option<PathBuf>,
 }
 
 /// The acceleration hint under the picker, and whether it is a warning
@@ -358,6 +362,8 @@ impl Form {
                 video: machine.effective_video().unwrap_or(Video::Std),
                 sound: machine.effective_sound(),
                 pad: machine.effective_pad(),
+                efi_vars: machine.efi_vars.clone(),
+                tpm_state: machine.tpm_state.clone(),
             }),
             ..Default::default()
         };
@@ -483,13 +489,26 @@ impl Form {
     /// display driver and the 3D pass-through, both Windows-only) and by
     /// hardware chosen for guests we cannot test here, and without the
     /// note someone would find that out by installing an OS onto it.
+    /// Windows 11 has its own: what the machine is, where its installer
+    /// comes from, and that it needs the host's hardware virtualization.
     pub fn family_note(&self) -> Option<&'static str> {
-        (self.family == Family::Other).then_some(
-            "For an era OS other than Windows or DOS: BeOS, a period Linux, OS/2. \
-             Standard hardware these systems have drivers for: a VESA VGA, an RTL8139 network card \
-             and an ES1370 sound card.\n\
-             No 3D: the display driver and the Direct3D and OpenGL pass-through are Windows-only.",
-        )
+        match self.family {
+            Family::Other => Some(
+                "For an era OS other than Windows or DOS: BeOS, a period Linux, OS/2. \
+                 Standard hardware these systems have drivers for: a VESA VGA, an RTL8139 network card \
+                 and an ES1370 sound card.\n\
+                 No 3D: the display driver and the Direct3D and OpenGL pass-through are Windows-only.",
+            ),
+            // Linux only so far: QEMU has no TPM on a Windows host yet,
+            // and a Mac gets Windows 11 on Arm later (track M20).
+            Family::Win11 if cfg!(target_os = "linux") => Some(
+                "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
+                 Install from Microsoft's Windows 11 ISO (x64).\n\
+                 Needs hardware acceleration. Emulated, Windows 11 takes minutes to start.",
+            ),
+            Family::Win11 => Some("Windows 11 machines don't run on this computer yet. They run on Linux for now."),
+            _ => None,
+        }
     }
 
     pub fn ram_mb(&self) -> u32 {
@@ -554,6 +573,13 @@ impl Form {
 
     /// What follows from the chosen processor, said before the machine
     /// is created rather than after it behaves oddly.
+    /// Whether the processor picker is a question here. A period
+    /// processor means nothing to Windows 11, whose machine always runs
+    /// at full speed.
+    pub fn cpu_speed_applies(&self) -> bool {
+        !self.family.is_modern()
+    }
+
     pub fn cpu_speed_notes(&self) -> &'static [&'static str] {
         if self.cpu_speed == CpuSpeed::Unthrottled {
             &["Full speed. Right for Windows. Most DOS games of the 486 era need a slower processor."]
@@ -599,8 +625,14 @@ impl Form {
             (Accel::Auto, false) => format!("No {hw} on this host, so the machine will be emulated."),
             (Accel::Kvm, true) => format!("{hw} is available."),
             (Accel::Kvm, false) => format!("No {hw} on this host. This machine won't start."),
+            (Accel::Tcg, _) if self.family.is_modern() => {
+                "Emulated. Windows 11 takes minutes to start this way.".to_string()
+            }
             (Accel::Tcg, _) => "Emulated. This is what everything here is tuned for.".to_string(),
         };
+        if self.family.is_modern() && self.accel == Accel::Auto && !self.have_kvm {
+            text.push_str("\nWindows 11 takes minutes to start this way.");
+        }
         if self.family == Family::Win98 && self.accel != Accel::Tcg && self.have_kvm {
             text.push('\n');
             text.push_str(&format!("Under {hw} Windows 98 runs at full host speed, which triggers its fast-CPU bugs."));
@@ -632,7 +664,7 @@ impl Form {
     /// and the cursor. Switching adapters would cost a driver install for
     /// nothing, and the image may later move to a host that has Vulkan.
     pub fn graphics_note(&self) -> Option<AccelNote> {
-        if matches!(self.family, Family::Dos | Family::Other) {
+        if matches!(self.family, Family::Dos | Family::Other | Family::Win11) {
             return None;
         }
         let mut text = format!("3D: {}", self.host_gpu.d3d_headline());
@@ -663,7 +695,9 @@ impl Form {
     /// the switch, that these guests stopped getting security fixes
     /// twenty years ago.
     pub fn network_notes(&self) -> &'static [&'static str] {
-        if self.network {
+        if self.network && self.family.is_modern() {
+            &["Outbound only, through the host (NAT). Nothing on the network can reach the guest."]
+        } else if self.network {
             &[
                 "Outbound only, through the host (NAT). Nothing on the network can reach the guest.",
                 "These systems haven't had security updates in twenty years. Don't browse the web on them.",
@@ -684,6 +718,18 @@ impl Form {
 
     pub fn voodoo2(&self) -> bool {
         self.voodoo2
+    }
+
+    /// Whether the Voodoo 2 checkbox is a question here: a PCI card of
+    /// 1998 with drivers for 9x and XP, so not on Windows 11.
+    pub fn voodoo2_applies(&self) -> bool {
+        !self.family.is_modern()
+    }
+
+    /// Whether the floppy field is: Windows 11's machine (a q35) has no
+    /// floppy controller.
+    pub fn floppy_applies(&self) -> bool {
+        !self.family.is_modern()
     }
 
     /// Under the "Extra QEMU arguments" field: what it is for, or a
@@ -1000,6 +1046,9 @@ impl Form {
                 "A real chip of the era, so the guest probably has a native driver for it. BeOS R5 and XFree86 both do.",
                 "Its VESA BIOS is the weaker of the two. Try it when the standard VGA leaves the guest in plain VGA.",
             ],
+            (Video::Std, Family::Win11) => &[
+                "Windows drives it with its own basic display driver. No 3D.",
+            ],
             (Video::Std, _) => &[
                 "The Bochs adapter: VBE 2.0 with a linear frame buffer. Works with period VESA drivers and with a modern Linux (bochs-drm).",
                 "The safe choice: a guest with no native driver still gets its VESA modes.",
@@ -1060,15 +1109,15 @@ impl Form {
     }
 
     /// The shader picker's rows: the app default first (named after the
-    /// library's default profile when one is marked,
-    /// `shader_library::default_label`), then every profile of the
+    /// library's default profile when one is marked, or "None" on a
+    /// modern machine, `shader_library::default_label_for`), then every profile of the
     /// library by name, in `shader_library::scan`'s order. A front end hands the same `profiles` to the three verbs
     /// below, so a row is a profile and nothing in the widget translates
     /// between an index and an id. When the Qt window did that itself it
     /// needed a delegate of its own, and its combo box looked unlike the
     /// others in the form.
-    pub fn shader_profile_labels(profiles: &[ProfileEntry]) -> Vec<String> {
-        std::iter::once(shader_library::default_label(profiles))
+    pub fn shader_profile_labels(&self, profiles: &[ProfileEntry]) -> Vec<String> {
+        std::iter::once(shader_library::default_label_for(self.family, profiles))
             .chain(profiles.iter().map(|e| e.profile.name.clone()))
             .collect()
     }
@@ -1100,6 +1149,12 @@ impl Form {
 
     pub fn reset_shader_profile(&mut self) {
         self.shader_profile = None;
+    }
+
+    /// Whether the MIDI port is a question at all: Windows 11's family
+    /// offers none (`bundle::music_choices`).
+    pub fn music_applies(&self) -> bool {
+        self.music_choices().len() > 1
     }
 
     /// Whether the SoundFont field is worth showing at all.
@@ -1143,6 +1198,9 @@ impl Form {
             ],
             (Sound::Adlib, _) => &[
                 "FM music only, no digital audio. Speech and sound effects will be silent.",
+            ],
+            (Sound::Hda, _) => &[
+                "Windows has the driver built in.",
             ],
             (Sound::None, _) => &[
                 "No sound card. The machine can still have a MIDI port for music.",
@@ -1320,6 +1378,13 @@ impl Form {
         })
     }
 
+    /// Whether the boot picker is a question: a modern machine's UEFI
+    /// keeps its own boot order (Windows' boot manager, then the disc
+    /// when the disk is empty), which a BIOS boot order does not reach.
+    pub fn boot_applies(&self) -> bool {
+        !self.family.is_modern()
+    }
+
     /// The boot picker's one non-obvious case: a machine told to boot
     /// from a floppy it hasn't got.
     pub fn boot_note(&self) -> Option<&'static str> {
@@ -1361,6 +1426,8 @@ impl Form {
                 soundfont: None,
                 mt32_roms: None,
                 pad: None,
+                efi_vars: edit.efi_vars.clone(),
+                tpm_state: edit.tpm_state.clone(),
                 optimizations: Optimizations::default(),
             },
             None => Machine::reference(self.family, self.name.clone(), disk),
@@ -1472,7 +1539,15 @@ impl Form {
             player::create_disk(&disk_path, self.disk_size_gb)?;
             disk_path
         };
-        self.build_machine(disk_path).save(&bundle_path)?;
+        let mut machine = self.build_machine(disk_path);
+        // A modern machine's firmware variables and TPM live in its own
+        // folder whatever disk it has; the first start makes them
+        // (`player::prepare`).
+        if machine.family.is_modern() {
+            machine.efi_vars = Some(dir.join(bundle::EFI_VARS_FILE));
+            machine.tpm_state = Some(dir.join(bundle::TPM_STATE_FILE));
+        }
+        machine.save(&bundle_path)?;
         Ok(bundle_path)
     }
 }

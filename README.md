@@ -37,7 +37,7 @@ Free software, GPL-2.0.
   chosen rate for speed-sensitive games (not yet widely tested).
 
 Not the goal: cycle-accurate emulation of specific chipsets (that is
-86Box and PCem), modern guests, or piracy. Use only your own install
+86Box and PCem) or piracy. Use only your own install
 media, licences and disc dumps.
 
 ## What you need

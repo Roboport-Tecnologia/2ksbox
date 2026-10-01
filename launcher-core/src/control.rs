@@ -341,8 +341,20 @@ impl Control {
     /// created and finish later (saving a 512 MB guest's RAM takes a
     /// visible moment), so the caller polls `job` below instead of
     /// blocking the UI thread on QEMU's main loop.
-    pub fn start_snapshot_job(&mut self, command: &str, job_id: &str, tag: &str, node: &str) -> Result<(), String> {
-        let mut args = serde_json::json!({"job-id": job_id, "tag": tag, "devices": [node]});
+    ///
+    /// `also` are more block nodes the snapshot covers beside the disk: a
+    /// Windows 11 machine's firmware variable store (`snaps.rs`).
+    pub fn start_snapshot_job(
+        &mut self,
+        command: &str,
+        job_id: &str,
+        tag: &str,
+        node: &str,
+        also: &[String],
+    ) -> Result<(), String> {
+        let mut devices = vec![node.to_string()];
+        devices.extend(also.iter().cloned());
+        let mut args = serde_json::json!({"job-id": job_id, "tag": tag, "devices": devices});
         if command != "snapshot-delete" {
             // The VM state goes in the same qcow2 as the disk, as with
             // `savevm`, so `qemu-img snapshot -a` (the offline path) can

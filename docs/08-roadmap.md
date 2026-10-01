@@ -29,6 +29,7 @@ M3/M4.
 | M13 | Gamepads | done | `m13-gamepads.md` |
 | M14 | Voodoo 2 device | active | doc 21 · `m14-voodoo2.md` |
 | M15 | Direct3D executor on Wine | active (steps 5–6) | doc 14 · `m15-wine-executor.md` |
+| M20 | Windows 11 (ADR-024) | active (step 1) | `m20-win11.md` |
 
 ## M0: Foundation
 
@@ -223,6 +224,13 @@ package ships a Wine).
 **Done 2026-09-23:** step 5, the community app on a real macOS 15
 (user-confirmed), and step 6, WineD3D-in-guest removed in one commit.
 **Left:** the Flatpak's Wine (the user's, on Linux).
+
+## M20: Windows 11 (active)
+
+ADR-024 made 2ksbox a general-purpose VM manager. The first modern box
+is Windows 11: EDK2 firmware, a TPM 2.0 from libtpms inside QEMU, x86_64
+under KVM or WHPX, and Windows 11 on Arm under Hypervisor.framework on
+Apple Silicon. Steps in the track doc.
 
 ## Post-v1 candidates
 

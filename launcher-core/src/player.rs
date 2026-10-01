@@ -130,7 +130,9 @@ pub fn pc_bios_dir() -> PathBuf {
 /// player actually runs with: a named `shader_profile` (looked up in the
 /// profile library) takes precedence, then the raw `shader` override,
 /// then the library's default profile (`shader_library::default_id`,
-/// what "(default)" means), then no shader at all. A `shader_profile`
+/// what "(default)" means), then no shader at all. A modern machine
+/// skips the library's default (ADR-024): a CRT over Windows 11 is
+/// something to pick, not something to get. A `shader_profile`
 /// naming a deleted profile falls through the same way rather than
 /// failing the machine (see `shader_library::find`).
 fn resolve_shader(machine: &Machine) -> Option<ShaderProfile> {
@@ -142,6 +144,9 @@ fn resolve_shader(machine: &Machine) -> Option<ShaderProfile> {
     }
     if let Some(preset) = machine.shader.clone() {
         return Some(ShaderProfile::new(String::new(), preset));
+    }
+    if machine.family.is_modern() {
+        return None;
     }
     shader_library::find_default(&dir)
 }
@@ -180,6 +185,70 @@ pub fn pad_args(machine: &Machine) -> Vec<String> {
     }
 }
 
+/// The player that runs `machine`. Each player binary links one QEMU
+/// (`libqemu-embed-<target>`), because QEMU has to be loaded with the
+/// process, not opened later: patch 63 reserves TCG's code buffer next to
+/// the helpers when the image loads (doc 22 §5.0). So the era's machines
+/// run on [`player_binary`] and Windows 11 on the x86_64 build of the same
+/// player (track M20): `bin/2ksbox-player-x86_64` installed,
+/// `target/qemu-x86_64/<profile>/player` in a checkout (`scripts/build.sh`
+/// builds it there, with its own feature), `LAUNCHER_PLAYER_X86_64_BIN`
+/// over both.
+pub fn player_binary_for(machine: &Machine) -> PathBuf {
+    target_player_binary(machine.qemu_target())
+}
+
+/// The player built for `target` (`i386`, `x86_64`), by the rules of
+/// [`player_binary_for`].
+pub fn target_player_binary(target: &str) -> PathBuf {
+    if target == "i386" {
+        return player_binary();
+    }
+    if let Ok(p) = std::env::var(format!("LAUNCHER_PLAYER_{}_BIN", target.to_uppercase())) {
+        return p.into();
+    }
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    if crate::paths::install_prefix().is_some() {
+        return crate::paths::bin_dir().join(format!("2ksbox-player-{target}{exe}"));
+    }
+    let current = std::env::current_exe().expect("current_exe");
+    let profile = current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned();
+    crate::paths::checkout("target").join(format!("qemu-{target}")).join(profile).join(format!("player{exe}"))
+}
+
+/// What has to exist on disk before `machine` can start, made if it does
+/// not: a modern machine's firmware variable store, a qcow2 copy of
+/// EDK2's empty one (`bundle::EFI_VARS_TEMPLATE`). Its TPM needs nothing
+/// made; a missing state file is a TPM libtpms manufactures on the first
+/// start. `spawn` calls this, and `--prepare` for a script that runs
+/// QEMU itself.
+pub fn prepare(machine: &Machine) -> std::io::Result<()> {
+    if !machine.family.is_modern() {
+        return Ok(());
+    }
+    let vars = machine.effective_efi_vars();
+    if vars.exists() {
+        return Ok(());
+    }
+    let template = pc_bios_dir().join(crate::bundle::EFI_VARS_TEMPLATE);
+    let bin = qemu_img_binary();
+    let status = crate::console::command(&bin)
+        .args(["convert", "-f", "raw", "-O", "qcow2"])
+        .arg(&template)
+        .arg(&vars)
+        .status()
+        .map_err(|e| std::io::Error::other(format!("running {}: {e}", bin.display())))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "qemu-img could not make {} from {} ({status})",
+            vars.display(),
+            template.display()
+        )))
+    }
+}
+
 /// Spawn `player` on `machine`. Inherits the launcher's stdout/stderr
 /// when there is a terminal to inherit. When there is not (a
 /// double-clicked launcher on Windows, which has no console and gives
@@ -199,11 +268,12 @@ pub fn spawn(
     qmp_socket: Option<&std::path::Path>,
     shelf: Option<&std::path::Path>,
 ) -> std::io::Result<Child> {
+    prepare(machine)?;
     let mut args = machine.qemu_args(&pc_bios_dir(), shelf);
     if let Some(extra) = qmp_socket.and_then(crate::control::qmp_args) {
         args.extend(extra);
     }
-    let bin = player_binary();
+    let bin = player_binary_for(machine);
     let mut argv: Vec<String> = shader_args(machine);
     argv.extend(pad_args(machine));
     argv.push("--".into());

@@ -68,7 +68,7 @@ smoke() {
   echo "$out"
   local fail=0
   while read -r what path; do
-    case "$what" in player|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
+    case "$what" in player|player-x86_64|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
     case "$path" in "("*) continue ;; /app*) ;; *)
       echo "package-flatpak.sh: $what resolved outside /app: $path" >&2; fail=1 ;;
     esac

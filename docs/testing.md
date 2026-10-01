@@ -59,7 +59,7 @@ copy).
 | `clone`, `qt-clone` | **Clone…** gives a machine with its own disk copy and snapshots, the original untouched; refused while the machine runs (doc 07); "same hard disk" boots the original's disk, copies none of it, warns, and goes ahead while the machine runs; the Qt window is as tall as its content (`;show` and the layout line), and its checkbox reaches the model (`;same`) |
 | `snapshot-tree` | the snapshot window's tree over a real qcow2 (doc 07): take, restore, take again gives siblings, not a line; a delete moves the branch up; a snapshot deleted or taken by hand is dropped from the record or shown at the top level; the clone carries the tree |
 | `shader-defaults` | the first-run shader offer without a toolkit, and the library's default profile: the first download marks CRT Aperture, a machine on "(default)" resolves to it and follows it when moved, a named profile does not, a second run of the starters never moves it, clearing it and a deleted profile both mean no default |
-| `qt-wizard`, `qt-close`, `qt-esc`, `qt-profilesclose`, `qt-profile`, `qt-shelf`, `qt-firstrun`, `qt-snapshots` | real Qt windows driven offscreen: what the controls show agrees with the shared model (the shader profile combo shows the default among the app default and two planted profiles); close/Esc reach exactly one window; closing the profile list after a cancelled wizard does not bring the wizard back; the form opens where it should; the snapshots list is the one item that grows and its header's columns start where its rows' do, at the window's own size and at its narrowest (needs a built `launcher-qt`) |
+| `qt-wizard`, `qt-close`, `qt-esc`, `qt-profilesclose`, `qt-profile`, `qt-shelf`, `qt-firstrun`, `qt-snapshots` | real Qt windows driven offscreen, on every family (Windows 11 included): what the controls show agrees with the shared model (the shader profile combo shows the default among the app default and two planted profiles); close/Esc reach exactly one window; closing the profile list after a cancelled wizard does not bring the wizard back; the form opens where it should; the snapshots list is the one item that grows and its header's columns start where its rows' do, at the window's own size and at its narrowest (needs a built `launcher-qt`) |
 | `host-check` | `launcherx --host-check`: no Vulkan reported unavailable, software Vulkan warned not refused, loader and floor always named (ADR-013/018) |
 | `optimizations` | the form's emulation switches land on `-cpu` / `-accel tcg` and our QEMU accepts all fourteen flipped; an untouched machine emits nothing; `pinned-regs` never reaches the command line |
 | `pointer` | "Seamless mouse": Windows gets `-usb -device usb-tablet`, DOS neither; toggling removes/restores both |
@@ -76,6 +76,8 @@ copy).
 | `sb16-irq` | a DSP reset over auto-init DMA raises no IRQ 5 edge; each silence block exactly one (patch 25) |
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
 | `machine-map` | `info mtree` of a PC machine: the `mesapt` pass-through region is there, and no Glide one (patch 74, ADR-020) and no SysBus `d3dpt` one (M16 step 7) |
+| `win11-snapshots` | a new Windows 11 machine's offline snapshot (take, restore, delete through `launcherx --snapshots`) covers its firmware variable store and a copy of its TPM state, with a snapshot name that has a space; a clone copies the TPM, and `--clone --new-tpm` leaves it behind (M20) |
+| `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64` |
 | `no-optionals` | no disabled library (libpng and libjpeg among them) is linked, named in a binary, or present as a QAPI audio enumerator; on a Mac, no Homebrew path in any load command of `libqemu-embed`, `qemu-system-i386` or `qemu-img`, whose libraries are our own static builds (`build-macos.md` "The libraries") |
 | `icons` | `scripts/gen-icons.sh --check` |
 | `package` | `scripts/package-linux.sh --no-tar` (or `package-macos.sh --no-sign --no-dmg` on a Mac) |
@@ -345,6 +347,24 @@ Local only; each works on a raw copy or overlay of an image.
 | `tools/xp-diablo.sh install\|play <image>` | Diablo on 8 bpp palettized modes into Tristram |
 
 ## Other tools
+
+`tools/tpm-qtest.py [qemu-system-x86_64]` (the `tpm-qtest` host check;
+patch 75, M20 step 2): the libtpms TPM backend with no guest. QEMU runs
+under `-accel qtest` and the script is the CPU, sending raw TPM 2.0
+commands through `tpm-crb`'s registers as QEMU's `tests/qtest/tpm-util.c`
+does. A fresh TPM (Startup, GetRandom, a PCR extend checked against
+SHA-256 computed in Python, an NV index), a second QEMU on the same state
+file (the index survives, the PCR is reset), and a savevm / loadvm round
+trip (PCR and index come back, and a third QEMU reads the snapshot's
+index from the file). `OUT=`.
+
+`tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
+Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a
+swtpm TPM. `install` runs setup from `tools/win11-spike/autounattend.xml`
+(one click on the product key page) and `spike.ps1` reports the build,
+firmware, TPM and Secure Boot on COM1; `boot` times power-on to the
+desktop and ends with the power button. `ACCEL=tcg`, `OUT=`, `SMP=`,
+`MEM=`, `VNC=`, `SHOT=`, `SETTLE=`; needs `swtpm`, `xorriso`, `7z`.
 
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),

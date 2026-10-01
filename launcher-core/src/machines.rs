@@ -108,7 +108,7 @@ impl Machines {
             .and_then(|id| self.profiles.iter().find(|e| shader_library::id_of(&e.path) == id))
             .map(|e| e.profile.name.clone())
             .or_else(|| entry.machine.shader.as_ref().map(|p| p.display().to_string()))
-            .unwrap_or_else(|| shader_library::default_label(&self.profiles))
+            .unwrap_or_else(|| shader_library::default_label_for(entry.machine.family, &self.profiles))
     }
 
     pub fn shader_label_at(&self, row: usize) -> String {

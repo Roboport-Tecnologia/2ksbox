@@ -22,7 +22,7 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{relative}");
     }
     // rpath to libqemu-embed so `cargo run` / target/*/player find it in place
-    if let Ok(dir) = std::env::var("DEP_QEMU_EMBED_I386_LIBDIR") {
+    if let Ok(dir) = std::env::var("DEP_QEMU_EMBED_LIBDIR") {
         if unix {
             println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{dir}");
         }

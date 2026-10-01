@@ -217,6 +217,9 @@ elif [ "$(uname -s)" = Darwin ]; then
     echo "no $DEPS/lib/pkgconfig/glib-2.0.pc: scripts/build-deps.sh first (scripts/build.sh runs it)"; exit 1; }
   export PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig:$(xcrun --show-sdk-path)/usr/lib/pkgconfig"
   unset PKG_CONFIG_PATH
+  # The TPM 2.0 of a Windows 11 box: libtpms and its libcrypto, ours too
+  # (patch 75, track M20). Asked for, so a missing one fails here.
+  CFG+=(--enable-libtpms)
   echo "==> libraries: $DEPS (static)"
 elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
   # Linux: QEMU on a glib of its own (scripts/build-deps.sh on Linux,
@@ -235,9 +238,12 @@ elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
   [ -f "$DEPS/lib/pkgconfig/glib-2.0.pc" ] || {
     echo "no $DEPS/lib/pkgconfig/glib-2.0.pc: scripts/build-deps.sh first (scripts/build.sh runs it), or QEMU_DEPS=system"; exit 1; }
   export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  HIDE=libglib-2.0.a:libgio-2.0.a:libgobject-2.0.a:libgmodule-2.0.a:libpcre2-8.a:libslirp.a
-  CFG+=(--disable-smartcard --extra-ldflags="-Wl,--exclude-libs,$HIDE")
-  echo "==> glib and libslirp: $DEPS (static, hidden)"
+  # libtpms and its libcrypto (patch 75, the TPM 2.0 of a Windows 11
+  # box, track M20) come the same way, hidden too: a process that loads
+  # its own OpenSSL must not have QEMU's calls bind to it, or the reverse.
+  HIDE=libglib-2.0.a:libgio-2.0.a:libgobject-2.0.a:libgmodule-2.0.a:libpcre2-8.a:libslirp.a:libtpms.a:libcrypto.a
+  CFG+=(--disable-smartcard --enable-libtpms --extra-ldflags="-Wl,--exclude-libs,$HIDE")
+  echo "==> glib, libslirp and libtpms: $DEPS (static, hidden)"
 fi
 # No QEMU user interface at all. The player is the front end. It embeds
 # QEMU, the embed library appends `-display none` itself

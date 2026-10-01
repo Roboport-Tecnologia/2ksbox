@@ -5,7 +5,9 @@ and other era OSes) as "native vintage boxes": a patched QEMU (qemu-3dfx
 for 3D) **in-process** in a Rust player with a CRT shader chain, a Qt
 launcher over a shared Rust library, and our own devices and guest
 drivers for Direct3D, CD-ROM and music, and an emulated Voodoo 2 for
-Glide.
+Glide. Since ADR-024 it is also a general-purpose VM manager: modern
+guests (Windows 11 first, track M20) run under hardware virtualization,
+on Apple Silicon as ARM64 under HVF.
 
 ## Start here
 
@@ -219,8 +221,13 @@ MSYS2's MINGW64 shell for debugging on the PC (`scripts/win-run.sh`,
   the player against an old library (`undefined symbol _qemu_embed_…`).
   `configure-qemu.sh` must re-run when meson files change.
 - Bumping the embed API: `QEMU_EMBED_API_VERSION` and the `qemu-embed`
-  crate's `API_VERSION` move together; rebuild the library before the
-  player links.
+  crate's `API_VERSION` move together; rebuild the libraries before the
+  players link (one per target, doc 11).
+- **The player links QEMU; never `dlopen` it.** Patch 63 reserves TCG's
+  code buffer next to the helpers when the image loads, before `main()`;
+  a library opened later lands it far away on Apple Silicon (doc 22
+  §5.0, 35–45 % slower). A second target is a second player binary
+  (`--features qemu-x86_64`).
 
 ## Guest images
 

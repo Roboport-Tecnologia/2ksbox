@@ -4,21 +4,33 @@ The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
 The API is **v8** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
-library before the player links). The 3D context provider is doc 12, the
+libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
 `qemu/` as prepared from v9.2.4.
 
 ## Shape
 
-One shared library per target, `libqemu-embed-i386.{so,dylib,dll}`,
-built by QEMU's own meson from the per-target static library (which
-already excludes `system/main.c`, so there is no `main()`) plus our shim
+One shared library per target, `libqemu-embed-<target>.{so,dylib,dll}`
+(`i386` for the era's machines, `x86_64` for Windows 11), built by
+QEMU's own meson from the per-target static library (which already
+excludes `system/main.c`, so there is no `main()`) plus our shim
 `embed/libqemu_embed.c`. `prepare-qemu.sh` rsyncs `embed/` into
 `qemu/embed/`, like the 3dfx overlay. A stale copy links the player
 against an old library (`undefined symbol _qemu_embed_…`;
 `qemu-embed/build.rs` warns). The `qemu-embed` crate's bindings are
 hand-written: the API is small, `qemu_embed_api_version()` catches
 drift, and no libclang is needed.
+
+**One player binary per target, each linking its QEMU.** The era's
+`2ksbox-player` links i386; Windows 11's `2ksbox-player-x86_64` is the
+same player built with `--features qemu-x86_64` (track M20), and the
+launcher starts the one a machine needs (`player::player_binary_for`).
+Not one player opening its QEMU at run time: patch 63 reserves TCG's
+code buffer next to the helpers from a constructor that has to run when
+the image loads, before `main()` and anything else fragments the address
+space, and a library opened later puts it 8 GiB away on Apple Silicon in
+a third of launches, helper-heavy code then 35–45 % slower (doc 22 §5.0).
+Tried and reverted in M20 step 3 for that reason.
 
 **Thread contract.** Call `qemu_embed_new`, `_run` and `_destroy` on one
 thread. Display callbacks fire on that thread with the BQL held and must

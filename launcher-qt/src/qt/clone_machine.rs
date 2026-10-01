@@ -24,6 +24,11 @@ pub mod ffi {
         #[qproperty(QString, note)]
         #[qproperty(bool, same_disk)]
         #[qproperty(QString, same_disk_label)]
+        /// A Windows 11 machine's "new TPM" box: whether it is shown at
+        /// all, its state and its words.
+        #[qproperty(bool, tpm_applies)]
+        #[qproperty(bool, new_tpm)]
+        #[qproperty(QString, new_tpm_label)]
         /// The shared disk's rule, or the machine is running: drawn as a warning, and Clone is off.
         #[qproperty(QString, warning)]
         #[qproperty(QString, error)]
@@ -49,6 +54,10 @@ pub mod ffi {
         /// The "same hard disk" checkbox changed.
         #[qinvokable]
         fn share_disk(self: Pin<&mut CloneModel>, same: bool);
+
+        /// The "new TPM" checkbox changed.
+        #[qinvokable]
+        fn choose_new_tpm(self: Pin<&mut CloneModel>, on: bool);
 
         #[qinvokable]
         fn submit(self: Pin<&mut CloneModel>);
@@ -84,6 +93,9 @@ pub struct CloneModelRust {
     note: QString,
     same_disk: bool,
     same_disk_label: QString,
+    tpm_applies: bool,
+    new_tpm: bool,
+    new_tpm_label: QString,
     warning: QString,
     error: QString,
     status: QString,
@@ -113,6 +125,11 @@ impl ffi::CloneModel {
         self.publish();
     }
 
+    fn choose_new_tpm(mut self: Pin<&mut Self>, on: bool) {
+        self.as_mut().rust_mut().model.new_tpm = on;
+        self.publish();
+    }
+
     fn submit(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().model.submit();
         self.publish();
@@ -137,6 +154,7 @@ impl ffi::CloneModel {
     /// the header of `main.rs`).
     fn publish(mut self: Pin<&mut Self>) {
         let (open, title, name, note, same_disk, same_disk_label, warning, error, status, busy, can_submit, progress, progress_label);
+        let (tpm_applies, new_tpm, new_tpm_label);
         {
             let m = &self.rust().model;
             open = m.open;
@@ -145,6 +163,9 @@ impl ffi::CloneModel {
             note = qs(m.note());
             same_disk = m.same_disk;
             same_disk_label = qs(m.same_disk_label());
+            tpm_applies = m.tpm_applies();
+            new_tpm = m.new_tpm;
+            new_tpm_label = qs(m.new_tpm_label());
             warning = qs_opt(m.warning());
             error = qs_opt(m.error());
             status = qs_opt(m.status());
@@ -158,6 +179,9 @@ impl ffi::CloneModel {
         self.as_mut().set_note(note);
         self.as_mut().set_same_disk(same_disk);
         self.as_mut().set_same_disk_label(same_disk_label);
+        self.as_mut().set_tpm_applies(tpm_applies);
+        self.as_mut().set_new_tpm(new_tpm);
+        self.as_mut().set_new_tpm_label(new_tpm_label);
         self.as_mut().set_warning(warning);
         self.as_mut().set_error(error);
         self.as_mut().set_status(status);

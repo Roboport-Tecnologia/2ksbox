@@ -30,6 +30,8 @@ The roadmap is doc 08.
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
+| 023 | The launcher moves to mitsuami | accepted, work in M19 |
+| 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -779,3 +781,46 @@ it is packaged.
 `launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami
 takes its pixels in an `Image`); the player keeps winit (a mitsuami player
 is a separate question, `spikes/player-gtk`).
+
+## ADR-024: A general-purpose VM manager, best at vintage boxes (2026-10-01)
+
+**Status.** Accepted (user decision: "lets be a general purpose vm
+manager, that just so happens to also be awesome at emulating vintage
+boxes"). Removes doc 01's "modern guests" non-goal. Work in track M20.
+
+**Decision.** 2ksbox runs current guests as well as era ones. The first
+is Windows 11 (track M20), asked for by the user so people who need it
+for work can run it on a Mac. A modern box uses the same launcher,
+bundle format, snapshots, player and in-process QEMU as a vintage one,
+but none of the era devices: no `d3dpt-vga`, no Voodoo 2, no
+guest-tools ISO, no CRT shader by default. On Apple Silicon a modern
+guest runs as ARM64 under Hypervisor.framework (`aarch64-softmmu`,
+`-accel hvf`). Emulating a current x86 system under TCG is too slow for
+work there. Vintage boxes stay x86 under TCG.
+
+**Why.** Everything a modern box needs from us outside QEMU already
+exists for the vintage ones: the machine library, the wizard, snapshots,
+the disc shelf, packaging on three platforms. A second app for modern
+guests would duplicate all of it. UTM covers the Mac only and is not our
+stack.
+
+**Unchanged.** Every locked decision: QEMU as the base (ADR-001),
+in-process (ADR-002), Rust where possible (ADR-004), one launcher
+library (ADR-014), everything open source, nothing shipped from
+Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
+
+**Costs.**
+
+- The player links one QEMU (`libqemu-embed-i386`), and has to keep
+  linking it (patch 63, doc 22 §5.0). So each target is a player binary
+  of its own: `2ksbox-player-x86_64` for a modern PC guest (M20 step 3),
+  aarch64 on a Mac later. Packages grow by a player and a QEMU library
+  per target.
+- The trimmed QEMU (`no-optionals`, the patches README) gains what a
+  modern guest needs: the TPM and its backend, NVMe, virtio, ramfb, HVF.
+- New libraries to build from pinned sources: libtpms and OpenSSL's
+  libcrypto (M20). EDK2 firmware, which QEMU's `pc-bios/` already
+  carries.
+- Doc 01's integration features (clipboard, shared folders, the guest
+  resizing its screen to the window) stay later work, but a modern
+  guest's users will expect them sooner than a game player does.

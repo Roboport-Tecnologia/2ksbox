@@ -350,15 +350,19 @@ fn SystemPage() -> impl View {
                 <Button enabled=get(wiz, |f| !f.ram_is_default()) @click=move || wiz.edit(Form::reset_ram)>"Default"</Button>
             </Row>
             <Note text=get(wiz, |f| f.ram_note().unwrap_or_default().to_owned())/>
-            <Picker
-                label="Processor"
-                options=labels(&CpuSpeed::ALL, CpuSpeed::label)
-                selected=get(wiz, |f| index_of(&CpuSpeed::ALL, f.cpu_speed()))
-                @choose=move |i| wiz.edit(|f| f.choose_cpu_speed(CpuSpeed::ALL[i]))
-                is_default=get(wiz, Form::cpu_speed_is_default)
-                @reset=move |()| wiz.edit(Form::reset_cpu_speed)
-            />
-            <Note text=get(wiz, |f| joined(f.cpu_speed_notes()))/>
+            <Show when=get(wiz, Form::cpu_speed_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Processor"
+                        options=labels(&CpuSpeed::ALL, CpuSpeed::label)
+                        selected=get(wiz, |f| index_of(&CpuSpeed::ALL, f.cpu_speed()))
+                        @choose=move |i| wiz.edit(|f| f.choose_cpu_speed(CpuSpeed::ALL[i]))
+                        is_default=get(wiz, Form::cpu_speed_is_default)
+                        @reset=move |()| wiz.edit(Form::reset_cpu_speed)
+                    />
+                    <Note text=get(wiz, |f| joined(f.cpu_speed_notes()))/>
+                </Column>
+            </Show>
             <Picker
                 label="Acceleration"
                 options=labels(&Accel::ALL, Accel::label)
@@ -445,21 +449,25 @@ fn DisplayPage() -> impl View {
                     <AccelLine note=get(wiz, |f| accel(f.d3d9_note()))/>
                 </Column>
             </Show>
-            <Row gap=Spacing::Lg>
-                <Checkbox checked=get(wiz, Form::voodoo2) @change=move |on| wiz.edit(|f| f.choose_voodoo2(on))>
-                    "3dfx Voodoo 2"
-                </Checkbox>
-                <Checkbox
-                    enabled=get(wiz, Form::voodoo2_undither_enabled)
-                    checked=get(wiz, Form::voodoo2_undither)
-                    @change=move |on| wiz.edit(|f| f.choose_voodoo2_undither(on))
-                >"Voodoo3 undither filter"</Checkbox>
-            </Row>
-            <Note text=get(wiz, |f| joined(f.voodoo2_notes()))/>
-            <Note text=get(wiz, |f| joined(f.voodoo2_undither_notes()))/>
+            <Show when=get(wiz, Form::voodoo2_applies)>
+                <Column gap=Spacing::Md>
+                    <Row gap=Spacing::Lg>
+                        <Checkbox checked=get(wiz, Form::voodoo2) @change=move |on| wiz.edit(|f| f.choose_voodoo2(on))>
+                            "3dfx Voodoo 2"
+                        </Checkbox>
+                        <Checkbox
+                            enabled=get(wiz, Form::voodoo2_undither_enabled)
+                            checked=get(wiz, Form::voodoo2_undither)
+                            @change=move |on| wiz.edit(|f| f.choose_voodoo2_undither(on))
+                        >"Voodoo3 undither filter"</Checkbox>
+                    </Row>
+                    <Note text=get(wiz, |f| joined(f.voodoo2_notes()))/>
+                    <Note text=get(wiz, |f| joined(f.voodoo2_undither_notes()))/>
+                </Column>
+            </Show>
             <Picker
                 label="Shader profile"
-                options=move || wiz.profiles.with(|p| Form::shader_profile_labels(p))
+                options=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_labels(p)))
                 selected=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_index(p)))
                 @choose=move |i| wiz.profiles.with_untracked(|p| wiz.edit(|f| f.choose_shader_profile(p, i)))
                 is_default=get(wiz, Form::shader_profile_is_default)
@@ -484,15 +492,19 @@ fn AudioPage() -> impl View {
             />
             <AccelLine note=get(wiz, |f| (f.sound_warning().unwrap_or_default().to_owned(), true))/>
             <Note text=get(wiz, |f| joined(f.sound_notes()))/>
-            <Picker
-                label="Music (MIDI)"
-                options=get(wiz, |f| labels(f.music_choices(), |m| m.label()))
-                selected=get(wiz, |f| index_of(f.music_choices(), f.music()))
-                @choose=move |i| wiz.edit(|f| f.choose_music(f.music_choices()[i]))
-                is_default=get(wiz, Form::music_is_default)
-                @reset=move |()| wiz.edit(Form::reset_music)
-            />
-            <Note text=get(wiz, |f| joined(f.music_notes()))/>
+            <Show when=get(wiz, Form::music_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Music (MIDI)"
+                        options=get(wiz, |f| labels(f.music_choices(), |m| m.label()))
+                        selected=get(wiz, |f| index_of(f.music_choices(), f.music()))
+                        @choose=move |i| wiz.edit(|f| f.choose_music(f.music_choices()[i]))
+                        is_default=get(wiz, Form::music_is_default)
+                        @reset=move |()| wiz.edit(Form::reset_music)
+                    />
+                    <Note text=get(wiz, |f| joined(f.music_notes()))/>
+                </Column>
+            </Show>
             <Show when=get(wiz, Form::soundfont_applies)>
                 <PathField
                 label_width=LABEL_W
@@ -596,21 +608,27 @@ fn StoragePage() -> impl View {
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
-            <PathField
-                label_width=LABEL_W
-                label="Floppy (optional)"
-                filter=FLOPPY_FILTER
-                value=get(wiz, |f| f.floppy.clone())
-                @edit=move |p| wiz.edit(|f| f.floppy = p)
-            />
-            <Picker
-                label="Boot from"
-                resettable=false
-                options=labels(&Boot::ALL, Boot::label)
-                selected=get(wiz, |f| index_of(&Boot::ALL, f.boot))
-                @choose=move |i| wiz.edit(|f| f.boot = Boot::ALL[i])
-            />
-            <Note text=get(wiz, |f| f.boot_note().unwrap_or_default().to_owned())/>
+            <Show when=get(wiz, Form::floppy_applies)>
+                <PathField
+                    label_width=LABEL_W
+                    label="Floppy (optional)"
+                    filter=FLOPPY_FILTER
+                    value=get(wiz, |f| f.floppy.clone())
+                    @edit=move |p| wiz.edit(|f| f.floppy = p)
+                />
+            </Show>
+            <Show when=get(wiz, Form::boot_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Boot from"
+                        resettable=false
+                        options=labels(&Boot::ALL, Boot::label)
+                        selected=get(wiz, |f| index_of(&Boot::ALL, f.boot))
+                        @choose=move |i| wiz.edit(|f| f.boot = Boot::ALL[i])
+                    />
+                    <Note text=get(wiz, |f| f.boot_note().unwrap_or_default().to_owned())/>
+                </Column>
+            </Show>
         </Column>
     }
 }

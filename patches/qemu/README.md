@@ -19,7 +19,7 @@ The test tools named here are in `docs/testing.md`.
    headers; `voodoo/` → `hw/voodoo/`; `libsynth/qemu/` → `hw/audio/`
    (`opl3.c`, `mpu401.c`); `libdisc/qemu/` → `block/cdimage.c` and
    `include/block/`; `gamepad/qemu/` → `hw/usb/dev-gamepad.c` and
-   `hw/input/gameport.c`. Our device code lives in these overlays and is
+   `hw/input/gameport.c`; `tpm/qemu/` → `backends/tpm/tpm_libtpms.c`. Our device code lives in these overlays and is
    edited in the repo; a patch only wires it into QEMU's build and machines.
 2. **Restore.** Every tracked file any patch touches is checked out
    pristine, and every file a patch creates is deleted.
@@ -846,3 +846,24 @@ stays. 2ksbox retired the Glide pass-through for the emulated Voodoo 2
 overlay directory is still copied in because `sign_commit` stamps a file
 in it. **Test:** the `machine-map` check (`info mtree` has `mesapt`
 and `d3dpt` and no `glidept`). **Drop:** never.
+
+### 75-tpm-libtpms
+The libtpms TPM backend, `-tpmdev libtpms,id=…,state=<file>`: a TPM 2.0
+inside QEMU's process for Windows 11 (track M20), where QEMU's own
+`emulator` backend talks to swtpm in a second process. The backend is
+ours (`tpm/qemu/tpm_libtpms.c`, overlaid); the patch adds the `libtpms`
+meson feature (`--enable-libtpms`; it asks pkg-config for libcrypto by
+name too, since libtpms's `.pc` names only `-ltpms` and ours is static),
+`CONFIG_TPM_LIBTPMS`, the `libtpms` `TpmType` with its `state` option in
+QAPI, and `info tpm`'s line for it. The TPM's permanent state is the one
+file, replaced atomically; snapshots carry the permanent and volatile
+state, and `loadvm` writes the snapshot's permanent state back to the
+file. libtpms and libcrypto come static and hidden from
+`scripts/build-deps.sh` on Linux and macOS (`QEMU_DEPS=system` leaves
+the feature on auto). Everything is behind `CONFIG_TPM`, which QEMU 9.2
+refuses on a Windows host, so the Windows build has no TPM yet.
+**Test:** `tools/tpm-qtest.py` (the `tpm-qtest` host check): a fresh
+TPM, a restart on the same file and a savevm / loadvm round trip
+through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
+with `TPM=libtpms` for Windows 11. **Drop:** never (upstream QEMU has no
+in-process TPM).
