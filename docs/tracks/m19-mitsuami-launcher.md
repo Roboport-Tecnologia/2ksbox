@@ -83,8 +83,8 @@ and photograph the screen it is on:
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
 | `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |
-| `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | Broadway's screen is 1024
-wide, so a 1060 window is cut at the right edge there. The debug verbs are
+| `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | The machine window
+is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug verbs are
 `launcher_core::cli`'s, as in every front end.
 
 ## Steps
@@ -106,13 +106,19 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    `.../machines/winxp/disk.qcow2`, its whole path the tooltip, user
    2026-10-01; one line, cut in the middle if it must be), one
    `Group` per page of
-   the form, rebuilt per group by a keyed `For`. Activating a row starts
+   the form (its rows padded inside the box past the platform's inset,
+   user 2026-10-01: they were cramped), rebuilt per group by a keyed `For`. Activating a row starts
    its machine; a right click on it offers Start and the More menu's
    items (`machine_actions`, shared by both; user, 2026-10-01; clicked
    through on Broadway, Discs opened on the row's machine). The toolbar keeps New, Shelf, Shaders (named so since
    2026-10-01, user; an empty library's button stays New machine),
-   with platform icons, and the status line, which says only
-   that a machine started: a start that fails is the platform's alert
+   with platform icons, Shelf and Shaders one item, a `Row`, so on
+   macOS 26 they share one glass capsule (mitsuami's segmented group;
+   titled buttons each get their own otherwise), and the first-run
+   download's progress bar ahead of them while it runs, with no capsule
+   (user, 2026-10-01). The status line is gone (user: "we won't have
+   status text"; it said only that a machine started, or that a clone
+   landed, which the list shows): a start that fails is the platform's alert
    since 2026-10-01 (user), the core's `Machines::start_failed` headline
    over its error (checked on Broadway with `LAUNCHER_PLAYER_BIN` on a
    missing file; an alert's text can't be selected, mitsuami has no
@@ -158,7 +164,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    Delete ask in the platform's alert, Cancel the default (the questions
    are the core's `Snapshots::restore_question` / `delete_question`), so
    the actions column is only as wide as Restore and the trash button,
-   plus a margin after the trash button (user, 2026-10-01);
+   plus a margin after the trash button (user, 2026-10-01), and padded
+   above and below so a row is 32 pt and its buttons don't fill it (user,
+   2026-10-01: "too cramped"; the shader list's actions too);
    the Qt window still asks on Restore's button and deletes without
    asking. Checked by clicks through Broadway's page on a scratch tree: a
    snapshot taken from the sheet landed under the current one, Cancel
@@ -176,7 +184,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    sit on the window's background with no frame (user); the scroll view
    runs to the window's edges with the side padding inside it, so the
    scroll bar stays clear of the buttons (user). A row is its
-   kind's icon, the label with a pencil floating past its end (absolute,
+   kind's icon, the label, which a double click turns into the field
+   (mitsuami's `on_double_click`; user 2026-10-01, as Finder renames),
+   with off macOS a pencil floating past its end too (absolute,
    taking no room; shown only while the row is hovered, mitsuami
    637772f's `on_hover`, with the row's context menu, Rename, Insert,
    Remove from shelf, as the keyboard's way in; clicked through on

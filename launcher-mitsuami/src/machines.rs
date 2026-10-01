@@ -40,9 +40,6 @@ pub struct Library {
     /// Never set: a `Copy` handle on the model, so the store is `Copy`.
     model: Signal<Rc<RefCell<Machines>>>,
     version: Signal<u64>,
-    /// The line at the end of the toolbar: what "Start" last did, when it
-    /// started.
-    pub status: Signal<String>,
     /// A start that failed, as the alert's headline and the core's error,
     /// until the window shows it.
     failure: Signal<Option<(String, String)>>,
@@ -56,7 +53,6 @@ impl Store for Library {
         Library {
             model: signal(Rc::new(RefCell::new(Machines::load()))),
             version: signal(0),
-            status: signal(String::new()),
             failure: signal(None),
             selected: signal(Vec::new()),
         }
@@ -130,13 +126,9 @@ impl Library {
         self.write(|m| {
             let Some(row) = row_of(m, dir) else { return false };
             match m.play(row) {
-                Ok(line) => {
-                    self.status.set(line);
-                    true
-                }
+                Ok(_) => true,
                 Err(e) => {
                     let name = m.machine(row).map(|x| x.name.clone()).unwrap_or_default();
-                    self.status.set(String::new());
                     self.failure.set(Some((Machines::start_failed(&name), e)));
                     false
                 }
@@ -274,20 +266,21 @@ pub fn MachinesWindow() -> impl View {
         <Column grow=1.0 min_height=0>
             <Toolbar>
                 <Show when=move || offer.progress.get().is_some()>
-                    // Only a bar: the size isn't known until it ends, and
-                    // the headline is its label for a screen reader.
-                    <Row padding_x=Spacing::Sm align=Align::Center>
-                        <Progress
-                            label=move || offer.progress.get().unwrap_or_default()
-                            indeterminate=true
-                            width=160
-                        />
-                    </Row>
+                    // Only a bar, on the toolbar with no capsule: the size
+                    // isn't known until it ends, and the headline is its
+                    // label for a screen reader.
+                    <Progress
+                        label=move || offer.progress.get().unwrap_or_default()
+                        indeterminate=true
+                        width=160
+                    />
                 </Show>
-                <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
                 <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
-                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button>
-                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button>
+                // One item, so one capsule on macOS 26.
+                <Row>
+                    <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button>
+                    <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button>
+                </Row>
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
                 <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
@@ -465,8 +458,11 @@ fn DetailBox(group: DetailGroup) -> impl View {
             }
         })
         .collect();
+    // Room inside the box, past the platform's own inset (user).
     view! {
-        <Group title=group.title gap=Spacing::Sm>{rows}</Group>
+        <Group title=group.title>
+            <Column padding_x=Spacing::Md padding_y=Spacing::Sm gap=Spacing::Sm>{rows}</Column>
+        </Group>
     }
 }
 

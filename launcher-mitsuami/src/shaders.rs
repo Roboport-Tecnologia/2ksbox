@@ -346,7 +346,7 @@ fn ProfileTable() -> impl View {
             let (p2, p3) = (path.clone(), path);
             let ui = ui.clone();
             view! {
-                <Row gap=Spacing::Sm align=Align::Center>
+                <Row gap=Spacing::Sm padding_y=Spacing::Xs align=Align::Center>
                     <Button @click=move || {
                         let path = p2.to_path_buf();
                         shaders.open_editor(|e| e.edit_path(path));

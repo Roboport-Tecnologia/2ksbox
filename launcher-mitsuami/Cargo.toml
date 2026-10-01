@@ -28,7 +28,7 @@ launcher-core = { path = "../launcher-core" }
 # Pinned to a commit (user decision): bump `rev` to take a newer mitsuami.
 # For work on both at once, a `[patch]` in a local, uncommitted
 # `.cargo/config.toml` points it at a checkout (docs/tracks/m19-mitsuami-launcher.md).
-mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "637772f5ad407b7e9f75d5b8876db978ee791a6d", default-features = false }
+mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "b3df5b4d6e6abaf61b4d96b55999cdcc84712791", default-features = false }
 # The headless screenshot (`LAUNCHER_SHOT`), the one image encoding this
 # crate does itself.
 png = "0.18"

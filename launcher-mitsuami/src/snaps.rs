@@ -248,7 +248,7 @@ fn SnapshotTable() -> impl View {
                 });
             };
             view! {
-                <Row gap=Spacing::Sm padding_end=Spacing::Md align=Align::Center>
+                <Row gap=Spacing::Sm padding_end=Spacing::Md padding_y=Spacing::Xs align=Align::Center>
                     <Button enabled=move || !snaps.busy() @click=restore>"Restore"</Button>
                     <Button
                         icon=crate::machines::icons::TRASH

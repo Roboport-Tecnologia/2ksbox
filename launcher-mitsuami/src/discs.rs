@@ -10,7 +10,8 @@
 //! shelf is kept in label order, so a row number is only good until the
 //! next edit.
 //!
-//! A label is edited behind the pencil beside it and written when Enter
+//! A label is edited in place, opened by a double click on it (or off
+//! macOS the pencil beside it), and written when Enter
 //! is pressed, when the field loses focus, or when the window closes with
 //! the edit still in it, as the Qt window's `editingFinished`: the core
 //! re-sorts the shelf on every label change, so writing each keystroke
@@ -293,11 +294,11 @@ fn DiscList() -> impl View {
     }
 }
 
-/// One disc: its kind, its label with a pencil to rename it (shown while
-/// the pointer is over the row), what it is and where it lives, then ▶
-/// (or "In drive") on a machine's shelf, and Remove. A right click offers
-/// the same, which is the keyboard's way to Rename, since a keyboard never
-/// hovers.
+/// One disc: its kind, its label, renamed by a double click on it (and
+/// off macOS a pencil shown while the pointer is over the row), what it is
+/// and where it lives, then ▶ (or "In drive") on a machine's shelf, and
+/// Remove. A right click offers the same, which is the keyboard's way to
+/// Rename, since a keyboard never double-clicks or hovers.
 #[component]
 fn DiscRow(path: PathBuf) -> impl View {
     let discs = use_store::<Discs>();
@@ -356,17 +357,27 @@ fn DiscRow(path: PathBuf) -> impl View {
                         let path = path.clone();
                         move || field(&path, |s, r| s.discs()[r].label.clone())
                     };
-                    // The pencil floats past the label's end, taking no
-                    // room in the row, and shows while the row is hovered.
+                    let renamed = path.clone();
+                    // A double click on the label renames it in place, as
+                    // Finder's names do. Elsewhere a pencil floats past its
+                    // end too, taking no room in the row, and shows while
+                    // the row is hovered; macOS has none (user).
                     view! {
-                        <Row align_self=Align::Start min_width=0>
+                        <Row
+                            align_self=Align::Start
+                            min_width=0
+                            @double_click=move || {
+                                discs.start_rename(&renamed);
+                                field_ref.select_text(0..usize::MAX);
+                            }
+                        >
                             <Text max_lines=1 shrink=1.0 min_width=0>{label}</Text>
                             <Button
                                 absolute
                                 start={Length::Percent(100.0)}
                                 top={Length::Px(-7.0)}
                                 margin_start=Spacing::Xs
-                                hidden=move || !hovered.get()
+                                hidden=move || cfg!(target_os = "macos") || !hovered.get()
                                 icon=icons::EDIT
                                 icon_only=true
                                 button_style=ButtonStyle::Borderless

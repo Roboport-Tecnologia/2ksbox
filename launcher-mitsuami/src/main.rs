@@ -62,8 +62,7 @@ fn main() {
         .id(launcher_core::paths::APP_ID)
         .name("2ksbox")
         .icon(AppIcon::bytes(icon.as_slice()))
-        // Wide enough for a row's five buttons with room to spare, as the
-        // Qt window is.
-        .window("2ksbox", Size::new(1060.0, 560.0), || view! { <machines::MachinesWindow/> })
+        // The machine list and its details, with room for a long path.
+        .window("2ksbox", Size::new(920.0, 560.0), || view! { <machines::MachinesWindow/> })
         .run();
 }

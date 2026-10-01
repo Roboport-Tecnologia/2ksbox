@@ -70,9 +70,6 @@ impl Cloner {
                 }
             }
             library.refresh();
-            if let Some(status) = cloner.model.with_untracked(|c| c.status().map(str::to_owned)) {
-                library.status.set(status);
-            }
         });
     }
 }
