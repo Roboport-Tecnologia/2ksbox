@@ -115,8 +115,10 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    edit is `Form`'s own method, so what a field does to the ones under it
    stays the core's. An application-modal `Window` opened by New machine
    and Edit…, the window's `Sidebar` for the pages (since 2026-10-01,
-   user; a platform list before), each with the platform's icon, one page
-   per section, the
+   user; a platform list before), each with the platform's icon (the
+   window's 650 is its content's, the sidebar added to it; on KDE the
+   column is narrowed to 10 grid units through `Sidebar::native`, from
+   Kirigami's 20), one page per section, the
    core's lists, notes and warnings, the platform file dialog for the
    four path fields (the MT-32 ROMs pick a folder), `browse::picked` and
    `remember` on what it returns. Reopening the same machine returns to

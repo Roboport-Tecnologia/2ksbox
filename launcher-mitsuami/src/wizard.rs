@@ -166,8 +166,8 @@ pub fn WizardWindow() -> impl View {
     view! {
         <Window
             title=get(wiz, |f| f.title().to_owned())
-            size=Size::new(820.0, 440.0)
-            min_size=Size::new(640.0, 400.0)
+            size=Size::new(650.0, 440.0)
+            min_size=Size::new(480.0, 400.0)
             modal=Modality::Application
             open=move || wiz.is_open()
             @close_request=move || wiz.close()
@@ -227,7 +227,17 @@ fn Sections() -> impl View {
     });
     let items: Vec<_> =
         Section::ALL.iter().map(|&s| SidebarItem::new(s.label(), s).icon(section_icon(s))).collect();
-    Sidebar::new(page).children(items)
+    // Kirigami gives every column of a wide page row its default width (20
+    // grid units), far more than these names need; KDE's apps narrow it.
+    let narrow = platform! {
+        kde => mitsuami::kirigami::tweak(|page: &mitsuami::kirigami::QmlObject| {
+            if let Some(row) = page.object("mitsuamiStack") {
+                row.set_int("defaultColumnWidth", (mitsuami::kirigami::grid_unit() * 10.0).round() as i32);
+            }
+        }),
+        _ => Tweak::none(),
+    };
+    Sidebar::new(page).native(narrow).children(items)
 }
 
 /// An SF Symbol, a symbolic GTK theme icon, a Breeze icon, a Segoe Fluent
