@@ -102,6 +102,9 @@ struct EditTarget {
     /// same reason: gaining or losing the USB controller is a hardware
     /// change (`pad_warning`).
     pad: Pad,
+    /// The board the bundle was created on, kept through an edit: the
+    /// form has no field for it (`Machine::board`).
+    board: Option<String>,
 }
 
 /// The acceleration hint under the picker, and whether it is a warning
@@ -358,6 +361,7 @@ impl Form {
                 video: machine.effective_video().unwrap_or(Video::Std),
                 sound: machine.effective_sound(),
                 pad: machine.effective_pad(),
+                board: machine.board.clone(),
             }),
             ..Default::default()
         };
@@ -1361,6 +1365,7 @@ impl Form {
                 soundfont: None,
                 mt32_roms: None,
                 pad: None,
+                board: edit.board.clone(),
                 optimizations: Optimizations::default(),
             },
             None => Machine::reference(self.family, self.name.clone(), disk),

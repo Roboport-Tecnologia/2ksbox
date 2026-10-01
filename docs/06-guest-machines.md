@@ -27,7 +27,7 @@ Modeled as a ~1998–2000 consumer PC.
 
 | Component | Default (alternatives) | Why |
 |---|---|---|
-| Machine | `pc,hpet=off` | 98 has no HPET (`PNP0103`) driver and never uses one; it showed as an Unknown Device (the `hpet` check). fw_cfg (`QEMU0002`) has no driver either, but its `_STA` hides it |
+| Machine | `pc-i440fx-<ver>,hpet=off` | The board is versioned and kept per bundle (`Machine::board`): a machine stays on the QEMU version it was created on, so a QEMU upgrade cannot break its live snapshots; a bundle with no `board` predates the field and gets `pc-i440fx-9.2`. 98 has no HPET (`PNP0103`) driver and never uses one; it showed as an Unknown Device (the `hpet` check). fw_cfg (`QEMU0002`) has no driver either, but its `_STA` hides it |
 | Accel | TCG | under KVM Explorer dies at startup (*SHELL32.DLL is linked to missing export SHLWAPI.DLL:GetFileAttributesA*): no Start menu |
 | CPU | `pentium3` | avoids CPUID features and fast-CPU bugs 9x mishandles; the floor, as our guest wrappers are built `-march=pentium3` |
 | RAM | 256 MB (32–512) | 9x VCACHE sizing overflows much above 512 MB |

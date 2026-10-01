@@ -296,6 +296,12 @@ queue run; effort is the port's, not the retest's):
 Stop there and bring the table to the user. Steps 2 to 5 are the plan if
 the user says go.
 
+**The user's answers (2026-10-01):** go; drop 21; existing bundles stay
+on `pc-i440fx-9.2`. The last landed first: a bundle now records its
+board (`Machine::board`, `bundle::CURRENT_BOARD`), a bundle without one
+gets `LEGACY_BOARD` (9.2's), and `CURRENT_BOARD` moves to
+`pc-i440fx-11.1` with the submodule. The `hpet` check covers both.
+
 ### 2. The tree builds on 11.1 with no TCG patches
 
 - Bump the `qemu` submodule to the tag, and change `prepare-qemu.sh`'s

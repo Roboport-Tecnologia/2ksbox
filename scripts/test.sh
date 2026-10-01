@@ -1850,7 +1850,7 @@ family_other_check() { # the "Other" family's hardware, from the picker to a rea
   return $rc
 }
 
-hpet_check() { # no HPET on Win98, from the bundle to our QEMU's device tree
+hpet_check() { # no HPET on Win98 and a versioned board, from the bundle to our QEMU's device tree
   local rc=0 dir="$OUT/hpet" w98 xp args o
   rm -rf "$dir"; mkdir -p "$dir/library"
   export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
@@ -1861,10 +1861,17 @@ hpet_check() { # no HPET on Win98, from the bundle to our QEMU's device tree
   # Windows 98 has no driver for an HPET and never uses one: with it the
   # guest's Device Manager shows an Unknown Device (ACPI\*PNP0103) with a
   # yellow mark on every machine. XP is left alone.
+  # Both on a versioned board (`Machine::board`), so a newer QEMU's `pc`
+  # cannot change a machine under its snapshots.
   args="$(target/release/launcherx --print-args "$w98")"
-  case "$args" in *"-machine pc,hpet=off "*) ;; *) echo "a Win98 machine still has an HPET"; echo "$args"; rc=1;; esac
+  case "$args" in *"-machine pc-i440fx-"*",hpet=off "*) ;; *) echo "a Win98 machine still has an HPET, or no versioned board"; echo "$args"; rc=1;; esac
   args="$(target/release/launcherx --print-args "$xp")"
-  case "$args" in *"-machine pc "*) ;; *) echo "an XP machine's board changed"; echo "$args"; rc=1;; esac
+  case "$args" in *"-machine pc-i440fx-"[0-9]*" "*) ;; *) echo "an XP machine's board changed"; echo "$args"; rc=1;; esac
+  # A bundle from before the field boots the board it was made on, 9.2's.
+  mkdir -p "$dir/library/legacy"
+  grep -v '^board = ' "$w98" >"$dir/library/legacy/machine.toml"
+  args="$(target/release/launcherx --print-args "$dir/library/legacy/machine.toml")"
+  case "$args" in *"-machine pc-i440fx-9.2,hpet=off "*) ;; *) echo "a bundle with no board did not get 9.2's"; echo "$args"; rc=1;; esac
   # And the device itself, asked of the real binary: the property's name
   # is QEMU's to change, and a misspelt one would be an exit code, but a
   # property that stopped removing the device would be neither.

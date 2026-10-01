@@ -1190,6 +1190,14 @@ pub struct Machine {
     /// says so at start. Absent from every bundle that has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_qemu_args: Vec<String>,
+    /// QEMU's versioned board, `pc-i440fx-<QEMU version>`. A machine keeps
+    /// the board it was created on: a newer QEMU's unversioned `pc`
+    /// changes CPUID bits and device state, and a live snapshot saved on
+    /// the old board may not load on the new one (track M21). Absent
+    /// means the bundle predates the field, when every machine ran 9.2's
+    /// `pc`, so it gets `LEGACY_BOARD` (`effective_board`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
     /// Which of our own emulator fast paths this machine runs with
     /// (`Optimization`), holding only what differs from each one's
     /// default. Absent means all of them at their shipped setting.
@@ -1201,6 +1209,15 @@ pub struct Machine {
     #[serde(default, skip_serializing_if = "Optimizations::is_empty")]
     pub optimizations: Optimizations,
 }
+
+/// The board a new machine is created on: the versioned name of the
+/// QEMU this launcher ships (`Machine::board`). Moves with the `qemu`
+/// submodule.
+pub const CURRENT_BOARD: &str = "pc-i440fx-9.2";
+
+/// The board of a bundle written before `Machine::board` existed: 9.2's
+/// `pc`, which every machine ran then.
+pub const LEGACY_BOARD: &str = "pc-i440fx-9.2";
 
 /// How a family runs unless the machine says otherwise.
 ///
@@ -1373,6 +1390,7 @@ impl Machine {
             mt32_roms: None,
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
+            board: Some(CURRENT_BOARD.to_string()),
             optimizations: Optimizations::default(),
         }
     }
@@ -1617,6 +1635,10 @@ impl Machine {
         self.boot.unwrap_or_default()
     }
 
+    pub fn effective_board(&self) -> &str {
+        self.board.as_deref().unwrap_or(LEGACY_BOARD)
+    }
+
     /// The `qemu-system-i386` arguments the player expects on its own
     /// command line (`player -- <these>`), per doc 06's reference tables.
     /// `pc_bios_dir` is `qemu/pc-bios` (see README's `-L`); `shelf`, when
@@ -1629,8 +1651,9 @@ impl Machine {
         // Manager and nothing else. QEMU's fw_cfg (`QEMU0002`) is the one
         // other device 98 has no driver for, but its `_STA` says "not
         // shown in UI", and 98 obeys that.
-        let machine = if matches!(self.family, Family::Win98) { "pc,hpet=off" } else { "pc" };
-        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine.into()];
+        let hpet = if matches!(self.family, Family::Win98) { ",hpet=off" } else { "" };
+        let machine = format!("{}{hpet}", self.effective_board());
+        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine];
         args.extend(self.accel_args());
         args.extend([
             "-m".into(),
