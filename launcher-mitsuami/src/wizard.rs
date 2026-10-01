@@ -172,27 +172,25 @@ pub fn WizardWindow() -> impl View {
             open=move || wiz.is_open()
             @close_request=move || wiz.close()
         >
-            // `min_height=0` on the column and the row: a flex item is at
-            // least as tall as its content unless told otherwise (as in
-            // CSS), so without them a long page grew the window's content
-            // past the window and pushed the buttons out, instead of the
-            // scroll view taking only the room left.
+            // `min_height=0` on the column: a flex item is at least as tall
+            // as its content unless told otherwise (as in CSS), so without
+            // it a long page grew the window's content past the window and
+            // pushed the buttons out, instead of the scroll view taking only
+            // the room left.
             <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
                 {crate::shot::arm(&["wizard", "edit"])}
-                <Row gap=Spacing::Md grow=1.0 min_height=0>
-                    <Sections/>
-                    <ScrollView grow=1.0>
-                        <Column gap=Spacing::Md padding_x=Spacing::Sm>
-                            <Show when=on(wiz, Section::General)><GeneralPage/></Show>
-                            <Show when=on(wiz, Section::System)><SystemPage/></Show>
-                            <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
-                            <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
-                            <Show when=on(wiz, Section::Input)><InputPage/></Show>
-                            <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
-                            <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
-                        </Column>
-                    </ScrollView>
-                </Row>
+                <Sections/>
+                <ScrollView grow=1.0 min_height=0>
+                    <Column gap=Spacing::Md padding_x=Spacing::Sm>
+                        <Show when=on(wiz, Section::General)><GeneralPage/></Show>
+                        <Show when=on(wiz, Section::System)><SystemPage/></Show>
+                        <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
+                        <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
+                        <Show when=on(wiz, Section::Input)><InputPage/></Show>
+                        <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
+                        <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
+                    </Column>
+                </ScrollView>
                 <Show when=get(wiz, |f| f.error.is_some())>
                     <Text color=Color::Error>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
                 </Show>
@@ -207,41 +205,56 @@ pub fn WizardWindow() -> impl View {
     }
 }
 
-/// The sidebar: the form's pages, in the form's order.
+/// The window's sidebar: the form's pages, in the form's order, each with
+/// the platform's own icon.
 #[component]
 fn Sections() -> impl View {
     let wiz = use_store::<Wizard>();
-    let selected = signal(vec![0usize]);
+    let page = signal(wiz.form.with_untracked(|f| f.section));
     // The page follows the form (every open starts on the first) and the
     // form follows a click; each side only writes when they differ.
     effect(move || {
-        let at = index_of(&Section::ALL, wiz.read(|f| f.section));
-        if selected.get_untracked() != [at] {
-            selected.set(vec![at]);
+        let at = wiz.read(|f| f.section);
+        if page.get_untracked() != at {
+            page.set(at);
         }
     });
     effect(move || {
-        if let Some(&at) = selected.get().first() {
-            let section = Section::ALL[at];
-            if wiz.form.with_untracked(|f| f.section) != section {
-                wiz.edit(|f| f.choose_section(section));
-            }
+        let at = page.get();
+        if wiz.form.with_untracked(|f| f.section) != at {
+            wiz.edit(|f| f.choose_section(at));
         }
     });
-    view! {
-        <List
-            each=|| (0..Section::ALL.len()).collect::<Vec<_>>()
-            key=|i: &usize| *i
-            selected=selected
-            width=150
-            min_width=150
-            max_width=150
-            let:i
-        >
-            <Row padding_x=Spacing::Md padding_y=Spacing::Sm>
-                <Text>{Section::ALL[i].label()}</Text>
-            </Row>
-        </List>
+    let items: Vec<_> =
+        Section::ALL.iter().map(|&s| SidebarItem::new(s.label(), s).icon(section_icon(s))).collect();
+    Sidebar::new(page).children(items)
+}
+
+/// An SF Symbol, a symbolic GTK theme icon, a Breeze icon, a Segoe Fluent
+/// Icons glyph.
+fn section_icon(section: Section) -> &'static str {
+    match section {
+        Section::General => platform! {
+            macos => "gearshape", gtk => "preferences-system-symbolic", kde => "preferences-system", windows => "\u{E713}",
+        },
+        Section::System => platform! {
+            macos => "cpu", gtk => "computer-symbolic", kde => "computer", windows => "\u{E977}",
+        },
+        Section::Display => platform! {
+            macos => "display", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+        },
+        Section::Audio => platform! {
+            macos => "speaker.wave.2", gtk => "audio-speakers-symbolic", kde => "audio-speakers", windows => "\u{E767}",
+        },
+        Section::Input => platform! {
+            macos => "keyboard", gtk => "input-keyboard-symbolic", kde => "input-keyboard", windows => "\u{E765}",
+        },
+        Section::Network => platform! {
+            macos => "network", gtk => "network-wired-symbolic", kde => "network-wired", windows => "\u{E839}",
+        },
+        Section::Storage => platform! {
+            macos => "internaldrive", gtk => "drive-harddisk-symbolic", kde => "drive-harddisk", windows => "\u{EDA2}",
+        },
     }
 }
 

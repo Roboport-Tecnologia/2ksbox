@@ -54,9 +54,18 @@ any row between it and a scroll view), because a flex item is at least as
 tall as its content, as in CSS. Without it the form's long System page
 pushed Cancel and Create out of the window instead of scrolling.
 
-`LAUNCHER_SHOT` captures the window's content (not its title or toolbar)
-after `LAUNCHER_SHOT_DELAY_MS` (800) and exits. `LAUNCHER_SCREEN` picks
-the window and what it opens on:
+`LAUNCHER_SHOT` captures the window's content (not its title, toolbar
+or sidebar) after `LAUNCHER_SHOT_DELAY_MS` (800) and exits. To see a
+whole window, sidebar and all, keep it open instead (no `LAUNCHER_SHOT`)
+and photograph the screen it is on:
+
+- GTK: Broadway serves its screen as a web page, `http://127.0.0.1:8080`
+  plus the display number (`:18` is port 8098); open it in a browser and
+  take a screenshot.
+- KDE: Qt's VNC platform, `QT_QPA_PLATFORM=vnc:port=5917:size=1200x800`,
+  then `tools/rfb-shot.py 5917 <out.png>`.
+
+`LAUNCHER_SCREEN` picks the window and what it opens on:
 
 | `LAUNCHER_SCREEN` | Shows |
 |---|---|
@@ -105,7 +114,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    `Signal<Form>` in a `Wizard` store; every control reads it and every
    edit is `Form`'s own method, so what a field does to the ones under it
    stays the core's. An application-modal `Window` opened by New machine
-   and Edit…, a platform list as the sidebar, one page per section, the
+   and Edit…, the window's `Sidebar` for the pages (since 2026-10-01,
+   user; a platform list before), each with the platform's icon, one page
+   per section, the
    core's lists, notes and warnings, the platform file dialog for the
    four path fields (the MT-32 ROMs pick a folder), `browse::picked` and
    `remember` on what it returns. Reopening the same machine returns to
