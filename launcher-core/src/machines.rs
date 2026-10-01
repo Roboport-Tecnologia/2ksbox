@@ -219,8 +219,8 @@ pub struct DetailGroup {
     pub rows: Vec<DetailRow>,
 }
 
-/// One setting. A file's row carries its whole path, for a tooltip: the
-/// value is cut to fit, or is only the file's name.
+/// One setting. A file's row shows the file's name and carries its whole
+/// path, for a tooltip.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DetailRow {
     pub label: &'static str,
@@ -236,7 +236,7 @@ impl From<(&'static str, String)> for DetailRow {
 
 /// A machine's details, with the shader column's label for it. The
 /// labels are the machine form's, so a row reads as the field it came
-/// from; a path shows its file name, the hard disk its whole path.
+/// from; a file shows its name, with its whole path kept for a tooltip.
 pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
     let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
     let file = |label: &'static str, path: Option<&PathBuf>| DetailRow {
@@ -287,11 +287,7 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         DetailGroup {
             title: Section::Storage.label(),
             rows: vec![
-                DetailRow {
-                    label: "Hard disk",
-                    value: machine.disk.display().to_string(),
-                    path: Some(machine.disk.clone()),
-                },
+                file("Hard disk", Some(&machine.disk)),
                 file("CD in drive", machine.boot_disc()),
                 file("Floppy", machine.floppy.as_ref()),
                 ("Boot from", machine.effective_boot().label().to_owned()).into(),
