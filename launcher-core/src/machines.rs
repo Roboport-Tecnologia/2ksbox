@@ -150,6 +150,12 @@ impl Machines {
 
     /// Start a machine's player. `Ok` carries the line to show, `Err`
     /// the reason it didn't start.
+    /// The headline over `play`'s error, for a front end that shows it
+    /// in an alert; the error is the line under it.
+    pub fn start_failed(name: &str) -> String {
+        format!("Couldn't start “{name}”")
+    }
+
     pub fn play(&mut self, row: usize) -> Result<String, String> {
         let entry = self.entries.get(row).ok_or("no such machine")?;
         let dir = entry.dir.clone();

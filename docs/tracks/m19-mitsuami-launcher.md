@@ -103,7 +103,12 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    per-machine windows, and the core's `details`, one `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
    its machine. The toolbar keeps New machine, Disc shelf, Shader
-   profiles (with platform icons) and the status line; an empty library
+   profiles (with platform icons) and the status line, which says only
+   that a machine started: a start that fails is the platform's alert
+   since 2026-10-01 (user), the core's `Machines::start_failed` headline
+   over its error (checked on Broadway with `LAUNCHER_PLAYER_BIN` on a
+   missing file; an alert's text can't be selected, mitsuami has no
+   option for it); an empty library
    is a title, its folder and New machine. These buttons have no "…"
    (user): toolbar and action buttons go without it on every platform
    today, as UTM's and VirtualBox's do. `Sidebar` was not used: its
@@ -205,15 +210,16 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
 5. **First run (done 2026-09-27).** `firstrun.rs`: on a start with no
    preset collection and no `first-run.txt`, the core's question in the
    platform's alert (Yes / No); a yes shows the download in the machine
-   window's toolbar (a spinner and the core's line), then the outcome in
+   window's toolbar (since 2026-10-01 only a small indeterminate progress
+   bar, user; the core's headline is its label), then the outcome in
    another alert (OK, or Retry / Cancel on a failure); a collection that
    landed refreshes the profile manager and the Shader column. Every
    other headless screen runs without it. Checked headless with scripted
    answers, the Qt check's sequence: declining writes the marker, the
    next start asks nothing, a yes onto a download that can't succeed
    comes back as Retry / Cancel with the core's failure line. Not seen:
-   the real alerts on a desktop, and a download that runs (the toolbar
-   line). The core's `firstrun::TITLE` has no place: a platform alert
+   the real alerts on a desktop. A download that runs was seen on
+   Broadway on 2026-10-01 (the bar, ~3 s for the collection). The core's `firstrun::TITLE` has no place: a platform alert
    has a headline and a message, not a window title.
    - **Fixed after a report from the user: the KDE build never offered.**
      The offer asked while the machine window was still being built.

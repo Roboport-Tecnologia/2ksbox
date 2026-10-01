@@ -23,6 +23,7 @@ use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
 use launcher_core::machines::{DetailGroup, Machines};
+use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -39,8 +40,12 @@ pub struct Library {
     /// Never set: a `Copy` handle on the model, so the store is `Copy`.
     model: Signal<Rc<RefCell<Machines>>>,
     version: Signal<u64>,
-    /// The line at the end of the toolbar: what "Start" last did.
+    /// The line at the end of the toolbar: what "Start" last did, when it
+    /// started.
     pub status: Signal<String>,
+    /// A start that failed, as the alert's headline and the core's error,
+    /// until the window shows it.
+    failure: Signal<Option<(String, String)>>,
     /// The list's selection, by bundle directory; `current` is what the
     /// details show.
     selected: Signal<Vec<PathBuf>>,
@@ -52,6 +57,7 @@ impl Store for Library {
             model: signal(Rc::new(RefCell::new(Machines::load()))),
             version: signal(0),
             status: signal(String::new()),
+            failure: signal(None),
             selected: signal(Vec::new()),
         }
     }
@@ -123,12 +129,18 @@ impl Library {
     fn play(&self, dir: &Path) {
         self.write(|m| {
             let Some(row) = row_of(m, dir) else { return false };
-            let (line, started) = match m.play(row) {
-                Ok(line) => (line, true),
-                Err(e) => (e, false),
-            };
-            self.status.set(line);
-            started
+            match m.play(row) {
+                Ok(line) => {
+                    self.status.set(line);
+                    true
+                }
+                Err(e) => {
+                    let name = m.machine(row).map(|x| x.name.clone()).unwrap_or_default();
+                    self.status.set(String::new());
+                    self.failure.set(Some((Machines::start_failed(&name), e)));
+                    false
+                }
+            }
         })
     }
 
@@ -235,6 +247,19 @@ pub fn MachinesWindow() -> impl View {
         let dir = Path::new(&bundle).parent().map(Path::to_path_buf).unwrap_or_default();
         library.selected.set(vec![dir]);
     }
+    // A start that failed says why in the platform's alert, over this
+    // window.
+    let ui = inject::<Ui>().expect("a window's component");
+    let window = inject::<CurrentWindow>().map(|CurrentWindow(w)| w);
+    effect(move || {
+        let Some((headline, detail)) = library.failure.get() else { return };
+        library.failure.set(None);
+        let alert = Alert::new(headline).message(detail).style(AlertStyle::Critical).button("OK");
+        let asker = ui.clone();
+        ui.spawn_local(async move {
+            asker.alert(window, alert).await;
+        });
+    });
     // The list shows what the details do: the first machine until one is
     // chosen, and the first again when the chosen one goes.
     effect(move || {
@@ -247,9 +272,14 @@ pub fn MachinesWindow() -> impl View {
         <Column grow=1.0 min_height=0>
             <Toolbar>
                 <Show when=move || offer.progress.get().is_some()>
-                    <Row gap=Spacing::Sm align=Align::Center>
-                        <Spinner label="Downloading"/>
-                        <Text>{move || offer.progress.get().unwrap_or_default()}</Text>
+                    // Only a bar: the size isn't known until it ends, and
+                    // the headline is its label for a screen reader.
+                    <Row padding_x=Spacing::Sm align=Align::Center>
+                        <Progress
+                            label=move || offer.progress.get().unwrap_or_default()
+                            indeterminate=true
+                            width=160
+                        />
                     </Row>
                 </Show>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
