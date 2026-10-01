@@ -307,7 +307,14 @@ fn ProfileTable() -> impl View {
     };
     let columns = vec![
         TableColumn::new("Name", move |path: PathBuf| {
-            Text::new(field(&path, |e| e.profile.name.clone())).max_lines(1)
+            // In from the frame by about what the actions column leaves
+            // after the trash button (user).
+            let name = field(&path, |e| e.profile.name.clone());
+            view! {
+                <Row padding_start=Spacing::Sm min_width=0>
+                    <Text max_lines=1>{name}</Text>
+                </Row>
+            }
         })
         .width(170),
         TableColumn::new("Preset", move |path: PathBuf| {
@@ -371,7 +378,7 @@ fn ProfileTable() -> impl View {
                 </Row>
             }
         })
-        .width(130),
+        .width(124),
     ];
     view! {
         <Table
