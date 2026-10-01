@@ -71,8 +71,8 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let row = library.entries().iter().position(|e| e.dir == dir).expect("a machine in the library");
             println!("{}", library.subtitle(row));
             for group in library.details(row) {
-                for (label, value) in group.rows {
-                    println!("{}\t{label}\t{value}", group.title);
+                for row in group.rows {
+                    println!("{}\t{}\t{}", group.title, row.label, row.value);
                 }
             }
         }

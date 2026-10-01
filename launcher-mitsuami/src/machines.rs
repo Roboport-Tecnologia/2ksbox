@@ -425,17 +425,26 @@ fn Details() -> impl View {
     }
 }
 
-/// One page's settings, label and value a row each.
+/// One page's settings, label and value a row each. A file's value is
+/// one line, cut in the middle to fit, with its whole path as the tooltip.
 #[component]
 fn DetailBox(group: DetailGroup) -> impl View {
     let rows: Vec<_> = group
         .rows
         .into_iter()
-        .map(|(label, value)| {
+        .map(|row| {
+            let value = match &row.path {
+                Some(path) => view! {
+                    <Text grow=1.0 min_width=0 max_lines=1 truncation=Truncation::Middle tooltip={path.display().to_string()}>
+                        {row.value}
+                    </Text>
+                },
+                None => view! { <Text grow=1.0 min_width=0>{row.value}</Text> },
+            };
             view! {
                 <Row gap=Spacing::Md>
-                    <Text color=Color::SecondaryLabel width=LABEL_W shrink=0.0>{label}</Text>
-                    <Text grow=1.0 min_width=0>{value}</Text>
+                    <Text color=Color::SecondaryLabel width=LABEL_W shrink=0.0>{row.label}</Text>
+                    {value}
                 </Row>
             }
         })

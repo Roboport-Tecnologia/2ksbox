@@ -216,18 +216,38 @@ impl Machines {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DetailGroup {
     pub title: &'static str,
-    pub rows: Vec<(&'static str, String)>,
+    pub rows: Vec<DetailRow>,
+}
+
+/// One setting. A file's row carries its whole path, for a tooltip: the
+/// value is cut to fit, or is only the file's name.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DetailRow {
+    pub label: &'static str,
+    pub value: String,
+    pub path: Option<PathBuf>,
+}
+
+impl From<(&'static str, String)> for DetailRow {
+    fn from((label, value): (&'static str, String)) -> DetailRow {
+        DetailRow { label, value, path: None }
+    }
 }
 
 /// A machine's details, with the shader column's label for it. The
 /// labels are the machine form's, so a row reads as the field it came
-/// from; a path shows its file name.
+/// from; a path shows its file name, the hard disk its whole path.
 pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
     let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
-    let file = |path: Option<&PathBuf>| match path {
-        Some(p) => p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned()),
-        None => "Empty".to_owned(),
+    let file = |label: &'static str, path: Option<&PathBuf>| DetailRow {
+        label,
+        value: match path {
+            Some(p) => p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned()),
+            None => "Empty".to_owned(),
+        },
+        path: path.cloned(),
     };
+    let rows = |rows: Vec<(&'static str, String)>| rows.into_iter().map(DetailRow::from).collect::<Vec<_>>();
     let video = machine.effective_video();
     let mut display = Vec::new();
     if let Some(video) = video {
@@ -242,11 +262,13 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
     };
     display.push(("3dfx Voodoo 2", voodoo));
     display.push(("Shader profile", shader));
-    let mut audio = vec![("Sound card", machine.effective_sound().label().to_owned())];
     let music = machine.effective_music();
-    audio.push(("Music (MIDI)", music.label().to_owned()));
+    let mut audio = rows(vec![
+        ("Sound card", machine.effective_sound().label().to_owned()),
+        ("Music (MIDI)", music.label().to_owned()),
+    ]);
     if music == Music::Gm && machine.soundfont.is_some() {
-        audio.push(("SoundFont", file(machine.soundfont.as_ref())));
+        audio.push(file("SoundFont", machine.soundfont.as_ref()));
     }
     let mut input = Vec::new();
     if bundle::pad_choices(machine.family).len() > 1 {
@@ -256,25 +278,29 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
     vec![
         DetailGroup {
             title: Section::System.label(),
-            rows: vec![
+            rows: rows(vec![
                 ("Memory", format!("{} MB", machine.ram_mb)),
                 ("Processor", machine.effective_cpu_speed().label().to_owned()),
                 ("Acceleration", machine.effective_accel().label().to_owned()),
-            ],
+            ]),
         },
         DetailGroup {
             title: Section::Storage.label(),
             rows: vec![
-                ("Hard disk", file(Some(&machine.disk))),
-                ("CD in drive", file(machine.boot_disc())),
-                ("Floppy", file(machine.floppy.as_ref())),
-                ("Boot from", machine.effective_boot().label().to_owned()),
+                DetailRow {
+                    label: "Hard disk",
+                    value: machine.disk.display().to_string(),
+                    path: Some(machine.disk.clone()),
+                },
+                file("CD in drive", machine.boot_disc()),
+                file("Floppy", machine.floppy.as_ref()),
+                ("Boot from", machine.effective_boot().label().to_owned()).into(),
             ],
         },
-        DetailGroup { title: Section::Display.label(), rows: display },
+        DetailGroup { title: Section::Display.label(), rows: rows(display) },
         DetailGroup { title: Section::Audio.label(), rows: audio },
-        DetailGroup { title: Section::Input.label(), rows: input },
-        DetailGroup { title: Section::Network.label(), rows: vec![("Networking", on_off(machine.network))] },
+        DetailGroup { title: Section::Input.label(), rows: rows(input) },
+        DetailGroup { title: Section::Network.label(), rows: rows(vec![("Networking", on_off(machine.network))]) },
     ]
 }
 

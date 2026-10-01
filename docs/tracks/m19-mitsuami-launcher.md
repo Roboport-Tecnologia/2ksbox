@@ -101,7 +101,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    directory with the first machine chosen until one is, and beside it a
    details pane: the name, with Start (the window's default button) and
    a More menu button (Settings, Discs, Snapshots, Clone) at its right on
-   the same row since 2026-10-01 (user), and the core's `details`, one
+   the same row since 2026-10-01 (user), and the core's `details` (a
+   file's row one line, cut in the middle, its whole path the tooltip;
+   the hard disk shows its whole path, user 2026-10-01), one
    `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
    its machine. The toolbar keeps New, Shelf, Shaders (named so since
