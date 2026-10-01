@@ -92,9 +92,11 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    details pane: the name, Start as the window's default button, the
    per-machine windows, and the core's `details`, one `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
-   its machine. The toolbar keeps New machine…, Disc shelf…, Shader
-   profiles… (with platform icons) and the status line; an empty library
-   is a title, its folder and New machine…. `Sidebar` was not used: its
+   its machine. The toolbar keeps New machine, Disc shelf, Shader
+   profiles (with platform icons) and the status line; an empty library
+   is a title, its folder and New machine. These buttons have no "…"
+   (user): toolbar and action buttons go without it on every platform
+   today, as UTM's and VirtualBox's do. `Sidebar` was not used: its
    items are fixed when it is built and have no second line. Checked
    headless on GTK and KDE with three machines (`select:` on the XP one
    shows its Direct3D row; DOS has none). On KDE Breeze's scroll bar is

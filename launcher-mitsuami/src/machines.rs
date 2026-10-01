@@ -255,15 +255,15 @@ pub fn MachinesWindow() -> impl View {
                     </Row>
                 </Show>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
-                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New machine…"</Button>
-                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Disc shelf…"</Button>
-                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shader profiles…"</Button>
+                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New machine"</Button>
+                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Disc shelf"</Button>
+                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shader profiles"</Button>
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
                 <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
                     <Text text_style=TextStyle::Title>"No machines yet"</Text>
                     <Text color=Color::SecondaryLabel>{move || library.read(|m| m.library_dir.display().to_string())}</Text>
-                    <Button role=ButtonRole::Default @click=move || wizard.open_fresh()>"New machine…"</Button>
+                    <Button role=ButtonRole::Default @click=move || wizard.open_fresh()>"New machine"</Button>
                 </Column>
             </Show>
             <WizardWindow/>
@@ -360,22 +360,22 @@ fn Details() -> impl View {
                         if let Some(bundle) = bundle() {
                             wizard.open_edit(bundle);
                         }
-                    }>"Settings…"</Button>
+                    }>"Settings"</Button>
                     <Button icon=icons::DISCS @click=move || {
                         if let Some(bundle) = bundle() {
                             discs.open_for(bundle, library, running());
                         }
-                    }>"Discs…"</Button>
+                    }>"Discs"</Button>
                     <Button icon=icons::SNAPSHOTS @click=move || {
                         if let Some(bundle) = bundle() {
                             snaps.open_for(&bundle, running());
                         }
-                    }>"Snapshots…"</Button>
+                    }>"Snapshots"</Button>
                     <Button icon=icons::CLONE enabled=move || !cloner.busy() @click=move || {
                         if let Some(bundle) = bundle() {
                             cloner.open_for(&bundle, running());
                         }
-                    }>"Clone…"</Button>
+                    }>"Clone"</Button>
                 </Row>
                 <For
                     each=move || library.details(&current())
