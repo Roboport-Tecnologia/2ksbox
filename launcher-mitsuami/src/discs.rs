@@ -281,6 +281,7 @@ fn DiscList() -> impl View {
 #[component]
 fn DiscRow(path: PathBuf) -> impl View {
     let discs = use_store::<Discs>();
+    let full = path.display().to_string();
     let path = std::rc::Rc::new(path);
     let p = {
         let path = path.clone();
@@ -298,7 +299,7 @@ fn DiscRow(path: PathBuf) -> impl View {
         move || discs.read(|s| row(&path).is_some_and(|r| s.row_in_drive(r)))
     };
     view! {
-        <Row padding_y=Spacing::Sm gap=Spacing::Lg align=Align::Center>
+        <Row padding_y=Spacing::Sm gap=Spacing::Lg align=Align::Center tooltip=full>
             <Icon name={let path = p3.clone(); move || {
                 discs.read(|s| row(&path).and_then(|r| s.row_kind(r))).map_or(icons::DISCS, kind_icon).to_owned()
             }} color=Color::SecondaryLabel icon_size=20.0 />
