@@ -73,7 +73,6 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let machine = Machine::load(Path::new(&path)).expect("load bundle");
             let mut argv = player::shader_args(&machine);
             argv.extend(player::pad_args(&machine));
-            argv.extend(player::target_args(&machine));
             println!("{}", argv.join(" "));
         }
         "--prepare" => {
@@ -830,6 +829,7 @@ fn paths_text() -> String {
     }
     .ok();
     writeln!(s, "player       {}", player::player_binary().display()).ok();
+    writeln!(s, "player-x86_64 {}", player::target_player_binary("x86_64").display()).ok();
     writeln!(s, "qemu-img     {}", player::qemu_img_binary().display()).ok();
     writeln!(s, "pc-bios      {}", player::pc_bios_dir().display()).ok();
     match disc_library::guest_tools_iso() {

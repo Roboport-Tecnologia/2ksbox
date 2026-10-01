@@ -4,8 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Rust bindings for libqemu-embed (embed/libqemu_embed.h): QEMU in-process"
+links = "qemu-embed"
 build = "build.rs"
 
 [dependencies]
-# libqemu-embed-<target> is opened at run time (`load`), one per machine.
-libloading = "0.8"
+
+[features]
+# Link libqemu-embed-x86_64 (Windows 11, track M20) instead of the era's
+# libqemu-embed-i386. One QEMU per binary, linked: see the player's
+# feature of the same name.
+qemu-x86_64 = []

@@ -1922,8 +1922,8 @@ impl Machine {
     }
 
     /// Which QEMU runs this machine: `i386` for the era's families,
-    /// `x86_64` for Windows 11. The player opens `libqemu-embed-<this>`
-    /// (`--target`, `qemu_embed::load`).
+    /// `x86_64` for Windows 11. Each player binary links one
+    /// (`player::player_binary_for`).
     pub fn qemu_target(&self) -> &'static str {
         if self.family.is_modern() {
             "x86_64"

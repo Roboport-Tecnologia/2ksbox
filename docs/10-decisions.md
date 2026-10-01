@@ -811,9 +811,11 @@ Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
 
 **Costs.**
 
-- The player links one QEMU (`libqemu-embed-i386`). It has to choose
-  the system emulator per machine: x86_64 for a modern PC guest, aarch64
-  on a Mac. Packages grow by one or two QEMU libraries.
+- The player links one QEMU (`libqemu-embed-i386`), and has to keep
+  linking it (patch 63, doc 22 §5.0). So each target is a player binary
+  of its own: `2ksbox-player-x86_64` for a modern PC guest (M20 step 3),
+  aarch64 on a Mac later. Packages grow by a player and a QEMU library
+  per target.
 - The trimmed QEMU (`no-optionals`, the patches README) gains what a
   modern guest needs: the TPM and its backend, NVMe, virtio, ramfb, HVF.
 - New libraries to build from pinned sources: libtpms and OpenSSL's

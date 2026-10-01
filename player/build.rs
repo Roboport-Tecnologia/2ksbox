@@ -21,7 +21,10 @@ fn main() {
         };
         println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{relative}");
     }
-    // libqemu-embed-<target> itself is opened at run time from the same
-    // directory or the build tree (`qemu_embed::search_dirs`), so no rpath
-    // to the build directory is baked in.
+    // rpath to libqemu-embed so `cargo run` / target/*/player find it in place
+    if let Ok(dir) = std::env::var("DEP_QEMU_EMBED_LIBDIR") {
+        if unix {
+            println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{dir}");
+        }
+    }
 }

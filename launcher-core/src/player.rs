@@ -185,15 +185,35 @@ pub fn pad_args(machine: &Machine) -> Vec<String> {
     }
 }
 
-/// The `--target <qemu>` argument `spawn` passes to `player`: which
-/// `libqemu-embed-<target>` runs the machine (M20). Nothing for the era's
-/// machines, which run on the player's default (`i386`), so their command
-/// line is the one it always was.
-pub fn target_args(machine: &Machine) -> Vec<String> {
-    match machine.qemu_target() {
-        "i386" => Vec::new(),
-        t => vec!["--target".to_string(), t.to_string()],
+/// The player that runs `machine`. Each player binary links one QEMU
+/// (`libqemu-embed-<target>`), because QEMU has to be loaded with the
+/// process, not opened later: patch 63 reserves TCG's code buffer next to
+/// the helpers when the image loads (doc 22 §5.0). So the era's machines
+/// run on [`player_binary`] and Windows 11 on the x86_64 build of the same
+/// player (track M20): `bin/2ksbox-player-x86_64` installed,
+/// `target/qemu-x86_64/<profile>/player` in a checkout (`scripts/build.sh`
+/// builds it there, with its own feature), `LAUNCHER_PLAYER_X86_64_BIN`
+/// over both.
+pub fn player_binary_for(machine: &Machine) -> PathBuf {
+    target_player_binary(machine.qemu_target())
+}
+
+/// The player built for `target` (`i386`, `x86_64`), by the rules of
+/// [`player_binary_for`].
+pub fn target_player_binary(target: &str) -> PathBuf {
+    if target == "i386" {
+        return player_binary();
     }
+    if let Ok(p) = std::env::var(format!("LAUNCHER_PLAYER_{}_BIN", target.to_uppercase())) {
+        return p.into();
+    }
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    if crate::paths::install_prefix().is_some() {
+        return crate::paths::bin_dir().join(format!("2ksbox-player-{target}{exe}"));
+    }
+    let current = std::env::current_exe().expect("current_exe");
+    let profile = current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned();
+    crate::paths::checkout("target").join(format!("qemu-{target}")).join(profile).join(format!("player{exe}"))
 }
 
 /// What has to exist on disk before `machine` can start, made if it does
@@ -253,10 +273,9 @@ pub fn spawn(
     if let Some(extra) = qmp_socket.and_then(crate::control::qmp_args) {
         args.extend(extra);
     }
-    let bin = player_binary();
+    let bin = player_binary_for(machine);
     let mut argv: Vec<String> = shader_args(machine);
     argv.extend(pad_args(machine));
-    argv.extend(target_args(machine));
     argv.push("--".into());
     argv.extend(args);
     // Log the command line before anything is spawned: it is the first

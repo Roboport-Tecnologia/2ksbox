@@ -615,16 +615,13 @@ fi
 
 # What the *loader* did, which is what another Mac will test. No image
 # outside the app and the system may load. An installed app has no
-# build/qemu, so the player's own rule (qemu_embed::search_dirs, the app's
-# lib/2ksbox) is all there is to find libqemu-embed with, and every
-# Homebrew library reached from here
+# build/qemu, so the @loader_path rpath (player/build.rs) is all there is
+# to find libqemu-embed with, and every Homebrew library reached from here
 # is one this machine has and another may not. `--mode-sweep` is the
-# display path end to end without a guest; the player opens a QEMU only
-# for a machine (M20: one library per target, at run time), so
-# `--load-qemu` opens the era's on its own.
-loaded=$(cd / && { env -i DYLD_PRINT_LIBRARIES=1 \
-  "$C/MacOS/2ksbox-player" --mode-sweep "$scratch/sweep" 2>&1; env -i DYLD_PRINT_LIBRARIES=1 \
-  "$C/MacOS/2ksbox-player" --load-qemu i386 2>&1; } \
+# display path end to end without a guest, enough to pull the embed
+# library in.
+loaded=$(cd / && env -i DYLD_PRINT_LIBRARIES=1 \
+  "$C/MacOS/2ksbox-player" --mode-sweep "$scratch/sweep" 2>&1 \
   | sed -n 's|^dyld\[[0-9]*\]: <[^>]*> ||p')
 case "$loaded" in
   *libqemu-embed-i386.dylib*) ;;

@@ -217,13 +217,17 @@ MSYS2's MINGW64 shell for debugging on the PC (`scripts/win-run.sh`,
   checks against an edited tree prove nothing. Recipe in the patch README.
 - Patches touching overlay files (`hw/3dfx`, `hw/mesa`, `embed/`) rely on
   the overlay being refreshed first; prepare handles the order.
-- `qemu/embed/` is a copy of `embed/` made by prepare. A stale copy builds
-  an old library, which the player refuses at start ("embed API N").
+- `qemu/embed/` is a copy of `embed/` made by prepare. A stale copy links
+  the player against an old library (`undefined symbol _qemu_embed_…`).
   `configure-qemu.sh` must re-run when meson files change.
 - Bumping the embed API: `QEMU_EMBED_API_VERSION` and the `qemu-embed`
-  crate's `API_VERSION` move together; rebuild every
-  `libqemu-embed-<target>` before the player runs (it links none; it opens
-  its machine's at start, doc 11).
+  crate's `API_VERSION` move together; rebuild the libraries before the
+  players link (one per target, doc 11).
+- **The player links QEMU; never `dlopen` it.** Patch 63 reserves TCG's
+  code buffer next to the helpers when the image loads, before `main()`;
+  a library opened later lands it far away on Apple Silicon (doc 22
+  §5.0, 35–45 % slower). A second target is a second player binary
+  (`--features qemu-x86_64`).
 
 ## Guest images
 

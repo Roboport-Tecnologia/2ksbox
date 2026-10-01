@@ -79,7 +79,8 @@ scripts/prepare-qemu.sh      # overlay qemu-3dfx + embed/, the patch queue, sign
 scripts/configure-qemu.sh    # uv-managed Python; also builds libdisc and libsynth
 ninja -C build/qemu qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io \
   libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS
-cargo build --release        # default members; the player opens libqemu-embed-<target> at run time
+cargo build --release        # default members; the player links libqemu-embed-i386
+cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player
 cargo check --release --workspace          # launcher-capi, the one non-default member
 (cd launcher-qt && cargo build --release)  # the Qt launcher; its own workspace
 # Direct3D pass-through (doc 14):

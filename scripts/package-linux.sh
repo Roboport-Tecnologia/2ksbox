@@ -30,10 +30,10 @@
 #
 # The layout, relative to the tree's root (= an install prefix):
 #   bin/2ksbox                        the launcher (Qt 6, ADR-015)
-#   bin/2ksbox-player                 the player
-#   lib/2ksbox/libqemu-embed-i386.so    QEMU for the era's machines and
-#   lib/2ksbox/libqemu-embed-x86_64.so    for Windows 11; the player opens
-#                                         one per machine (--target)
+#   bin/2ksbox-player                 the player, on QEMU for the era's
+#   lib/2ksbox/libqemu-embed-i386.so    machines
+#   bin/2ksbox-player-x86_64          the same player for Windows 11, on
+#   lib/2ksbox/libqemu-embed-x86_64.so  its own QEMU (each links one)
 #   lib/2ksbox/libd3dpt_exec.so       the Direct3D executor and the DXVK
 #   lib/2ksbox/libdxvk_d3d9.so.0        it runs on (both or neither)
 #   lib/2ksbox/libd3dpt_exec_remote.so  the executor in another process, on
@@ -86,12 +86,14 @@ need qemu/pc-bios "scripts/prepare-qemu.sh"
 
 if [ "$BUILD" = 1 ]; then
   cargo build --release -p player
+  cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
   # Its own cargo workspace, so its own build command (as scripts/build.sh's
   # `qt` stage). That boundary keeps Qt 6 off the root `cargo build`.
   ( cd launcher-qt && cargo build --release )
 fi
 need launcher-qt/target/release/launcher-qt "scripts/build.sh qt"
 need target/release/player
+need target/qemu-x86_64/release/player "scripts/build.sh rust"
 
 # Only ever clear a staging directory of our own making. `--prefix` names
 # somewhere that already exists and belongs to someone else (`/app`).
@@ -100,6 +102,7 @@ mkdir -p "$STAGE"/{bin,lib/2ksbox,libexec/2ksbox,share/2ksbox/desktop,share/doc/
 
 install -m755 launcher-qt/target/release/launcher-qt "$STAGE/bin/2ksbox"
 install -m755 target/release/player "$STAGE/bin/2ksbox-player"
+install -m755 target/qemu-x86_64/release/player "$STAGE/bin/2ksbox-player-x86_64"
 install -m755 build/qemu/libqemu-embed-i386.so build/qemu/libqemu-embed-x86_64.so "$STAGE/lib/2ksbox/"
 install -m755 build/qemu/qemu-img "$STAGE/libexec/2ksbox/"
 # The Direct3D executor and the DXVK it runs on (doc 14), found the same
@@ -200,7 +203,7 @@ resolved=$(cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machine
 echo "$resolved"
 while read -r what path; do
   case "$what" in
-    player|qemu-img|pc-bios|guest-tools|prefix) ;;
+    player|player-x86_64|qemu-img|pc-bios|guest-tools|prefix) ;;
     *) continue ;;
   esac
   # `--paths` says "(none built or shipped)" where there is nothing to
@@ -212,17 +215,16 @@ while read -r what path; do
     *) echo "package-linux.sh: $what resolved outside the package: $path" >&2; fail=1 ;;
   esac
 done <<< "$resolved"
-# The player's QEMUs: it opens libqemu-embed-<target> at run time
-# (qemu_embed::search_dirs), so no import table names them and ldd cannot
-# answer. The staged player's own `--companions` says which file it would
-# open for each target, and both have to be the package's, not a build
-# tree's.
-for target in i386 x86_64; do
-  embed=$(cd / && env -i "$STAGE/bin/2ksbox-player" --companions | awk -v t="qemu-$target" '$1 == t { print $2 }')
-  embed=$(readlink -f "$embed" 2>/dev/null || echo "$embed")  # found via bin/../lib
+# The players' own dependency: an installed tree has no build/qemu, so the
+# origin-relative rpath (player/build.rs) is what has to find each one's
+# embed library. ldd resolves it exactly as the loader will.
+for pair in "2ksbox-player i386" "2ksbox-player-x86_64 x86_64"; do
+  set -- $pair
+  embed=$(cd / && env -i ldd "$STAGE/bin/$1" | sed -n "s/.*libqemu-embed-$2.so => \([^ ]*\).*/\1/p")
+  embed=$(readlink -f "$embed" 2>/dev/null || echo "$embed")  # the loader reports it via bin/../lib
   case "$embed" in
-    "$STAGE"/lib/2ksbox/*) printf '%-15s%s\n' "qemu-$target" "$embed" ;;
-    *) echo "package-linux.sh: the player's QEMU for $target is ${embed:-not found}, not the package's" >&2; fail=1 ;;
+    "$STAGE"/lib/2ksbox/*) printf '%-15s%s\n' "qemu-$2" "$embed" ;;
+    *) echo "package-linux.sh: $1's libqemu-embed-$2 came from ${embed:-nowhere}, not the package" >&2; fail=1 ;;
   esac
 done
 # The one companion that is not a library, the General MIDI bank. The

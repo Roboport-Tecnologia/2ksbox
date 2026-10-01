@@ -172,6 +172,9 @@ modules:
       - scripts/configure-qemu.sh --disable-download
       - ninja -C build/qemu qemu-img libqemu-embed-i386.so libqemu-embed-x86_64.so
       - cargo build --release --locked --offline -p player
+      # Windows 11's player (track M20): the same, linked to the x86_64
+      # QEMU, in a target directory of its own.
+      - cargo build --release --locked --offline -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
       # `launcher-qt` is its own cargo workspace (ADR-015), so it is its
       # own build command; `CARGO_HOME` above points both at the one
       # vendored directory, which cargo-sources.json fills from both lock

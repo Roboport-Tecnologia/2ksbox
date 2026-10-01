@@ -34,7 +34,7 @@ QEMU's own Windows CI base
 (`qemu/tests/docker/dockerfiles/fedora-win64-cross.docker`).
 `packaging/windows/Dockerfile` adds:
 
-- **rustup with `x86_64-pc-windows-gnu`.** The player opens the embed
+- **rustup with `x86_64-pc-windows-gnu`.** The player links the embed
   DLL and `libdisc` links into QEMU, so Rust must share the mingw ABI.
 - **Python 3.13.** Fedora's default 3.14 is past QEMU 9.2's `mkvenv`
   (3.8–3.13). The real `distlib` goes in at image build, the last moment

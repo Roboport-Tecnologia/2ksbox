@@ -543,11 +543,6 @@ fn companions() {
 
 fn main() {
     companions();
-    // The player's QEMU is opened at run time, not linked (track M20).
-    if let Err(e) = qemu_embed::load("i386") {
-        eprintln!("player-gtk: {e}");
-        std::process::exit(1);
-    }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut shader = std::env::var("PLAYER_SHADER").ok().map(std::path::PathBuf::from);
     let mut params = Vec::new();

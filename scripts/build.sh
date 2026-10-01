@@ -21,13 +21,14 @@
 #           rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
 #           -> ninja: qemu-system-i386, qemu-system-x86_64, qemu-img,
-#           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (the player
-#           opens the one its machine runs on; x86_64 is Windows 11's)
+#           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (x86_64 is
+#           Windows 11's, linked by a player of its own; see `rust`)
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
 #           build/qemu. Then `cargo check --release --workspace` keeps the
-#           one non-default member, `launcher-capi`, compiling.
+#           one non-default member, `launcher-capi`, compiling. On Linux
+#           also Windows 11's player, into target/qemu-x86_64.
 #   qt      cargo build --release in launcher-qt/ (its own workspace):
 #           the Qt 6 / QML launcher that every package ships (ADR-015).
 #           Needs Qt 6 development files. Without them the stage is
@@ -67,7 +68,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -380,6 +381,15 @@ if want rust; then
   else
     say "rust: cargo build --release (default members)"
     cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"}
+    # The Windows 11 player (track M20): the same player linked to
+    # libqemu-embed-x86_64. A build of its own, in its own target
+    # directory, because a feature is shared by everything one cargo run
+    # builds. Linked rather than opened at run time for patch 63 (doc 22
+    # §5.0). Linux only for now: the family runs nowhere else yet.
+    if [ "$(uname -s)" = Linux ]; then
+      say "rust: the x86_64 player (Windows 11)"
+      cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64 ${JOBS[@]+"${JOBS[@]}"}
+    fi
     # The member that is not a default member (Cargo.toml):
     # `launcher-capi`, a cdylib + staticlib of the whole launcher that
     # nothing installs. Checked rather than built, so it cannot rot. Once

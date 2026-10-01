@@ -15,6 +15,13 @@ description = "Standalone player: in-process QEMU + wgpu/librashader display (do
 [features]
 default = ["gilrs"]
 gilrs = ["dep:gilrs"]
+# The player for Windows 11 (track M20): links libqemu-embed-x86_64
+# instead of the era's i386. A second binary, built on its own
+# (`scripts/build.sh`: `--features qemu-x86_64 --target-dir
+# target/qemu-x86_64`), because QEMU has to be linked, not opened at run
+# time: patch 63 reserves TCG's code buffer next to the helpers when the
+# image loads, before main(), and a later dlopen loses that (doc 22 §5.0).
+qemu-x86_64 = ["qemu-embed/qemu-x86_64"]
 
 [dependencies]
 qemu-embed = { path = "../qemu-embed" }
