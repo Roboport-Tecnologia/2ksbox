@@ -194,7 +194,7 @@ pub fn WizardWindow() -> impl View {
                     </ScrollView>
                 </Row>
                 <Show when=get(wiz, |f| f.error.is_some())>
-                    <Text text_style=TextStyle::Callout>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
+                    <Text color=Color::Error>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
                 </Show>
                 <Row gap=Spacing::Sm justify=Justify::End shrink=0.0>
                     <Button role=ButtonRole::Cancel @click=move || wiz.close()>"Cancel"</Button>
@@ -260,15 +260,14 @@ fn Note(text: Value<String>) -> impl View {
     }
 }
 
-/// A note that can be a warning (a machine that will refuse to start).
-/// mitsuami has no text colour yet, so a warning is set in the stronger
-/// style instead of the Qt window's amber.
+/// A note that can be a warning (a machine that will refuse to start),
+/// then in the platform's warning colour, as the Qt window's amber.
 #[component]
 fn AccelLine(note: Value<(String, bool)>) -> impl View {
     let (n1, n2, n3) = (note.clone(), note.clone(), note);
     view! {
         <Show when=move || !n1.get().0.is_empty()>
-            <Text text_style={let n2 = n2.clone(); move || if n2.get().1 { TextStyle::Callout } else { TextStyle::Caption }}>
+            <Text text_style=TextStyle::Caption color={let n2 = n2.clone(); move || if n2.get().1 { Color::Warning } else { Color::Label }}>
                 {let n3 = n3.clone(); move || n3.get().0}
             </Text>
         </Show>

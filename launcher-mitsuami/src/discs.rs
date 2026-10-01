@@ -7,11 +7,11 @@
 //! shelf is kept in label order, so a row number is only good until the
 //! next edit.
 //!
-//! A label is written when Enter is pressed in its field, or when the
-//! window closes with the edit still in it: mitsuami's text input reports
-//! no focus leaving, and the core re-sorts the shelf on every label
-//! change, so writing each keystroke would move the row being typed in
-//! (the Qt window writes on `editingFinished`).
+//! A label is written when Enter is pressed in its field, when the field
+//! loses focus, or when the window closes with the edit still in it, as
+//! the Qt window's `editingFinished`: the core re-sorts the shelf on every
+//! label change, so writing each keystroke would move the row being typed
+//! in.
 
 use crate::machines::Library;
 use crate::path_field::PathField;
@@ -240,7 +240,7 @@ pub fn DiscShelfWindow() -> impl View {
                     <Text text_style=TextStyle::Caption>{move || discs.read(|s| s.status().unwrap_or_default().to_owned())}</Text>
                 </Show>
                 <Show when=move || discs.read(|s| s.error().is_some())>
-                    <Text text_style=TextStyle::Callout>{move || discs.read(|s| s.error().unwrap_or_default().to_owned())}</Text>
+                    <Text color=Color::Error>{move || discs.read(|s| s.error().unwrap_or_default().to_owned())}</Text>
                 </Show>
             </Column>
         </Window>
@@ -276,7 +276,7 @@ fn DiscRow(path: PathBuf) -> impl View {
         let path = path.clone();
         move || path.clone()
     };
-    let (p1, p2, p3, p4, p5, p6) = (p(), p(), p(), p(), p(), p());
+    let (p1, p2, p3, p4, p5, p6, p7) = (p(), p(), p(), p(), p(), p(), p());
     let label = move || {
         discs.drafts.with(|d| d.get(p1.as_path()).cloned()).unwrap_or_else(|| discs.field(&p1, |_, d| d.label.clone()))
     };
@@ -312,7 +312,8 @@ fn DiscRow(path: PathBuf) -> impl View {
                 @input={let path = p6.clone(); move |text| discs.drafts.update(|d| {
                     d.insert(path.to_path_buf(), text);
                 })}
-                @submit=move || discs.commit_label(&path)
+                @submit=move || discs.commit_label(&p7)
+                @blur=move || discs.commit_label(&path)
             />
             <Text max_lines=1 width=NAME_W shrink=0.0>{name}</Text>
             // Cut at its end: mitsuami's Text has no elide mode, and the Qt

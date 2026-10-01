@@ -137,7 +137,7 @@ pub fn SnapshotsWindow() -> impl View {
                     </Text>
                 </Row>
                 <Show when=move || snaps.read(|m| m.error().is_some())>
-                    <Text text_style=TextStyle::Callout>
+                    <Text color=Color::Error>
                         {move || snaps.read(|m| m.error().unwrap_or_default().to_owned())}
                     </Text>
                 </Show>

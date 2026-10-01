@@ -206,7 +206,7 @@ fn PresetCollection() -> impl View {
                 </Row>
             </Show>
             <Show when={let s = s3.clone(); move || s().0 == 3}>
-                <Text text_style=TextStyle::Callout>
+                <Text color=Color::Error>
                     {let s = s3.clone(); move || format!("Couldn't download the shader presets: {}", s().1)}
                 </Text>
             </Show>
@@ -389,7 +389,7 @@ pub fn ShaderEditorWindow() -> impl View {
                 />
                 <PresetCollection/>
                 <Show when=move || shaders.read(|e| e.parse_error().is_some())>
-                    <Text text_style=TextStyle::Callout>
+                    <Text color=Color::Error>
                         {move || format!(
                             "Couldn't read this preset's parameters: {}",
                             shaders.read(|e| e.parse_error().unwrap_or_default().to_owned()),
@@ -417,7 +417,7 @@ pub fn ShaderEditorWindow() -> impl View {
                     </Column>
                 </Row>
                 <Show when=move || shaders.read(|e| e.error.is_some())>
-                    <Text text_style=TextStyle::Callout>{move || shaders.read(|e| e.error.clone().unwrap_or_default())}</Text>
+                    <Text color=Color::Error>{move || shaders.read(|e| e.error.clone().unwrap_or_default())}</Text>
                 </Show>
                 <Row gap=Spacing::Sm shrink=0.0>
                     <Button role=ButtonRole::Default @click=save>"Save"</Button>
@@ -553,10 +553,10 @@ fn PreviewArea() -> impl View {
         .justify(Justify::Center)
         .children(view! {
             <Show when=move || shaders.read(|e| e.preview_image_path.trim().is_empty())>
-                <Text text_style=TextStyle::Caption>"Pick a screenshot to preview the shader."</Text>
+                <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>"Pick a screenshot to preview the shader."</Text>
             </Show>
             <Show when=move || shaders.preview_error.get().is_some()>
-                <Text text_style=TextStyle::Callout>{move || shaders.preview_error.get().unwrap_or_default()}</Text>
+                <Text color=Color::Error>{move || shaders.preview_error.get().unwrap_or_default()}</Text>
             </Show>
             <Show when=move || shaders.frame.with(Option::is_some)>
                 <Image

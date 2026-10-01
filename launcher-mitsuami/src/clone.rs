@@ -113,10 +113,8 @@ pub fn CloneWindow() -> impl View {
                     checked=move || cloner.read(|c| c.same_disk)
                     @change=move |on| cloner.edit(|c| c.same_disk = on)
                 >{get(|c| c.same_disk_label().to_owned())}</Checkbox>
-                // A warning: the stronger style, as mitsuami has no text
-                // colour (the form's warnings, track doc step 2).
                 <Show when=move || cloner.read(|c| c.warning().is_some())>
-                    <Text text_style=TextStyle::Callout>{get(|c| c.warning().unwrap_or_default().to_owned())}</Text>
+                    <Text color=Color::Warning>{get(|c| c.warning().unwrap_or_default().to_owned())}</Text>
                 </Show>
                 <Show when=move || cloner.busy()>
                     <Column gap=Spacing::Xs>
@@ -130,7 +128,7 @@ pub fn CloneWindow() -> impl View {
                     </Column>
                 </Show>
                 <Show when=move || cloner.read(|c| c.error().is_some())>
-                    <Text text_style=TextStyle::Callout>{get(|c| c.error().unwrap_or_default().to_owned())}</Text>
+                    <Text color=Color::Error>{get(|c| c.error().unwrap_or_default().to_owned())}</Text>
                 </Show>
                 <Row gap=Spacing::Sm justify=Justify::End>
                     <Button role=ButtonRole::Cancel enabled=move || !cloner.busy() @click=move || cloner.close()>

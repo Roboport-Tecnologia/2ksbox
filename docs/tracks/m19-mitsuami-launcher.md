@@ -95,8 +95,7 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    its page. Checked headless: every page, a DOS machine created (the
    core's DOS defaults in its `machine.toml`) and one opened for editing.
    Not yet driven by hand on a desktop. What mitsuami lacks for it:
-   - **Text colour.** A warning is the Callout style, not the Qt
-     window's amber: `Text` has no tone or colour.
+   - Text colour: done in step 6 (mitsuami 0e474a9, `Color::Warning`).
    - A dialog's start folder: done in step 6 (mitsuami 6beec2e).
    - The optimizations disclosure closes when the page changes (each page
      is rebuilt by its `Show`); the Qt window keeps it open.
@@ -114,10 +113,7 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    with its branch, discs added and one set to boot with. Not driven: a
    running machine's Insert / Eject and live snapshots, and typing a
    label. What mitsuami lacks for these:
-   - **A text input's focus leaving.** A label is written on Enter, or
-     when the window closes with the edit in it; Qt writes it when the
-     field loses focus. Writing each keystroke would re-sort the row
-     being typed in.
+   - A text input's focus leaving: done in step 6 (`@blur`).
    - **An elide mode.** A disc's folder is cut at its end, where Qt cuts
      it at its start and keeps the useful part.
 4. **Shader profiles and the editor with the live preview (done
@@ -170,9 +166,14 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    `main.rs`: `paths::APP_ID` and the 256 px PNG `launcher-qt` uses);
    under Sway the window's `app_id` is `com._2ksbox.Launcher`. GTK shows
    only the theme's icon by that name, so a run from the build has none,
-   as with Qt on Wayland. Still missing: a text colour for warnings, a
-   text input's focus leaving and an elide mode (step 3), and a view's
-   size (step 4).
+   as with Qt on Wayland. mitsuami 0e474a9 (2026-10-01) gave `Text` a
+   colour, the platform's own where Qt fixes one: warnings are
+   `Color::Warning` (amber on GTK, Breeze's orange on KDE), every error
+   line `Color::Error` (they were the Callout style), the preview's
+   placeholder `SecondaryLabel`, each at its note's size as Qt does
+   (checked headless on `clone:<machine>:same`, which shows both). A disc label is now also written when its field loses
+   focus (`@blur`, as Qt's `editingFinished`; not driven headless).
+   Still missing: an elide mode (step 3) and a view's size (step 4).
    Widgets mitsuami won't have are ours, as `#[component]`s in their own
    module. The first is `src/path_field.rs`, `PathField` (the caption,
    the text input and Browse…, as `PathField.qml`): the form, the shader
