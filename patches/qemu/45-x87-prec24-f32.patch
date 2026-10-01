@@ -90,7 +90,7 @@ index c950bfa00b..8848b92225 100644
          }
      }
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 2065927e7c..0019e62ed2 100644
+index 2887bf829d..8fbcb7d168 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
 @@ -84,6 +84,7 @@ static TCGv_i64 cpu_bndl[4];
@@ -101,7 +101,7 @@ index 2065927e7c..0019e62ed2 100644
  
  /* x87 shadow-double translation: one out-of-line slow block (x87-shadow.c.inc) */
  typedef struct X87SlowBlock {
-@@ -3886,6 +3887,15 @@ void tcg_x86_init(void)
+@@ -3889,6 +3890,15 @@ void tcg_x86_init(void)
                                                 sd_names[i]);
      }
  

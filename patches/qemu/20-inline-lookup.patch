@@ -239,10 +239,10 @@ index 5250185748..4e013961a4 100644
  void tcg_gen_plugin_mem_cb(TCGv_i64 addr, unsigned meminfo);
  
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 09ab3eb2d9..d8c591aacf 100644
+index 349401e948..abda72163f 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -2107,6 +2107,52 @@ static void gen_bnd_jmp(DisasContext *s)
+@@ -2109,6 +2109,52 @@ static void gen_bnd_jmp(DisasContext *s)
   * single step traps, resetting the RF flag, and handling the interrupt
   * shadow.
   */
@@ -295,7 +295,7 @@ index 09ab3eb2d9..d8c591aacf 100644
  static void
  gen_eob(DisasContext *s, int mode)
  {
-@@ -2135,7 +2181,7 @@ gen_eob(DisasContext *s, int mode)
+@@ -2137,7 +2183,7 @@ gen_eob(DisasContext *s, int mode)
      } else if (mode == DISAS_JUMP &&
                 /* give irqs a chance to happen */
                 !inhibit_reset) {

@@ -241,18 +241,18 @@ index c15a32d60a..6bf9c19e03 100644
 +    return n;
 +}
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index d90ef4fc78..09ab3eb2d9 100644
+index 6431a8157b..349401e948 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -178,6 +178,7 @@ typedef struct DisasContext {
-     bool sses_guarded;          /* runtime guard emitted */
-     bool sses_pending;          /* hand-over check due at the end of the insn */
+@@ -180,6 +180,7 @@ typedef struct DisasContext {
+     bool sses_tracked;          /* the insn updated sses_clean itself */
+     uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
      bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
 +    bool rep_fast;              /* REP MOVS/STOS page runs through mem_helper.c */
  
      /* TCG local temps */
      TCGv cc_srcT;
-@@ -1366,6 +1367,69 @@ static void gen_outs(DisasContext *s, MemOp ot, TCGv dshift)
+@@ -1368,6 +1369,69 @@ static void gen_outs(DisasContext *s, MemOp ot, TCGv dshift)
  
  #define REP_MAX 65535
  
@@ -322,7 +322,7 @@ index d90ef4fc78..09ab3eb2d9 100644
  static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
                         void (*fn)(DisasContext *s, MemOp ot, TCGv dshift),
                         bool is_repz_nz)
-@@ -1373,6 +1437,8 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1375,6 +1439,8 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
      TCGLabel *last = gen_new_label();
      TCGLabel *loop = gen_new_label();
      TCGLabel *done = gen_new_label();
@@ -331,7 +331,7 @@ index d90ef4fc78..09ab3eb2d9 100644
  
      target_ulong cx_mask = MAKE_64BIT_MASK(0, 8 << s->aflag);
      TCGv cx_next = tcg_temp_new();
-@@ -1410,6 +1476,10 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1412,6 +1478,10 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
      /* Any iteration at all?  */
      tcg_gen_brcondi_tl(TCG_COND_TSTEQ, cpu_regs[R_ECX], cx_mask, done);
  
@@ -342,7 +342,7 @@ index d90ef4fc78..09ab3eb2d9 100644
      /*
       * From now on we operate on the value of CX/ECX/RCX that will be written
       * back, which is stored in cx_next.  There can be no carry, so we can zero
-@@ -1446,7 +1516,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1448,7 +1518,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
  
      if (can_loop) {
          tcg_gen_subi_tl(cx_next, cx_next, 1);
@@ -351,7 +351,7 @@ index d90ef4fc78..09ab3eb2d9 100644
          tcg_gen_brcondi_tl(TCG_COND_TSTEQ, cx_next, cx_mask, last);
      }
  
-@@ -1455,6 +1525,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1457,6 +1527,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
       * but the last.  Set it here before giving the main loop a chance to
       * execute.  (For faults, seg_helper.c sets the flag as usual).
       */
@@ -359,9 +359,9 @@ index d90ef4fc78..09ab3eb2d9 100644
      if (!had_rf) {
          gen_set_eflags(s, RF_MASK);
      }
-@@ -3620,6 +3691,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
-     dc->sses_guarded = false;
-     dc->sses_pending = false;
+@@ -3625,6 +3696,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->sses_tracked = false;
+     memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
      dc->simd_on = env_archcpu(env)->simd_fast;
 +    dc->rep_fast = env_archcpu(env)->rep_fast;
      if (dc->x87s_on) {

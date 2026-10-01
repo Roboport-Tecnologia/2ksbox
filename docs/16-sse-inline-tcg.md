@@ -66,10 +66,13 @@ Consequences for the translator:
 
 ## Fast conditions
 
-Softfloat with DAZ/FTZ off treats denormal operands as exact values and
-raises nothing for them, so operands need no check. What must be
-excluded is everything that would raise a flag other than PE, or where
-QEMU's result differs from the host's (NaN payload rules):
+Softfloat with DAZ/FTZ off treats denormal operands as exact values,
+but since QEMU 10.1 (`57df511180`) it raises DE when it consumes one.
+So every instruction below except rcp/rsqrt (whose helpers restore the
+flags) and the int32 conversions (no DE, as on the hardware) also needs
+no denormal operand. Beyond that, what must be excluded is everything
+that would raise a flag other than PE, or where QEMU's result differs
+from the host's (NaN payload rules):
 
 | Instructions | Fast when | Why that is enough |
 |---|---|---|
@@ -80,6 +83,16 @@ QEMU's result differs from the host's (NaN payload rules):
 | cvt(t)ss2si, cvt(t)sd2si | \|x\| < 2^31 − 1/2 | the host conversion is exact for both roundings; softfloat returns 0x80000000 with IE otherwise |
 | cvtsi2ss, cvtsi2sd | always | only PE |
 | cvtss2sd | result not NaN/inf | an SNaN input raises IE |
+
+The denormal check is left out for a register already known to hold
+none at that point of the TB (`sses_clean`, per register in four views:
+binary32 or binary64, all lanes or lane 0): one that passed the check
+earlier in the TB (a failure leaves the TB), or the result of mul, div,
+sqrt, rcp, rsqrt, min, max, a compare or a conversion, none of which
+can produce a denormal on the fast path. Any other write to an xmm
+register forgets every register, except a `movaps`-family register move,
+which copies the bits. In a loop body most operands are such registers,
+so a typical instruction checks one operand or none.
 
 Everything else takes the instruction's slow block: the unmodified
 helper sequence out of line, then a TB exit to the next instruction, as
@@ -94,8 +107,13 @@ instructions falls back to helpers for the rest.
 **Packed** (`ps`, `pd`): the vector unit. New TCG opcodes `fadd_vec`,
 `fsub_vec`, `fmul_vec`, `fdiv_vec`, `fsqrt_vec` (vece MO_32/MO_64;
 aarch64 `fadd.4s` etc., x86-64 `vaddps`/`vaddpd`), with the checks built
-from TCG's integer vector ops (`shli`, `cmp`, `and`, `sub`, `andc`,
-`sari`, `bitsel`). The lane mask is all-ones or all-zeros per lane and
+from TCG's integer vector ops (`shli`, `cmp`, `and`, `add`, `andc`,
+`sari`, `bitsel`). The checks compare |x| (the sign bit masked off, so
+never negative) with signed compares, which both hosts have natively:
+an unsigned vector compare costs x86-64 without AVX-512 three or four
+extra instructions (a `pmaxud` + `pcmpeqd` + inversion, or a bias on
+both sides for 64-bit lanes), which on 11.1 with the DE checks made the
+packed bench 1.8x slower than on 9.2. The lane mask is all-ones or all-zeros per lane and
 the branch tests it with `vec_allsign_i32` (patch 39: `vpmovmskb` + `xor`
 on x86-64, `cmlt #0` / `uminv` / `umov` / `eor` on aarch64). Before that
 op the mask went through `env->sses_scratch` and two 64-bit loads, a

@@ -72,12 +72,12 @@ index 6f4c02de7b..cfae21f342 100644
  /* size changing ops */
  DEF(ext_i32_i64, 1, 1, 0, 0)
 diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
-index e3a35a8f8b..3da2c452d4 100644
+index ef978ee014..80411015de 100644
 --- a/target/i386/tcg/sse-fast.c.inc
 +++ b/target/i386/tcg/sse-fast.c.inc
-@@ -504,13 +504,26 @@ static void sses_vec_insn(DisasContext *s, X86DecodedInsn *decode, int op,
-         }
-     }
+@@ -629,13 +629,26 @@ static void sses_vec_insn(DisasContext *s, X86DecodedInsn *decode, int op,
+     sses_dest(s, &decode->op[0], sses_view(dbl, false),
+               op != SSES_ADD && op != SSES_SUB);
  
 -    tcg_gen_st_vec(ok, tcg_env, scratch);
 -    lo = x87s_tmp_i64(s);

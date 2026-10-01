@@ -141,7 +141,7 @@ index eb257cd4b2..da2c48ffc5 100644
       * Force features to be enabled even if the host doesn't support them.
       * This is dangerous and should be done only for testing CPUID
 diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
-index 14b5358634..ad6ce28d18 100644
+index 7de74194d8..8f854d20e4 100644
 --- a/target/i386/tcg/decode-new.c.inc
 +++ b/target/i386/tcg/decode-new.c.inc
 @@ -3098,7 +3098,7 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
@@ -1120,21 +1120,21 @@ index 85bcd61678..ef394e90c2 100644
  int x86_mmu_index_pl(CPUX86State *env, unsigned pl);
  
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 5b3d7033dd..d90ef4fc78 100644
+index 5b54e1e263..6431a8157b 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -177,6 +177,7 @@ typedef struct DisasContext {
-     bool sses_on;               /* TB translated with TB_FLAG_SSE_FAST */
-     bool sses_guarded;          /* runtime guard emitted */
+@@ -179,6 +179,7 @@ typedef struct DisasContext {
      bool sses_pending;          /* hand-over check due at the end of the insn */
+     bool sses_tracked;          /* the insn updated sses_clean itself */
+     uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
 +    bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
  
      /* TCG local temps */
      TCGv cc_srcT;
-@@ -2220,6 +2221,23 @@ static bool sses_cvt_ss_sd(DisasContext *s, X86DecodedInsn *decode,
- static void sses_helper_done(DisasContext *s);
+@@ -2223,6 +2224,23 @@ static void sses_helper_done(DisasContext *s);
  static void sses_emit_pending(DisasContext *s);
  static void sses_end_tb(DisasContext *s);
+ static void sses_track(DisasContext *s, X86DecodedInsn *decode);
 +/* simd-fast.c.inc, used by emit.c.inc and decode-new.c.inc */
 +static void gen_enter_mmx(DisasContext *s);
 +static bool simd_int_binary(DisasContext *s, X86DecodedInsn *decode, int op);
@@ -1155,7 +1155,7 @@ index 5b3d7033dd..d90ef4fc78 100644
  enum {
      SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
      SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
-@@ -2228,6 +2246,7 @@ enum {
+@@ -2231,6 +2249,7 @@ enum {
  #include "emit.c.inc"
  #include "x87-shadow.c.inc"
  #include "sse-fast.c.inc"
@@ -1163,10 +1163,10 @@ index 5b3d7033dd..d90ef4fc78 100644
  
  static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
  {
-@@ -3600,6 +3619,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
-         && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
-     dc->sses_guarded = false;
+@@ -3605,6 +3624,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      dc->sses_pending = false;
+     dc->sses_tracked = false;
+     memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
 +    dc->simd_on = env_archcpu(env)->simd_fast;
      if (dc->x87s_on) {
          dc->x87s_t32 = tcg_temp_new_i32();

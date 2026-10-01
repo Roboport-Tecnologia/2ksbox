@@ -195,7 +195,7 @@ index 8848b92225..cc4693babb 100644
                      memcpy(&f, &env->x87_ss[r], sizeof(f));
                      env->fpregs[(entry + r) & 7].d = x87f_f_to_x80(f);
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 0019e62ed2..86e5373682 100644
+index 8fbcb7d168..8089aeec85 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
 @@ -85,6 +85,8 @@ static TCGv_i64 cpu_bndu[4];
@@ -215,7 +215,7 @@ index 0019e62ed2..86e5373682 100644
      bool x87s_guarded;          /* runtime mode guard emitted */
      TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
      int x87s_delta;             /* current top = (entry top + delta) & 7 */
-@@ -3896,6 +3899,21 @@ void tcg_x86_init(void)
+@@ -3899,6 +3902,21 @@ void tcg_x86_init(void)
                                                 ss_names[i]);
      }
  
@@ -237,7 +237,7 @@ index 0019e62ed2..86e5373682 100644
      for (i = 0; i < 4; ++i) {
          cpu_bndl[i]
              = tcg_global_mem_new_i64(tcg_env,
-@@ -3946,6 +3964,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3949,6 +3967,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      dc->x87s_on = dc->x87s_mode != 0 && tcg_f64_supported()
          && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
      dc->x87s_prec24 = dc->x87s_mode == 2;

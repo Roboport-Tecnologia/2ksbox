@@ -212,13 +212,14 @@ index eb5b59460c..eb257cd4b2 100644
  void do_cpu_init(X86CPU *cpu);
  
 diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
-index ff6db02d59..14b5358634 100644
+index ff6db02d59..7de74194d8 100644
 --- a/target/i386/tcg/decode-new.c.inc
 +++ b/target/i386/tcg/decode-new.c.inc
-@@ -3151,6 +3151,7 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
+@@ -3151,6 +3151,8 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
          assert(!!decode.cc_src == !!(cc_live & USES_CC_SRC));
          assert(!!decode.cc_src2 == !!(cc_live & USES_CC_SRC2));
      }
++    sses_track(s, &decode);
 +    sses_emit_pending(s);
  
      return;
@@ -451,10 +452,10 @@ index 7da73602af..1a2c6ed87e 100644
  void update_mxcsr_from_sse_status(CPUX86State *env)
 diff --git a/target/i386/tcg/sse-fast-lane.c.inc b/target/i386/tcg/sse-fast-lane.c.inc
 new file mode 100644
-index 0000000000..0d6ecebea1
+index 0000000000..fcdcb3077c
 --- /dev/null
 +++ b/target/i386/tcg/sse-fast-lane.c.inc
-@@ -0,0 +1,287 @@
+@@ -0,0 +1,291 @@
 +/*
 + * SSE inline fast path, per-lane code for one element width.
 + * Included twice from sse-fast.c.inc with W = 32 and W = 64. The
@@ -478,6 +479,7 @@ index 0000000000..0d6ecebea1
 +#define EXP_RANGE       0x7e800000u             /* fields 2 .. 254 */
 +#define ONE_BITS        0x3f800000u
 +#define TO_I32(d, x)    tcg_gen_mov_i32(d, x)
++#define VIEW            SSES_K_SS
 +#else
 +#define LANE(i)         offsetof(ZMMReg, ZMM_Q(i))
 +#define NAN_LIMIT       0xffe0000000000000ull
@@ -486,38 +488,42 @@ index 0000000000..0d6ecebea1
 +#define EXP_RANGE       0x7fd0000000000000ull   /* fields 2 .. 2046 */
 +#define ONE_BITS        0x3ff0000000000000ull
 +#define TO_I32(d, x)    tcg_gen_extrl_i64_i32(d, x)
++#define VIEW            SSES_K_SD
 +#endif
 +
 +/*
-+ * ok &= "r is an acceptable fast-path result". `z` is nonzero unless the
++ * "r is an acceptable fast-path result": a branch to `slow` if not, or,
++ * with `z`, ok &= it (ok NULL: returned). `z` is nonzero unless the
 + * result is an exact zero for the reason the fast path allows (an operand
 + * of a multiply, the dividend of a divide, is zero); NULL: no such case.
 + */
 +static TCGv_iW LANEFN(check)(DisasContext *s, TCGv_iW ok, TCGv_iW r,
-+                             TCGv_iW z, bool normal_only)
++                             TCGv_iW z, bool normal_only, TCGLabel *slow)
 +{
 +    TCGv_iW e = TMP();
-+    TCGv_iW okl = TMP();
++    TCGv_iW t = TMP();
++    TCGv_iW okl, pz;
 +
 +    if (!normal_only) {
 +        /* exponent field not all ones: no NaN, infinity or overflow */
 +        OPW(shli)(e, r, 1);
-+        OPW(setcondi)(TCG_COND_LTU, okl, e, NAN_LIMIT);
-+    } else {
-+        /* exponent field in [2, max - 1], or an allowed exact zero */
-+        TCGv_iW t = TMP();
-+        TCGv_iW pz = TMP();
-+
-+        OPW(andi)(e, r, EXP_MASK);
-+        OPW(subi)(t, e, EXP_LO);
-+        OPW(setcondi)(TCG_COND_LTU, okl, t, EXP_RANGE);
-+        if (z) {
-+            OPW(setcondi)(TCG_COND_EQ, pz, z, 0);
-+            OPW(setcondi)(TCG_COND_NE, t, e, EXP_MASK);   /* not 0 * inf */
-+            OPW(and)(pz, pz, t);
-+            OPW(or)(okl, okl, pz);
-+        }
++        OPW(brcondi)(TCG_COND_GEU, e, NAN_LIMIT, slow);
++        return ok;
 +    }
++    /* exponent field in [2, max - 1], or an allowed exact zero */
++    OPW(andi)(e, r, EXP_MASK);
++    OPW(subi)(t, e, EXP_LO);
++    if (!z) {
++        OPW(brcondi)(TCG_COND_GEU, t, EXP_RANGE, slow);
++        return ok;
++    }
++    okl = TMP();
++    pz = TMP();
++    OPW(setcondi)(TCG_COND_LTU, okl, t, EXP_RANGE);
++    OPW(setcondi)(TCG_COND_EQ, pz, z, 0);
++    OPW(setcondi)(TCG_COND_NE, t, e, EXP_MASK);   /* not 0 * inf */
++    OPW(and)(pz, pz, t);
++    OPW(or)(okl, okl, pz);
 +    if (ok) {
 +        OPW(and)(ok, ok, okl);
 +        return ok;
@@ -526,28 +532,24 @@ index 0000000000..0d6ecebea1
 +}
 +
 +/*
-+ * ok &= "x is no denormal": with t = x << 1, a denormal is t in
-+ * [1, EXP_LO - 1], EXP_LO being the first normal exponent field in that
-+ * space too. Since QEMU 10.1 softfloat raises DE on a denormal operand.
++ * To `slow` if x is a denormal: with t = x << 1, t in [1, EXP_LO - 1],
++ * EXP_LO being the first normal exponent field in that space too. Since
++ * QEMU 10.1 softfloat raises DE on a denormal operand. A branch of its
++ * own costs less than a setcond folded into the lane's `ok`.
 + */
-+static TCGv_iW LANEFN(nodenorm)(DisasContext *s, TCGv_iW ok, TCGv_iW x)
++static void LANEFN(denorm_br)(DisasContext *s, TCGv_iW x, TCGLabel *slow)
 +{
 +    TCGv_iW t = TMP();
-+    TCGv_iW okl = TMP();
 +
 +    OPW(shli)(t, x, 1);
 +    OPW(subi)(t, t, 1);
-+    OPW(setcondi)(TCG_COND_GEU, okl, t, EXP_LO - 1);
-+    if (ok) {
-+        OPW(and)(ok, ok, okl);
-+        return ok;
-+    }
-+    return okl;
++    OPW(brcondi)(TCG_COND_LTU, t, EXP_LO - 1, slow);
 +}
 +
 +/* r = a op b (unary ops: b), see the table in sse-fast.c.inc */
 +static TCGv_iW LANEFN(arith)(DisasContext *s, int op, TCGv_iW r,
-+                             TCGv_iW a, TCGv_iW b, TCGv_iW ok)
++                             TCGv_iW a, TCGv_iW b, TCGv_iW ok,
++                             TCGLabel *slow)
 +{
 +    TCGv_iW z = TMP();
 +    TCGv_iW t;
@@ -555,32 +557,32 @@ index 0000000000..0d6ecebea1
 +    switch (op) {
 +    case SSES_ADD:
 +        FPW(add)(r, a, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
 +    case SSES_SUB:
 +        FPW(sub)(r, a, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
 +    case SSES_SQRT:
 +        FPW(sqrt)(r, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
 +    case SSES_MUL:
 +        FPW(mul)(r, a, b);
 +        t = TMP();
 +        OPW(shli)(z, a, 1);
 +        OPW(shli)(t, b, 1);
 +        OPW(umin)(z, z, t);                     /* zero iff a or b is zero */
-+        return LANEFN(check)(s, ok, r, z, true);
++        return LANEFN(check)(s, ok, r, z, true, slow);
 +    case SSES_DIV:
 +        FPW(div)(r, a, b);
 +        OPW(shli)(z, a, 1);                     /* zero iff the dividend is zero */
-+        return LANEFN(check)(s, ok, r, z, true);
++        return LANEFN(check)(s, ok, r, z, true, slow);
 +    case SSES_RCP:
 +        FPW(div)(r, CONSTW(ONE_BITS), b);
-+        return LANEFN(check)(s, ok, r, NULL, true);
++        return LANEFN(check)(s, ok, r, NULL, true, slow);
 +    case SSES_RSQRT:
 +        t = TMP();
 +        FPW(sqrt)(t, b);
 +        FPW(div)(r, CONSTW(ONE_BITS), t);
-+        return LANEFN(check)(s, ok, r, NULL, true);
++        return LANEFN(check)(s, ok, r, NULL, true, slow);
 +    default:
 +        g_assert_not_reached();
 +    }
@@ -599,43 +601,40 @@ index 0000000000..0d6ecebea1
 +    OPW(xor)(k, c, sgn);
 +}
 +
-+/* ok &= neither a nor b is a NaN; ka, kb = their keys */
-+static TCGv_iW LANEFN(keys)(DisasContext *s, TCGv_iW ok, TCGv_iW ka,
-+                            TCGv_iW kb, TCGv_iW a, TCGv_iW b)
++/* to `slow` if a or b is a NaN; ka, kb = their keys */
++static void LANEFN(keys)(DisasContext *s, TCGv_iW ka, TCGv_iW kb,
++                         TCGv_iW a, TCGv_iW b, TCGLabel *slow)
 +{
 +    TCGv_iW ta = TMP();
 +    TCGv_iW tb = TMP();
 +    TCGv_iW m = TMP();
-+    TCGv_iW okl = TMP();
 +
 +    OPW(shli)(ta, a, 1);
 +    OPW(shli)(tb, b, 1);
 +    OPW(umax)(m, ta, tb);
-+    OPW(setcondi)(TCG_COND_LEU, okl, m, NAN_LIMIT);
++    OPW(brcondi)(TCG_COND_GTU, m, NAN_LIMIT, slow);
 +    LANEFN(key)(s, ka, a, ta);
 +    LANEFN(key)(s, kb, b, tb);
-+    if (ok) {
-+        OPW(and)(ok, ok, okl);
-+        return ok;
-+    }
-+    return okl;
 +}
 +
 +/* comis/ucomis: cc = CC_Z (equal) | CC_C (less), other flags clear */
-+static void LANEFN(comis)(DisasContext *s, TCGv_i32 cc, TCGv_iW a,
-+                          TCGv_iW b, TCGLabel *slow)
++static void LANEFN(comis)(DisasContext *s, X86DecodedInsn *decode,
++                          TCGv_i32 cc, TCGv_iW a, TCGv_iW b, TCGLabel *slow)
 +{
 +    TCGv_iW ka = TMP();
 +    TCGv_iW kb = TMP();
 +    TCGv_iW eq = TMP();
 +    TCGv_iW lt = TMP();
 +    TCGv_iW t = TMP();
-+    TCGv_iW ok;
 +
-+    ok = LANEFN(keys)(s, NULL, ka, kb, a, b);
-+    ok = LANEFN(nodenorm)(s, ok, a);
-+    ok = LANEFN(nodenorm)(s, ok, b);
-+    OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
++    LANEFN(keys)(s, ka, kb, a, b, slow);
++    for (int i = 1; i <= 2; i++) {
++        if (!sses_known(s, &decode->op[i], VIEW)) {
++            LANEFN(denorm_br)(s, i == 1 ? a : b, slow);
++            sses_mark(s, &decode->op[i], VIEW);
++        }
++    }
++    s->sses_tracked = true;
 +    OPW(setcond)(TCG_COND_EQ, eq, ka, kb);
 +    OPW(setcond)(TCG_COND_LT, lt, ka, kb);
 +    OPW(movcond)(TCG_COND_NE, t, eq, CONSTW(0), CONSTW(CC_Z), CONSTW(0));
@@ -645,26 +644,25 @@ index 0000000000..0d6ecebea1
 +}
 +
 +/* min: lt(a, b) ? a : b; max: lt(b, a) ? a : b (Intel's operand order rules) */
-+static TCGv_iW LANEFN(minmax)(DisasContext *s, bool max, TCGv_iW r,
-+                              TCGv_iW a, TCGv_iW b, TCGv_iW ok)
++static void LANEFN(minmax)(DisasContext *s, bool max, TCGv_iW r,
++                           TCGv_iW a, TCGv_iW b, TCGLabel *slow)
 +{
 +    TCGv_iW ka = TMP();
 +    TCGv_iW kb = TMP();
 +    TCGv_iW lt = TMP();
 +
-+    ok = LANEFN(keys)(s, ok, ka, kb, a, b);
++    LANEFN(keys)(s, ka, kb, a, b, slow);
 +    if (max) {
 +        OPW(setcond)(TCG_COND_LT, lt, kb, ka);
 +    } else {
 +        OPW(setcond)(TCG_COND_LT, lt, ka, kb);
 +    }
 +    OPW(movcond)(TCG_COND_NE, r, lt, CONSTW(0), a, b);
-+    return ok;
 +}
 +
 +/* cmpps predicate 0..7: eq lt le unord neq nlt nle ord -> all-ones / 0 */
-+static TCGv_iW LANEFN(cmp)(DisasContext *s, int pred, TCGv_iW r,
-+                           TCGv_iW a, TCGv_iW b, TCGv_iW ok)
++static void LANEFN(cmp)(DisasContext *s, int pred, TCGv_iW r,
++                        TCGv_iW a, TCGv_iW b, TCGLabel *slow)
 +{
 +    static const TCGCond conds[8] = {
 +        TCG_COND_EQ, TCG_COND_LT, TCG_COND_LE, TCG_COND_NEVER,
@@ -673,7 +671,7 @@ index 0000000000..0d6ecebea1
 +    TCGv_iW ka = TMP();
 +    TCGv_iW kb = TMP();
 +
-+    ok = LANEFN(keys)(s, ok, ka, kb, a, b);
++    LANEFN(keys)(s, ka, kb, a, b, slow);
 +    if (pred == 3) {
 +        OPW(movi)(r, 0);
 +    } else if (pred == 7) {
@@ -682,13 +680,12 @@ index 0000000000..0d6ecebea1
 +        OPW(setcond)(conds[pred], r, ka, kb);
 +        OPW(neg)(r, r);
 +    }
-+    return ok;
 +}
 +
 +/*
 + * The scalar form of an arithmetic, min/max or compare instruction: lane
-+ * 0 of op[0] = op[1] op op[2] (unary: op[2]) in general registers, one
-+ * branch to the slow block before the store.
++ * 0 of op[0] = op[1] op op[2] (unary: op[2]) in general registers, each
++ * check a branch to the slow block, all before the store.
 + */
 +static void LANEFN(scalar)(DisasContext *s, X86DecodedInsn *decode, int op,
 +                           int pred, TCGLabel *slow)
@@ -699,7 +696,7 @@ index 0000000000..0d6ecebea1
 +    TCGv_iW a = NULL;
 +    TCGv_iW b = TMP();
 +    TCGv_iW r = TMP();
-+    TCGv_iW ok;
++    TCGv_iW ok = NULL;
 +
 +    OPW(ld)(b, tcg_env, src + LANE(0));
 +    if (!unary) {
@@ -709,22 +706,29 @@ index 0000000000..0d6ecebea1
 +    switch (op) {
 +    case SSES_MIN:
 +    case SSES_MAX:
-+        ok = LANEFN(minmax)(s, op == SSES_MAX, r, a, b, NULL);
++        LANEFN(minmax)(s, op == SSES_MAX, r, a, b, slow);
 +        break;
 +    case SSES_CMP:
-+        ok = LANEFN(cmp)(s, pred, r, a, b, NULL);
++        LANEFN(cmp)(s, pred, r, a, b, slow);
 +        break;
 +    default:
-+        ok = LANEFN(arith)(s, op, r, a, b, NULL);
++        ok = LANEFN(arith)(s, op, r, a, b, NULL, slow);
 +        break;
 +    }
++    if (ok) {
++        OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
++    }
 +    if (op != SSES_RCP && op != SSES_RSQRT) {   /* those restore the flags */
-+        ok = LANEFN(nodenorm)(s, ok, b);
-+        if (!unary) {
-+            ok = LANEFN(nodenorm)(s, ok, a);
++        if (!sses_known(s, &decode->op[2], VIEW)) {
++            LANEFN(denorm_br)(s, b, slow);
++            sses_mark(s, &decode->op[2], VIEW);
++        }
++        if (!unary && !sses_known(s, &decode->op[1], VIEW)) {
++            LANEFN(denorm_br)(s, a, slow);
++            sses_mark(s, &decode->op[1], VIEW);
 +        }
 +    }
-+    OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
++    sses_dest(s, &decode->op[0], VIEW, op != SSES_ADD && op != SSES_SUB);
 +    OPW(st)(r, tcg_env, d + LANE(0));
 +}
 +
@@ -741,13 +745,14 @@ index 0000000000..0d6ecebea1
 +#undef EXP_RANGE
 +#undef ONE_BITS
 +#undef TO_I32
++#undef VIEW
 +#undef W
 diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
 new file mode 100644
-index 0000000000..e3a35a8f8b
+index 0000000000..ef978ee014
 --- /dev/null
 +++ b/target/i386/tcg/sse-fast.c.inc
-@@ -0,0 +1,734 @@
+@@ -0,0 +1,866 @@
 +/*
 + * SSE inline fast path: scalar and packed binary32/binary64 arithmetic,
 + * compares and int conversions on the host FPU, emitted inline by TCG
@@ -796,6 +801,9 @@ index 0000000000..e3a35a8f8b
 + *                       rounding; softfloat gives 0x80000000 + IE)
 + *   cvt from int32      always (PE only)
 + *   cvtss2sd            result not NaN/inf (an SNaN input raises IE)
++ * The denormal checks are skipped for a register already known to hold
++ * none (sses_clean): one that passed a check earlier in the TB, or the
++ * result of an instruction that cannot produce one.
 + * Everything else takes the slow block of the instruction: the helper
 + * and a TB exit to the next instruction, as x87-shadow does. Legacy SSE
 + * encodings only (VEX forms take the helpers). The slow blocks share the
@@ -803,11 +811,6 @@ index 0000000000..e3a35a8f8b
 + *
 + * SPDX-License-Identifier: GPL-2.0-or-later
 + */
-+
-+#define W 32
-+#include "sse-fast-lane.c.inc"
-+#define W 64
-+#include "sse-fast-lane.c.inc"
 +
 +/* room for the instruction's slow block and the guard */
 +static bool sses_admissible(DisasContext *s)
@@ -891,6 +894,110 @@ index 0000000000..e3a35a8f8b
 +    }
 +}
 +
++/*
++ * Registers known to hold no denormal at this point of the TB, so their
++ * DE checks can be left out: s->sses_clean[k], bit n for xmm n, k one of
++ * the four views below (a full view implies its lane 0). A register gets
++ * a bit when it passes a check (a failure leaves the TB) or receives a
++ * result that cannot be a denormal (mul, div, sqrt, rcp, rsqrt, min, max,
++ * a compare mask, a conversion); any other write clears it (sses_track).
++ */
++enum { SSES_K_PS, SSES_K_SS, SSES_K_PD, SSES_K_SD };
++
++static int sses_view(bool dbl, bool scalar)
++{
++    return (dbl ? SSES_K_PD : SSES_K_PS) + scalar;
++}
++
++static bool sses_is_reg(X86DecodedOp *op)
++{
++    return op->unit == X86_OP_SSE && !op->has_ea;
++}
++
++static bool sses_known(DisasContext *s, X86DecodedOp *op, int k)
++{
++    return sses_is_reg(op) && (s->sses_clean[k] >> op->n & 1);
++}
++
++/* op passed a denormal check in view k */
++static void sses_mark(DisasContext *s, X86DecodedOp *op, int k)
++{
++    if (sses_is_reg(op)) {
++        s->sses_clean[k] |= 1 << op->n;
++        s->sses_clean[k | 1] |= 1 << op->n;
++    }
++}
++
++/*
++ * op (op[0]) written in view k with a result that is `clean` or may be a
++ * denormal. A scalar write keeps the register's other lanes, so its full
++ * view survives a clean lane 0; the other element width changes.
++ */
++static void sses_dest(DisasContext *s, X86DecodedOp *op, int k, bool clean)
++{
++    uint16_t bit = 1 << op->n;
++    int other = k & 2 ? SSES_K_PS : SSES_K_PD;
++
++    assert(sses_is_reg(op));
++    if (clean) {
++        s->sses_clean[k] |= bit;
++        if (!(k & 1)) {
++            s->sses_clean[k | 1] |= bit;
++        }
++    } else {
++        s->sses_clean[k & 2] &= ~bit;
++        s->sses_clean[k | 1] &= ~bit;
++    }
++    s->sses_clean[other] &= ~bit;
++    s->sses_clean[other | 1] &= ~bit;
++    s->sses_tracked = true;
++}
++
++/*
++ * At the end of every instruction: one the fast path did not handle
++ * forgets every register if it has an SSE operand or a VEX prefix
++ * (implicit writes included), except a register-to-register move, which
++ * carries the bits over. Whatever else writes xmm registers (fxrstor,
++ * xrstor) ends the TB.
++ */
++static void sses_track(DisasContext *s, X86DecodedInsn *decode)
++{
++    int i;
++
++    if (s->sses_tracked) {
++        s->sses_tracked = false;
++        return;
++    }
++    if (decode->e.gen == gen_MOVDQ) {
++        X86DecodedOp *d = &decode->op[0], *src = &decode->op[2];
++
++        if (sses_is_reg(d)) {
++            for (i = 0; i < ARRAY_SIZE(s->sses_clean); i++) {
++                s->sses_clean[i] &= ~(1 << d->n);
++                if (sses_is_reg(src)) {
++                    s->sses_clean[i] |= (s->sses_clean[i] >> src->n & 1) << d->n;
++                }
++            }
++        }
++        return;
++    }
++    if (s->prefix & PREFIX_VEX) {
++        memset(s->sses_clean, 0, sizeof(s->sses_clean));
++        return;
++    }
++    for (i = 0; i < 3; i++) {
++        if (decode->op[i].unit == X86_OP_SSE) {
++            memset(s->sses_clean, 0, sizeof(s->sses_clean));
++            return;
++        }
++    }
++}
++
++#define W 32
++#include "sse-fast-lane.c.inc"
++#define W 64
++#include "sse-fast-lane.c.inc"
++
 +static X87SlowBlock *sses_slow(DisasContext *s, X86DecodedInsn *decode,
 +                               int kind, void *fn, int nargs)
 +{
@@ -968,11 +1075,17 @@ index 0000000000..e3a35a8f8b
 +/* ------------------------------------------------------------------ */
 +/* vector path: arithmetic, min/max and compares, all lanes or lane 0    */
 +
++/*
++ * The vector checks compare |x| (x with its sign bit cleared, so never
++ * negative) in signed order: hosts have signed vector compares natively,
++ * where an unsigned one costs a bias or a min/max fixup (x86 without
++ * AVX-512 pays three or four extra instructions per compare).
++ */
 +typedef struct SSESVec {
 +    TCGType type;
 +    unsigned vece;
-+    uint64_t nan_limit;         /* x << 1 above this: NaN; at or above: exp all ones */
-+    uint64_t exp_mask, exp_lo, exp_range;   /* fields 2 .. max - 1 */
++    uint64_t abs_mask;          /* every bit but the sign */
++    uint64_t exp_mask, exp_lo;  /* exponent field all ones; field 2 */
 +    uint64_t one;
 +    TCGv_vec tmps[24];
 +    int ntmps;
@@ -984,17 +1097,15 @@ index 0000000000..e3a35a8f8b
 +    v->ntmps = 0;
 +    if (dbl) {
 +        v->vece = MO_64;
-+        v->nan_limit = 0xffe0000000000000ull;
++        v->abs_mask = 0x7fffffffffffffffull;
 +        v->exp_mask = 0x7ff0000000000000ull;
 +        v->exp_lo = 0x0020000000000000ull;
-+        v->exp_range = 0x7fd0000000000000ull;
 +        v->one = 0x3ff0000000000000ull;
 +    } else {
 +        v->vece = MO_32;
-+        v->nan_limit = 0xff000000u;
++        v->abs_mask = 0x7fffffffu;
 +        v->exp_mask = 0x7f800000u;
 +        v->exp_lo = 0x01000000u;
-+        v->exp_range = 0x7e800000u;
 +        v->one = 0x3f800000u;
 +    }
 +}
@@ -1023,6 +1134,15 @@ index 0000000000..e3a35a8f8b
 +    return tcg_constant_vec(v->type, v->vece, c);
 +}
 +
++/* |x| */
++static TCGv_vec sses_vabs(SSESVec *v, TCGv_vec x)
++{
++    TCGv_vec t = sses_vtmp(v);
++
++    tcg_gen_and_vec(v->vece, t, x, sses_vconst(v, v->abs_mask));
++    return t;
++}
++
 +/*
 + * Lanes whose result is acceptable, all ones. `pz`: lanes where an exact
 + * zero result is allowed (a factor / the dividend is zero), or NULL.
@@ -1030,36 +1150,50 @@ index 0000000000..e3a35a8f8b
 +static TCGv_vec sses_vcheck(SSESVec *v, TCGv_vec r, TCGv_vec pz, bool normal_only)
 +{
 +    unsigned vece = v->vece;
++    TCGv_vec e = sses_vabs(v, r);
 +    TCGv_vec ok = sses_vtmp(v);
-+    TCGv_vec t = sses_vtmp(v);
++    TCGv_vec t;
++    uint64_t k;
 +
 +    if (!normal_only) {
-+        tcg_gen_shli_vec(vece, t, r, 1);
-+        tcg_gen_cmp_vec(TCG_COND_LTU, vece, ok, t, sses_vconst(v, v->nan_limit));
-+    } else {
-+        TCGv_vec e = sses_vtmp(v);
-+
-+        tcg_gen_and_vec(vece, e, r, sses_vconst(v, v->exp_mask));
-+        tcg_gen_sub_vec(vece, t, e, sses_vconst(v, v->exp_lo));
-+        tcg_gen_cmp_vec(TCG_COND_LTU, vece, ok, t, sses_vconst(v, v->exp_range));
-+        if (pz) {
-+            tcg_gen_cmp_vec(TCG_COND_NE, vece, t, e, sses_vconst(v, v->exp_mask));
-+            tcg_gen_and_vec(vece, t, t, pz);
-+            tcg_gen_or_vec(vece, ok, ok, t);
-+        }
++        /* exponent field not all ones: no NaN, infinity or overflow */
++        tcg_gen_cmp_vec(TCG_COND_LT, vece, ok, e, sses_vconst(v, v->exp_mask));
++        return ok;
++    }
++    /*
++     * |r| in [exp_lo, exp_mask): adding k = sign bit - exp_mask wraps
++     * [exp_mask, sign bit) (infinity, NaN) to negative and leaves the
++     * rest in order, so one compare against exp_lo + k - 1.
++     */
++    t = sses_vtmp(v);
++    k = (1ull << ((8 << vece) - 1)) - v->exp_mask;
++    tcg_gen_add_vec(vece, t, e, sses_vconst(v, k));
++    tcg_gen_cmp_vec(TCG_COND_GT, vece, ok, t, sses_vconst(v, v->exp_lo + k - 1));
++    if (pz) {
++        tcg_gen_cmp_vec(TCG_COND_LT, vece, t, e, sses_vconst(v, v->exp_mask));
++        tcg_gen_and_vec(vece, t, t, pz);        /* not 0 * inf */
++        tcg_gen_or_vec(vece, ok, ok, t);
 +    }
 +    return ok;
 +}
 +
-+/* ok with the lanes where x is a denormal cleared (sses_nodenorm_*) */
++/*
++ * ok with the lanes where x is a denormal cleared. With t = x << 1 a
++ * denormal is t in [1, exp_lo - 1]; adding k = sign bit - exp_lo moves
++ * that range, and only it, above k in signed order (zero lands on k, the
++ * rest wraps to [sign bit, k - 1]): one signed compare, which hosts have
++ * natively, where an unsigned one costs a bias or min/max fixup (x86
++ * without AVX-512).
++ */
 +static TCGv_vec sses_vnodenorm(SSESVec *v, TCGv_vec ok, TCGv_vec x)
 +{
 +    unsigned vece = v->vece;
 +    TCGv_vec t = sses_vtmp(v);
++    TCGv_vec k = sses_vconst(v, (1ull << ((8 << vece) - 1)) - v->exp_lo);
 +
 +    tcg_gen_shli_vec(vece, t, x, 1);
-+    tcg_gen_sub_vec(vece, t, t, sses_vconst(v, 1));
-+    tcg_gen_cmp_vec(TCG_COND_LTU, vece, t, t, sses_vconst(v, v->exp_lo - 1));
++    tcg_gen_add_vec(vece, t, t, k);
++    tcg_gen_cmp_vec(TCG_COND_GT, vece, t, t, k);
 +    tcg_gen_andc_vec(vece, ok, ok, t);
 +    return ok;
 +}
@@ -1093,51 +1227,39 @@ index 0000000000..e3a35a8f8b
 +    return k;
 +}
 +
-+/* ok = lanes with no NaN operand; keys of both operands */
-+static TCGv_vec sses_vkeys(SSESVec *v, TCGv_vec a, TCGv_vec b,
-+                           TCGv_vec *ka, TCGv_vec *kb)
-+{
-+    unsigned vece = v->vece;
-+    TCGv_vec ta, tb;
-+    TCGv_vec za = sses_vzero(v, a, &ta);
-+    TCGv_vec zb = sses_vzero(v, b, &tb);
-+    TCGv_vec na = sses_vtmp(v);
-+    TCGv_vec nb = sses_vtmp(v);
-+    TCGv_vec ok = sses_vtmp(v);
-+
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, na, ta, sses_vconst(v, v->nan_limit));
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, nb, tb, sses_vconst(v, v->nan_limit));
-+    tcg_gen_or_vec(vece, ok, na, nb);
-+    tcg_gen_not_vec(vece, ok, ok);
-+    *ka = sses_vkey(v, a, za);
-+    *kb = sses_vkey(v, b, zb);
-+    return ok;
-+}
-+
-+/*
-+ * ok = lanes with no NaN operand, without the total-order key transform:
-+ * for use with the native minps/maxps/cmpps opcodes (tcg_fp_minmax_vec_
-+ * supported() / tcg_fp_cmp_vec_supported()), which already implement
-+ * the guest's own -0/+0 tie-break and NaN-operand-selection rules
-+ * exactly (same host ISA as the guest here), so sses_vkeys's key
-+ * computation -- needed only to give cmp_vec's integer compare a
-+ * monotonic float ordering -- is dead weight on this path.
-+ */
++/* ok = lanes with no NaN operand: |a| and |b| at most exp_mask */
 +static TCGv_vec sses_vnan_ok(SSESVec *v, TCGv_vec a, TCGv_vec b)
 +{
 +    unsigned vece = v->vece;
-+    TCGv_vec ta = sses_vtmp(v);
-+    TCGv_vec tb = sses_vtmp(v);
-+    TCGv_vec na = sses_vtmp(v);
-+    TCGv_vec nb = sses_vtmp(v);
-+    TCGv_vec ok = sses_vtmp(v);
++    TCGv_vec lim = sses_vconst(v, v->exp_mask + 1);
++    TCGv_vec ta = sses_vabs(v, a);
++    TCGv_vec tb = sses_vabs(v, b);
 +
-+    tcg_gen_shli_vec(vece, ta, a, 1);
-+    tcg_gen_shli_vec(vece, tb, b, 1);
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, na, ta, sses_vconst(v, v->nan_limit));
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, nb, tb, sses_vconst(v, v->nan_limit));
-+    tcg_gen_or_vec(vece, ok, na, nb);
-+    tcg_gen_not_vec(vece, ok, ok);
++    tcg_gen_cmp_vec(TCG_COND_LT, vece, ta, ta, lim);
++    tcg_gen_cmp_vec(TCG_COND_LT, vece, tb, tb, lim);
++    tcg_gen_and_vec(vece, ta, ta, tb);
++    return ta;
++}
++
++/*
++ * ok = lanes with no NaN operand; keys of both operands, for cmp_vec's
++ * integer compare on hosts without the native minps/maxps/cmpps
++ * (tcg_fp_minmax_vec_supported() / tcg_fp_cmp_vec_supported(), which
++ * implement the guest's -0/+0 tie-break and NaN-operand selection exactly
++ * and need no keys).
++ */
++static TCGv_vec sses_vkeys(SSESVec *v, TCGv_vec a, TCGv_vec b,
++                           TCGv_vec *ka, TCGv_vec *kb)
++{
++    TCGv_vec zero = sses_vconst(v, 0);
++    TCGv_vec za = sses_vtmp(v);
++    TCGv_vec zb = sses_vtmp(v);
++    TCGv_vec ok = sses_vnan_ok(v, a, b);
++
++    tcg_gen_cmp_vec(TCG_COND_EQ, v->vece, za, sses_vabs(v, a), zero);
++    tcg_gen_cmp_vec(TCG_COND_EQ, v->vece, zb, sses_vabs(v, b), zero);
++    *ka = sses_vkey(v, a, za);
++    *kb = sses_vkey(v, b, zb);
 +    return ok;
 +}
 +
@@ -1248,11 +1370,19 @@ index 0000000000..e3a35a8f8b
 +        g_assert_not_reached();
 +    }
 +    if (op != SSES_RCP && op != SSES_RSQRT) {   /* those restore the flags */
-+        ok = sses_vnodenorm(v, ok, b);
-+        if (!unary) {
++        int k = sses_view(dbl, false);
++
++        if (!sses_known(s, &decode->op[2], k)) {
++            ok = sses_vnodenorm(v, ok, b);
++            sses_mark(s, &decode->op[2], k);
++        }
++        if (!unary && !sses_known(s, &decode->op[1], k)) {
 +            ok = sses_vnodenorm(v, ok, a);
++            sses_mark(s, &decode->op[1], k);
 +        }
 +    }
++    sses_dest(s, &decode->op[0], sses_view(dbl, false),
++              op != SSES_ADD && op != SSES_SUB);
 +
 +    tcg_gen_st_vec(ok, tcg_env, scratch);
 +    lo = x87s_tmp_i64(s);
@@ -1343,14 +1473,14 @@ index 0000000000..e3a35a8f8b
 +
 +        tcg_gen_ld_i64(a, tcg_env, v + offsetof(ZMMReg, ZMM_Q(0)));
 +        tcg_gen_ld_i64(c, tcg_env, src + offsetof(ZMMReg, ZMM_Q(0)));
-+        sses_comis_64(s, cc, a, c, b->label);
++        sses_comis_64(s, decode, cc, a, c, b->label);
 +    } else {
 +        TCGv_i32 a = x87s_tmp_i32(s);
 +        TCGv_i32 c = x87s_tmp_i32(s);
 +
 +        tcg_gen_ld_i32(a, tcg_env, v + offsetof(ZMMReg, ZMM_L(0)));
 +        tcg_gen_ld_i32(c, tcg_env, src + offsetof(ZMMReg, ZMM_L(0)));
-+        sses_comis_32(s, cc, a, c, b->label);
++        sses_comis_32(s, decode, cc, a, c, b->label);
 +    }
 +    tcg_gen_extu_i32_tl(cpu_cc_src, cc);
 +    set_cc_op(s, CC_OP_EFLAGS);
@@ -1378,6 +1508,7 @@ index 0000000000..e3a35a8f8b
 +        tcg_gen_cvt_i32_f32(r, in);
 +        tcg_gen_st_i32(r, tcg_env, d + offsetof(ZMMReg, ZMM_L(0)));
 +    }
++    sses_dest(s, &decode->op[0], sses_view(s->prefix & PREFIX_REPNZ, true), true);
 +    x87s_free_tmps(s);
 +    return true;
 +}
@@ -1427,6 +1558,7 @@ index 0000000000..e3a35a8f8b
 +        }
 +    }
 +    tcg_gen_extu_i32_tl(s->T0, r);
++    s->sses_tracked = true;                     /* no xmm register written */
 +    x87s_free_tmps(s);
 +    return true;
 +}
@@ -1452,8 +1584,10 @@ index 0000000000..e3a35a8f8b
 +        TCGv_i64 t = x87s_tmp_i64(s);
 +
 +        tcg_gen_ld_i32(a, tcg_env, src + offsetof(ZMMReg, ZMM_L(0)));
-+        tcg_gen_brcondi_i32(TCG_COND_EQ, sses_nodenorm_32(s, NULL, a), 0,
-+                            b->label);
++        if (!sses_known(s, &decode->op[2], SSES_K_SS)) {
++            sses_denorm_br_32(s, a, b->label);
++            sses_mark(s, &decode->op[2], SSES_K_SS);
++        }
 +        tcg_gen_extu_i32_i64(a64, a);
 +        tcg_gen_cvt_f32_f64(r, a64);
 +        tcg_gen_shli_i64(t, r, 1);
@@ -1468,17 +1602,20 @@ index 0000000000..e3a35a8f8b
 +        TCGv_i32 ok;
 +
 +        tcg_gen_ld_i64(a, tcg_env, src + offsetof(ZMMReg, ZMM_Q(0)));
-+        tcg_gen_brcondi_i64(TCG_COND_EQ, sses_nodenorm_64(s, NULL, a), 0,
-+                            b->label);
++        if (!sses_known(s, &decode->op[2], SSES_K_SD)) {
++            sses_denorm_br_64(s, a, b->label);
++            sses_mark(s, &decode->op[2], SSES_K_SD);
++        }
 +        tcg_gen_cvt_f64_f32(r64, a);
 +        tcg_gen_extrl_i64_i32(r, r64);
 +        tcg_gen_shli_i64(z64, a, 1);            /* zero iff a is zero */
 +        tcg_gen_setcondi_i64(TCG_COND_NE, z64, z64, 0);
 +        tcg_gen_extrl_i64_i32(z, z64);
-+        ok = sses_check_32(s, NULL, r, z, true);
++        ok = sses_check_32(s, NULL, r, z, true, b->label);
 +        tcg_gen_brcondi_i32(TCG_COND_EQ, ok, 0, b->label);
 +        tcg_gen_st_i32(r, tcg_env, d + offsetof(ZMMReg, ZMM_L(0)));
 +    }
++    sses_dest(s, &decode->op[0], to_double ? SSES_K_SD : SSES_K_SS, true);
 +    x87s_free_tmps(s);
 +    return true;
 +}
@@ -1498,7 +1635,7 @@ index 18ad6d235b..cf05c34232 100644
          cs_base = 0;
          pc = env->eip;
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 1eac0ab072..5b3d7033dd 100644
+index 1eac0ab072..5b54e1e263 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
 @@ -101,6 +101,11 @@ typedef struct X87SlowBlock {
@@ -1513,7 +1650,7 @@ index 1eac0ab072..5b3d7033dd 100644
  } X87SlowBlock;
  #define X87S_MAX_SLOW 96
  #define X87S_MAX_TMPS 96
-@@ -168,6 +173,11 @@ typedef struct DisasContext {
+@@ -168,6 +173,13 @@ typedef struct DisasContext {
      TCGv_i64 x87s_t64;
      int x87_fdp_seg;
  
@@ -1521,11 +1658,13 @@ index 1eac0ab072..5b3d7033dd 100644
 +    bool sses_on;               /* TB translated with TB_FLAG_SSE_FAST */
 +    bool sses_guarded;          /* runtime guard emitted */
 +    bool sses_pending;          /* hand-over check due at the end of the insn */
++    bool sses_tracked;          /* the insn updated sses_clean itself */
++    uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
 +
      /* TCG local temps */
      TCGv cc_srcT;
      TCGv A0;
-@@ -295,6 +305,7 @@ static void x87s_flush_code(DisasContext *s);
+@@ -295,6 +307,7 @@ static void x87s_flush_code(DisasContext *s);
  static void x87s_boundary(DisasContext *s);
  static void x87s_emit_slow_blocks(DisasContext *s);
  static void gen_x87_fip_fdp(DisasContext *s);
@@ -1533,7 +1672,7 @@ index 1eac0ab072..5b3d7033dd 100644
  static void gen_jmp_rel_csize(DisasContext *s, int diff, int tb_num);
  static void gen_exception_gpf(DisasContext *s);
  
-@@ -2196,8 +2207,27 @@ static void gen_sty_env_A0(DisasContext *s, int offset, bool align)
+@@ -2196,8 +2209,28 @@ static void gen_sty_env_A0(DisasContext *s, int offset, bool align)
      tcg_gen_qemu_st_i128(t, a0_hi, mem_index, mop);
  }
  
@@ -1550,6 +1689,7 @@ index 1eac0ab072..5b3d7033dd 100644
 +static void sses_helper_done(DisasContext *s);
 +static void sses_emit_pending(DisasContext *s);
 +static void sses_end_tb(DisasContext *s);
++static void sses_track(DisasContext *s, X86DecodedInsn *decode);
 +enum {
 +    SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
 +    SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
@@ -1561,7 +1701,7 @@ index 1eac0ab072..5b3d7033dd 100644
  
  static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
  {
-@@ -3566,6 +3596,10 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3566,6 +3599,12 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      dc->x87s_ntmps = 0;
      x87s_reset(dc);
      dc->x87_fdp_addr = NULL;
@@ -1569,6 +1709,8 @@ index 1eac0ab072..5b3d7033dd 100644
 +        && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
 +    dc->sses_guarded = false;
 +    dc->sses_pending = false;
++    dc->sses_tracked = false;
++    memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
      if (dc->x87s_on) {
          dc->x87s_t32 = tcg_temp_new_i32();
          dc->x87s_t64 = tcg_temp_new_i64();

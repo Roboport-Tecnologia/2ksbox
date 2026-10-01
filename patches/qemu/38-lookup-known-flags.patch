@@ -36,10 +36,10 @@ unchanged, scripts/test.sh all 57/57.
 Behind inline-lookup, like the function it changes.
 
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 91dae81675..ddf2a6ea54 100644
+index 5da03d8661..60b381f648 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -2219,7 +2219,6 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2221,7 +2221,6 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
  #else
      TCGv_i32 flags = tcg_temp_new_i32();
      TCGv_i32 t = tcg_temp_new_i32();
@@ -47,7 +47,7 @@ index 91dae81675..ddf2a6ea54 100644
      TCGv_i64 pc = tcg_temp_new_i64();
      TCGv_i64 cs_base = tcg_temp_new_i64();
  
-@@ -2227,34 +2226,30 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2229,34 +2228,30 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
      tcg_gen_ld_i32(t, tcg_env, offsetof(CPUX86State, eflags));
      tcg_gen_andi_i32(t, t, IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK);
      tcg_gen_or_i32(flags, flags, t);

@@ -83,10 +83,10 @@ index 8e77ca5ac0..1720e7f51d 100644
                                     tcg_get_one_insn_per_tb,
                                     tcg_set_one_insn_per_tb);
 diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
-index 3da2c452d4..3b65b6a310 100644
+index 80411015de..dc3f10f191 100644
 --- a/target/i386/tcg/sse-fast.c.inc
 +++ b/target/i386/tcg/sse-fast.c.inc
-@@ -138,6 +138,7 @@ static void sses_end_tb(DisasContext *s)
+@@ -136,6 +136,7 @@ static void sses_end_tb(DisasContext *s)
  {
      if (tcg_f64_supported()) {
          s->base.is_jmp = DISAS_EOB_NEXT;
@@ -95,7 +95,7 @@ index 3da2c452d4..3b65b6a310 100644
  }
  
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index ddf2a6ea54..2065927e7c 100644
+index 60b381f648..2887bf829d 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
 @@ -168,6 +168,7 @@ typedef struct DisasContext {
@@ -106,7 +106,7 @@ index ddf2a6ea54..2065927e7c 100644
      bool x87s_prec24;           /* mode 2: PC=24, shadows hold 24-bit values */
      bool x87s_guarded;          /* runtime mode guard emitted */
      TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
-@@ -205,6 +206,9 @@ typedef struct DisasContext {
+@@ -207,6 +208,9 @@ typedef struct DisasContext {
   * Point EIP to next instruction before ending translation.
   * For instructions that can change hflags.
   */
@@ -116,7 +116,7 @@ index ddf2a6ea54..2065927e7c 100644
  #define DISAS_EOB_NEXT         DISAS_TARGET_0
  
  /*
-@@ -2240,7 +2244,40 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2242,7 +2246,40 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
       * the eflags bits stay loaded: RF, TF and the interrupt shadow are
       * what gen_eob left them, and a far jump's helper may change CS.
       */
@@ -158,7 +158,7 @@ index ddf2a6ea54..2065927e7c 100644
          uint32_t known = s->flags & (TB_FLAG_X87_MODE_MASK | TB_FLAG_SSE_FAST_MASK);
  
          if ((s->flags & TB_FLAG_X87_PE_MASK) && s->x87s_pe_sticky) {
-@@ -2281,14 +2318,44 @@ gen_eob(DisasContext *s, int mode)
+@@ -2283,14 +2320,44 @@ gen_eob(DisasContext *s, int mode)
          gen_reset_eflags(s, RF_MASK);
      }
      if (mode == DISAS_EOB_RECHECK_TF) {
@@ -205,7 +205,7 @@ index ddf2a6ea54..2065927e7c 100644
      } else {
          tcg_gen_exit_tb(NULL, 0);
      }
-@@ -2542,6 +2609,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+@@ -2545,6 +2612,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
       */
      if (tcg_f64_supported() && gen_x87s_ends_tb(op, mod, rm)) {
          s->base.is_jmp = DISAS_EOB_NEXT;
@@ -213,7 +213,7 @@ index ddf2a6ea54..2065927e7c 100644
      }
  
      if (mod != 3) {
-@@ -3869,6 +3937,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3872,6 +3940,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
          && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
      dc->x87s_prec24 = dc->x87s_mode == 2;
      dc->x87s_pe_sticky = dc->x87s_on && (flags & TB_FLAG_X87_PE_MASK);

@@ -600,7 +600,7 @@ index 7c42c57cca..535685597a 100644
       * the code of this one. This can be done either by emitting direct or
       * indirect native jump instructions. These jumps are reset so that the TB
 diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
-index ad6ce28d18..dc9f9d7f1b 100644
+index 8f854d20e4..3be415620e 100644
 --- a/target/i386/tcg/decode-new.c.inc
 +++ b/target/i386/tcg/decode-new.c.inc
 @@ -2032,6 +2032,10 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
@@ -816,7 +816,7 @@ index 236ced8fca..bae6bec8cc 100644
 +           gen == gen_XOR || gen == gen_MOV || gen == gen_IMUL3;
 +}
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index d8c591aacf..e91524e6e6 100644
+index abda72163f..a1bbb30346 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
 @@ -25,6 +25,7 @@
@@ -841,7 +841,7 @@ index d8c591aacf..e91524e6e6 100644
      target_ulong pc;       /* pc = eip + cs_base */
      target_ulong cs_base;  /* base of CS segment */
      target_ulong pc_save;
-@@ -1750,9 +1758,90 @@ static TCGv gen_shiftd_rm_T1(DisasContext *s, MemOp ot,
+@@ -1752,9 +1760,90 @@ static TCGv gen_shiftd_rm_T1(DisasContext *s, MemOp ot,
  }
  
  /* Compute the address, with a minimum number of TCG ops.  */
@@ -932,7 +932,7 @@ index d8c591aacf..e91524e6e6 100644
  
      if (a.index >= 0 && !is_vsib) {
          if (a.scale == 0) {
-@@ -1772,10 +1861,16 @@ static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
+@@ -1774,10 +1863,16 @@ static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
          if (tb_cflags(s->base.tb) & CF_PCREL && a.base == -2) {
              /* With cpu_eip ~= pc_save, the expression is pc-relative. */
              tcg_gen_addi_tl(s->A0, cpu_eip, a.disp - s->pc_save);
@@ -949,7 +949,7 @@ index d8c591aacf..e91524e6e6 100644
      } else if (a.disp != 0) {
          tcg_gen_addi_tl(s->A0, ea, a.disp);
          ea = s->A0;
-@@ -3703,6 +3798,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3706,6 +3801,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      dc->cs_base = dc->base.tb->cs_base;
      dc->pc_save = dc->base.pc_next;
      dc->flags = flags;

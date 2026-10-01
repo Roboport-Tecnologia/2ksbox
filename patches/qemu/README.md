@@ -190,7 +190,7 @@ fmul/fdiv/fsqrt_vec`, `fmin/fmax_vec`, `fcmp_vec`, which map straight to
 overflow, underflow and divide-by-zero take the helper out of line, and
 `ldmxcsr`/`fxrstor`/`xrstor` end the TB. Packed 7.5–12×, scalar 3.4–3.9×.
 **Switch:** `sse-fast`. **Test:** `tools/sse-guest-test.py` (546,425
-lines identical on/off). **Drop:** upstream float ops in TCG. **On 11.1:** a denormal operand sends the instruction to its slow block, since 10.1's softfloat raises DE on one (`57df511180`; the SSE battery's MXCSR caught it); the scalar ops are `TCGOutOp` descriptors as in 06, the vector ones stay on the vector path; `float_exception_flags` is a bit-field since 11.1, read as the struct's first 16 bits.
+lines identical on/off). **Drop:** upstream float ops in TCG. **On 11.1:** a denormal operand sends the instruction to its slow block, since 10.1's softfloat raises DE on one (`57df511180`; the SSE battery's MXCSR caught it), checked only for registers not already known clean in the TB, and the checks use signed compares (doc 16), which keeps the SSE bench at 9.2's times; the scalar ops are `TCGOutOp` descriptors as in 06, the vector ones stay on the vector path; `float_exception_flags` is a bit-field since 11.1, read as the struct's first 16 bits.
 
 ### 12-simd-inline-tcg
 MMX and SSE integer and permutation instructions inline (doc 16):

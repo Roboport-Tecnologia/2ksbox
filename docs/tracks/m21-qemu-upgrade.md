@@ -422,7 +422,12 @@ noise doc 22 gives is a stop: find it before the next group.
   now sends an instruction with a denormal operand to its slow block (the
   helper raises DE exactly); rcp/rsqrt (whose helpers restore the flags)
   and the int32 conversions (no DE, as on the hardware) need no check.
-  The SSE battery caught it (MXCSR 1fa2 against 1fa0). 06's inline FXCH
+  The SSE battery caught it (MXCSR 1fa2 against 1fa0). The checks first
+  cost the whole SSE bench regression (packed 0.27 to 0.49 s, scalar 0.38
+  to 0.60 s, clamp+cmp 0.27 to 0.38 s); they are now skipped for
+  registers already known clean in the TB, and every vector check uses
+  signed compares (doc 16), which brought all three back to 9.2's times
+  on the Ryzen. 06's inline FXCH
   and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. 11.1 made
   `float_status.float_exception_flags` a 16-bit bit-field (`8c86fe2451`),
   so the TCG loads of it read the struct's first 16 bits, little-endian
