@@ -440,6 +440,36 @@ noise doc 22 gives is a stop: find it before the next group.
   `accel/tcg/cpu-ops.h` and its page-walk record in
   `target/i386/tcg/system/excp_helper.c`.
 
+#### The game A/Bs (2026-10-01, Ryzen 7 5700X, base98-br)
+
+Both trees on the same machine, one guest at a time, each tree's own
+harness (`m21-base` worktree at main, QEMU 9.2.4).
+
+| workload | 9.2 | 11.1 | |
+|---|---|---|---|
+| 3DMark 99, 3DMarks | 6015 | 6016 | vertical blank on: game tests at the 60 Hz cap on both |
+| 3DMark 99, CPU 3DMarks | 16423 | 15954 | -2.9 %, one run each |
+| Blood e1m1, fps (5-95 s) | 124.3, 122.0, 123.0 (123.1) | 121.1, 115.4, 120.6 (119.0) | -3.3 % |
+| Moto Racer, race fps | 60.0 | 60.0 | at the cap on both |
+| SSE bench packed/scalar/MMX/clamp, s | 0.27/0.38/0.66/0.27 | 0.27/0.38/0.66/0.27 | after the DE-check fix |
+
+- The first 11.1 3DMark run segfaulted in patch 18's same-value compare
+  on an MMIO page (fixed, README row 18); the next boot of that raw
+  copy came up in safe mode, which is the crash's dirty disk, not 11.1.
+  One of four Blood runs on 11.1 sat at "Using Setup file" with 3dfx's
+  "no Voodoo^2" dialog on the desktop (the image's Glide helper; neither
+  harness adds the card); the other three played, and whether 9.2 ever
+  does this is not known (three runs, all played).
+- The ~3 % is self-modifying-code work: in Blood
+  `tb_invalidate_phys_range_fast` (the TB-list walks of patches 15/24)
+  is 29.4 % of QEMU on 11.1 against 24.7 % on 9.2, the time in the walk's
+  `tb->size` load, and `info jit` 30 s into the level holds 28,747 TBs
+  on 11.1 against 18,268 (invalidations 582k against 571k): longer page
+  lists. Why 11.1 keeps more TBs is open (duplicate translations under a
+  flag that differs, or blocks no longer freed).
+- `tools/w98-blood-fps.py` reads 11.1's trace lines too (no `pid@epoch:`
+  prefix; the `-msg timestamp=on` time instead).
+
 ### 4. The other platforms
 
 The macOS build on the Air (both the App Store and community builds, and

@@ -18,9 +18,16 @@ log = open(os.path.join(run, "..", os.path.basename(run) + ".run.log"), errors="
 m = re.search(r"t\+0 = (\d\d):(\d\d):(\d\d) UTC", log)
 writes = []
 for l in open(os.path.join(run, "qemu.log"), errors="replace"):
+    # QEMU 9.2's log backend: "pid@epoch:event"; 11.1 drops that prefix
+    # and -msg timestamp=on puts the ISO time in front instead
     t = re.match(r"\d+@(\d+\.\d+):vga_vbe_write index 0x9,", l)
     if t:
         writes.append(float(t.group(1)))
+        continue
+    t = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+)Z vga_vbe_write index 0x9,", l)
+    if t:
+        writes.append(datetime.datetime.fromisoformat(t.group(1))
+                      .replace(tzinfo=datetime.timezone.utc).timestamp())
 if not writes:
     sys.exit("no vga_vbe_write index 9 in qemu.log (was -trace vga_vbe_write on?)")
 day = datetime.datetime.fromtimestamp(writes[0], datetime.timezone.utc).date()

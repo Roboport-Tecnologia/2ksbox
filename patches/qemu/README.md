@@ -270,7 +270,9 @@ Era software renderers patch their span loops' immediates per span, and
 94 % of Moto Racer's ~700,000 code-page stores a second rewrote the value
 already there; its race went 7.3 → 21.7 fps. **Switch:**
 `smc-same-value`. **Test:** `tools/smc-guest-test.py`. **Drop:** upstream
-takes it (worth sending).
+takes it (worth sending). **On 11.1:** a not-dirty store can land on an
+MMIO page, whose `haddr` is no host pointer, so the comparison refuses
+`TLB_MMIO` pages (a Win98 boot segfaulted in it once in three).
 
 ### 19-tls-hot-paths
 Thread-local reads off the TCG hot paths, which on macOS are calls into

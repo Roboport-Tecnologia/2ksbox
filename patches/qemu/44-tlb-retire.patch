@@ -47,7 +47,7 @@ install (the same VGA reset) both showed it; a mode change that leaves
 the window alone did not.
 
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 2985a7ec0d..fa4aebb7ae 100644
+index db56eb792d..d3fbd10116 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
 @@ -271,6 +271,7 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,

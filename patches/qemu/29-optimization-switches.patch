@@ -52,7 +52,7 @@ tlb-floor=off,tls-hot-paths=off` to say the off branches are
 architecturally the same machine.
 
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 4f76f7b378..928456c327 100644
+index 980889a1d1..ef6fbbd94b 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
 @@ -47,6 +47,23 @@

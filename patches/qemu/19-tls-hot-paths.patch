@@ -34,7 +34,7 @@ index b2f4c80b55..bad5ce00fe 100644
          start_exclusive();
          g_assert(cpu == current_cpu);
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 4529701e91..4f76f7b378 100644
+index 084515b806..980889a1d1 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
 @@ -1351,8 +1351,19 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
