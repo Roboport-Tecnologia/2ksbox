@@ -315,9 +315,9 @@ fn MachineRow(dir: PathBuf) -> impl View {
     let dir = Rc::new(dir);
     let (d1, d2) = (dir.clone(), dir);
     view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Sm gap=Spacing::Md align=Align::Center>
+        <Row padding_x=Spacing::Lg padding_y=Spacing::Md gap=Spacing::Md align=Align::Center>
             <Icon name=icons::MACHINE icon_size=32.0/>
-            <Column min_width=0 grow=1.0>
+            <Column min_width=0 grow=1.0 gap=Spacing::Xs>
                 <Text text_style=TextStyle::Headline max_lines=1>
                     {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
                 </Text>
