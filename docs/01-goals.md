@@ -6,6 +6,14 @@ the decisions doc 10.
 
 ## Vision
 
+A virtual machine manager for Linux, Windows and macOS that runs current
+systems (Windows 11 first, track M20) and is best at vintage ones
+(ADR-024). Modern guests get the same launcher, snapshots and player as
+vintage ones, and run under hardware virtualization: KVM, WHPX, or on
+Apple Silicon an ARM64 guest under Hypervisor.framework. The rest of
+this doc is about the vintage boxes, which is where the original work
+is.
+
 A Windows 98 or XP machine that behaves like the real thing around
 1998 to 2005. Games install from your own disc dumps, copy protection
 included. Direct3D and Glide titles run accelerated. The picture looks
@@ -41,9 +49,6 @@ rectangle in a window.
 - **Cycle-accurate hardware.** 86Box and PCem do that. We target a fast
   machine of the era. The one concession: a DOS machine's processor is
   throttled to a calibrated instruction rate (doc 06).
-- **Modern guests.** Win9x/Me, 2000/XP, DOS and period alternatives
-  (BeOS, a period Linux, OS/2) only. Not a general-purpose VM manager
-  competing with virt-manager or UTM.
 - **Bypassing DRM.** No-CD patches, key generators and activation
   workarounds are out of scope. Users supply their own media, licences
   and dumps.

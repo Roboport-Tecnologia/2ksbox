@@ -5,7 +5,9 @@ and other era OSes) as "native vintage boxes": a patched QEMU (qemu-3dfx
 for 3D) **in-process** in a Rust player with a CRT shader chain, a Qt
 launcher over a shared Rust library, and our own devices and guest
 drivers for Direct3D, CD-ROM and music, and an emulated Voodoo 2 for
-Glide.
+Glide. Since ADR-024 it is also a general-purpose VM manager: modern
+guests (Windows 11 first, track M20) run under hardware virtualization,
+on Apple Silicon as ARM64 under HVF.
 
 ## Start here
 
