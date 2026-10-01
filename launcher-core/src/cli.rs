@@ -60,6 +60,22 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let machine = Machine::load(Path::new(&path)).expect("load bundle");
             println!("{}", machine.qemu_args(&player::pc_bios_dir(), None).join(" "));
         }
+        "--machine-details" => {
+            // What the machine window shows of a selected machine: the
+            // line under its name, then each group and its rows, as
+            // `<group>\t<label>\t<value>`. The machine is found in the
+            // library (`LAUNCHER_LIBRARY_DIR`), as the window finds it.
+            let path = args.next().expect("usage: --machine-details <machine.toml>");
+            let dir = Path::new(&path).parent().expect("a bundle in a directory").to_path_buf();
+            let library = machines::Machines::load();
+            let row = library.entries().iter().position(|e| e.dir == dir).expect("a machine in the library");
+            println!("{}", library.subtitle(row));
+            for group in library.details(row) {
+                for (label, value) in group.rows {
+                    println!("{}\t{label}\t{value}", group.title);
+                }
+            }
+        }
         "--print-shader-args" => {
             let path = args.next().expect("usage: --print-shader-args <machine.toml>");
             let machine = Machine::load(Path::new(&path)).expect("load bundle");

@@ -334,6 +334,31 @@ shelforder_check() { # the disc shelf is in order by label, all the way to the g
   [ "$o" = "Age of Empires" ] || { echo "a disc added later did not land in order (first row: $o)"; rc=1; }
   return $rc
 }
+machinedetails_check() { # what the machine window shows of a chosen machine (doc 07)
+  local rc=0 dir="$OUT/machinedetails" xp dos o groups
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  : >"$dir/xp.qcow2"; : >"$dir/dos.qcow2"
+  xp="$(target/release/launcherx --new xp "XP box" "$dir/xp.qcow2")" || { echo "--new xp failed"; return 1; }
+  dos="$(target/release/launcherx --new dos "DOS box" "$dir/dos.qcow2")" || { echo "--new dos failed"; return 1; }
+  o="$(target/release/launcherx --machine-details "$xp" 2>&1)" || { echo "--machine-details failed: $o"; return 1; }
+  # The line under the name, then a group per page of the form, in its
+  # order, with the form's own labels.
+  [ "$(head -1 <<<"$o")" = "XP · Stopped" ] || { echo "xp subtitle: $(head -1 <<<"$o")"; rc=1; }
+  groups="$(tail -n +2 <<<"$o" | cut -f1 | uniq | tr '\n' ' ')"
+  [ "$groups" = "System Display Audio Input Network Storage " ] || { echo "xp groups: $groups"; rc=1; }
+  grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }
+  grep -qx $'Storage\tHard disk\txp.qcow2' <<<"$o" || { echo "xp's disk is not its file name"; rc=1; }
+  grep -qx $'Storage\tCD at boot\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }
+  # No Direct3D on a machine without our adapter, as the form hides it.
+  o="$(target/release/launcherx --machine-details "$dos" 2>&1)" || { echo "--machine-details dos failed: $o"; return 1; }
+  [ "$(head -1 <<<"$o")" = "DOS · Stopped" ] || { echo "dos subtitle: $(head -1 <<<"$o")"; rc=1; }
+  grep -q $'\tDirect3D\t' <<<"$o" && { echo "dos shows a Direct3D row"; rc=1; }
+  grep -qx $'System\tMemory\t64 MB' <<<"$o" || { echo "dos memory: $(grep Memory <<<"$o")"; rc=1; }
+  return $rc
+}
+
 clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   local rc=0 dir="$OUT/clone" img=build/qemu/qemu-img io=build/qemu/qemu-io
   local bundle disk copy copy_disk o args outside twin sock qpid i
@@ -2385,7 +2410,11 @@ host_stage() {
   if [ -x target/release/launcherx ]; then
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true
-  else skip dirshelf "needs target/release/launcherx"; skip shelforder "needs target/release/launcherx"; fi
+    run_check machine-details machine-details.log machinedetails_check || true
+  else
+    skip dirshelf "needs target/release/launcherx"; skip shelforder "needs target/release/launcherx"
+    skip machine-details "needs target/release/launcherx"
+  fi
   if [ -x target/release/launcherx ] && [ -x build/qemu/qemu-img ] && [ -x build/qemu/qemu-io ]; then
     run_check clone clone.log clone_check || true
   else skip clone "needs target/release/launcherx, build/qemu/qemu-img and qemu-io"; fi

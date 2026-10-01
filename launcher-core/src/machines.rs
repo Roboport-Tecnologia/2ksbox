@@ -13,7 +13,8 @@
 //! which is how every other window finds it again (doc 07, "How the
 //! launcher reaches a running machine").
 
-use crate::bundle::Machine;
+use crate::bundle::{self, D3d9, Machine, Music, Video};
+use crate::wizard::Section;
 use crate::{control, disc_library, library, player, shader_library};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -115,6 +116,22 @@ impl Machines {
         self.entries.get(row).map(|e| self.shader_label(e)).unwrap_or_default()
     }
 
+    /// The line under a machine's name in the list: its family, and
+    /// whether it is running.
+    pub fn subtitle(&self, row: usize) -> String {
+        let Some(machine) = self.machine(row) else { return String::new() };
+        let state = if self.is_running(row) { "Running" } else { "Stopped" };
+        format!("{} · {state}", machine.family.label())
+    }
+
+    /// What the window shows of the selected machine, a group per page
+    /// of the machine form, in its order. Only what the form would show
+    /// for this family: no Direct3D row on a machine without our adapter.
+    pub fn details(&self, row: usize) -> Vec<DetailGroup> {
+        let Some(entry) = self.entries.get(row) else { return Vec::new() };
+        details(&entry.machine, self.shader_label(entry))
+    }
+
     pub fn is_running(&self, row: usize) -> bool {
         self.entries.get(row).map(|e| self.running.contains_key(&e.dir)).unwrap_or(false)
     }
@@ -184,6 +201,73 @@ impl Machines {
             publish_shelf(&self.disc_library_path, &control::shelf_path(dir));
         }
     }
+}
+
+/// One group of a machine's details: a page of the machine form, and its
+/// settings as label and value.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DetailGroup {
+    pub title: &'static str,
+    pub rows: Vec<(&'static str, String)>,
+}
+
+/// A machine's details, with the shader column's label for it. The
+/// labels are the machine form's, so a row reads as the field it came
+/// from; a path shows its file name.
+pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
+    let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
+    let file = |path: Option<&PathBuf>| match path {
+        Some(p) => p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned()),
+        None => "Empty".to_owned(),
+    };
+    let video = machine.effective_video();
+    let mut display = Vec::new();
+    if let Some(video) = video {
+        display.push(("Display adapter", video.label().to_owned()));
+    }
+    if video == Some(Video::D3dpt) {
+        display.push(("Direct3D", machine.d3d9.unwrap_or(D3d9::Auto).label().to_owned()));
+    }
+    let voodoo = match (machine.voodoo2, machine.voodoo2_undither) {
+        (true, true) => "On, with the Voodoo3 undither filter".to_owned(),
+        (on, _) => on_off(on),
+    };
+    display.push(("3dfx Voodoo 2", voodoo));
+    display.push(("Shader profile", shader));
+    let mut audio = vec![("Sound card", machine.effective_sound().label().to_owned())];
+    let music = machine.effective_music();
+    audio.push(("Music (MIDI)", music.label().to_owned()));
+    if music == Music::Gm && machine.soundfont.is_some() {
+        audio.push(("SoundFont", file(machine.soundfont.as_ref())));
+    }
+    let mut input = Vec::new();
+    if bundle::pad_choices(machine.family).len() > 1 {
+        input.push(("Gamepad", machine.effective_pad().label().to_owned()));
+    }
+    input.push(("Seamless mouse", on_off(machine.seamless_mouse)));
+    vec![
+        DetailGroup {
+            title: Section::System.label(),
+            rows: vec![
+                ("Memory", format!("{} MB", machine.ram_mb)),
+                ("Processor", machine.effective_cpu_speed().label().to_owned()),
+                ("Acceleration", machine.effective_accel().label().to_owned()),
+            ],
+        },
+        DetailGroup { title: Section::Display.label(), rows: display },
+        DetailGroup { title: Section::Audio.label(), rows: audio },
+        DetailGroup { title: Section::Input.label(), rows: input },
+        DetailGroup { title: Section::Network.label(), rows: vec![("Networking", on_off(machine.network))] },
+        DetailGroup {
+            title: Section::Storage.label(),
+            rows: vec![
+                ("Hard disk", file(Some(&machine.disk))),
+                ("CD at boot", file(machine.boot_disc())),
+                ("Floppy", file(machine.floppy.as_ref())),
+                ("Boot from", machine.effective_boot().label().to_owned()),
+            ],
+        },
+    ]
 }
 
 /// Write the shared shelf out in the flat form a machine's ATAPI drive

@@ -61,6 +61,7 @@ the window and what it opens on:
 | `LAUNCHER_SCREEN` | Shows |
 |---|---|
 | (unset) | the machine window |
+| `select:<machine.toml>` | the machine window with that machine chosen, as a click on its row |
 | `wizard[:<family>[:<page>[:open]]]` | a fresh form, on `win98` / `xp` / `dos` / `other` and a page by its sidebar index; `:open` opens the optimizations list |
 | `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
 | `clone:<machine.toml>[:same]` | the clone dialog on a machine, or sharing its disk |
@@ -84,6 +85,20 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    state, the 500 ms reap. Written with `view!`, `#[component]` and a
    `Store` (user: the easy macros). The buttons for windows not ported
    yet are there, disabled.
+   **Reworked 2026-10-01 (user: "more like UTM / VirtualBox"):** a
+   platform list of machines down the leading side (an icon, the name,
+   and the core's `subtitle`, "XP · Stopped"), selection by bundle
+   directory with the first machine chosen until one is, and beside it a
+   details pane: the name, Start as the window's default button, the
+   per-machine windows, and the core's `details`, one `Group` per page of
+   the form, rebuilt per group by a keyed `For`. Activating a row starts
+   its machine. The toolbar keeps New machine…, Disc shelf…, Shader
+   profiles… (with platform icons) and the status line; an empty library
+   is a title, its folder and New machine…. `Sidebar` was not used: its
+   items are fixed when it is built and have no second line. Checked
+   headless on GTK and KDE with three machines (`select:` on the XP one
+   shows its Direct3D row; DOS has none). On KDE Breeze's scroll bar is
+   drawn over the details' right edge, as mitsuami leaves it no room.
 2. **The machine form (done 2026-09-27).** `src/wizard.rs`: one
    `Signal<Form>` in a `Wizard` store; every control reads it and every
    edit is `Form`'s own method, so what a field does to the ones under it

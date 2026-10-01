@@ -46,6 +46,18 @@ player line runs a machine with nothing else.
   spawns a player. "Running" is the launcher's own child *or* a
   listening monitor socket, so a player started by `--play` counts too.
   The launcher only observes (`try_wait`); a spawned player outlives it.
+- **On mitsuami the library is a list beside the chosen machine's
+  details**, as UTM and VirtualBox lay theirs out (user, 2026-10-01).
+  The machines run down the leading side, each with its name and
+  `Machines::subtitle` (family and state); double-click or Return starts
+  one. Beside them: the chosen machine's name, Start and its windows
+  (Settings…, Discs…, Snapshots…, Clone…), then its settings in a group
+  per page of the form (`Machines::details`, `launcherx
+  --machine-details`). The details show only what the form shows for
+  that family (no Direct3D row without our adapter), and a path shows
+  its file name. The toolbar keeps what is not about one machine: New
+  machine…, Disc shelf…, Shader profiles… and the status line. The Qt
+  window keeps its grid until the flip.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Play is logged with the line it ran**, quoted to paste back

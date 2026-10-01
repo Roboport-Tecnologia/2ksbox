@@ -1,5 +1,5 @@
 //! The machine library window, over `launcher_core::machines::Machines`:
-//! the scan, the running-player map, what "Play" does (publish the shelf,
+//! the scan, the running-player map, what "Start" does (publish the shelf,
 //! derive the monitor socket from the bundle directory, spawn) and the
 //! reap that notices a player exiting.
 //!
@@ -13,7 +13,8 @@
 //! The list is keyed by bundle directory, and a keyed row stays mounted
 //! while its key does, so a row reads its fields through the model by
 //! that key rather than holding a copy: a player exiting changes only its
-//! row's "Running" label.
+//! row's state line. Beside the list, the chosen machine's details (the
+//! core's `details`), as UTM and VirtualBox show theirs.
 
 use crate::clone::{CloneWindow, Cloner};
 use crate::firstrun::Offer;
@@ -21,26 +22,28 @@ use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
 use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
-use launcher_core::machines::Machines;
+use launcher_core::machines::{DetailGroup, Machines};
 use mitsuami::prelude::*;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-/// The widths of the three text columns, shared by the header and every
-/// row so they line up.
-const NAME_W: f32 = 190.0;
-const FAMILY_W: f32 = 80.0;
-const SHADER_W: f32 = 170.0;
+/// The machine list's width, beside the details.
+const LIST_W: f32 = 260.0;
+/// The details' label column.
+const LABEL_W: f32 = 150.0;
 
 #[derive(Clone, Copy)]
 pub struct Library {
     /// Never set: a `Copy` handle on the model, so the store is `Copy`.
     model: Signal<Rc<RefCell<Machines>>>,
     version: Signal<u64>,
-    /// The line at the end of the toolbar: what "Play" last did.
+    /// The line at the end of the toolbar: what "Start" last did.
     pub status: Signal<String>,
+    /// The list's selection, by bundle directory; `current` is what the
+    /// details show.
+    selected: Signal<Vec<PathBuf>>,
 }
 
 impl Store for Library {
@@ -49,6 +52,7 @@ impl Store for Library {
             model: signal(Rc::new(RefCell::new(Machines::load()))),
             version: signal(0),
             status: signal(String::new()),
+            selected: signal(Vec::new()),
         }
     }
 }
@@ -99,6 +103,19 @@ impl Library {
         self.read(|m| row_of(m, dir).and_then(|row| f(m, row)).unwrap_or_default())
     }
 
+    /// The machine the details show: the selected one, or the first while
+    /// none is (at start, or after the selected one went).
+    fn current(&self) -> Option<PathBuf> {
+        let dirs = self.dirs();
+        let chosen = self.selected.with(|s| s.first().cloned()).filter(|d| dirs.contains(d));
+        chosen.or_else(|| dirs.first().cloned())
+    }
+
+    /// A machine's details, by its bundle directory.
+    fn details(&self, dir: &Path) -> Vec<DetailGroup> {
+        self.read(|m| row_of(m, dir).map(|row| m.details(row)).unwrap_or_default())
+    }
+
     fn is_running(&self, dir: &Path) -> bool {
         self.read(|m| m.is_running_dir(dir))
     }
@@ -140,7 +157,7 @@ pub fn MachinesWindow() -> impl View {
     let offer = use_store::<Offer>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm(&["", "create", "clonego", "firstrun"]);
+    crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
     // The first-run offer asks on a real start, and on
     // `firstrun[:<answers>]` with scripted answers; every other headless
     // screen runs without it, as the Qt build's do.
@@ -214,8 +231,22 @@ pub fn MachinesWindow() -> impl View {
     if let Some(arg) = crate::shot::screen("create") {
         wizard.create_for_screen(&arg, library);
     }
+    // `select:<machine.toml>`: the window with that machine chosen, as a
+    // click on its row would.
+    if let Some(bundle) = crate::shot::screen("select") {
+        let dir = Path::new(&bundle).parent().map(Path::to_path_buf).unwrap_or_default();
+        library.selected.set(vec![dir]);
+    }
+    // The list shows what the details do: the first machine until one is
+    // chosen, and the first again when the chosen one goes.
+    effect(move || {
+        let shown: Vec<PathBuf> = library.current().into_iter().collect();
+        if library.selected.with_untracked(|s| *s != shown) {
+            library.selected.set(shown);
+        }
+    });
     view! {
-        <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
+        <Column grow=1.0 min_height=0>
             <Toolbar>
                 <Show when=move || offer.progress.get().is_some()>
                     <Row gap=Spacing::Sm align=Align::Center>
@@ -224,23 +255,17 @@ pub fn MachinesWindow() -> impl View {
                     </Row>
                 </Show>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
+                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New machine…"</Button>
+                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Disc shelf…"</Button>
+                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shader profiles…"</Button>
             </Toolbar>
-            <Text text_style=TextStyle::Title>"Machines"</Text>
-            <Row padding_x=Spacing::Md gap=Spacing::Md>
-                <Text text_style=TextStyle::Headline width=NAME_W>"Name"</Text>
-                <Text text_style=TextStyle::Headline width=FAMILY_W>"Family"</Text>
-                <Text text_style=TextStyle::Headline width=SHADER_W>"Shader"</Text>
-            </Row>
-            <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineList/> }>
-                <Column grow=1.0 align=Align::Center justify=Justify::Center>
-                    <Text>{move || library.read(|m| format!("No machines yet.\n{}", m.library_dir.display()))}</Text>
+            <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
+                <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
+                    <Text text_style=TextStyle::Title>"No machines yet"</Text>
+                    <Text color=Color::SecondaryLabel>{move || library.read(|m| m.library_dir.display().to_string())}</Text>
+                    <Button role=ButtonRole::Default @click=move || wizard.open_fresh()>"New machine…"</Button>
                 </Column>
             </Show>
-            <Row gap=Spacing::Sm>
-                <Button @click=move || wizard.open_fresh()>"New machine…"</Button>
-                <Button @click=move || discs.open_library(library)>"Disc shelf…"</Button>
-                <Button @click=move || shaders.open_list()>"Shader profiles…"</Button>
-            </Row>
             <WizardWindow/>
             <CloneWindow/>
             <SnapshotsWindow/>
@@ -251,73 +276,166 @@ pub fn MachinesWindow() -> impl View {
     }
 }
 
+/// The library: the machines down the leading side, and the chosen one's
+/// details beside them, as UTM and VirtualBox lay theirs out.
 #[component]
-fn MachineList() -> impl View {
+fn MachineLibrary() -> impl View {
     let library = use_store::<Library>();
     view! {
-        <List each=move || library.dirs() key=|d: &PathBuf| d.clone() grow=1.0 let:dir>
-            <MachineRow dir=dir/>
-        </List>
+        <Row grow=1.0 min_height=0>
+            <List
+                each=move || library.dirs()
+                key=|d: &PathBuf| d.clone()
+                selection_mode=SelectionMode::Single
+                selected=library.selected
+                list_style=ListStyle::Plain
+                width=LIST_W
+                shrink=0.0
+                @activate=move |dir: PathBuf| {
+                    if !library.is_running(&dir) {
+                        library.play(&dir);
+                    }
+                }
+                let:dir
+            >
+                <MachineRow dir=dir/>
+            </List>
+            <Separator orientation=Orientation::Vertical/>
+            <Show when=move || library.current().is_some()>
+                <Details/>
+            </Show>
+        </Row>
     }
 }
 
-/// One machine: its name, family and shader, and what can be done to it.
+/// One machine in the list: its name, and its family and state under it.
 #[component]
 fn MachineRow(dir: PathBuf) -> impl View {
+    let library = use_store::<Library>();
+    let dir = Rc::new(dir);
+    let (d1, d2) = (dir.clone(), dir);
+    view! {
+        <Row padding_x=Spacing::Md padding_y=Spacing::Sm gap=Spacing::Md align=Align::Center>
+            <Icon name=icons::MACHINE icon_size=32.0/>
+            <Column min_width=0 grow=1.0>
+                <Text text_style=TextStyle::Headline max_lines=1>
+                    {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
+                </Text>
+                <Text text_style=TextStyle::Caption color=Color::SecondaryLabel max_lines=1>
+                    {move || library.field(&d2, |m, row| Some(m.subtitle(row)))}
+                </Text>
+            </Column>
+        </Row>
+    }
+}
+
+/// The chosen machine: its name, what can be done to it, and its
+/// settings, a group per page of the machine form.
+#[component]
+fn Details() -> impl View {
     let library = use_store::<Library>();
     let wizard = use_store::<Wizard>();
     let cloner = use_store::<Cloner>();
     let snaps = use_store::<Snaps>();
     let discs = use_store::<Discs>();
-    let dir = Rc::new(dir);
-    let (d1, d2, d3, d4, d5, d6, d7, d8, d9) = (
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir,
-    );
+    let current = move || library.current().unwrap_or_default();
+    let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
+    let bundle = move || library.bundle_path(&current());
+    let running = move || library.is_running(&current());
     view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
-            <Text max_lines=1 width=NAME_W>
-                {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
-            </Text>
-            <Text max_lines=1 width=FAMILY_W>
-                {move || library.field(&d2, |m, row| m.machine(row).map(|x| x.family.label().to_string()))}
-            </Text>
-            <Text max_lines=1 width=SHADER_W grow=1.0>
-                {move || library.field(&d3, |m, row| Some(m.shader_label_at(row)))}
-            </Text>
-            <Show when=move || library.is_running(&d4) fallback=move || {
-                let dir = d5.clone();
-                view! { <Button width=60 @click=move || library.play(&dir)>"Play"</Button> }
-            }>
-                <Text width=60>"Running"</Text>
-            </Show>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d6) {
-                    wizard.open_edit(bundle);
-                }
-            }>"Edit…"</Button>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d9) {
-                    discs.open_for(bundle, library, library.is_running(&d9));
-                }
-            }>"Discs…"</Button>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d8) {
-                    snaps.open_for(&bundle, library.is_running(&d8));
-                }
-            }>"Snapshots…"</Button>
-            <Button enabled=move || !cloner.busy() @click=move || {
-                if let Some(bundle) = library.bundle_path(&d7) {
-                    cloner.open_for(&bundle, library.is_running(&d7));
-                }
-            }>"Clone…"</Button>
-        </Row>
+        <ScrollView grow=1.0 min_width=0>
+            <Column padding=Spacing::Xl gap=Spacing::Lg>
+                <Column gap=Spacing::Xs>
+                    <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
+                    <Text color=Color::SecondaryLabel>{field(|m, row| Some(m.subtitle(row)))}</Text>
+                </Column>
+                <Row gap=Spacing::Sm>
+                    <Button
+                        role=ButtonRole::Default
+                        icon=icons::START
+                        enabled=move || !running()
+                        @click=move || library.play(&current())
+                    >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
+                    <Button icon=icons::SETTINGS @click=move || {
+                        if let Some(bundle) = bundle() {
+                            wizard.open_edit(bundle);
+                        }
+                    }>"Settings…"</Button>
+                    <Button icon=icons::DISCS @click=move || {
+                        if let Some(bundle) = bundle() {
+                            discs.open_for(bundle, library, running());
+                        }
+                    }>"Discs…"</Button>
+                    <Button icon=icons::SNAPSHOTS @click=move || {
+                        if let Some(bundle) = bundle() {
+                            snaps.open_for(&bundle, running());
+                        }
+                    }>"Snapshots…"</Button>
+                    <Button icon=icons::CLONE enabled=move || !cloner.busy() @click=move || {
+                        if let Some(bundle) = bundle() {
+                            cloner.open_for(&bundle, running());
+                        }
+                    }>"Clone…"</Button>
+                </Row>
+                <For
+                    each=move || library.details(&current())
+                    key=|g: &DetailGroup| g.clone()
+                    let:group
+                >
+                    <DetailBox group=group/>
+                </For>
+            </Column>
+        </ScrollView>
     }
+}
+
+/// One page's settings, label and value a row each.
+#[component]
+fn DetailBox(group: DetailGroup) -> impl View {
+    let rows: Vec<_> = group
+        .rows
+        .into_iter()
+        .map(|(label, value)| {
+            view! {
+                <Row gap=Spacing::Md>
+                    <Text color=Color::SecondaryLabel width=LABEL_W shrink=0.0>{label}</Text>
+                    <Text grow=1.0 min_width=0>{value}</Text>
+                </Row>
+            }
+        })
+        .collect();
+    view! {
+        <Group title=group.title gap=Spacing::Sm>{rows}</Group>
+    }
+}
+
+/// The platform's own icons: an SF Symbol, a symbolic GTK theme icon, a
+/// Breeze icon, a Segoe Fluent Icons glyph.
+mod icons {
+    use mitsuami::prelude::platform;
+
+    pub const MACHINE: &str = platform! {
+        macos => "desktopcomputer", gtk => "computer-symbolic", kde => "computer", windows => "\u{E977}",
+    };
+    pub const NEW: &str = platform! {
+        macos => "plus", gtk => "list-add-symbolic", kde => "list-add", windows => "\u{E710}",
+    };
+    pub const START: &str = platform! {
+        macos => "play.fill", gtk => "media-playback-start-symbolic", kde => "media-playback-start", windows => "\u{E768}",
+    };
+    pub const SETTINGS: &str = platform! {
+        macos => "gearshape", gtk => "emblem-system-symbolic", kde => "configure", windows => "\u{E713}",
+    };
+    pub const DISCS: &str = platform! {
+        macos => "opticaldisc", gtk => "media-optical-symbolic", kde => "media-optical", windows => "\u{E958}",
+    };
+    pub const SNAPSHOTS: &str = platform! {
+        macos => "camera", gtk => "camera-photo-symbolic", kde => "camera-photo", windows => "\u{E722}",
+    };
+    pub const CLONE: &str = platform! {
+        macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
+    };
+    pub const SHADERS: &str = platform! {
+        macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+    };
 }
