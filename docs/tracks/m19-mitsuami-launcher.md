@@ -146,8 +146,15 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    - A text input's focus leaving: done in step 6 (`@blur`).
    - An elide mode: done in step 6 (mitsuami 4cdac37, `Truncation`).
 4. **Shader profiles and the editor with the live preview (done
-   2026-09-27).** `shaders.rs`: the profile list (default, edit, delete,
-   "No default", the preset collection's download row) and the editor
+   2026-09-27).** `shaders.rs`: the profile list (a `Table` since
+   2026-10-01, user: name, preset, a `Switch` for the default, Edit, and
+   a trash button, tooltip "Delete", that asks first in the platform's
+   alert, Cancel the default (the question is the core's
+   `shader_library::delete_question`); a row opens in the editor when
+   activated; checked by clicks through Broadway's page: the switch moved
+   the default, Cancel kept the file, Delete removed it; New profile and
+   No default in the window's toolbar; the preset collection's download
+   row) and the editor
    (name, preset, the parameters as box + slider + description, the
    preview image). The preview is the core's render path
    (`launcher_core::preview`) and its frame goes into an `Image` as

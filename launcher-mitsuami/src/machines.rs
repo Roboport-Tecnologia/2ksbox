@@ -411,7 +411,7 @@ fn DetailBox(group: DetailGroup) -> impl View {
 
 /// The platform's own icons: an SF Symbol, a symbolic GTK theme icon, a
 /// Breeze icon, a Segoe Fluent Icons glyph.
-mod icons {
+pub(crate) mod icons {
     use mitsuami::prelude::platform;
 
     pub const MACHINE: &str = platform! {
@@ -434,6 +434,9 @@ mod icons {
     };
     pub const CLONE: &str = platform! {
         macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
+    };
+    pub const TRASH: &str = platform! {
+        macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
     };
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",

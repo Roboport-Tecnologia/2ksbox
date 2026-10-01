@@ -207,6 +207,12 @@ pub fn find(dir: &Path, id: &str) -> Option<ShaderProfile> {
     ShaderProfile::load(&dir.join(format!("{id}.toml"))).ok()
 }
 
+/// What a front end asks before `delete`: a headline naming the profile,
+/// and the line under it.
+pub fn delete_question(name: &str) -> (String, &'static str) {
+    (format!("Delete the profile “{name}”?"), "This can't be undone.")
+}
+
 /// Delete a profile; if it was the library's default, the library has
 /// no default afterwards (`default_id` would say so anyway, but the
 /// file should not name a ghost).

@@ -14,7 +14,7 @@ use crate::path_field::PathField;
 use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PresetState, Presets};
 use launcher_core::preview::Preview;
 use launcher_core::shader_library::{self, ProfileEntry};
-use mitsuami::core::Ui;
+use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::mem::ManuallyDrop;
@@ -248,7 +248,7 @@ pub fn ShaderProfilesWindow() -> impl View {
     view! {
         <Window
             title="Shader profiles"
-            size=Size::new(660.0, 340.0)
+            size=Size::new(720.0, 340.0)
             min_size=Size::new(480.0, 240.0)
             modal=Modality::Application
             open=shaders.open
@@ -256,16 +256,10 @@ pub fn ShaderProfilesWindow() -> impl View {
         >
             <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
                 {crate::shot::arm(&["profiles", "saveprofile"])}
-                <Show
-                    when=move || shaders.profiles.with(Vec::is_empty)
-                    fallback=|| view! { <ProfileList/> }
-                >
-                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
-                        <Text>"No shader profiles yet."</Text>
-                    </Column>
-                </Show>
-                <Row gap=Spacing::Sm shrink=0.0>
-                    <Button @click=move || shaders.open_editor(Editor::new_profile)>"New profile…"</Button>
+                <Toolbar>
+                    <Button icon=crate::machines::icons::NEW @click=move || shaders.open_editor(Editor::new_profile)>
+                        "New profile"
+                    </Button>
                     <Button
                         enabled=move || shaders.profiles.with(|p| p.iter().any(|e| e.is_default))
                         @click=move || {
@@ -275,76 +269,117 @@ pub fn ShaderProfilesWindow() -> impl View {
                             shaders.refresh();
                         }
                     >"No default"</Button>
-                </Row>
+                </Toolbar>
+                <Show
+                    when=move || shaders.profiles.with(Vec::is_empty)
+                    fallback=|| view! { <ProfileTable/> }
+                >
+                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
+                        <Text>"No shader profiles yet."</Text>
+                    </Column>
+                </Show>
                 <PresetCollection/>
             </Column>
         </Window>
     }
 }
 
+/// The profiles under column headers: name, preset, a switch for the
+/// default, and what can be done to it. Rows are keyed by the profile's
+/// file and read their fields by it, so an edit shows in place. Activating
+/// a row (double-click, Return) opens it in the editor; the trash button
+/// asks before it deletes.
 #[component]
-fn ProfileList() -> impl View {
+fn ProfileTable() -> impl View {
     let shaders = use_store::<Shaders>();
-    view! {
-        <List
-            each=move || shaders.profiles.with(|p| p.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
-            key=|p: &PathBuf| p.clone()
-            grow=1.0
-            min_height=0
-            let:path
-        >
-            <ProfileRow path=path/>
-        </List>
-    }
-}
-
-/// One profile: its name, its preset, and what can be done to it.
-#[component]
-fn ProfileRow(path: PathBuf) -> impl View {
-    let shaders = use_store::<Shaders>();
-    let path = Rc::new(path);
-    let field = {
+    let ui = inject::<Ui>().expect("a window's component");
+    let window = inject::<CurrentWindow>().map(|CurrentWindow(w)| w);
+    let field = move |path: &PathBuf, f: fn(&ProfileEntry) -> String| {
         let path = path.clone();
-        move |f: fn(&ProfileEntry) -> String| {
-            let path = path.clone();
-            move || shaders.profiles.with(|p| p.iter().find(|e| e.path == *path).map(f).unwrap_or_default())
-        }
+        move || shaders.profiles.with(|p| p.iter().find(|e| e.path == path).map(f).unwrap_or_default())
     };
-    let is_default = {
+    let is_default = move |path: &PathBuf| {
         let path = path.clone();
-        move || shaders.profiles.with(|p| p.iter().any(|e| e.path == *path && e.is_default))
+        move || shaders.profiles.with(|p| p.iter().any(|e| e.path == path && e.is_default))
     };
-    let (d1, d2) = (is_default.clone(), is_default);
-    let (p1, p2, p3) = (path.clone(), path.clone(), path);
-    view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
-            <Text max_lines=1 width=170 shrink=0.0>{field(|e| e.profile.name.clone())}</Text>
-            <Text text_style=TextStyle::Caption max_lines=1 truncation=Truncation::Start grow=1.0 min_width=0>
-                {field(|e| e.profile.preset.display().to_string())}
-            </Text>
-            <Show when=d1>
-                <Text text_style=TextStyle::Headline>"default"</Text>
-            </Show>
-            <Show when=move || !d2()>
-                <Button @click={let path = p1.clone(); move || {
-                    let id = shader_library::id_of(&path);
-                    if let Err(e) = shader_library::set_default(&Shaders::dir(), Some(&id)) {
-                        eprintln!("[shader-manager] marking {id} as the default: {e}");
-                    }
-                    shaders.refresh();
-                }}>"Use as default"</Button>
-            </Show>
-            <Button @click=move || {
-                let path = p2.to_path_buf();
-                shaders.open_editor(|e| e.edit_path(path));
-            }>"Edit…"</Button>
-            <Button @click=move || {
-                if let Err(e) = shader_library::delete(&p3) {
-                    eprintln!("[shader-manager] deleting {}: {e}", p3.display());
+    let columns = vec![
+        TableColumn::new("Name", move |path: PathBuf| {
+            Text::new(field(&path, |e| e.profile.name.clone())).max_lines(1)
+        })
+        .width(170),
+        TableColumn::new("Preset", move |path: PathBuf| {
+            Text::new(field(&path, |e| e.profile.preset.display().to_string()))
+                .text_style(TextStyle::Caption)
+                .color(Color::SecondaryLabel)
+                .max_lines(1)
+                .truncation(Truncation::Start)
+                .grow(1.0)
+                .shrink(1.0)
+                .basis(0)
+        })
+        .expand(),
+        // On makes this profile the default (the library has one, so the
+        // others go off); off leaves none.
+        TableColumn::new("Default", move |path: PathBuf| {
+            let id = shader_library::id_of(&path);
+            Switch::new("Default").checked(is_default(&path)).on_change(move |on| {
+                let chosen = on.then_some(id.as_str());
+                if let Err(e) = shader_library::set_default(&Shaders::dir(), chosen) {
+                    eprintln!("[shader-manager] setting the default profile to {chosen:?}: {e}");
                 }
                 shaders.refresh();
-            }>"Delete"</Button>
-        </Row>
+            })
+        })
+        .width(80),
+        TableColumn::new("", move |path: PathBuf| {
+            let path = Rc::new(path);
+            let (p2, p3) = (path.clone(), path);
+            let ui = ui.clone();
+            view! {
+                <Row gap=Spacing::Sm align=Align::Center>
+                    <Button @click=move || {
+                        let path = p2.to_path_buf();
+                        shaders.open_editor(|e| e.edit_path(path));
+                    }>"Edit"</Button>
+                    <Button icon=crate::machines::icons::TRASH icon_only=true tooltip="Delete" @click=move || {
+                        let path = p3.to_path_buf();
+                        let name = shaders.profiles.with_untracked(|p| {
+                            p.iter().find(|e| e.path == path).map(|e| e.profile.name.clone()).unwrap_or_default()
+                        });
+                        let (headline, detail) = shader_library::delete_question(&name);
+                        // Cancel first: the first is the default, and Return
+                        // should not delete.
+                        let alert = Alert::new(headline)
+                            .message(detail)
+                            .style(AlertStyle::Critical)
+                            .button("Cancel")
+                            .button("Delete");
+                        let asker = ui.clone();
+                        ui.spawn_local(async move {
+                            if asker.alert(window, alert).await != 1 {
+                                return;
+                            }
+                            if let Err(e) = shader_library::delete(&path) {
+                                eprintln!("[shader-manager] deleting {}: {e}", path.display());
+                            }
+                            shaders.refresh();
+                        });
+                    }>"Delete"</Button>
+                </Row>
+            }
+        })
+        .width(130),
+    ];
+    view! {
+        <Table
+            each=move || shaders.profiles.with(|p| p.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
+            key=|p: &PathBuf| p.clone()
+            columns=columns
+            list_style=ListStyle::Framed
+            @activate=move |path: PathBuf| shaders.open_editor(|e| e.edit_path(path))
+            grow=1.0
+            min_height=0
+        />
     }
 }
 
