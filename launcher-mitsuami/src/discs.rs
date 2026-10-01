@@ -235,24 +235,27 @@ fn DriveCard() -> impl View {
     let card = move || discs.read(Shelf::drive_card);
     let has_disc = move || card().is_some_and(|c| c.kind.is_some());
     view! {
-        <Group margin_x=Spacing::Xl shrink=0.0 title="CD drive">
-            <Row gap=Spacing::Md align=Align::Center>
-                <Icon
-                    name=move || card().and_then(|c| c.kind).map_or(icons::DISCS, kind_icon).to_owned()
-                    color=move || if has_disc() { Color::Accent } else { Color::SecondaryLabel }
-                    icon_size=32.0
-                />
-                <Column gap=Spacing::None grow=1.0 min_width=0>
-                    <Text text_style=TextStyle::Title max_lines=1>{move || card().map(|c| c.title).unwrap_or_default()}</Text>
-                    <Text text_style=TextStyle::Caption color=Color::SecondaryLabel max_lines=1 truncation=Truncation::Middle>
-                        {move || card().map(|c| c.detail).unwrap_or_default()}
-                    </Text>
-                </Column>
-                <Show when=has_disc>
-                    <Button icon=icons::EJECT @click=move || discs.edit(Shelf::eject)>"Eject"</Button>
-                </Show>
-            </Row>
-        </Group>
+        <Column margin_x=Spacing::Xl shrink=0.0 gap=Spacing::Sm>
+            <Text text_style=TextStyle::Headline>"CD drive"</Text>
+            <Group>
+                <Row gap=Spacing::Md align=Align::Center>
+                    <Icon
+                        name=move || card().and_then(|c| c.kind).map_or(icons::DISCS, kind_icon).to_owned()
+                        color=move || if has_disc() { Color::Accent } else { Color::SecondaryLabel }
+                        icon_size=32.0
+                    />
+                    <Column gap=Spacing::None grow=1.0 min_width=0>
+                        <Text text_style=TextStyle::Title max_lines=1>{move || card().map(|c| c.title).unwrap_or_default()}</Text>
+                        <Text text_style=TextStyle::Caption color=Color::SecondaryLabel max_lines=1 truncation=Truncation::Middle>
+                            {move || card().map(|c| c.detail).unwrap_or_default()}
+                        </Text>
+                    </Column>
+                    <Show when=has_disc>
+                        <Button icon=icons::EJECT @click=move || discs.edit(Shelf::eject)>"Eject"</Button>
+                    </Show>
+                </Row>
+            </Group>
+        </Column>
     }
 }
 

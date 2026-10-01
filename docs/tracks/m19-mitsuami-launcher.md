@@ -160,7 +160,8 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    current snapshot, Delete removed the row. The shelf's
    rows are keyed by path (it is kept in label order).
    **The shelf redone 2026-10-01 (user's design):** opened on a machine
-   it has a "CD drive" card on top (the disc's kind icon, its label, the
+   it has a card on top under a "CD drive" heading, outside it as
+   "Library" is (the disc's kind icon, its label, the
    core's detail line, Eject; or "Tray empty"), then "Library" with the
    core's count and an Add menu button (Disc image…, Folder as disc…,
    Guest tools ISO, checked once it is on the shelf), then the rows, and
