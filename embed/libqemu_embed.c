@@ -70,6 +70,7 @@ struct qemu_embed {
     qemu_embed_display_cb cb;
     void *ud;
     QemuConsole *con;
+    bool follow_pending;    /* bh_follow_console scheduled */
 
     QemuMutex in_lock;
     in_event in_q[IN_QUEUE_LEN];
@@ -155,9 +156,59 @@ void embed_fx_frame_ready(int slot)
 
 /* ---------------------------------------------------------------- display */
 
+/*
+ * The screen a machine with two adapters shows (M20, Windows 11 on Arm):
+ * the last graphic console whose device has a picture, else the default
+ * one. The `virt` board has `ramfb`, which the firmware and Windows setup
+ * draw on, and then `virtio-gpu-pci`, which Windows draws on once
+ * viogpudo is installed. virtio-gpu holds a placeholder surface whenever
+ * no driver scans out (reset, the firmware's hand-over, a Windows without
+ * the driver, its recovery), so following it needs no state of our own.
+ * A machine with one adapter always gets that one.
+ */
+static QemuConsole *embed_live_console(void)
+{
+    QemuConsole *live = NULL;
+    for (unsigned i = 0;; i++) {
+        QemuConsole *con = qemu_console_lookup_by_index(i);
+        if (!con) {
+            break;
+        }
+        if (qemu_console_is_graphic(con) &&
+            !surface_is_placeholder(qemu_console_surface(con))) {
+            live = con;
+        }
+    }
+    return live ? live : qemu_console_lookup_default();
+}
+
+/* Out of the listener's own refresh: re-registering inside it would edit
+ * the display state's listener list while QEMU walks it. Registering fires
+ * gfx_switch with the new console's surface, so the player sees a mode
+ * change and nothing else. */
+static void bh_follow_console(void *opaque)
+{
+    qemu_embed_t *e = opaque;
+    QemuConsole *con = embed_live_console();
+    e->follow_pending = false;
+    if (con == e->con) {
+        return;
+    }
+    g_autofree char *label = qemu_console_get_label(con);
+    fprintf(stderr, "qemu-embed: showing console %d (%s)\n", qemu_console_get_index(con), label);
+    unregister_displaychangelistener(&e->dcl);
+    e->con = con;
+    e->dcl.con = con;
+    register_displaychangelistener(&e->dcl);
+}
+
 static void embed_dpy_refresh(DisplayChangeListener *dcl)
 {
     qemu_embed_t *e = container_of(dcl, qemu_embed_t, dcl);
+    if (!e->follow_pending && embed_live_console() != e->con) {
+        e->follow_pending = true;
+        aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_follow_console, e);
+    }
     graphic_hw_update(dcl->con);
     if (e->cb.on_refresh_done) {
         e->cb.on_refresh_done(e->ud);

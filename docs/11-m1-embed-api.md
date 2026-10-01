@@ -68,7 +68,12 @@ Windows has no zero-copy slot; its 3D frames arrive through
   on return, so never retain it (`ui/console.c:853`). `dpy_gfx_update`
   gives a clamped dirty rect. `dpy_refresh` calls `graphic_hw_update()`,
   the pull that makes the VGA device render; the GUI timer exists only if
-  some listener has `dpy_refresh` (`ui/console.c:108-127`).
+  some listener has `dpy_refresh` (`ui/console.c:108-127`). On a machine
+  with two adapters (Windows 11 on Arm's `ramfb` and `virtio-gpu-pci`,
+  M20) the listener moves, from a bottom half, to the last graphic
+  console whose surface is not a placeholder, and back to the default
+  when there is none (`embed_live_console`); the move is one more
+  `dpy_gfx_switch`, and input follows it.
   `dpy_gfx_check_format` accepts only `x8r8g8b8`, so QEMU shadows
   8/15/16/24 bpp into 32 bpp; 32 bpp modes are zero-copy (the surface
   points into VRAM, `hw/display/vga.c:1637`). All callbacks fire on the

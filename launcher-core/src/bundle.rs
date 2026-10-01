@@ -2153,8 +2153,15 @@ impl Machine {
             format!("file={},if=none,id=disk0", opt_value(&self.disk.display().to_string())),
             "-device".into(),
             "ide-hd,bus=ide.0,drive=disk0".into(),
+            // Two screens, and the player shows the live one (embed's
+            // `embed_live_console`): the firmware, Windows setup and its
+            // recovery draw on ramfb, an installed Windows on virtio-gpu
+            // through viogpudo from the drivers disc. ramfb first, so it
+            // is the default console.
             "-device".into(),
             "ramfb".into(),
+            "-device".into(),
+            "virtio-gpu-pci".into(),
             "-device".into(),
             "qemu-xhci".into(),
             "-device".into(),

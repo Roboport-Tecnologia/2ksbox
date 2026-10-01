@@ -38,9 +38,11 @@ Environment:
   FW_ARM=2ksbox        aarch64 firmware: ours (2ksbox-aarch64-*.fd), or edk2
                        for QEMU's prebuilt one (no Secure Boot, no AHCI: the
                        disk goes on NVMe, the CDs on USB)
-  GPU=ramfb            aarch64: the screen, ramfb (Windows' Basic Display on the
-                       firmware's framebuffer) or virtio-gpu-pci (viogpudo,
-                       from the drivers disc)
+  GPU=ramfb            aarch64: the screens, a comma list: ramfb (the firmware,
+                       and Windows' Basic Display), virtio-gpu-pci (viogpudo,
+                       from the drivers disc, once installed), or both, as the
+                       launcher's board has them (the player shows the live
+                       one; the shots here are of the first)
   NET=1                a network card (aarch64: virtio-net, whose driver is on
                        the drivers disc; x86_64: e1000e) on QEMU's user network
   DRIVERS=<iso>        aarch64: the drivers disc in a CD drive of its own
@@ -344,7 +346,7 @@ def arm_args(tpmdev):
             "-device", "tpm-tis-device,tpmdev=tpm0",
             "-drive", "if=none,id=d0,format=qcow2,file=" + DISK,
             *disk,
-            "-device", GPU,
+            *[a for g in GPU.split(",") for a in ("-device", g)],
             "-device", "qemu-xhci", "-device", "usb-tablet", "-device", "usb-kbd",
             *([] if NET else ["-nic", "none"]),
             # HD Audio, the launcher's Windows 11 sound card
