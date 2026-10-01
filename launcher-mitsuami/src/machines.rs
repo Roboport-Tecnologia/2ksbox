@@ -338,14 +338,60 @@ fn MachineLibrary() -> impl View {
     }
 }
 
+/// What can be done to a machine besides starting it, each opening its
+/// window on it: the details' More menu, and the list's context menu
+/// under Start. `dir` names the machine when the menu is used.
+fn machine_actions(dir: Rc<dyn Fn() -> PathBuf>) -> impl mitsuami::core::services::MenuEntries {
+    let library = use_store::<Library>();
+    let wizard = use_store::<Wizard>();
+    let cloner = use_store::<Cloner>();
+    let snaps = use_store::<Snaps>();
+    let discs = use_store::<Discs>();
+    let bundle = {
+        let dir = dir.clone();
+        move || library.bundle_path(&dir())
+    };
+    let running = move || library.is_running(&dir());
+    let (b1, b2, b3, b4) = (bundle.clone(), bundle.clone(), bundle.clone(), bundle);
+    let r1 = running.clone();
+    (
+        MenuItem::new("Settings").on_select(move || {
+            if let Some(bundle) = b1() {
+                wizard.open_edit(bundle);
+            }
+        }),
+        MenuItem::new("Discs").on_select(move || {
+            if let Some(bundle) = b2() {
+                discs.open_for(bundle, library);
+            }
+        }),
+        MenuItem::new("Snapshots").on_select(move || {
+            if let Some(bundle) = b3() {
+                snaps.open_for(&bundle, r1());
+            }
+        }),
+        MenuItem::new("Clone").enabled(move || !cloner.busy()).on_select(move || {
+            if let Some(bundle) = b4() {
+                cloner.open_for(&bundle, running());
+            }
+        }),
+    )
+}
+
 /// One machine in the list: its name, and its family and state under it.
+/// A right click offers what the details' Start and More do.
 #[component]
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
     let dir = Rc::new(dir);
-    let (d1, d2) = (dir.clone(), dir);
+    let (d1, d2, d3, d4) = (dir.clone(), dir.clone(), dir.clone(), dir.clone());
+    let menu = (
+        MenuItem::new("Start").enabled(move || !library.is_running(&d3)).on_select(move || library.play(&d4)),
+        MenuSeparator::new(),
+        machine_actions(Rc::new(move || dir.to_path_buf())),
+    );
     view! {
-        <Row padding_x=Spacing::Lg padding_y=Spacing::Md gap=Spacing::Md align=Align::Center>
+        <Row padding_x=Spacing::Lg padding_y=Spacing::Md gap=Spacing::Md align=Align::Center context_menu=menu>
             <Icon name=icons::MACHINE icon_size=32.0/>
             <Column min_width=0 grow=1.0 gap=Spacing::Xs>
                 <Text text_style=TextStyle::Headline max_lines=1>
@@ -364,39 +410,9 @@ fn MachineRow(dir: PathBuf) -> impl View {
 #[component]
 fn Details() -> impl View {
     let library = use_store::<Library>();
-    let wizard = use_store::<Wizard>();
-    let cloner = use_store::<Cloner>();
-    let snaps = use_store::<Snaps>();
-    let discs = use_store::<Discs>();
     let current = move || library.current().unwrap_or_default();
     let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
-    let bundle = move || library.bundle_path(&current());
     let running = move || library.is_running(&current());
-    // Everything but Start, each opening its window on this machine.
-    let more = move || {
-        (
-            MenuItem::new("Settings").on_select(move || {
-                if let Some(bundle) = bundle() {
-                    wizard.open_edit(bundle);
-                }
-            }),
-            MenuItem::new("Discs").on_select(move || {
-                if let Some(bundle) = bundle() {
-                    discs.open_for(bundle, library);
-                }
-            }),
-            MenuItem::new("Snapshots").on_select(move || {
-                if let Some(bundle) = bundle() {
-                    snaps.open_for(&bundle, running());
-                }
-            }),
-            MenuItem::new("Clone").enabled(move || !cloner.busy()).on_select(move || {
-                if let Some(bundle) = bundle() {
-                    cloner.open_for(&bundle, running());
-                }
-            }),
-        )
-    };
     view! {
         <ScrollView grow=1.0 min_width=0>
             <Column padding=Spacing::Xl gap=Spacing::Lg>
@@ -411,7 +427,7 @@ fn Details() -> impl View {
                         enabled=move || !running()
                         @click=move || library.play(&current())
                     >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
-                    <MenuButton menu=more()>"More"</MenuButton>
+                    <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>
                 </Row>
                 <For
                     each=move || library.details(&current())

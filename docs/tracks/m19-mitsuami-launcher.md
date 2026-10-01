@@ -107,7 +107,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    2026-10-01; one line, cut in the middle if it must be), one
    `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
-   its machine. The toolbar keeps New, Shelf, Shaders (named so since
+   its machine; a right click on it offers Start and the More menu's
+   items (`machine_actions`, shared by both; user, 2026-10-01; clicked
+   through on Broadway, Discs opened on the row's machine). The toolbar keeps New, Shelf, Shaders (named so since
    2026-10-01, user; an empty library's button stays New machine),
    with platform icons, and the status line, which says only
    that a machine started: a start that fails is the platform's alert

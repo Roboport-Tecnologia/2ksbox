@@ -295,6 +295,9 @@ fn DiscRow(path: PathBuf) -> impl View {
         let path = p1.clone();
         move || discs.editing.with(|e| e.as_ref().is_some_and(|(p, _)| p == path.as_ref()))
     };
+    // The label's field, focused with its text selected when the pencil
+    // opens it.
+    let field_ref = node_ref();
     let in_drive = {
         let path = p2.clone();
         move || discs.read(|s| row(&path).is_some_and(|r| s.row_in_drive(r)))
@@ -325,13 +328,18 @@ fn DiscRow(path: PathBuf) -> impl View {
                                 icon_only=true
                                 button_style=ButtonStyle::Borderless
                                 tooltip="Rename"
-                                @click=move || discs.editing.set(Some((path.to_path_buf(), label())))
+                                @click=move || {
+                                    discs.editing.set(Some((path.to_path_buf(), label())));
+                                    // Asked before the field is built, done once it is.
+                                    field_ref.select_text(0..usize::MAX);
+                                }
                             >"Rename"</Button>
                         </Row>
                     }
                 }}>
                     <TextInput
                         a11y_label="Label"
+                        node_ref=field_ref
                         value=move || discs.editing.with(|e| e.as_ref().map(|(_, t)| t.clone()).unwrap_or_default())
                         @input=move |text| discs.editing.update(|e| {
                             if let Some((_, typed)) = e {
