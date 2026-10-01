@@ -196,6 +196,12 @@ pub fn MachinesWindow() -> impl View {
             snaps.ask(&name);
         }
     }
+    // `takesnapshot:<machine.toml>`: the window on a machine, with Take
+    // snapshot's name sheet open.
+    if let Some(bundle) = crate::shot::screen("takesnapshot") {
+        snaps.open_for(Path::new(&bundle), false);
+        snaps.ask_name();
+    }
     // `shelf[:<disc>]`: the shared shelf, with a disc added through its
     // Add field; `discs:<machine.toml>[:boot=<disc>]`: the shelf for a
     // machine, with a disc ticked to boot with.

@@ -76,6 +76,7 @@ and photograph the screen it is on:
 | `clone:<machine.toml>[:same]` | the clone dialog on a machine, or sharing its disk |
 | `clonego:<machine.toml>` | presses Clone, and shows the machine window once the copy has landed (writes into the library) |
 | `snapshots:<machine.toml>[:ask=<name>]` | the snapshot tree, with a row's Restore asking |
+| `takesnapshot:<machine.toml>` | the snapshot tree with Take snapshot's name sheet open |
 | `shelf[:<disc>]` | the shared shelf, with a disc added through its Add field (writes the shelf) |
 | `discs:<machine.toml>[:boot=<disc>]` | the shelf for a machine, with a disc ticked to boot with (writes the bundle) |
 | `profiles` | the shader profile list |
@@ -135,7 +136,14 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    one's is bound to it: the warning and the progress bar grow it) that
    polls the copy's thread and puts the new row in the list. Snapshots is the tree, rows keyed by snapshot id (qcow2
    reuses an id once its snapshot is deleted, so a row reads its fields
-   by key), Restore asking once, a poll while a live job runs. The shelf's
+   by key), Restore asking once, a poll while a live job runs. Since
+   2026-10-01 (user) the tree is a `Table` (name indented under its
+   parent with the "current" mark, taken, VM state, Restore and a trash
+   button, tooltip "Delete") and Take snapshot is on the window's
+   toolbar: it opens a sheet (`Modality::Window`) asking for the name,
+   empty at each opening, Take snapshot its default button. Checked by
+   clicks through Broadway's page on a scratch tree: a snapshot taken
+   from the sheet landed under the current one, and Cancel took none. The shelf's
    rows are keyed by path (it is kept in label order); Boot is a
    checkbox (unticked: an empty tray), where Qt has a checkable button.
    Checked headless on a scratch machine with a real qcow2: a clone copied
