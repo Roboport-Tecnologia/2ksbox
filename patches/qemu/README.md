@@ -3,10 +3,9 @@
 Every change 2ksbox makes to QEMU. The tree is the pinned submodule
 `qemu/` at v11.1.2, plus qemu-3dfx's OpenGL device (`third_party/qemu-3dfx`)
 wired in by our port of its patch (`patches/qemu-3dfx/`: qemu-3dfx stops
-at 9.2), plus the patches in this directory. **While track M21 runs**, the
-TCG patches wait in `patches/qemu-pending/` as their 9.2 versions; each
-comes back here when it is ported and measured (track doc, step 3), and
-the rows below describe them as they were on 9.2. The larger patches are designed in the numbered docs
+at 9.2), plus the patches in this directory. Every row was written on 9.2;
+where 11.1 changed a patch's shape, the row says so, and the measurements
+are 9.2's until track M21's step 3 re-takes them. The larger patches are designed in the numbered docs
 (x87 doc 13, SSE doc 16, pinned registers doc 18, CD-ROM doc 17, music
 doc 20, Voodoo 2 doc 21); doc 22 measures the TCG patches as a whole.
 The test tools named here are in `docs/testing.md`.
@@ -162,7 +161,7 @@ unusual runs the helper out of line and exits the TB. Bit-exact except
 for empty registers after a pop. DOS loop 21.6 (softfloat) / 10.6 (patch
 05) / 2.9 ns per op; XP Super PI 1M on the Air 9:49 → 1:57. **Switch:**
 `x87-fast`. **Test:** `tools/x87-guest-test.py`. **Drop:** upstream float
-ops in TCG, or an upstream rewrite of the x87 translator.
+ops in TCG, or an upstream rewrite of the x87 translator. **On 11.1:** the eight ops are `TCGOutOp` descriptors (`TCGOutOpBinary`, `TCGOutOpUnary`, and `TCGOutOpTernary` for fmsub, in `tcg/tcg.c`) behind `TCG_TARGET_F64`, x86-64 gated at run time on AVX + FMA; the shadow has its own scratch temps (`x87s_t32`/`x87s_t64`, 11.0 removed `tmp2_i32`/`tmp1_i64`), the third `insn_start` word carries its state, and FXCH and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. It carries 07's and 09's hunks on the shadow.
 
 ### 07-upstream-x87-helper-fixes
 **Dropped in M21** (QEMU 11.1). Upstream since 11.0 and 11.1.1 (`cf10af6c70`, `1621cc4971`). Its hunk on patch 06's inline compare moves into 06.
@@ -191,7 +190,7 @@ fmul/fdiv/fsqrt_vec`, `fmin/fmax_vec`, `fcmp_vec`, which map straight to
 overflow, underflow and divide-by-zero take the helper out of line, and
 `ldmxcsr`/`fxrstor`/`xrstor` end the TB. Packed 7.5–12×, scalar 3.4–3.9×.
 **Switch:** `sse-fast`. **Test:** `tools/sse-guest-test.py` (546,425
-lines identical on/off). **Drop:** upstream float ops in TCG.
+lines identical on/off). **Drop:** upstream float ops in TCG. **On 11.1:** a denormal operand sends the instruction to its slow block, since 10.1's softfloat raises DE on one (`57df511180`; the SSE battery's MXCSR caught it); the scalar ops are `TCGOutOp` descriptors as in 06, the vector ones stay on the vector path; `float_exception_flags` is a bit-field since 11.1, read as the struct's first 16 bits.
 
 ### 12-simd-inline-tcg
 MMX and SSE integer and permutation instructions inline (doc 16):
@@ -286,7 +285,7 @@ wrapper (removing it needs a context-taking twin of every `tcg_gen_opN`),
 round-robin with several vCPUs), and `tcg-op-ldst.c`. **Switch:**
 `tls-hot-paths` (patch 29), the RCU half only; the `tcg_ctx` half has no
 reachable behaviour. **Drop:** the RCU part is worth sending upstream;
-the `tcg_ctx` part matters only where TLS is a call.
+the `tcg_ctx` part matters only where TLS is a call. **On 11.1:** the dirty-bitmap API is out of line in `system/physmem.c`, where the `_rcu_locked` twins now live (`include/system/physmem.h`).
 
 ### 20-embed-audio
 Registers the player's `embed` audiodev: the QAPI enum/union entry,
@@ -309,7 +308,7 @@ cache. These stay on the helper: `CF_NO_GOTO_PTR`, exec/nochain logging,
 `one-insn-per-tb`, 32-bit hosts, the x86-64 target. 7-Zip compress +12 %,
 decompress +7 %. Any new TB flag must be built here too (patch 37).
 **Switch:** `inline-lookup`. **Drop:** upstream grows a generic inline
-probe with a per-target state hook.
+probe with a per-target state hook. **On 11.1:** `translator.c` is built once per mode, so the probe addresses `CPUState` as `offsetof(CPUState, f) - sizeof(CPUState)` and tests `singlestep_flags & SSTEP_ENABLE`.
 
 ### 21-pinned-regs
 **Dropped in M21** (QEMU 11.1). Not ported (user decision, 2026-10-01): it was off and unoffered, and 10.1's TCG backend rewrite would make the port a rewrite. Doc 18 keeps the design.
@@ -515,7 +514,7 @@ generation, and `tb_lookup()` re-validates a stale entry against the pc's
 current mapping and re-stamps it. The cache is 65,536 entries instead of
 4,096. Win98's VMM writes the same CR3 2,400 times a second.
 **Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
-physical page.
+physical page. **On 11.1:** whether the cache carries a generation is a run-time `target_long_bits() <= 32` (`TARGET_LONG_BITS` is poisoned in code built once per mode): `qemu-system-i386` keeps it, `qemu-system-x86_64` the clear.
 
 ### 43-eob-chain
 A block ending without a jump (`mov ds/es`, `sti`, `mov ss`, `popf`,
@@ -545,7 +544,7 @@ inbox VGA driver (a VGA window topology flush, then the int10 call's own
 `mov cr3`) ended black or in an empty text mode (2026-09-24;
 `tools/xp-driver-test.sh <image> vesa`). `info jit` prints refills
 and reuses. **Switch:** `tlb-retire`. **Drop:** upstream's TLB keeps
-state across CR3 writes.
+state across CR3 writes. **On 11.1:** the hook is in `include/accel/tcg/cpu-ops.h`, the page-walk record in `target/i386/tcg/system/excp_helper.c`, and `info jit`'s counters in `accel/tcg/tcg-stats.c`.
 
 ### 45-x87-prec24-f32
 At PC=24 (Direct3D's setting, a 3D game's whole frame) the shadows are

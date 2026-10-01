@@ -1,0 +1,281 @@
+A TCG op that tells whether every byte of a vector has its top bit set,
+so patch 11's lane check branches on a register instead of a round trip
+through env.
+
+Every inlined SSE instruction (sse-fast.c.inc, sses_vec_insn) computes
+its result in all lanes, checks them, and only then stores: the check
+builds a vector `ok` whose lanes are all ones (acceptable) or all zeros
+(the slow block must run). TCG had no way to test a vector from a
+branch, so the mask went to env->sses_scratch with one 16-byte store,
+came back as two 8-byte loads, was and'ed and compared with -1 -- six
+instructions and a store-to-load dependency in front of every SSE op's
+branch, on every guest that does SSE arithmetic.
+
+vec_allsign_i32 (i32 out, one vector in, like patch 06's scalar cvt ops
+take a vector-register operand) is 0 iff every byte of its operand has
+its top bit set, nonzero otherwise; for a mask of all-ones / all-zero
+lanes that is exactly "every lane passed":
+
+  x86-64   vpmovmskb r32, xmm ; xor $0xffff          (TCG_TARGET_HAS: AVX1)
+  aarch64  cmlt v31.16b, #0 ; uminv b31, v31.16b ;
+           umov w, v31.b[0] ; eor #0xff               (V31: TCG_VEC_TMP0)
+
+The check is then the op and a brcondi. Where the backend has no such op
+the round trip stays as it was. tcg/optimize.c needs no case: like the
+cvt ops it is an ordinary op with no folding.
+
+The aarch64 half was not compiled on the host this patch was written on
+(an x86-64 box): the Mac's build is its first, and the SSE battery there
+is its test.
+
+Measured on 3DMark 99 Max, claude98, 800x600x16, after patch 38: CPU
+3DMarks 15389 -> 15940 (+4 %), the first-person test 17.1 -> 17.5 fps,
+3DMarks 5932 -> 5950. SSE battery 546,425 lines identical on/off (the op
+exercised on every packed check), x87, SMC and rep unchanged,
+scripts/test.sh all 57/57.
+
+Behind sse-fast, like the check it serves.
+
+Test: tools/sse-guest-test.py (every packed op, its check and its slow
+block, sse-fast on/off identical), the x87, SMC and rep batteries, and
+3DMark 99 on claude98.
+
+diff --git a/include/tcg/tcg-op-common.h b/include/tcg/tcg-op-common.h
+index 4e013961a4..a8dd883cda 100644
+--- a/include/tcg/tcg-op-common.h
++++ b/include/tcg/tcg-op-common.h
+@@ -269,6 +269,9 @@ void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2);
+ 
+ /* Host-FPU binary64 ops on raw bit patterns; only when tcg_f64_supported(). */
+ bool tcg_f64_supported(void);
++/* ret = 0 iff every byte of a has its top bit set; only when supported */
++bool tcg_vec_allsign_supported(void);
++void tcg_gen_vec_allsign_i32(TCGv_i32 ret, TCGv_vec a);
+ void tcg_gen_add_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b);
+ void tcg_gen_sub_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b);
+ void tcg_gen_mul_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b);
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 6f4c02de7b..cfae21f342 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -138,6 +138,12 @@ DEF(cvt_f32_i32, 1, 1, 0, TCG_OPF_INT)
+ DEF(cvtt_f32_i32, 1, 1, 0, TCG_OPF_INT)
+ DEF(cvt_f64_i32, 1, 1, 0, TCG_OPF_INT)
+ DEF(cvtt_f64_i32, 1, 1, 0, TCG_OPF_INT)
++/*
++ * 2ksbox (patch 39): i32 = 0 iff every byte of the vector operand has its
++ * top bit set, else nonzero (sse-fast.c.inc's lane check, without an env
++ * round trip). Type I32; the operand is a vector temp.
++ */
++DEF(vec_allsign_i32, 1, 1, 0, TCG_OPF_INT)
+ 
+ /* size changing ops */
+ DEF(ext_i32_i64, 1, 1, 0, 0)
+diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
+index e3a35a8f8b..3da2c452d4 100644
+--- a/target/i386/tcg/sse-fast.c.inc
++++ b/target/i386/tcg/sse-fast.c.inc
+@@ -504,13 +504,26 @@ static void sses_vec_insn(DisasContext *s, X86DecodedInsn *decode, int op,
+         }
+     }
+ 
+-    tcg_gen_st_vec(ok, tcg_env, scratch);
+-    lo = x87s_tmp_i64(s);
+-    hi = x87s_tmp_i64(s);
+-    tcg_gen_ld_i64(lo, tcg_env, scratch);
+-    tcg_gen_ld_i64(hi, tcg_env, scratch + 8);
+-    tcg_gen_and_i64(lo, lo, hi);
+-    tcg_gen_brcondi_i64(TCG_COND_NE, lo, -1, slow);
++    if (tcg_vec_allsign_supported()) {
++        /*
++         * Every lane of `ok` is all ones or all zeros, so its bytes' top
++         * bits say whether all lanes passed: one pmovmskb (umin on
++         * aarch64) instead of a store to sses_scratch, two loads and an
++         * and (patch 39).
++         */
++        TCGv_i32 z = x87s_tmp_i32(s);
++
++        tcg_gen_vec_allsign_i32(z, ok);
++        tcg_gen_brcondi_i32(TCG_COND_NE, z, 0, slow);
++    } else {
++        tcg_gen_st_vec(ok, tcg_env, scratch);
++        lo = x87s_tmp_i64(s);
++        hi = x87s_tmp_i64(s);
++        tcg_gen_ld_i64(lo, tcg_env, scratch);
++        tcg_gen_ld_i64(hi, tcg_env, scratch + 8);
++        tcg_gen_and_i64(lo, lo, hi);
++        tcg_gen_brcondi_i64(TCG_COND_NE, lo, -1, slow);
++    }
+     tcg_gen_st_vec(r, tcg_env, d);
+     sses_vfree(v);
+ }
+diff --git a/tcg/aarch64/tcg-target-has.h b/tcg/aarch64/tcg-target-has.h
+index 3e06afa1d3..b4483fbfc0 100644
+--- a/tcg/aarch64/tcg-target-has.h
++++ b/tcg/aarch64/tcg-target-has.h
+@@ -50,6 +50,8 @@
+ #define TCG_TARGET_HAS_tbl_vec          1
+ #define TCG_TARGET_HAS_mulh_vec         0
+ #define TCG_TARGET_HAS_pack_vec         0
++/* 2ksbox (patch 39) */
++#define TCG_TARGET_HAS_vec_allsign      1
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          1
+diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
+index bef094790a..9ce4953bd8 100644
+--- a/tcg/aarch64/tcg-target.c.inc
++++ b/tcg/aarch64/tcg-target.c.inc
+@@ -655,6 +655,7 @@ typedef enum {
+     Iqrr_e_CMGT0      = 0x0e208800,
+     Iqrr_e_CMEQ0      = 0x0e209800,
+     Iqrr_e_CMLT0      = 0x0e20a800,
++    Iqrr_e_UMINV      = 0x2e31a800,   /* 2ksbox (patch 39): across lanes */
+     Iqrr_e_CMGE0      = 0x2e208800,
+     Iqrr_e_CMLE0      = 0x2e209800,
+     Iqrr_e_NOT        = 0x2e205800,
+@@ -2722,6 +2723,24 @@ F64_CVT(cvtt_f64_i32, I3F_FCVTZSD, C_O1_I1(r, w))
+ #undef F64_CVT
+ 
+ /* vector FP: sz (bit 22) selects S/D lanes, Q (bit 30) the width */
++/*
++ * 2ksbox (patch 39): vec_allsign_i32, 0 iff every byte has its top bit set.
++ * Bytes with the top bit set -> 0xff, their minimum, 0 iff all were.
++ */
++static void tgen_vec_allsign_i32(TCGContext *s, TCGType type,
++                                 TCGReg a0, TCGReg a1)
++{
++    tcg_out_insn(s, qrr_e, CMLT0, 1, MO_8, TCG_VEC_TMP0, a1);
++    tcg_out_insn(s, qrr_e, UMINV, 1, MO_8, TCG_VEC_TMP0, TCG_VEC_TMP0);
++    tcg_out_insn(s, simd_copy, UMOV, 0, a0, TCG_VEC_TMP0, 1, 0);
++    tcg_out_logicali(s, Ilogic_imm_EORI, TCG_TYPE_I32, a0, a0, 0xff);
++}
++
++static const TCGOutOpUnary outop_vec_allsign_i32 = {
++    .base.static_constraint = C_O1_I1(r, w),
++    .out_rr = tgen_vec_allsign_i32,
++};
++
+ static void tcg_out_fpv(TCGContext *s, AArch64Insn insn, bool q,
+                         unsigned vece, TCGReg rd, TCGReg rn, TCGReg rm)
+ {
+diff --git a/tcg/tcg-has.h b/tcg/tcg-has.h
+index f492bcf271..235801a880 100644
+--- a/tcg/tcg-has.h
++++ b/tcg/tcg-has.h
+@@ -66,5 +66,9 @@
+ #ifndef TCG_TARGET_HAS_pack_vec
+ #define TCG_TARGET_HAS_pack_vec         0
+ #endif
++/* 2ksbox (patch 39) */
++#ifndef TCG_TARGET_HAS_vec_allsign
++#define TCG_TARGET_HAS_vec_allsign      0
++#endif
+ 
+ #endif
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index 4bf607b1f7..bb2500a283 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -2374,6 +2374,19 @@ bool tcg_f64_supported(void)
+     return tcg_op_supported(INDEX_op_add_f64, TCG_TYPE_I64, 0);
+ }
+ 
++bool tcg_vec_allsign_supported(void)
++{
++    return tcg_op_supported(INDEX_op_vec_allsign_i32, TCG_TYPE_I32, 0)
++        && tcg_op_supported(INDEX_op_ld_vec, TCG_TYPE_V128, 0);
++}
++
++void tcg_gen_vec_allsign_i32(TCGv_i32 ret, TCGv_vec a)
++{
++    tcg_debug_assert(tcg_vec_allsign_supported());
++    tcg_gen_op2(INDEX_op_vec_allsign_i32, TCG_TYPE_I32,
++                tcgv_i32_arg(ret), tcgv_vec_arg(a));
++}
++
+ void tcg_gen_add_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
+ {
+     tcg_debug_assert(tcg_f64_supported());
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index 09dbcb8f3a..db93dc1ba0 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -1248,6 +1248,7 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
+     OUTOP(INDEX_op_cvtt_f32_i32, TCGOutOpUnary, outop_cvtt_f32_i32),
+     OUTOP(INDEX_op_cvt_f64_i32, TCGOutOpUnary, outop_cvt_f64_i32),
+     OUTOP(INDEX_op_cvtt_f64_i32, TCGOutOpUnary, outop_cvtt_f64_i32),
++    OUTOP(INDEX_op_vec_allsign_i32, TCGOutOpUnary, outop_vec_allsign_i32),
+ #endif
+ 
+     [INDEX_op_goto_ptr] = &outop_goto_ptr,
+@@ -2483,6 +2484,7 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_cvtt_f32_i32:
+     case INDEX_op_cvt_f64_i32:
+     case INDEX_op_cvtt_f64_i32:
++    case INDEX_op_vec_allsign_i32:
+ #ifdef TCG_TARGET_F64
+         if (has_type) {
+             goto do_lookup;
+@@ -5730,6 +5732,7 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+     case INDEX_op_cvtt_f32_i32:
+     case INDEX_op_cvt_f64_i32:
+     case INDEX_op_cvtt_f64_i32:
++    case INDEX_op_vec_allsign_i32:
+         {
+             const TCGOutOpUnary *out =
+                 container_of(all_outop[op->opc], TCGOutOpUnary, base);
+diff --git a/tcg/x86_64/tcg-target-has.h b/tcg/x86_64/tcg-target-has.h
+index d3aaa84c1b..973b9e1f91 100644
+--- a/tcg/x86_64/tcg-target-has.h
++++ b/tcg/x86_64/tcg-target-has.h
+@@ -49,6 +49,8 @@
+ #define TCG_TARGET_HAS_tbl_vec          have_avx1
+ #define TCG_TARGET_HAS_mulh_vec         1
+ #define TCG_TARGET_HAS_pack_vec         1
++/* 2ksbox (patch 39) */
++#define TCG_TARGET_HAS_vec_allsign      have_avx1
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          have_avx512vl
+diff --git a/tcg/x86_64/tcg-target.c.inc b/tcg/x86_64/tcg-target.c.inc
+index b19ae06f07..a8421313a4 100644
+--- a/tcg/x86_64/tcg-target.c.inc
++++ b/tcg/x86_64/tcg-target.c.inc
+@@ -328,6 +328,7 @@ static bool tcg_target_const_match(int64_t val, int ct,
+ #define OPC_PMULLW      (0xd5 | P_EXT | P_DATA16)
+ #define OPC_PMULHW      (0xe5 | P_EXT | P_DATA16)
+ #define OPC_PMULHUW     (0xe4 | P_EXT | P_DATA16)
++#define OPC_PMOVMSKB    (0xd7 | P_EXT | P_DATA16)
+ #define OPC_PMULLD      (0x40 | P_EXT38 | P_DATA16)
+ #define OPC_VPMULLQ     (0x40 | P_EXT38 | P_DATA16 | P_VEXW | P_EVEX)
+ #define OPC_POR         (0xeb | P_EXT | P_DATA16)
+@@ -3125,6 +3126,28 @@ F64_CVT(cvt_f64_i32, OPC_VCVTSD2SI, 0, cset_f64_to_int)
+ F64_CVT(cvtt_f64_i32, OPC_VCVTTSD2SI, 0, cset_f64_to_int)
+ #undef F64_CVT
+ 
++/*
++ * 2ksbox (patch 39): vec_allsign_i32, 0 iff every byte has its top bit set:
++ * the bytes' top bits, 0xffff when all are set, then 0.
++ */
++static void tgen_vec_allsign_i32(TCGContext *s, TCGType type,
++                                 TCGReg a0, TCGReg a1)
++{
++    tcg_out_vex_modrm(s, OPC_PMOVMSKB, a0, 0, a1);
++    tgen_arithi(s, ARITH_XOR, a0, 0xffff, 0);
++}
++
++static TCGConstraintSetIndex cset_vec_allsign(TCGType type, unsigned flags)
++{
++    return have_avx1 ? C_O1_I1(r, x) : C_NotImplemented;
++}
++
++static const TCGOutOpUnary outop_vec_allsign_i32 = {
++    .base.static_constraint = C_Dynamic,
++    .base.dynamic_constraint = cset_vec_allsign,
++    .out_rr = tgen_vec_allsign_i32,
++};
++
+ static void tgen_bswap16(TCGContext *s, TCGType type,
+                          TCGReg a0, TCGReg a1, unsigned flags)
+ {

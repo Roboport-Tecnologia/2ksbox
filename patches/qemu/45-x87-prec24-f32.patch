@@ -37,10 +37,10 @@ with PE set before each case -- without it (fninit before every case) the
 battery never ran the sticky variant at all, patch 37's included.
 
 diff --git a/target/i386/cpu.h b/target/i386/cpu.h
-index 20d7cf3..cef14a9 100644
+index 30ddb824f9..6d6cf0ea77 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -1815,6 +1815,8 @@ typedef struct CPUArchState {
+@@ -2068,6 +2068,8 @@ typedef struct CPUArchState {
      uint64_t x87s_stat[1];      /* x87 inline guard exits (mode byte or sticky PE) */
      /* shadow doubles of the x87 stack, relative slots (tcg/x87-shadow.c.inc) */
      uint64_t x87_sd[8];
@@ -50,10 +50,10 @@ index 20d7cf3..cef14a9 100644
      float_status mmx_status; /* for 3DNow! float ops */
      float_status sse_status;
 diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
-index b1fd8c6..ffd846c 100644
+index c950bfa00b..8848b92225 100644
 --- a/target/i386/tcg/tcg-cpu.c
 +++ b/target/i386/tcg/tcg-cpu.c
-@@ -95,20 +95,30 @@ static void x86_restore_state_to_opc(CPUState *cs,
+@@ -124,20 +124,30 @@ static void x86_restore_state_to_opc(CPUState *cs,
      }
  
      /*
@@ -90,10 +90,10 @@ index b1fd8c6..ffd846c 100644
          }
      }
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 3615b53..80cf9dd 100644
+index 2065927e7c..0019e62ed2 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -82,6 +82,7 @@ static TCGv_i64 cpu_bndl[4];
+@@ -84,6 +84,7 @@ static TCGv_i64 cpu_bndl[4];
  static TCGv_i64 cpu_bndu[4];
  /* x87 shadow doubles (x87-shadow.c.inc), relative stack slots */
  static TCGv_i64 cpu_x87_sd[8];
@@ -101,7 +101,7 @@ index 3615b53..80cf9dd 100644
  
  /* x87 shadow-double translation: one out-of-line slow block (x87-shadow.c.inc) */
  typedef struct X87SlowBlock {
-@@ -4188,6 +4189,15 @@ void tcg_x86_init(void)
+@@ -3886,6 +3887,15 @@ void tcg_x86_init(void)
                                                 sd_names[i]);
      }
  
@@ -118,7 +118,7 @@ index 3615b53..80cf9dd 100644
          cpu_bndl[i]
              = tcg_global_mem_new_i64(tcg_env,
 diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
-index aea7a2f..0c67926 100644
+index e95200d013..891f41539b 100644
 --- a/target/i386/tcg/x87-shadow.c.inc
 +++ b/target/i386/tcg/x87-shadow.c.inc
 @@ -45,17 +45,27 @@
@@ -746,7 +746,7 @@ index aea7a2f..0c67926 100644
 -    TCGv_i64 a, r;
 +    X87SV a, v, r;
  
-     tcg_gen_mov_i64(m, s->tmp1_i64);
+     tcg_gen_mov_i64(m, s->x87s_t64);
      x87s_begin(s);
 @@ -1017,11 +1376,8 @@ static void gen_x87s_arith_mem(DisasContext *s, int op1, bool m64)
      b->m = m;
@@ -796,7 +796,7 @@ index aea7a2f..0c67926 100644
 -    TCGv_i64 v = x87s_tmp_i64(s);
 +    X87SV v;
  
-     tcg_gen_mov_i64(m, s->tmp1_i64);
+     tcg_gen_mov_i64(m, s->x87s_t64);
      x87s_begin(s);
      b = x87s_new_slow(s, X87S_SLOW_FLD_MEM);
      b->m = m;
@@ -851,8 +851,8 @@ index aea7a2f..0c67926 100644
 +        tcg_gen_qemu_st_i32(f.f, s->A0, s->mem_index, MO_LEUL);
      } else {
 +        v = x87s_get(s, 0, b->label).d;
-         x87s_f64_to_f32(s, s->tmp2_i32, v, b->label);
-         tcg_gen_qemu_st_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
+         x87s_f64_to_f32(s, s->x87s_t32, v, b->label);
+         tcg_gen_qemu_st_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
      }
 @@ -1201,7 +1567,7 @@ static void gen_x87s_fst_mem(DisasContext *s, bool m64, bool pop)
  static void gen_x87s_fld_st(DisasContext *s, int opreg)
@@ -863,7 +863,7 @@ index aea7a2f..0c67926 100644
  
      x87s_begin(s);
      b = x87s_new_slow(s, X87S_SLOW_FLD_ST);
-@@ -1225,10 +1591,10 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
+@@ -1240,10 +1606,10 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
      sa = s->x87s_state[ra];
      sb = s->x87s_state[rb];
      if (sa != X87S_MEM && sb != X87S_MEM) {
@@ -878,7 +878,7 @@ index aea7a2f..0c67926 100644
          s->x87s_state[ra] = s->x87s_state[rb] = X87S_DIRTY;
          return;
      }
-@@ -1253,10 +1619,10 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
+@@ -1268,10 +1634,10 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
          x87s_st_x80(pb, lowa, higha);
      }
      if (sa != X87S_MEM) {
@@ -891,7 +891,7 @@ index aea7a2f..0c67926 100644
      }
      s->x87s_state[ra] = sb == X87S_MEM ? X87S_MEM : X87S_CLEAN;
      s->x87s_state[rb] = sa == X87S_MEM ? X87S_MEM : X87S_CLEAN;
-@@ -1266,7 +1632,7 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
+@@ -1281,7 +1647,7 @@ static void gen_x87s_fxch(DisasContext *s, int opreg)
  static void gen_x87s_fst_st(DisasContext *s, int opreg, bool pop)
  {
      X87SlowBlock *b;
@@ -900,7 +900,7 @@ index aea7a2f..0c67926 100644
  
      x87s_begin(s);
      b = x87s_new_slow(s, X87S_SLOW_FST_ST);
-@@ -1283,7 +1649,7 @@ static void gen_x87s_fst_st(DisasContext *s, int opreg, bool pop)
+@@ -1300,7 +1666,7 @@ static void gen_x87s_fst_st(DisasContext *s, int opreg, bool pop)
  static void gen_x87s_fcmov(DisasContext *s, int op1, int opreg)
  {
      X87SlowBlock *b;
@@ -909,7 +909,7 @@ index aea7a2f..0c67926 100644
      TCGv cond = tcg_temp_new();
  
      gen_setcc(s, op1 ^ 1, cond);           /* op1 is the skip condition */
-@@ -1293,9 +1659,19 @@ static void gen_x87s_fcmov(DisasContext *s, int op1, int opreg)
+@@ -1310,9 +1676,19 @@ static void gen_x87s_fcmov(DisasContext *s, int op1, int opreg)
      b->cond = cond;
      a = x87s_get(s, 0, b->label);
      v = x87s_get(s, opreg, b->label);
@@ -932,7 +932,7 @@ index aea7a2f..0c67926 100644
      s->x87s_state[X87S_SLOT(s, 0)] = X87S_DIRTY;
  }
  
-@@ -1304,7 +1680,7 @@ static void gen_x87s_fld_const(DisasContext *s, uint64_t bits)
+@@ -1321,7 +1697,7 @@ static void gen_x87s_fld_const(DisasContext *s, uint64_t bits)
  {
      x87s_begin(s);
      x87s_push(s);
@@ -941,7 +941,7 @@ index aea7a2f..0c67926 100644
  }
  
  /* fchs / fabs */
-@@ -1315,7 +1691,13 @@ static void gen_x87s_sign(DisasContext *s, bool chs)
+@@ -1332,7 +1708,13 @@ static void gen_x87s_sign(DisasContext *s, bool chs)
      x87s_begin(s);
      r = X87S_SLOT(s, 0);
      if (s->x87s_state[r] != X87S_MEM) {
@@ -956,7 +956,7 @@ index aea7a2f..0c67926 100644
              tcg_gen_xori_i64(cpu_x87_sd[r], cpu_x87_sd[r], 1ULL << 63);
          } else {
              tcg_gen_andi_i64(cpu_x87_sd[r], cpu_x87_sd[r], ~(1ULL << 63));
-@@ -1343,7 +1725,7 @@ static void gen_x87s_fcom(DisasContext *s, int opreg, bool zero_operand,
+@@ -1360,7 +1742,7 @@ static void gen_x87s_fcom(DisasContext *s, int opreg, bool zero_operand,
                            bool eflags, bool quiet, int pops)
  {
      X87SlowBlock *b;
@@ -965,7 +965,7 @@ index aea7a2f..0c67926 100644
      TCGv_i32 cc = x87s_tmp_i32(s);
  
      if (eflags) {
-@@ -1357,7 +1739,7 @@ static void gen_x87s_fcom(DisasContext *s, int opreg, bool zero_operand,
+@@ -1374,7 +1756,7 @@ static void gen_x87s_fcom(DisasContext *s, int opreg, bool zero_operand,
      b->quiet = quiet;
      b->pops = pops;
      a = x87s_get(s, 0, b->label);
@@ -974,7 +974,7 @@ index aea7a2f..0c67926 100644
      x87s_compare(s, cc, a, v, eflags);
      if (eflags) {
          /* OF, SF and AF are cleared unconditionally (upstream 0924d9d3db36) */
-@@ -1379,7 +1761,18 @@ static void gen_x87s_fsqrt(DisasContext *s)
+@@ -1396,7 +1778,18 @@ static void gen_x87s_fsqrt(DisasContext *s)
  
      x87s_begin(s);
      b = x87s_new_slow(s, X87S_SLOW_FSQRT);
@@ -994,7 +994,7 @@ index aea7a2f..0c67926 100644
      r = x87s_tmp_i64(s);
      err = x87s_tmp_i64(s);
      /* negative, -0 included (the helper sets C2 for it): helper */
-@@ -1390,14 +1783,18 @@ static void gen_x87s_fsqrt(DisasContext *s)
+@@ -1407,14 +1800,18 @@ static void gen_x87s_fsqrt(DisasContext *s)
          tcg_gen_fmsub_f64(err, r, r, v);
      }
      if (s->x87s_prec24) {
@@ -1018,7 +1018,7 @@ index aea7a2f..0c67926 100644
  }
  
  /* frndint: round to nearest even (mode 1) */
-@@ -1408,7 +1805,7 @@ static void gen_x87s_frndint(DisasContext *s)
+@@ -1425,7 +1822,7 @@ static void gen_x87s_frndint(DisasContext *s)
  
      x87s_begin(s);
      b = x87s_new_slow(s, X87S_SLOW_FRNDINT);
@@ -1027,7 +1027,7 @@ index aea7a2f..0c67926 100644
      c = x87s_tmp_i64(s);
      r = x87s_tmp_i64(s);
      t = x87s_tmp_i64(s);
-@@ -1427,7 +1824,15 @@ static void gen_x87s_frndint(DisasContext *s)
+@@ -1444,7 +1841,15 @@ static void gen_x87s_frndint(DisasContext *s)
      tcg_gen_setcondi_i64(TCG_COND_GEU, big, t, X87S_BIAS_F64 + 52);
      tcg_gen_movcond_i64(TCG_COND_NE, r, big, tcg_constant_i64(0), v, r);
      x87s_set_pe_ne(s, r, v);

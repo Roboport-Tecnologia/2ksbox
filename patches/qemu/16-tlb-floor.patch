@@ -2,14 +2,15 @@ Softmmu TLB: a 4096-entry floor for the dynamic table (M9 track,
 docs/tracks/m9-tcg-aarch64.md). See the comment in the header and the patch
 README row.
 
---- a/include/exec/cpu-defs.h
-+++ b/include/exec/cpu-defs.h
-@@ -55,8 +55,20 @@
- #include "exec/target_long.h"
+diff --git a/accel/tcg/tlb-bounds.h b/accel/tcg/tlb-bounds.h
+index f83d9ac9ee..da21f81f7d 100644
+--- a/accel/tcg/tlb-bounds.h
++++ b/accel/tcg/tlb-bounds.h
+@@ -6,8 +6,20 @@
+ #ifndef ACCEL_TCG_TLB_BOUNDS_H
+ #define ACCEL_TCG_TLB_BOUNDS_H
  
- #if defined(CONFIG_SOFTMMU) && defined(CONFIG_TCG)
 -#define CPU_TLB_DYN_MIN_BITS 6
--#define CPU_TLB_DYN_DEFAULT_BITS 8
 +/*
 + * The dynamic TLB is direct-mapped and resized at every flush from the
 + * entries used since the previous one.  A Windows guest flushes at every
@@ -23,7 +24,8 @@ README row.
 + * above it is unchanged.  M9 track, docs/tracks/m9-tcg-aarch64.md.
 + */
 +#define CPU_TLB_DYN_MIN_BITS 12
+ #define CPU_TLB_DYN_MAX_BITS (32 - TARGET_PAGE_BITS)
+-#define CPU_TLB_DYN_DEFAULT_BITS 8
 +#define CPU_TLB_DYN_DEFAULT_BITS 12
  
- # if HOST_LONG_BITS == 32
- /* Make sure we do not require a double-word shift for the TLB load */
+ #endif /* ACCEL_TCG_TLB_BOUNDS_H */

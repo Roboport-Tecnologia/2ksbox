@@ -28,11 +28,77 @@ alone), first person 19.0 -> 19.1 fps -- the round trips were cheaper
 than their count suggested.  Switch: `-accel tcg,eob-chain=off`.
 Batteries identical, scripts/test.sh all green.
 
+diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
+index 7098a22d90..2b0d4815fd 100644
+--- a/accel/tcg/internal-common.h
++++ b/accel/tcg/internal-common.h
+@@ -30,6 +30,8 @@ extern bool tcg_tlb_floor;
+ extern bool tcg_tls_hot_paths;
+ /* the jump cache kept across TLB flushes, re-validated by physical page (patch 42) */
+ extern bool tcg_jump_cache_keep;
++/* a non-jump end of block chains to the next block when no interrupt is pending (patch 43) */
++extern bool tcg_eob_chain;
+ 
+ extern bool icount_align_option;
+ 
+diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
+index 8e77ca5ac0..1720e7f51d 100644
+--- a/accel/tcg/tcg-all.c
++++ b/accel/tcg/tcg-all.c
+@@ -90,6 +90,7 @@ bool tcg_tb_invalidate_fast = true;
+ bool tcg_tlb_floor = true;
+ bool tcg_tls_hot_paths = true;
+ bool tcg_jump_cache_keep = true;
++bool tcg_eob_chain = true;
+ 
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -300,6 +301,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
+     return tcg_inline_lookup;
+ }
+ 
++static bool tcg_get_eob_chain(Object *obj, Error **errp)
++{
++    return tcg_eob_chain;
++}
++
++static void tcg_set_eob_chain(Object *obj, bool value, Error **errp)
++{
++    tcg_eob_chain = value;
++}
++
+ static bool tcg_get_jump_cache_keep(Object *obj, Error **errp)
+ {
+     return tcg_jump_cache_keep;
+@@ -393,6 +404,11 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "jump-cache-keep",
+         "Keep the jump cache across TLB flushes and re-validate its entries by physical page");
+ 
++    object_class_property_add_bool(oc, "eob-chain",
++        tcg_get_eob_chain, tcg_set_eob_chain);
++    object_class_property_set_description(oc, "eob-chain",
++        "Chain a block that ends after a segment load, sti, popf or iret to the next one when no interrupt is pending");
++
+     object_class_property_add_bool(oc, "one-insn-per-tb",
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
+index 3da2c452d4..3b65b6a310 100644
+--- a/target/i386/tcg/sse-fast.c.inc
++++ b/target/i386/tcg/sse-fast.c.inc
+@@ -138,6 +138,7 @@ static void sses_end_tb(DisasContext *s)
+ {
+     if (tcg_f64_supported()) {
+         s->base.is_jmp = DISAS_EOB_NEXT;
++        s->x87s_mode_dynamic = true;
+     }
+ }
+ 
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 1da6401..3615b53 100644
+index ddf2a6ea54..2065927e7c 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -166,6 +166,7 @@ typedef struct DisasContext {
+@@ -168,6 +168,7 @@ typedef struct DisasContext {
      bool x87s_on;               /* TB translated in inline mode */
      int x87s_mode;              /* env->x87_fast_mode this TB is for */
      bool x87s_pe_sticky;        /* TB_FLAG_X87_PE: no inexact bookkeeping */
@@ -40,7 +106,7 @@ index 1da6401..3615b53 100644
      bool x87s_prec24;           /* mode 2: PC=24, shadows hold 24-bit values */
      bool x87s_guarded;          /* runtime mode guard emitted */
      TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
-@@ -208,6 +209,9 @@ typedef struct DisasContext {
+@@ -205,6 +206,9 @@ typedef struct DisasContext {
   * Point EIP to next instruction before ending translation.
   * For instructions that can change hflags.
   */
@@ -50,7 +116,7 @@ index 1da6401..3615b53 100644
  #define DISAS_EOB_NEXT         DISAS_TARGET_0
  
  /*
-@@ -2529,7 +2533,41 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2240,7 +2244,40 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
       * the eflags bits stay loaded: RF, TF and the interrupt shadow are
       * what gen_eob left them, and a far jump's helper may change CS.
       */
@@ -69,10 +135,9 @@ index 1da6401..3615b53 100644
 +        tcg_gen_ld8u_i32(t, tcg_env, offsetof(CPUX86State, x87_fast_mode));
 +        tcg_gen_shli_i32(t, t, TB_FLAG_X87_MODE_SHIFT);
 +        tcg_gen_or_i32(flags, flags, t);
-+        QEMU_BUILD_BUG_ON(sizeof_field(CPUX86State,
-+                                       sse_status.float_exception_flags) != 2);
-+        tcg_gen_ld16u_i32(t, tcg_env,
-+                          offsetof(CPUX86State, sse_status.float_exception_flags));
++        /* the 16-bit bit-field float_exception_flags, as in sses_state() */
++        QEMU_BUILD_BUG_ON(HOST_BIG_ENDIAN);
++        tcg_gen_ld16u_i32(t, tcg_env, offsetof(CPUX86State, sse_status));
 +        tcg_gen_andi_i32(t, t, float_flag_inexact);
 +        tcg_gen_setcondi_i32(TCG_COND_NE, t, t, 0);
 +        tcg_gen_ld8u_i32(u, tcg_env, offsetof(CPUX86State, sse_fast_mode));
@@ -93,7 +158,7 @@ index 1da6401..3615b53 100644
          uint32_t known = s->flags & (TB_FLAG_X87_MODE_MASK | TB_FLAG_SSE_FAST_MASK);
  
          if ((s->flags & TB_FLAG_X87_PE_MASK) && s->x87s_pe_sticky) {
-@@ -2570,14 +2608,44 @@ gen_eob(DisasContext *s, int mode)
+@@ -2281,14 +2318,44 @@ gen_eob(DisasContext *s, int mode)
          gen_reset_eflags(s, RF_MASK);
      }
      if (mode == DISAS_EOB_RECHECK_TF) {
@@ -140,7 +205,7 @@ index 1da6401..3615b53 100644
      } else {
          tcg_gen_exit_tb(NULL, 0);
      }
-@@ -2825,6 +2893,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+@@ -2542,6 +2609,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
       */
      if (tcg_f64_supported() && gen_x87s_ends_tb(op, mod, rm)) {
          s->base.is_jmp = DISAS_EOB_NEXT;
@@ -148,7 +213,7 @@ index 1da6401..3615b53 100644
      }
  
      if (mod != 3) {
-@@ -4170,6 +4239,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3869,6 +3937,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
          && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
      dc->x87s_prec24 = dc->x87s_mode == 2;
      dc->x87s_pe_sticky = dc->x87s_on && (flags & TB_FLAG_X87_PE_MASK);
@@ -156,69 +221,3 @@ index 1da6401..3615b53 100644
      dc->x87s_guarded = false;
      dc->x87s_nslow = 0;
      dc->x87s_ntmps = 0;
-diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
-index 41f650a..7291546 100644
---- a/target/i386/tcg/sse-fast.c.inc
-+++ b/target/i386/tcg/sse-fast.c.inc
-@@ -130,6 +130,7 @@ static void sses_end_tb(DisasContext *s)
- {
-     if (tcg_f64_supported()) {
-         s->base.is_jmp = DISAS_EOB_NEXT;
-+        s->x87s_mode_dynamic = true;
-     }
- }
- 
-diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
-index a9cbf03..582c2f1 100644
---- a/accel/tcg/tcg-all.c
-+++ b/accel/tcg/tcg-all.c
-@@ -107,6 +107,7 @@ bool tcg_tb_invalidate_fast = true;
- bool tcg_tlb_floor = true;
- bool tcg_tls_hot_paths = true;
- bool tcg_jump_cache_keep = true;
-+bool tcg_eob_chain = true;
- 
- static int tcg_init_machine(MachineState *ms)
- {
-@@ -248,6 +249,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
-     return tcg_inline_lookup;
- }
- 
-+static bool tcg_get_eob_chain(Object *obj, Error **errp)
-+{
-+    return tcg_eob_chain;
-+}
-+
-+static void tcg_set_eob_chain(Object *obj, bool value, Error **errp)
-+{
-+    tcg_eob_chain = value;
-+}
-+
- static bool tcg_get_jump_cache_keep(Object *obj, Error **errp)
- {
-     return tcg_jump_cache_keep;
-@@ -366,6 +377,11 @@ static void tcg_accel_class_init(ObjectClass *oc, void *data)
-     object_class_property_set_description(oc, "jump-cache-keep",
-         "Keep the jump cache across TLB flushes and re-validate its entries by physical page");
- 
-+    object_class_property_add_bool(oc, "eob-chain",
-+        tcg_get_eob_chain, tcg_set_eob_chain);
-+    object_class_property_set_description(oc, "eob-chain",
-+        "Chain a block that ends after a segment load, sti, popf or iret to the next one when no interrupt is pending");
-+
-     object_class_property_add_bool(oc, "pinned-regs",
-         tcg_get_pinned_regs, tcg_set_pinned_regs);
-     object_class_property_set_description(oc, "pinned-regs",
-diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
-index 4880358..e71fb3b 100644
---- a/accel/tcg/internal-common.h
-+++ b/accel/tcg/internal-common.h
-@@ -28,6 +28,8 @@ extern bool tcg_tlb_floor;
- extern bool tcg_tls_hot_paths;
- /* the jump cache kept across TLB flushes, re-validated by physical page (patch 42) */
- extern bool tcg_jump_cache_keep;
-+/* a non-jump end of block chains to the next block when no interrupt is pending (patch 43) */
-+extern bool tcg_eob_chain;
- 
- /*
-  * Return true if CS is not running in parallel with other cpus, either

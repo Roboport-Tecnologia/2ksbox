@@ -23,7 +23,7 @@ subtract would need both paths computed and one selected to stay
 label-free, about a hundred ops, no clear win over the call.
 
 diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
-index e891fa7..bef98f7 100644
+index 937f5eb79d..ad07831b89 100644
 --- a/target/i386/tcg/x87-shadow.c.inc
 +++ b/target/i386/tcg/x87-shadow.c.inc
 @@ -1389,14 +1389,100 @@ static void x87s_binop_f32(DisasContext *s, TCGv_i32 r, int op, TCGv_i32 a,
@@ -140,7 +140,7 @@ index e891fa7..bef98f7 100644
 -            gen_helper_x87x_to_f32(res, a.xl, a.xh);
 -            x87s_x80_ok(s, res, X87S_XF_OK + 16, b->label);
 -            x87s_set_pe_bit(s, res, X87S_XF_INEXACT + 16);
--            tcg_gen_extrl_i64_i32(s->tmp2_i32, res);
+-            tcg_gen_extrl_i64_i32(s->x87s_t32, res);
 +            /*
 +             * inline (patch 49): the top 24 mantissa bits rounded
 +             * nearest-even by the 40 below; a normal binary32 or zero,
@@ -186,7 +186,7 @@ index e891fa7..bef98f7 100644
 +            tcg_gen_andi_i64(h, h, 0x8000);
 +            tcg_gen_shli_i64(h, h, 16);
 +            tcg_gen_or_i64(m, m, h);
-+            tcg_gen_extrl_i64_i32(s->tmp2_i32, m);
-             tcg_gen_qemu_st_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
++            tcg_gen_extrl_i64_i32(s->x87s_t32, m);
+             tcg_gen_qemu_st_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
          }
          if (pop) {

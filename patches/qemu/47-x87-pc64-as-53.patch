@@ -17,10 +17,10 @@ what an x87 computes -- the last 11 bits of a 64-bit mantissa -- which is
 why it is off by default and why the launcher labels it "not exact".
 
 diff --git a/target/i386/cpu.c b/target/i386/cpu.c
-index 1208a39..48721cf 100644
+index 04a03d6288..beda7161af 100644
 --- a/target/i386/cpu.c
 +++ b/target/i386/cpu.c
-@@ -8496,6 +8496,7 @@ static Property x86_cpu_properties[] = {
+@@ -10791,6 +10791,7 @@ static const Property x86_cpu_properties[] = {
      DEFINE_PROP_BOOL("check", X86CPU, check_cpuid, true),
      DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
      DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
@@ -29,10 +29,10 @@ index 1208a39..48721cf 100644
      DEFINE_PROP_BOOL("simd-fast", X86CPU, simd_fast, true),
      DEFINE_PROP_BOOL("rep-fast", X86CPU, rep_fast, true),
 diff --git a/target/i386/cpu.h b/target/i386/cpu.h
-index cef14a9..019dffe 100644
+index 6d6cf0ea77..df3b5b73c6 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -2131,6 +2131,8 @@ struct ArchCPU {
+@@ -2395,6 +2395,8 @@ struct ArchCPU {
      bool enforce_cpuid;
      /* x87 host-FPU fast path (target/i386/tcg/x87-fast.h) */
      bool x87_fast;
@@ -42,10 +42,10 @@ index cef14a9..019dffe 100644
      bool sse_fast;
      /* MMX/SSE integer and permutation ops inline (target/i386/tcg/simd-fast.c.inc) */
 diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
-index ec65620..8fab0f3 100644
+index 1a2c6ed87e..abcb066850 100644
 --- a/target/i386/tcg/fpu_helper.c
 +++ b/target/i386/tcg/fpu_helper.c
-@@ -970,7 +970,11 @@ void update_fp_status(CPUX86State *env)
+@@ -1000,7 +1000,11 @@ void update_fp_status(CPUX86State *env)
          break;
      case 3:
      default:

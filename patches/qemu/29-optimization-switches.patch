@@ -51,31 +51,13 @@ the DOS batteries run under `QEMU_TCG_OPTS=tb-invalidate-fast=off,
 tlb-floor=off,tls-hot-paths=off` to say the off branches are
 architecturally the same machine.
 
-diff --git a/include/exec/cpu-defs.h b/include/exec/cpu-defs.h
-index d569d0f..1ca335e 100644
---- a/include/exec/cpu-defs.h
-+++ b/include/exec/cpu-defs.h
-@@ -69,6 +69,13 @@
-  */
- #define CPU_TLB_DYN_MIN_BITS 12
- #define CPU_TLB_DYN_DEFAULT_BITS 12
-+/*
-+ * Upstream's numbers, which `-accel tcg,tlb-floor=off` goes back to so the
-+ * floor can be A/B'd like every other patch of the queue.  cputlb.c picks
-+ * between the two pairs at run time (tlb_dyn_min_bits / _default_bits).
-+ */
-+#define CPU_TLB_DYN_MIN_BITS_NOFLOOR 6
-+#define CPU_TLB_DYN_DEFAULT_BITS_NOFLOOR 8
- 
- # if HOST_LONG_BITS == 32
- /* Make sure we do not require a double-word shift for the TLB load */
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 4af9d45..074dddd 100644
+index 4f76f7b378..928456c327 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
-@@ -41,6 +41,23 @@
- #include "trace.h"
+@@ -47,6 +47,23 @@
  #include "tb-hash.h"
+ #include "tlb-bounds.h"
  #include "internal-common.h"
 +
 +/*
@@ -94,10 +76,10 @@ index 4af9d45..074dddd 100644
 +    return tcg_tlb_floor ? CPU_TLB_DYN_DEFAULT_BITS
 +                         : CPU_TLB_DYN_DEFAULT_BITS_NOFLOOR;
 +}
- #include "internal-target.h"
+ #include "system-page-protection.h"
  #ifdef CONFIG_PLUGIN
  #include "qemu/plugin-memory.h"
-@@ -243,7 +260,7 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
+@@ -236,7 +253,7 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
          if (expected_rate > 70) {
              ceil *= 2;
          }
@@ -106,7 +88,7 @@ index 4af9d45..074dddd 100644
      }
  
      if (new_size == old_size) {
-@@ -270,11 +287,11 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
+@@ -263,11 +280,11 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
       * size, aborting if we cannot even allocate the smallest TLB we support.
       */
      while (fast->table == NULL || desc->fulltlb == NULL) {
@@ -120,7 +102,7 @@ index 4af9d45..074dddd 100644
          fast->mask = (new_size - 1) << CPU_TLB_ENTRY_BITS;
  
          g_free(fast->table);
-@@ -306,7 +323,7 @@ static void tlb_flush_one_mmuidx_locked(CPUState *cpu, int mmu_idx,
+@@ -299,7 +316,7 @@ static void tlb_flush_one_mmuidx_locked(CPUState *cpu, int mmu_idx,
  
  static void tlb_mmu_init(CPUTLBDesc *desc, CPUTLBDescFast *fast, int64_t now)
  {
@@ -129,7 +111,7 @@ index 4af9d45..074dddd 100644
  
      tlb_window_reset(desc, now, 0);
      desc->n_used_entries = 0;
-@@ -1351,6 +1368,26 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
+@@ -1361,6 +1378,25 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
       * Racer 1997 makes ~2 million such stores a second after patch 18 and
       * spent 8 % of its vCPU thread in that thunk).
       */
@@ -141,12 +123,11 @@ index 4af9d45..074dddd 100644
 +         * is the whole claim patch 19 makes.
 +         */
 +        if (changed &&
-+            !cpu_physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
-+            tb_invalidate_phys_range_fast(ram_addr, size, retaddr);
++            !physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
++            tb_invalidate_phys_range_fast(cpu, ram_addr, size, retaddr);
 +        }
-+        cpu_physical_memory_set_dirty_range(ram_addr, size,
-+                                            DIRTY_CLIENTS_NOCODE);
-+        if (!cpu_physical_memory_is_clean(ram_addr)) {
++        physical_memory_set_dirty_range(ram_addr, size, DIRTY_CLIENTS_NOCODE);
++        if (!physical_memory_is_clean(ram_addr)) {
 +            trace_memory_notdirty_set_dirty(mem_vaddr);
 +            tlb_set_dirty(cpu, mem_vaddr);
 +        }
@@ -154,13 +135,13 @@ index 4af9d45..074dddd 100644
 +    }
 +
      if (changed &&
-         !cpu_physical_memory_get_dirty_flag_rcu_locked(ram_addr,
-                                                        DIRTY_MEMORY_CODE)) {
+         !physical_memory_get_dirty_flag_rcu_locked(ram_addr,
+                                                    DIRTY_MEMORY_CODE)) {
 diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
-index e9b755f..c8a22ab 100644
+index d1564279f7..e46f170aaf 100644
 --- a/accel/tcg/internal-common.h
 +++ b/accel/tcg/internal-common.h
-@@ -20,6 +20,12 @@ extern bool one_insn_per_tb;
+@@ -22,6 +22,12 @@ extern bool one_insn_per_tb;
  extern bool tcg_smc_same_value;
  /* the jump-cache probe of indirect branches emitted as TCG ops (patch 20) */
  extern bool tcg_inline_lookup;
@@ -171,13 +152,83 @@ index e9b755f..c8a22ab 100644
 +/* the dirty-bitmap helpers read under the vCPU's own RCU section (patch 19) */
 +extern bool tcg_tls_hot_paths;
  
- /*
-  * Return true if CS is not running in parallel with other cpus, either
+ extern bool icount_align_option;
+ 
+diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
+index d3b721bc07..9e0c32d1c5 100644
+--- a/accel/tcg/tb-maint.c
++++ b/accel/tcg/tb-maint.c
+@@ -946,6 +946,13 @@ static void tb_jmp_cache_inval_tb(TranslationBlock *tb)
+     CPUState *cpu;
+ 
+     if (tb_cflags(tb) & CF_PCREL) {
++        if (!tcg_tb_invalidate_fast) {
++            /* upstream: the slot is unknown, so flush every cache */
++            CPU_FOREACH(cpu) {
++                tcg_flush_jmp_cache(cpu);
++            }
++            return;
++        }
+         /*
+          * A TB may be at any virtual address, so its jump cache slot is
+          * unknown.  Flushing the whole cache (a 64 KiB memset per
+@@ -1270,7 +1277,9 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
+          * option ROM's TPR stubs (all of a Windows guest's IRQL fast paths)
+          * sit below the VAPICState the APIC writes at every interrupt.
+          */
+-        page_start = MAX(page_start, start);
++        if (tcg_tb_invalidate_fast) {
++            page_start = MAX(page_start, start);
++        }
+         page_last = MIN(page_last, last);
+         tb_invalidate_phys_page_range__locked(cpu, pages, pd,
+                                               page_start, page_last, 0);
+@@ -1338,21 +1347,33 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+     }
+     /* under the page lock, against a TB being added on another vCPU */
+     page_lock(p);
+-    may_hit = p->first_tb &&
+-              !(off + len - 1 < p->code_lo || off > p->code_hi);
+-    if (!may_hit) {
+-        page_unlock(p);
+-        return;
+-    }
+     if (soft_imm_absorbs__locked(p, start, last)) {
+         /*
+          * Every block the write can reach reads those bytes at run time
+          * (exec/tb-softimm.h): the store is the update, nothing is stale
+-         * and nothing has to be thrown away.
++         * and nothing has to be thrown away.  Asked before the switch
++         * below, because this is patch 24's and that switch is patch
++         * 15's: turning one of the queue off must not silently take
++         * another with it, which is the whole point of them being
++         * separate.
+          */
+         page_unlock(p);
+         return;
+     }
++    if (!tcg_tb_invalidate_fast) {
++        /* upstream: always the page collection, always the whole walk */
++        page_unlock(p);
++        pages = page_collection_lock(start, last);
++        tb_invalidate_phys_page_range__locked(cpu, pages, p, start, last, ra);
++        page_collection_unlock(pages);
++        return;
++    }
++    may_hit = p->first_tb &&
++              !(off + len - 1 < p->code_lo || off > p->code_hi);
++    if (!may_hit) {
++        page_unlock(p);
++        return;
++    }
+     if (off >= p->span_in_end && off + len - 1 < p->span_out_lo) {
+         /*
+          * The common case, nothing the write can hit reaches into another
 diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
-index ba599b1..c746555 100644
+index b80ebdac62..552ee00122 100644
 --- a/accel/tcg/tcg-all.c
 +++ b/accel/tcg/tcg-all.c
-@@ -103,6 +103,9 @@ bool one_insn_per_tb;
+@@ -86,6 +86,9 @@ bool one_insn_per_tb;
  bool tcg_smc_same_value = true;
  bool tcg_inline_lookup = true;
  bool tcg_soft_imm = true;
@@ -185,9 +236,9 @@ index ba599b1..c746555 100644
 +bool tcg_tlb_floor = true;
 +bool tcg_tls_hot_paths = true;
  
- static int tcg_init_machine(MachineState *ms)
- {
-@@ -209,6 +212,36 @@ static void tcg_set_smc_same_value(Object *obj, bool value, Error **errp)
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -261,6 +264,36 @@ static void tcg_set_smc_same_value(Object *obj, bool value, Error **errp)
      tcg_smc_same_value = value;
  }
  
@@ -224,7 +275,7 @@ index ba599b1..c746555 100644
  static bool tcg_get_inline_lookup(Object *obj, Error **errp)
  {
      return tcg_inline_lookup;
-@@ -302,6 +335,21 @@ static void tcg_accel_class_init(ObjectClass *oc, void *data)
+@@ -329,6 +362,21 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
      object_class_property_set_description(oc, "soft-imm",
          "A block whose code keeps being patched reads those operands from the guest's code at run time");
  
@@ -243,76 +294,23 @@ index ba599b1..c746555 100644
 +    object_class_property_set_description(oc, "tls-hot-paths",
 +        "Read the dirty bitmaps under the vCPU's own RCU section instead of locking per access");
 +
-     object_class_property_add_bool(oc, "pinned-regs",
-         tcg_get_pinned_regs, tcg_set_pinned_regs);
-     object_class_property_set_description(oc, "pinned-regs",
-diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
-index 662028d..368bfb6 100644
---- a/accel/tcg/tb-maint.c
-+++ b/accel/tcg/tb-maint.c
-@@ -929,6 +929,13 @@ static void tb_jmp_cache_inval_tb(TranslationBlock *tb)
-     CPUState *cpu;
+     object_class_property_add_bool(oc, "one-insn-per-tb",
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/accel/tcg/tlb-bounds.h b/accel/tcg/tlb-bounds.h
+index da21f81f7d..19647f390d 100644
+--- a/accel/tcg/tlb-bounds.h
++++ b/accel/tcg/tlb-bounds.h
+@@ -21,5 +21,12 @@
+ #define CPU_TLB_DYN_MIN_BITS 12
+ #define CPU_TLB_DYN_MAX_BITS (32 - TARGET_PAGE_BITS)
+ #define CPU_TLB_DYN_DEFAULT_BITS 12
++/*
++ * Upstream's numbers, which `-accel tcg,tlb-floor=off` goes back to so the
++ * floor can be A/B'd like every other patch of the queue.  cputlb.c picks
++ * between the two pairs at run time (tlb_dyn_min_bits / _default_bits).
++ */
++#define CPU_TLB_DYN_MIN_BITS_NOFLOOR 6
++#define CPU_TLB_DYN_DEFAULT_BITS_NOFLOOR 8
  
-     if (tb_cflags(tb) & CF_PCREL) {
-+        if (!tcg_tb_invalidate_fast) {
-+            /* upstream: the slot is unknown, so flush every cache */
-+            CPU_FOREACH(cpu) {
-+                tcg_flush_jmp_cache(cpu);
-+            }
-+            return;
-+        }
-         /*
-          * A TB may be at any virtual address, so its jump cache slot is
-          * unknown.  Flushing the whole cache (a 64 KiB memset per
-@@ -1265,7 +1272,9 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t last)
-          * option ROM's TPR stubs (all of a Windows guest's IRQL fast paths)
-          * sit below the VAPICState the APIC writes at every interrupt.
-          */
--        page_start = MAX(page_start, start);
-+        if (tcg_tb_invalidate_fast) {
-+            page_start = MAX(page_start, start);
-+        }
-         page_last = MIN(page_last, last);
-         tb_invalidate_phys_page_range__locked(pages, pd,
-                                               page_start, page_last, 0);
-@@ -1351,21 +1360,33 @@ void tb_invalidate_phys_range_fast(ram_addr_t ram_addr,
-     }
-     /* under the page lock, against a TB being added on another vCPU */
-     page_lock(p);
--    may_hit = p->first_tb &&
--              !(off + size - 1 < p->code_lo || off > p->code_hi);
--    if (!may_hit) {
--        page_unlock(p);
--        return;
--    }
-     if (soft_imm_absorbs__locked(p, ram_addr, ram_addr + size - 1)) {
-         /*
-          * Every block the write can reach reads those bytes at run time
-          * (exec/tb-softimm.h): the store is the update, nothing is stale
--         * and nothing has to be thrown away.
-+         * and nothing has to be thrown away.  Asked before the switch
-+         * below, because this is patch 24's and that switch is patch
-+         * 15's: turning one of the queue off must not silently take
-+         * another with it, which is the whole point of them being
-+         * separate.
-          */
-         page_unlock(p);
-         return;
-     }
-+    if (!tcg_tb_invalidate_fast) {
-+        /* upstream: always the page collection, always the whole walk */
-+        page_unlock(p);
-+        pages = page_collection_lock(ram_addr, ram_addr + size - 1);
-+        tb_invalidate_phys_page_fast__locked(pages, ram_addr, size, retaddr);
-+        page_collection_unlock(pages);
-+        return;
-+    }
-+    may_hit = p->first_tb &&
-+              !(off + size - 1 < p->code_lo || off > p->code_hi);
-+    if (!may_hit) {
-+        page_unlock(p);
-+        return;
-+    }
-     if (off >= p->span_in_end && off + size - 1 < p->span_out_lo) {
-         /*
-          * The common case, nothing the write can hit reaches into another
+ #endif /* ACCEL_TCG_TLB_BOUNDS_H */

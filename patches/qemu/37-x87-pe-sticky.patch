@@ -65,10 +65,10 @@ SSE, SMC and rep batteries unchanged; scripts/test.sh all 57/57.
 Behind x87-fast, like the rest of patch 06: off, none of this exists.
 
 diff --git a/target/i386/cpu-dump.c b/target/i386/cpu-dump.c
-index fbeb2e2..4b0e5fd 100644
+index 12889c6dbd..6292434199 100644
 --- a/target/i386/cpu-dump.c
 +++ b/target/i386/cpu-dump.c
-@@ -499,6 +499,7 @@ void x86_cpu_dump_state(CPUState *cs, FILE *f, int flags)
+@@ -525,6 +525,7 @@ void x86_cpu_dump_state(CPUState *cs, FILE *f, int flags)
          qemu_fprintf(f, "SSE-fast slow paths: guard=%" PRIu64 " handover=%" PRIu64
                       " helper=%" PRIu64 " cvt/comis=%" PRIu64 "\n",
                       env->sses_stat[0], env->sses_stat[1], env->sses_stat[2], env->sses_stat[3]);
@@ -77,10 +77,10 @@ index fbeb2e2..4b0e5fd 100644
              CPU_LDoubleU u;
              u.d = env->fpregs[i].d;
 diff --git a/target/i386/cpu.h b/target/i386/cpu.h
-index a69018c..20d7cf3 100644
+index 9c2022b9cf..30ddb824f9 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -1812,6 +1812,7 @@ typedef struct CPUArchState {
+@@ -2065,6 +2065,7 @@ typedef struct CPUArchState {
      uint64_t sses_scratch[4] QEMU_ALIGNED(16);
      /* slow-path counters (info registers): guard, hand-over, helper, cvt/comis */
      uint64_t sses_stat[4];
@@ -88,7 +88,7 @@ index a69018c..20d7cf3 100644
      /* shadow doubles of the x87 stack, relative slots (tcg/x87-shadow.c.inc) */
      uint64_t x87_sd[8];
  
-@@ -2578,6 +2579,14 @@ int cpu_mmu_index_kernel(CPUX86State *env);
+@@ -2889,6 +2890,14 @@ static inline bool is_mmu_index_32(int mmu_index)
  /* SSE inline mode: sse_fast_mode and the precision flag already sticky */
  #define TB_FLAG_SSE_FAST_SHIFT  31
  #define TB_FLAG_SSE_FAST_MASK   (1u << TB_FLAG_SSE_FAST_SHIFT)
@@ -101,23 +101,27 @@ index a69018c..20d7cf3 100644
 +#define TB_FLAG_X87_PE_SHIFT    2
 +#define TB_FLAG_X87_PE_MASK     (1u << TB_FLAG_X87_PE_SHIFT)
  
- static inline void cpu_get_tb_cpu_state(CPUX86State *env, vaddr *pc,
-                                         uint64_t *cs_base, uint32_t *flags)
-@@ -2585,6 +2594,9 @@ static inline void cpu_get_tb_cpu_state(CPUX86State *env, vaddr *pc,
-     *flags = env->hflags |
+ void do_cpu_init(X86CPU *cpu);
+ 
+diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
+index 9663ab93a3..2356370ccb 100644
+--- a/target/i386/tcg/tcg-cpu.c
++++ b/target/i386/tcg/tcg-cpu.c
+@@ -59,6 +59,9 @@ static TCGTBCPUState x86_get_tb_cpu_state(CPUState *cs)
+     flags = env->hflags |
          (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK)) |
          ((uint32_t)env->x87_fast_mode << TB_FLAG_X87_MODE_SHIFT);
 +    if (env->x87_fast_mode && (env->fpus & 0x20)) {     /* FPUS_PE */
-+        *flags |= TB_FLAG_X87_PE_MASK;
++        flags |= TB_FLAG_X87_PE_MASK;
 +    }
      if (env->sse_fast_mode
          && (env->sse_status.float_exception_flags & float_flag_inexact)) {
-         *flags |= TB_FLAG_SSE_FAST_MASK;
+         flags |= TB_FLAG_SSE_FAST_MASK;
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 7af3dc8..19598b9 100644
+index b889f3c913..91dae81675 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -165,6 +165,7 @@ typedef struct DisasContext {
+@@ -167,6 +167,7 @@ typedef struct DisasContext {
      /* x87 shadow-double state (x87-shadow.c.inc) */
      bool x87s_on;               /* TB translated in inline mode */
      int x87s_mode;              /* env->x87_fast_mode this TB is for */
@@ -125,7 +129,7 @@ index 7af3dc8..19598b9 100644
      bool x87s_prec24;           /* mode 2: PC=24, shadows hold 24-bit values */
      bool x87s_guarded;          /* runtime mode guard emitted */
      TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
-@@ -2529,6 +2530,21 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2239,6 +2240,21 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
      tcg_gen_and_i32(t, t, u);
      tcg_gen_shli_i32(t, t, TB_FLAG_SSE_FAST_SHIFT);
      tcg_gen_or_i32(flags, flags, t);
@@ -147,15 +151,15 @@ index 7af3dc8..19598b9 100644
  
      tcg_gen_ld_i32(t, tcg_env, offsetof(CPUX86State, segs[R_CS].base));
      tcg_gen_extu_i32_i64(cs_base, t);
-@@ -2948,6 +2964,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+@@ -2659,6 +2675,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
              gen_helper_fldenv(tcg_env, s->A0,
                                tcg_constant_i32(s->dflag - 1));
              update_fip = update_fdp = false;
 +            s->x87s_pe_sticky = false;          /* PE may be clear now: exact for the rest of the TB */
              break;
          case 0x0d: /* fldcw mem */
-             tcg_gen_qemu_ld_i32(s->tmp2_i32, s->A0,
-@@ -2977,11 +2994,13 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+             t32 = tcg_temp_new_i32();
+@@ -2690,11 +2707,13 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
              gen_helper_frstor(tcg_env, s->A0,
                                tcg_constant_i32(s->dflag - 1));
              update_fip = update_fdp = false;
@@ -168,8 +172,8 @@ index 7af3dc8..19598b9 100644
 +            s->x87s_pe_sticky = false;          /* PE may be clear now: exact for the rest of the TB */
              break;
          case 0x2f: /* fnstsw mem */
-             gen_helper_fnstsw(s->tmp2_i32, tcg_env);
-@@ -3209,10 +3228,12 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+             t32 = tcg_temp_new_i32();
+@@ -2911,10 +2930,12 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
              case 2: /* fclex */
                  gen_helper_fclex(tcg_env);
                  update_fip = false;
@@ -182,7 +186,7 @@ index 7af3dc8..19598b9 100644
                  break;
              case 4: /* fsetpm (287 only, just do nop here) */
                  break;
-@@ -4154,6 +4175,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3852,6 +3873,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
      dc->x87s_on = dc->x87s_mode != 0 && tcg_f64_supported()
          && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
      dc->x87s_prec24 = dc->x87s_mode == 2;
@@ -191,7 +195,7 @@ index 7af3dc8..19598b9 100644
      dc->x87s_nslow = 0;
      dc->x87s_ntmps = 0;
 diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
-index db77b56..aea7a2f 100644
+index 4d8bb806fc..e95200d013 100644
 --- a/target/i386/tcg/x87-shadow.c.inc
 +++ b/target/i386/tcg/x87-shadow.c.inc
 @@ -424,12 +424,10 @@ static void x87s_round24(DisasContext *s, TCGv_i64 out, TCGv_i64 in,
@@ -358,7 +362,7 @@ index db77b56..aea7a2f 100644
  }
  
  /* total-order key of a finite double: -0 -> +0, negatives flipped */
-@@ -1349,11 +1386,15 @@ static void gen_x87s_fsqrt(DisasContext *s)
+@@ -1366,11 +1403,15 @@ static void gen_x87s_fsqrt(DisasContext *s)
      tcg_gen_brcondi_i64(TCG_COND_LT, v, 0, b->label);
      tcg_gen_sqrt_f64(r, v);
      x87s_f64_check_win(s, r, b->label);

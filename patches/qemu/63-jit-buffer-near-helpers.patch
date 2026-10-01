@@ -31,7 +31,7 @@ in doc 22 §5.0. Darwin only: Linux/x86-64 has the same reach rules (CALL
 rel32 = 2 GiB) but a different allocator; not measured there.
 
 diff --git a/tcg/region.c b/tcg/region.c
-index 478ec051c4..e5111fc963 100644
+index 1145f35085..918f5744de 100644
 --- a/tcg/region.c
 +++ b/tcg/region.c
 @@ -24,6 +24,7 @@
@@ -42,7 +42,7 @@ index 478ec051c4..e5111fc963 100644
  #include "qemu/madvise.h"
  #include "qemu/mprotect.h"
  #include "qemu/memalign.h"
-@@ -551,12 +552,86 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
+@@ -560,12 +561,86 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
      return PROT_READ | PROT_WRITE | PROT_EXEC;
  }
  #else

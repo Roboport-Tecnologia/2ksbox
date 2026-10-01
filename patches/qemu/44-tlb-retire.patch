@@ -47,10 +47,10 @@ install (the same VGA reset) both showed it; a mode change that leaves
 the window alone did not.
 
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index a8b64f1..382c68d 100644
+index 2985a7ec0d..fa4aebb7ae 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
-@@ -278,6 +278,7 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
+@@ -271,6 +271,7 @@ static void tlb_mmu_resize_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast,
      fast->mask = (new_size - 1) << CPU_TLB_ENTRY_BITS;
      fast->table = g_try_new(CPUTLBEntry, new_size);
      desc->fulltlb = g_try_new(CPUTLBEntryFull, new_size);
@@ -58,7 +58,7 @@ index a8b64f1..382c68d 100644
  
      /*
       * If the allocations fail, try smaller sizes. We just freed some
-@@ -307,16 +308,117 @@ static void tlb_mmu_flush_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast)
+@@ -300,16 +301,117 @@ static void tlb_mmu_flush_locked(CPUTLBDesc *desc, CPUTLBDescFast *fast)
      desc->large_page_addr = -1;
      desc->large_page_mask = -1;
      desc->vindex = 0;
@@ -168,7 +168,7 @@ index a8b64f1..382c68d 100644
 +                                        int64_t now, bool retire)
  {
      CPUTLBDesc *desc = &cpu->neg.tlb.d[mmu_idx];
-     CPUTLBDescFast *fast = &cpu->neg.tlb.f[mmu_idx];
+     CPUTLBDescFast *fast = cpu_tlb_fast(cpu, mmu_idx);
  
 +    if (retire) {
 +        tlb_retire_locked(desc, fast);
@@ -178,7 +178,7 @@ index a8b64f1..382c68d 100644
      tlb_mmu_resize_locked(desc, fast, now);
      tlb_mmu_flush_locked(desc, fast);
  }
-@@ -330,6 +432,12 @@ static void tlb_mmu_init(CPUTLBDesc *desc, CPUTLBDescFast *fast, int64_t now)
+@@ -323,6 +425,12 @@ static void tlb_mmu_init(CPUTLBDesc *desc, CPUTLBDescFast *fast, int64_t now)
      fast->mask = (n_entries - 1) << CPU_TLB_ENTRY_BITS;
      fast->table = g_new(CPUTLBEntry, n_entries);
      desc->fulltlb = g_new(CPUTLBEntryFull, n_entries);
@@ -191,7 +191,7 @@ index a8b64f1..382c68d 100644
      tlb_mmu_flush_locked(desc, fast);
  }
  
-@@ -369,6 +477,9 @@ void tlb_destroy(CPUState *cpu)
+@@ -362,6 +470,9 @@ void tlb_destroy(CPUState *cpu)
  
          g_free(fast->table);
          g_free(desc->fulltlb);
@@ -201,15 +201,15 @@ index a8b64f1..382c68d 100644
      }
  }
  
-@@ -396,6 +507,7 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
-     uint16_t asked = data.host_int;
-     uint16_t all_dirty, work, to_clean;
+@@ -389,6 +500,7 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
+     MMUIdxMap asked = data.host_int;
+     MMUIdxMap all_dirty, work, to_clean;
      int64_t now = get_clock_realtime();
 +    bool retire;
  
      assert_cpu_is_self(cpu);
  
-@@ -403,6 +515,16 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
+@@ -396,6 +508,16 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
  
      qemu_spin_lock(&cpu->neg.tlb.c.lock);
  
@@ -226,7 +226,7 @@ index a8b64f1..382c68d 100644
      all_dirty = cpu->neg.tlb.c.dirty;
      to_clean = asked & all_dirty;
      all_dirty &= ~to_clean;
-@@ -410,7 +532,13 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
+@@ -403,7 +525,13 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
  
      for (work = to_clean; work != 0; work &= work - 1) {
          int mmu_idx = ctz32(work);
@@ -241,7 +241,7 @@ index a8b64f1..382c68d 100644
      }
  
      qemu_spin_unlock(&cpu->neg.tlb.c.lock);
-@@ -445,6 +573,12 @@ void tlb_flush(CPUState *cpu)
+@@ -438,6 +566,12 @@ void tlb_flush(CPUState *cpu)
      tlb_flush_by_mmuidx(cpu, ALL_MMUIDX_BITS);
  }
  
@@ -251,10 +251,10 @@ index a8b64f1..382c68d 100644
 +    tlb_flush(cpu);
 +}
 +
- void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint16_t idxmap)
+ void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, MMUIdxMap idxmap)
  {
      const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
-@@ -534,12 +668,20 @@ static void tlb_flush_page_locked(CPUState *cpu, int midx, vaddr page)
+@@ -527,12 +661,20 @@ static void tlb_flush_page_locked(CPUState *cpu, int midx, vaddr page)
          tlb_debug("forcing full flush midx %d (%016"
                    VADDR_PRIx "/%016" VADDR_PRIx ")\n",
                    midx, lp_addr, lp_mask);
@@ -276,7 +276,7 @@ index a8b64f1..382c68d 100644
      }
  }
  
-@@ -707,7 +849,7 @@ static void tlb_flush_range_locked(CPUState *cpu, int midx,
+@@ -700,7 +842,7 @@ static void tlb_flush_range_locked(CPUState *cpu, int midx,
          tlb_debug("forcing full flush midx %d ("
                    "%016" VADDR_PRIx "/%016" VADDR_PRIx "+%016" VADDR_PRIx ")\n",
                    midx, addr, mask, len);
@@ -285,7 +285,7 @@ index a8b64f1..382c68d 100644
          return;
      }
  
-@@ -720,7 +862,7 @@ static void tlb_flush_range_locked(CPUState *cpu, int midx,
+@@ -713,7 +855,7 @@ static void tlb_flush_range_locked(CPUState *cpu, int midx,
          tlb_debug("forcing full flush midx %d ("
                    "%016" VADDR_PRIx "/%016" VADDR_PRIx ")\n",
                    midx, d->large_page_addr, d->large_page_mask);
@@ -294,15 +294,15 @@ index a8b64f1..382c68d 100644
          return;
      }
  
-@@ -1184,6 +1326,7 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
+@@ -1170,6 +1312,7 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
       * vaddr we add back in io_prepare()/get_page_addr_code().
       */
      desc->fulltlb[index] = *full;
 +    tlb_note_filled(desc, index);
      full = &desc->fulltlb[index];
-     full->xlat_section = iotlb - addr_page;
-     full->phys_addr = paddr_page;
-@@ -1243,6 +1386,85 @@ void tlb_set_page(CPUState *cpu, vaddr addr,
+     full->xlat_offset = iotlb - addr_page;
+     full->section = section;
+@@ -1253,6 +1396,85 @@ static inline bool tlb_hit(uint64_t tlb_addr, vaddr addr)
   * (e.g. CPUTLBEntry pointers) must be discarded and looked up again
   * (e.g. via tlb_entry()).
   */
@@ -370,10 +370,10 @@ index a8b64f1..382c68d 100644
 +    /* the page may have gained or lost translated code since */
 +    if (tlb_hit_page(tn.addr_write, page) &&
 +        !(tn.addr_write & (TLB_MMIO | TLB_DISCARD_WRITE))) {
-+        ram_addr_t ram_addr = rtf->xlat_section + page;
++        ram_addr_t ram_addr = rtf->xlat_offset + page;
 +
 +        tn.addr_write &= ~(uint64_t)TLB_NOTDIRTY;
-+        if (cpu_physical_memory_is_clean(ram_addr)) {
++        if (physical_memory_is_clean(ram_addr)) {
 +            tn.addr_write |= TLB_NOTDIRTY;
 +        }
 +    }
@@ -388,7 +388,7 @@ index a8b64f1..382c68d 100644
  static bool tlb_fill_align(CPUState *cpu, vaddr addr, MMUAccessType type,
                             int mmu_idx, MemOp memop, int size,
                             bool probe, uintptr_t ra)
-@@ -1250,6 +1472,10 @@ static bool tlb_fill_align(CPUState *cpu, vaddr addr, MMUAccessType type,
+@@ -1260,6 +1482,10 @@ static bool tlb_fill_align(CPUState *cpu, vaddr addr, MMUAccessType type,
      const TCGCPUOps *ops = cpu->cc->tcg_ops;
      CPUTLBEntryFull full;
  
@@ -400,31 +400,72 @@ index a8b64f1..382c68d 100644
          if (ops->tlb_fill_align(cpu, &full, addr, type, mmu_idx,
                                  memop, size, probe, ra)) {
 diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
-index e71fb3b..438080e 100644
+index 2b0d4815fd..cfd5b89d00 100644
 --- a/accel/tcg/internal-common.h
 +++ b/accel/tcg/internal-common.h
-@@ -30,6 +30,8 @@ extern bool tcg_tls_hot_paths;
+@@ -32,6 +32,8 @@ extern bool tcg_tls_hot_paths;
  extern bool tcg_jump_cache_keep;
  /* a non-jump end of block chains to the next block when no interrupt is pending (patch 43) */
  extern bool tcg_eob_chain;
 +/* a CR3 write retires the TLB instead of clearing it; misses re-check the page tables (patch 44) */
 +extern bool tcg_tlb_retire;
  
- /*
-  * Return true if CS is not running in parallel with other cpus, either
-diff --git a/accel/tcg/monitor.c b/accel/tcg/monitor.c
-index 093efe9..05e05a8 100644
---- a/accel/tcg/monitor.c
-+++ b/accel/tcg/monitor.c
-@@ -18,6 +18,7 @@
- #include "sysemu/tcg.h"
+ extern bool icount_align_option;
+ 
+diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
+index 1720e7f51d..ef261e5803 100644
+--- a/accel/tcg/tcg-all.c
++++ b/accel/tcg/tcg-all.c
+@@ -91,6 +91,7 @@ bool tcg_tlb_floor = true;
+ bool tcg_tls_hot_paths = true;
+ bool tcg_jump_cache_keep = true;
+ bool tcg_eob_chain = true;
++bool tcg_tlb_retire = true;
+ 
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -301,6 +302,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
+     return tcg_inline_lookup;
+ }
+ 
++static bool tcg_get_tlb_retire(Object *obj, Error **errp)
++{
++    return tcg_tlb_retire;
++}
++
++static void tcg_set_tlb_retire(Object *obj, bool value, Error **errp)
++{
++    tcg_tlb_retire = value;
++}
++
+ static bool tcg_get_eob_chain(Object *obj, Error **errp)
+ {
+     return tcg_eob_chain;
+@@ -409,6 +420,11 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "eob-chain",
+         "Chain a block that ends after a segment load, sti, popf or iret to the next one when no interrupt is pending");
+ 
++    object_class_property_add_bool(oc, "tlb-retire",
++        tcg_get_tlb_retire, tcg_set_tlb_retire);
++    object_class_property_set_description(oc, "tlb-retire",
++        "A CR3 write keeps the flushed TLB; a miss reuses its entry when the page tables still agree");
++
+     object_class_property_add_bool(oc, "one-insn-per-tb",
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/accel/tcg/tcg-stats.c b/accel/tcg/tcg-stats.c
+index ced5dec0c4..aeb43fbf28 100644
+--- a/accel/tcg/tcg-stats.c
++++ b/accel/tcg/tcg-stats.c
+@@ -16,6 +16,7 @@
  #include "tcg/tcg.h"
  #include "internal-common.h"
-+#include "exec/tb-softimm.h"
  #include "tb-context.h"
++#include "exec/tb-softimm.h"
+ #include <math.h>
  
- 
-@@ -48,8 +49,21 @@ static void dump_accel_info(GString *buf)
+ static void dump_drift_info(GString *buf)
+@@ -44,8 +45,21 @@ static void dump_accel_info(AccelState *accel, GString *buf)
                                                      &error_fatal);
  
      g_string_append_printf(buf, "Accelerator settings:\n");
@@ -447,8 +488,8 @@ index 093efe9..05e05a8 100644
  }
  
  static void print_qht_statistics(struct qht_stats hst, GString *buf)
-@@ -126,6 +140,20 @@ static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
-     return false;
+@@ -147,9 +161,24 @@ static void tlb_flush_counts(size_t *pfull, size_t *ppart, size_t *pelide)
+     *pelide = elide;
  }
  
 +/* patch 44: TLB refills, and how many of them came from a retired table */
@@ -465,73 +506,48 @@ index 093efe9..05e05a8 100644
 +    *preuse = reuse;
 +}
 +
- static void tlb_flush_counts(size_t *pfull, size_t *ppart, size_t *pelide)
+ static void tcg_dump_flush_info(GString *buf)
  {
-     CPUState *cpu;
-@@ -149,6 +177,7 @@ static void tcg_dump_info(GString *buf)
- static void dump_exec_info(GString *buf)
- {
-     struct tb_tree_stats tst = {};
+     size_t flush_full, flush_part, flush_elide;
 +    size_t refill, reuse;
-     struct qht_stats hst;
-     size_t nb_tbs, flush_full, flush_part, flush_elide;
  
-@@ -196,6 +225,9 @@ static void dump_exec_info(GString *buf)
+     g_string_append_printf(buf, "TB flush count      %u\n",
+                            qatomic_read(&tb_ctx.tb_flush_count));
+@@ -160,6 +189,9 @@ static void tcg_dump_flush_info(GString *buf)
      g_string_append_printf(buf, "TLB full flushes    %zu\n", flush_full);
      g_string_append_printf(buf, "TLB partial flushes %zu\n", flush_part);
      g_string_append_printf(buf, "TLB elided flushes  %zu\n", flush_elide);
 +    tlb_refill_counts(&refill, &reuse);
 +    g_string_append_printf(buf, "TLB refills         %zu (%zu from retired tables)\n",
 +                           refill, reuse);
-     tcg_dump_info(buf);
  }
  
-diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
-index 582c2f1..87282eb 100644
---- a/accel/tcg/tcg-all.c
-+++ b/accel/tcg/tcg-all.c
-@@ -108,6 +108,7 @@ bool tcg_tlb_floor = true;
- bool tcg_tls_hot_paths = true;
- bool tcg_jump_cache_keep = true;
- bool tcg_eob_chain = true;
-+bool tcg_tlb_retire = true;
- 
- static int tcg_init_machine(MachineState *ms)
- {
-@@ -249,6 +250,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
-     return tcg_inline_lookup;
- }
- 
-+static bool tcg_get_tlb_retire(Object *obj, Error **errp)
-+{
-+    return tcg_tlb_retire;
-+}
-+
-+static void tcg_set_tlb_retire(Object *obj, bool value, Error **errp)
-+{
-+    tcg_tlb_retire = value;
-+}
-+
- static bool tcg_get_eob_chain(Object *obj, Error **errp)
- {
-     return tcg_eob_chain;
-@@ -382,6 +393,11 @@ static void tcg_accel_class_init(ObjectClass *oc, void *data)
-     object_class_property_set_description(oc, "eob-chain",
-         "Chain a block that ends after a segment load, sti, popf or iret to the next one when no interrupt is pending");
- 
-+    object_class_property_add_bool(oc, "tlb-retire",
-+        tcg_get_tlb_retire, tcg_set_tlb_retire);
-+    object_class_property_set_description(oc, "tlb-retire",
-+        "A CR3 write keeps the flushed TLB; a miss reuses its entry when the page tables still agree");
-+
-     object_class_property_add_bool(oc, "pinned-regs",
-         tcg_get_pinned_regs, tcg_set_pinned_regs);
-     object_class_property_set_description(oc, "pinned-regs",
-diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
-index 2e4c4cc..241eea9 100644
---- a/include/exec/exec-all.h
-+++ b/include/exec/exec-all.h
-@@ -89,6 +89,16 @@ void tlb_flush_page_all_cpus_synced(CPUState *src, vaddr addr);
+ static void dump_exec_info(GString *buf)
+diff --git a/include/accel/tcg/cpu-ops.h b/include/accel/tcg/cpu-ops.h
+index 3ff6e6810e..c7f1eb78a0 100644
+--- a/include/accel/tcg/cpu-ops.h
++++ b/include/accel/tcg/cpu-ops.h
+@@ -226,6 +226,15 @@ struct TCGCPUOps {
+     bool (*tlb_fill)(CPUState *cpu, vaddr address, int size,
+                      MMUAccessType access_type, int mmu_idx,
+                      bool probe, uintptr_t retaddr);
++    /**
++     * @tlb_retired_reusable: 2ksbox (patch 44).  A TLB flush the target
++     * asked for with tlb_flush_retiring() kept the flushed tables; on a
++     * miss whose page the retired table holds, say whether that entry is
++     * still the translation the guest's page tables give now.  A true
++     * answer puts the entry back without a walk.
++     */
++    bool (*tlb_retired_reusable)(CPUState *cpu, int mmu_idx, vaddr addr,
++                                 const CPUTLBEntryFull *full);
+     /**
+      * @pointer_wrap:
+      *
+diff --git a/include/exec/cputlb.h b/include/exec/cputlb.h
+index f7f7020382..006d1a8aa1 100644
+--- a/include/exec/cputlb.h
++++ b/include/exec/cputlb.h
+@@ -125,6 +125,16 @@ void tlb_flush_page_all_cpus_synced(CPUState *src, vaddr addr);
   * use one of the other functions for efficiency.
   */
  void tlb_flush(CPUState *cpu);
@@ -545,14 +561,14 @@ index 2e4c4cc..241eea9 100644
 + * entries it was computed from (TCGCPUOps.tlb_retired_reusable).
 + */
 +void tlb_flush_retiring(CPUState *cpu);
+ 
  /**
   * tlb_flush_all_cpus_synced:
-  * @cpu: src CPU of the flush
 diff --git a/include/hw/core/cpu.h b/include/hw/core/cpu.h
-index 0e4d6f1..34d183d 100644
+index b54035fb13..cd551098c8 100644
 --- a/include/hw/core/cpu.h
 +++ b/include/hw/core/cpu.h
-@@ -262,6 +262,24 @@ struct CPUTLBEntryFull {
+@@ -267,6 +267,24 @@ struct CPUTLBEntryFull {
              uint8_t shareability;
              bool guarded;
          } arm;
@@ -577,7 +593,7 @@ index 0e4d6f1..34d183d 100644
      } extra;
  };
  
-@@ -283,6 +301,25 @@ typedef struct CPUTLBDesc {
+@@ -288,6 +306,25 @@ typedef struct CPUTLBDesc {
      /* maximum number of entries observed in the window */
      size_t window_max_entries;
      size_t n_used_entries;
@@ -603,7 +619,7 @@ index 0e4d6f1..34d183d 100644
      /* The next index to use in the tlb victim table.  */
      size_t vindex;
      /* The tlb victim table, in two parts.  */
-@@ -311,6 +348,10 @@ typedef struct CPUTLBCommon {
+@@ -316,6 +353,10 @@ typedef struct CPUTLBCommon {
      size_t full_flush_count;
      size_t part_flush_count;
      size_t elide_flush_count;
@@ -614,31 +630,11 @@ index 0e4d6f1..34d183d 100644
  } CPUTLBCommon;
  
  /*
-diff --git a/include/hw/core/tcg-cpu-ops.h b/include/hw/core/tcg-cpu-ops.h
-index 663efb9..d8ba73f 100644
---- a/include/hw/core/tcg-cpu-ops.h
-+++ b/include/hw/core/tcg-cpu-ops.h
-@@ -167,6 +167,15 @@ struct TCGCPUOps {
-     bool (*tlb_fill)(CPUState *cpu, vaddr address, int size,
-                      MMUAccessType access_type, int mmu_idx,
-                      bool probe, uintptr_t retaddr);
-+    /**
-+     * @tlb_retired_reusable: patch 44.  A TLB flush the target asked for
-+     * with tlb_flush_retiring() kept the flushed tables; on a miss whose
-+     * page the retired table holds, say whether that entry is still the
-+     * translation the guest's page tables give now.  A true answer puts
-+     * the entry back without a walk.
-+     */
-+    bool (*tlb_retired_reusable)(CPUState *cpu, int mmu_idx, vaddr addr,
-+                                 const CPUTLBEntryFull *full);
-     /**
-      * @do_transaction_failed: Callback for handling failed memory transactions
-      * (ie bus faults or external aborts; not MMU faults)
 diff --git a/target/i386/helper.c b/target/i386/helper.c
-index 01a268a..ac1d27c 100644
+index 6836214162..6beef73038 100644
 --- a/target/i386/helper.c
 +++ b/target/i386/helper.c
-@@ -175,7 +175,15 @@ void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3)
+@@ -181,7 +181,15 @@ void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3)
      if (env->cr[0] & CR0_PG_MASK) {
          qemu_log_mask(CPU_LOG_MMU,
                          "CR3 update: CR3=" TARGET_FMT_lx "\n", new_cr3);
@@ -656,10 +652,10 @@ index 01a268a..ac1d27c 100644
  }
  
 diff --git a/target/i386/tcg/helper-tcg.h b/target/i386/tcg/helper-tcg.h
-index 696d6ef..4c93cc1 100644
+index f4b2ff740d..f9c49bdcbd 100644
 --- a/target/i386/tcg/helper-tcg.h
 +++ b/target/i386/tcg/helper-tcg.h
-@@ -79,6 +79,8 @@ void x86_cpu_record_sigsegv(CPUState *cs, vaddr addr,
+@@ -78,6 +78,8 @@ void x86_cpu_record_sigsegv(CPUState *cs, vaddr addr,
  void x86_cpu_record_sigbus(CPUState *cs, vaddr addr,
                             MMUAccessType access_type, uintptr_t ra);
  #else
@@ -668,11 +664,11 @@ index 696d6ef..4c93cc1 100644
  bool x86_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                        MMUAccessType access_type, int mmu_idx,
                        bool probe, uintptr_t retaddr);
-diff --git a/target/i386/tcg/sysemu/excp_helper.c b/target/i386/tcg/sysemu/excp_helper.c
-index b1f4004..81c03b8 100644
---- a/target/i386/tcg/sysemu/excp_helper.c
-+++ b/target/i386/tcg/sysemu/excp_helper.c
-@@ -37,6 +37,15 @@ typedef struct TranslateResult {
+diff --git a/target/i386/tcg/system/excp_helper.c b/target/i386/tcg/system/excp_helper.c
+index d7ea77c855..560a57a12a 100644
+--- a/target/i386/tcg/system/excp_helper.c
++++ b/target/i386/tcg/system/excp_helper.c
+@@ -40,6 +40,15 @@ typedef struct TranslateResult {
      hwaddr paddr;
      int prot;
      int page_size;
@@ -688,7 +684,7 @@ index b1f4004..81c03b8 100644
  } TranslateResult;
  
  typedef enum TranslateFaultStage2 {
-@@ -156,7 +165,20 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -159,7 +168,20 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
      int error_code;
      int prot;
  
@@ -709,7 +705,7 @@ index b1f4004..81c03b8 100644
      rsvd_mask = ~MAKE_64BIT_MASK(0, env_archcpu(env)->phys_bits);
      rsvd_mask &= PG_ADDRESS_MASK;
      if (!(pg_mode & PG_MODE_NXE)) {
-@@ -198,6 +220,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -201,6 +223,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
              if (!ptw_translate(&pte_trans, pte_addr)) {
                  return false;
              }
@@ -717,7 +713,7 @@ index b1f4004..81c03b8 100644
          restart_4:
              pte = ptw_ldq(&pte_trans, ra);
              if (!(pte & PG_PRESENT_MASK)) {
-@@ -218,6 +241,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -221,6 +244,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
              if (!ptw_translate(&pte_trans, pte_addr)) {
                  return false;
              }
@@ -725,7 +721,7 @@ index b1f4004..81c03b8 100644
          restart_3_lma:
              pte = ptw_ldq(&pte_trans, ra);
              if (!(pte & PG_PRESENT_MASK)) {
-@@ -245,6 +269,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -248,6 +272,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
              if (!ptw_translate(&pte_trans, pte_addr)) {
                  return false;
              }
@@ -733,7 +729,7 @@ index b1f4004..81c03b8 100644
              rsvd_mask |= PG_HI_USER_MASK;
          restart_3_nolma:
              pte = ptw_ldq(&pte_trans, ra);
-@@ -267,6 +292,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -270,6 +295,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
          if (!ptw_translate(&pte_trans, pte_addr)) {
              return false;
          }
@@ -741,7 +737,7 @@ index b1f4004..81c03b8 100644
      restart_2_pae:
          pte = ptw_ldq(&pte_trans, ra);
          if (!(pte & PG_PRESENT_MASK)) {
-@@ -293,6 +319,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -296,6 +322,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
          if (!ptw_translate(&pte_trans, pte_addr)) {
              return false;
          }
@@ -749,7 +745,7 @@ index b1f4004..81c03b8 100644
          pte = ptw_ldq(&pte_trans, ra);
          if (!(pte & PG_PRESENT_MASK)) {
              goto do_fault;
-@@ -311,6 +338,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -314,6 +341,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
          if (!ptw_translate(&pte_trans, pte_addr)) {
              return false;
          }
@@ -757,7 +753,7 @@ index b1f4004..81c03b8 100644
      restart_2_nopae:
          pte = ptw_ldl(&pte_trans, ra);
          if (!(pte & PG_PRESENT_MASK)) {
-@@ -340,6 +368,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -343,6 +371,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
          if (!ptw_translate(&pte_trans, pte_addr)) {
              return false;
          }
@@ -765,7 +761,7 @@ index b1f4004..81c03b8 100644
          pte = ptw_ldl(&pte_trans, ra);
          if (!(pte & PG_PRESENT_MASK)) {
              goto do_fault;
-@@ -356,6 +385,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
+@@ -359,6 +388,7 @@ static bool mmu_translate(CPUX86State *env, const TranslateParams *in,
          page_size = 0x40000000;
          paddr = in->addr;
          prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
@@ -773,7 +769,7 @@ index b1f4004..81c03b8 100644
          goto stage2;
      }
  
-@@ -444,6 +474,8 @@ do_check_protect_pse36:
+@@ -447,6 +477,8 @@ do_check_protect_pse36:
          CPUTLBEntryFull *full;
          int flags, nested_page_size;
  
@@ -782,7 +778,7 @@ index b1f4004..81c03b8 100644
          flags = probe_access_full_mmu(env, paddr, 0, access_type,
                                        MMU_NESTED_IDX, &pte_trans.haddr, &full);
          if (unlikely(flags & TLB_INVALID_MASK)) {
-@@ -606,6 +638,48 @@ static bool get_physical_address(CPUX86State *env, vaddr addr,
+@@ -610,6 +642,48 @@ static bool get_physical_address(CPUX86State *env, vaddr addr,
      return true;
  }
  
@@ -831,7 +827,7 @@ index b1f4004..81c03b8 100644
  bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
                        MMUAccessType access_type, int mmu_idx,
                        bool probe, uintptr_t retaddr)
-@@ -620,11 +694,32 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
+@@ -624,11 +698,32 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
           * Even if 4MB pages, we map only one 4KB page in the cache to
           * avoid filling it too fast.
           */
@@ -869,14 +865,14 @@ index b1f4004..81c03b8 100644
      }
  
 diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
-index fd5e772..b1fd8c6 100644
+index 2356370ccb..c950bfa00b 100644
 --- a/target/i386/tcg/tcg-cpu.c
 +++ b/target/i386/tcg/tcg-cpu.c
-@@ -139,6 +139,7 @@ static const TCGCPUOps x86_tcg_ops = {
+@@ -207,6 +207,7 @@ const TCGCPUOps x86_tcg_ops = {
      .record_sigbus = x86_cpu_record_sigbus,
  #else
      .tlb_fill = x86_cpu_tlb_fill,
 +    .tlb_retired_reusable = x86_tlb_retired_reusable,
+     .pointer_wrap = x86_pointer_wrap,
      .do_interrupt = x86_cpu_do_interrupt,
      .cpu_exec_halt = x86_cpu_exec_halt,
-     .cpu_exec_interrupt = x86_cpu_exec_interrupt,

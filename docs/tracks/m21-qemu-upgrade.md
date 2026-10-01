@@ -399,6 +399,42 @@ Each A/B uses the same image, the same machine and a quiet host, and
 reports the 9.2 number beside the 11.1 one. A loss outside the run-to-run
 noise doc 22 gives is a stop: find it before the next group.
 
+#### Where step 3 stands
+
+- Every TCG patch is ported (05, 06, 11, 12, 15 to 20-inline, 24, 29,
+  35 to 39, 42 to 45, 47 to 49, 63, 67) and the queue is whole again:
+  62 patches plus the qemu-3dfx port, `patches/qemu-pending/` empty.
+  They were ported in filename order rather than group order, because
+  the groups interleave (37 sits on 11, 36 and 20's context); the groups
+  stay the unit of measurement.
+- The TCG backend layer was rewritten for 10.1's per-opcode `TCGOutOp`
+  descriptors: 06's eight binary64 ops, 11's eleven binary32 and int32
+  conversion ops and 39's `vec_allsign_i32` are `TCGOutOpBinary`,
+  `TCGOutOpUnary` and a new `TCGOutOpTernary` (fmsub) in both backends,
+  dispatched in `tcg_reg_alloc_op` beside upstream's own, gated by
+  `TCG_TARGET_F64` (a backend that has them) and on x86-64 at run time
+  by AVX + FMA. 11's and 12's vector ops keep the old vector path
+  (`tcg_out_vec_op`, `tcg_target_op_def`). The aarch64 half was checked
+  with `clang --target=aarch64-linux-gnu -fsyntax-only` here; the Air
+  builds and runs it in step 4.
+- 11.1 behaviour the fast paths had to follow: since 10.1 softfloat
+  raises DE on a denormal operand (`57df511180`), so 11's SSE fast path
+  now sends an instruction with a denormal operand to its slow block (the
+  helper raises DE exactly); rcp/rsqrt (whose helpers restore the flags)
+  and the int32 conversions (no DE, as on the hardware) need no check.
+  The SSE battery caught it (MXCSR 1fa2 against 1fa0). 06's inline FXCH
+  and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. 11.1 made
+  `float_status.float_exception_flags` a 16-bit bit-field (`8c86fe2451`),
+  so the TCG loads of it read the struct's first 16 bits, little-endian
+  hosts only (a build assertion).
+- Code compiled once per mode since 10.1: 42's jump-cache generation is
+  a run-time `target_long_bits() <= 32` (i386 keeps the generation
+  scheme, x86_64 the clear), 20's inline probe addresses `CPUState` as
+  `offsetof(CPUState, f) - sizeof(CPUState)` and reads `singlestep_flags`,
+  19's dirty-bitmap twins live in `system/physmem.c`, 44's hook is in
+  `accel/tcg/cpu-ops.h` and its page-walk record in
+  `target/i386/tcg/system/excp_helper.c`.
+
 ### 4. The other platforms
 
 The macOS build on the Air (both the App Store and community builds, and

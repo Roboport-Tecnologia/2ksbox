@@ -1,0 +1,350 @@
+The jump cache survives a TLB flush, and holds 65,536 entries.
+
+Every TLB flush cleared the jump cache (tcg_flush_jmp_cache in
+tlb_flush_by_mmuidx_async_work), because a cached entry maps a virtual
+pc to a TB and nothing re-checked that mapping.  Windows 98 reloads CR3
+with its own value 2,400 times a second while 3DMark 99 runs (its VMM's
+TLB flush after every page it maps or unmaps), so every `ret`, `call *`
+and `jmp *` after each of them missed the inline probe and paid the
+hash-table lookup: qht_lookup_custom, tb_htable_lookup and
+tb_lookup_cmp were 2.3 % of the first-person test and the main-loop
+round trips around them another 2 %.
+
+An entry's key is now the pc with the cache's generation in the high
+half of the word (a 32-bit target's pc leaves it free; a 64-bit one
+keeps the clear), a flush bumps the generation, and tb_lookup()
+re-validates an entry of an older generation by the check the hash
+table makes -- the TB's physical page(s) against what the pc maps to
+now -- and re-stamps it.  In the first-person window not one of 2.3
+million revalidations a second failed.  The cache is also 65,536
+entries instead of 4,096: with flushes free it could grow, and the
+misses that remained were conflicts, 11.7 million to 2.5 million per
+ten seconds.
+
+Measured on 3DMark 99 (claude98, Win98 SE, our display driver, TCG on
+the Ryzen 5700X): first person 18.2 -> 19.0 fps.  Switch:
+`-accel tcg,jump-cache-keep=off` restores the clear (the cache size is
+compiled in).  SSE / x87 / SMC / rep batteries identical,
+scripts/test.sh all green.
+
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index bad5ce00fe..a677261974 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -227,33 +227,78 @@ static TranslationBlock *tb_htable_lookup(CPUState *cpu, TCGTBCPUState s)
+  *
+  * Returns: an existing translation block or NULL.
+  */
++/*
++ * Whether @tb, translated from some physical page, is still what @pc
++ * maps to (patch 42): the check tb_lookup_cmp() makes on a hash-table
++ * hit, asked of a jump cache entry that outlived a TLB flush.
++ */
++static bool tb_jmp_cache_revalidate(CPUState *cpu, TranslationBlock *tb,
++                                    vaddr pc)
++{
++    tb_page_addr_t phys_page1;
++    tb_page_addr_t phys = get_page_addr_code(cpu_env(cpu), pc);
++
++    if (phys == -1 || tb_page_addr0(tb) != phys) {
++        return false;
++    }
++    phys_page1 = tb_page_addr1(tb);
++    if (phys_page1 == -1) {
++        return true;
++    }
++    return phys_page1 == get_page_addr_code(cpu_env(cpu),
++                                           TARGET_PAGE_ALIGN(pc));
++}
++
+ static inline TranslationBlock *tb_lookup(CPUState *cpu, TCGTBCPUState s)
+ {
+     TranslationBlock *tb;
+     CPUJumpCache *jc;
+     uint32_t hash;
++    vaddr key;
+ 
+     /* we should never be trying to look up an INVALID tb */
+     tcg_debug_assert(!(s.cflags & CF_INVALID));
+ 
+     hash = tb_jmp_cache_hash_func(s.pc);
+     jc = cpu->tb_jmp_cache;
++    key = tb_jmp_cache_key(s.pc, jc->gen);
+ 
+     tb = qatomic_read(&jc->array[hash].tb);
+     if (likely(tb &&
+-               jc->array[hash].pc == s.pc &&
++               jc->array[hash].pc == key &&
+                tb->cs_base == s.cs_base &&
+                tb->flags == s.flags &&
+                tb_cflags(tb) == s.cflags)) {
+         goto hit;
+     }
+ 
++    /*
++     * An entry from before the last TLB flush (patch 42): the same pc,
++     * an older generation.  It is what the flush used to throw away, and
++     * what it protected against is the pc mapping somewhere else now --
++     * so ask exactly what tb_htable_lookup() would: does the TB's
++     * physical page (both of them, for a block that spans two) still
++     * lie under this pc?  If so the entry is as good as a fresh one and
++     * is re-stamped; if not, the hash table decides as before.  The
++     * probe fills the code TLB for the pc on the way, as the hash
++     * table's own would have.
++     */
++    if (tb && tcg_jump_cache_keep && TB_JMP_CACHE_GEN &&
++        (vaddr)(uint32_t)jc->array[hash].pc == s.pc &&
++        tb->cs_base == s.cs_base &&
++        tb->flags == s.flags &&
++        tb_cflags(tb) == s.cflags &&
++        tb_jmp_cache_revalidate(cpu, tb, s.pc)) {
++        jc->array[hash].pc = key;
++        goto hit;
++    }
++
+     tb = tb_htable_lookup(cpu, s);
+     if (tb == NULL) {
+         return NULL;
+     }
+ 
+-    jc->array[hash].pc = s.pc;
++    jc->array[hash].pc = key;
+     qatomic_set(&jc->array[hash].tb, tb);
+ 
+ hit:
+@@ -990,7 +1035,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
+                  */
+                 h = tb_jmp_cache_hash_func(s.pc);
+                 jc = cpu->tb_jmp_cache;
+-                jc->array[h].pc = s.pc;
++                jc->array[h].pc = tb_jmp_cache_key(s.pc, jc->gen);
+                 qatomic_set(&jc->array[h].tb, tb);
+             }
+ 
+diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
+index 928456c327..2985a7ec0d 100644
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -408,7 +408,7 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
+ 
+     qemu_spin_unlock(&cpu->neg.tlb.c.lock);
+ 
+-    tcg_flush_jmp_cache(cpu);
++    tcg_flush_jmp_cache_lazy(cpu);
+ 
+     if (to_clean == ALL_MMUIDX_BITS) {
+         qatomic_set(&cpu->neg.tlb.c.full_flush_count,
+@@ -758,7 +758,7 @@ static void tlb_flush_range_by_mmuidx_async_0(CPUState *cpu,
+      * longer to clear each entry individually than it will to clear it all.
+      */
+     if (d.len >= (TARGET_PAGE_SIZE * TB_JMP_CACHE_SIZE)) {
+-        tcg_flush_jmp_cache(cpu);
++        tcg_flush_jmp_cache_lazy(cpu);
+         return;
+     }
+ 
+diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
+index e46f170aaf..7098a22d90 100644
+--- a/accel/tcg/internal-common.h
++++ b/accel/tcg/internal-common.h
+@@ -28,6 +28,8 @@ extern bool tcg_tb_invalidate_fast;
+ extern bool tcg_tlb_floor;
+ /* the dirty-bitmap helpers read under the vCPU's own RCU section (patch 19) */
+ extern bool tcg_tls_hot_paths;
++/* the jump cache kept across TLB flushes, re-validated by physical page (patch 42) */
++extern bool tcg_jump_cache_keep;
+ 
+ extern bool icount_align_option;
+ 
+diff --git a/accel/tcg/tb-hash.h b/accel/tcg/tb-hash.h
+index f7b159f04c..883706ff2a 100644
+--- a/accel/tcg/tb-hash.h
++++ b/accel/tcg/tb-hash.h
+@@ -21,6 +21,7 @@
+ #define EXEC_TB_HASH_H
+ 
+ #include "exec/vaddr.h"
++#include "qemu/target-info.h"
+ #include "exec/target_page.h"
+ #include "exec/translation-block.h"
+ #include "qemu/xxhash.h"
+@@ -51,6 +52,24 @@ static inline unsigned int tb_jmp_cache_hash_func(vaddr pc)
+            | (tmp & TB_JMP_ADDR_MASK));
+ }
+ 
++/*
++ * A jump cache entry's key (patch 42): the pc, and in the high half of the
++ * word the generation the entry was filled in, on a target whose virtual
++ * addresses leave that half free.  A TLB flush bumps the generation, so
++ * every entry misses the inline probe as it did when the flush cleared
++ * the cache, and tb_lookup() re-validates it by physical page instead of
++ * paying the hash-table lookup again.  A 64-bit target keeps the clear.
++ */
++/*
++ * Since QEMU 10.1 this code is compiled once per mode, not per target, so
++ * TARGET_LONG_BITS is a run-time question here.
++ */
++#define TB_JMP_CACHE_GEN (target_long_bits() <= 32)
++static inline vaddr tb_jmp_cache_key(vaddr pc, uint32_t gen)
++{
++    return TB_JMP_CACHE_GEN ? pc | ((vaddr)gen << 32) : pc;
++}
++
+ #else
+ 
+ /* In user-mode we can get better hashing because we do not have a TLB */
+diff --git a/accel/tcg/tb-jmp-cache.h b/accel/tcg/tb-jmp-cache.h
+index c3a505e394..9564dfb5a3 100644
+--- a/accel/tcg/tb-jmp-cache.h
++++ b/accel/tcg/tb-jmp-cache.h
+@@ -12,7 +12,7 @@
+ #include "qemu/rcu.h"
+ #include "exec/cpu-common.h"
+ 
+-#define TB_JMP_CACHE_BITS 12
++#define TB_JMP_CACHE_BITS 16
+ #define TB_JMP_CACHE_SIZE (1 << TB_JMP_CACHE_BITS)
+ 
+ /*
+@@ -24,6 +24,13 @@
+  */
+ typedef struct CPUJumpCache {
+     struct rcu_head rcu;
++    /*
++     * The cache's generation (patch 42): a TLB flush bumps it instead of
++     * clearing the array, an entry's key is its pc and the generation it
++     * was filled in, and a stale one is re-validated against the TB's
++     * physical page in tb_lookup() rather than thrown away.
++     */
++    uint32_t gen;
+     struct {
+         TranslationBlock *tb;
+         vaddr pc;
+diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
+index 552ee00122..8e77ca5ac0 100644
+--- a/accel/tcg/tcg-all.c
++++ b/accel/tcg/tcg-all.c
+@@ -89,6 +89,7 @@ bool tcg_soft_imm = true;
+ bool tcg_tb_invalidate_fast = true;
+ bool tcg_tlb_floor = true;
+ bool tcg_tls_hot_paths = true;
++bool tcg_jump_cache_keep = true;
+ 
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -299,6 +300,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
+     return tcg_inline_lookup;
+ }
+ 
++static bool tcg_get_jump_cache_keep(Object *obj, Error **errp)
++{
++    return tcg_jump_cache_keep;
++}
++
++static void tcg_set_jump_cache_keep(Object *obj, bool value, Error **errp)
++{
++    tcg_jump_cache_keep = value;
++}
++
+ static bool tcg_get_soft_imm(Object *obj, Error **errp)
+ {
+     return tcg_soft_imm;
+@@ -377,6 +388,11 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "tls-hot-paths",
+         "Read the dirty bitmaps under the vCPU's own RCU section instead of locking per access");
+ 
++    object_class_property_add_bool(oc, "jump-cache-keep",
++        tcg_get_jump_cache_keep, tcg_set_jump_cache_keep);
++    object_class_property_set_description(oc, "jump-cache-keep",
++        "Keep the jump cache across TLB flushes and re-validate its entries by physical page");
++
+     object_class_property_add_bool(oc, "one-insn-per-tb",
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index a3a1419abd..95685994ac 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -646,3 +646,28 @@ void tcg_flush_jmp_cache(CPUState *cpu)
+         qatomic_set(&jc->array[i].tb, NULL);
+     }
+ }
++
++/*
++ * A TLB flush's jump cache flush (patch 42).  The entries are keyed by
++ * the generation they were filled in, so bumping it makes every one of
++ * them miss the inline probe exactly as clearing did; the C lookup then
++ * checks a stale entry's TB against the pc's physical page and keeps it
++ * when they agree, where it used to pay a hash-table lookup for every
++ * indirect branch target after every context switch.  A guest with the
++ * cache switched off, or a 64-bit one, gets the clear.  The generation
++ * wrapping to zero (2^32 flushes) takes the clear too, so no entry can
++ * ever alias a generation it was not filled in.
++ */
++void tcg_flush_jmp_cache_lazy(CPUState *cpu)
++{
++    if (TB_JMP_CACHE_GEN && tcg_jump_cache_keep) {
++        uint32_t gen = cpu->tb_jmp_cache->gen + 1;
++
++        if (likely(gen != 0)) {
++            cpu->tb_jmp_cache->gen = gen;
++            return;
++        }
++        cpu->tb_jmp_cache->gen = 1;
++    }
++    tcg_flush_jmp_cache(cpu);
++}
+diff --git a/accel/tcg/translator.c b/accel/tcg/translator.c
+index 11d1046dc6..0b505f5c61 100644
+--- a/accel/tcg/translator.c
++++ b/accel/tcg/translator.c
+@@ -36,7 +36,7 @@ void translator_lookup_and_goto_ptr(TCGv_i64 pc, TCGv_i64 cs_base,
+                                     TCGv_i32 flags)
+ {
+ #if UINTPTR_MAX == UINT64_MAX && !defined(CONFIG_USER_ONLY)
+-    TCGv_i64 tmp, hash, entry, tb, tbs, m, ptr;
++    TCGv_i64 tmp, hash, entry, tb, tbs, m, ptr, gen = NULL;
+     TCGv_i32 f, c;
+ 
+     if (!tcg_inline_lookup
+@@ -77,6 +77,11 @@ void translator_lookup_and_goto_ptr(TCGv_i64 pc, TCGv_i64 cs_base,
+     /* entry = &cpu->tb_jmp_cache->array[hash] */
+     QEMU_BUILD_BUG_ON(sizeof(((CPUJumpCache *)0)->array[0]) != 16);
+     tcg_gen_ld_i64(entry, tcg_env, CPU_OFF(tb_jmp_cache));
++    if (TB_JMP_CACHE_GEN) {
++        /* the cache's generation, for the key compare below (patch 42) */
++        gen = tcg_temp_ebb_new_i64();
++        tcg_gen_ld32u_i64(gen, (TCGv_ptr)entry, offsetof(CPUJumpCache, gen));
++    }
+     tcg_gen_shli_i64(hash, hash, 4);
+     tcg_gen_add_i64(entry, entry, hash);
+ 
+@@ -89,6 +94,16 @@ void translator_lookup_and_goto_ptr(TCGv_i64 pc, TCGv_i64 cs_base,
+     tcg_gen_setcondi_i64(TCG_COND_EQ, m, tb, 0);
+     tcg_gen_ld_i64(tmp, (TCGv_ptr)entry, offsetof(CPUJumpCache, array[0].pc));
+     tcg_gen_xor_i64(tmp, tmp, pc);
++    if (TB_JMP_CACHE_GEN) {
++        /*
++         * The entry's key carries the generation it was filled in (patch
++         * 42): a TLB flush bumps the cache's and every entry misses here,
++         * as it did when the flush cleared the cache; the C lookup then
++         * re-validates the entry instead of paying the hash table.
++         */
++        tcg_gen_shli_i64(gen, gen, 32);
++        tcg_gen_xor_i64(tmp, tmp, gen);
++    }
+     tcg_gen_or_i64(m, m, tmp);
+     tcg_gen_ld_i64(tmp, (TCGv_ptr)tbs, offsetof(TranslationBlock, cs_base));
+     tcg_gen_xor_i64(tmp, tmp, cs_base);
+diff --git a/include/exec/tb-flush.h b/include/exec/tb-flush.h
+index e971d4ba6d..c858173560 100644
+--- a/include/exec/tb-flush.h
++++ b/include/exec/tb-flush.h
+@@ -34,5 +34,7 @@ void tb_flush__exclusive_or_serial(void);
+ void queue_tb_flush(CPUState *cs);
+ 
+ void tcg_flush_jmp_cache(CPUState *cs);
++/* the same for a TLB flush: a generation bump where the cache is keyed by one (patch 42) */
++void tcg_flush_jmp_cache_lazy(CPUState *cs);
+ 
+ #endif /* _TB_FLUSH_H_ */
