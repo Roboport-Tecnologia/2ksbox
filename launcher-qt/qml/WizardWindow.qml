@@ -896,7 +896,7 @@ Window {
                             PathField {
                                 id: mediaField
                                 Layout.fillWidth: true
-                                label: qsTr("Install media (optional)")
+                                label: qsTr("CD in drive (optional)")
                                 nameFilter: root.wizard.mediaFilter()
                                 value: root.wizard.installMedia
                                 onEdited: (path) => root.wizard.installMedia = path

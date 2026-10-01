@@ -355,7 +355,7 @@ drive_check() { # the shelf's one drive: the boot disc when stopped, the tray wh
   o="$(target/release/launcherx --drive "$bundle" insert "$dir/zork.iso" 2>&1)" || { echo "insert failed: $o"; return 1; }
   grep -q $'^drive\tdisc\tzork\t' <<<"$o" || { echo "the card after insert: $o"; rc=1; }
   grep -q $'^in-drive\tdisc\tzork\t' <<<"$o" || { echo "zork is not marked in the drive: $o"; rc=1; }
-  grep -qx $'Storage\tCD at boot\tzork.iso' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+  grep -qx $'Storage\tCD in drive\tzork.iso' <<<"$(target/release/launcherx --machine-details "$bundle")" \
     || { echo "the bundle does not boot with zork"; rc=1; }
   # Running: the card is the tray, read from the monitor. A paused QEMU
   # with the machine's CD drive stands in for the player.
@@ -373,11 +373,11 @@ drive_check() { # the shelf's one drive: the boot disc when stopped, the tray wh
     o="$(target/release/launcherx --drive "$bundle" insert "$dir/Patch 1.3" 2>&1)"
     grep -q $'^drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the card after a live folder insert: $o"; rc=1; }
     grep -q $'^in-drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the folder is not marked in the drive: $o"; rc=1; }
-    grep -qx $'Storage\tCD at boot\tPatch 1.3' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+    grep -qx $'Storage\tCD in drive\tPatch 1.3' <<<"$(target/release/launcherx --machine-details "$bundle")" \
       || { echo "a live insert did not set the boot disc too"; rc=1; }
     o="$(target/release/launcherx --drive "$bundle" eject 2>&1)"
     grep -q $'^drive\tempty\tTray empty\tInsert a disc from the library' <<<"$o" || { echo "the card after a live eject: $o"; rc=1; }
-    grep -qx $'Storage\tCD at boot\tEmpty' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+    grep -qx $'Storage\tCD in drive\tEmpty' <<<"$(target/release/launcherx --machine-details "$bundle")" \
       || { echo "a live eject did not empty the boot drive too"; rc=1; }
     kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
   else
@@ -401,7 +401,7 @@ machinedetails_check() { # what the machine window shows of a chosen machine (do
   [ "$groups" = "System Storage Display Audio Input Network " ] || { echo "xp groups: $groups"; rc=1; }
   grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }
   grep -qx $'Storage\tHard disk\txp.qcow2' <<<"$o" || { echo "xp's disk is not its file name"; rc=1; }
-  grep -qx $'Storage\tCD at boot\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }
+  grep -qx $'Storage\tCD in drive\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }
   # No Direct3D on a machine without our adapter, as the form hides it.
   o="$(target/release/launcherx --machine-details "$dos" 2>&1)" || { echo "--machine-details dos failed: $o"; return 1; }
   [ "$(head -1 <<<"$o")" = "DOS · Stopped" ] || { echo "dos subtitle: $(head -1 <<<"$o")"; rc=1; }

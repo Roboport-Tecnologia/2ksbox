@@ -266,7 +266,7 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
             title: Section::Storage.label(),
             rows: vec![
                 ("Hard disk", file(Some(&machine.disk))),
-                ("CD at boot", file(machine.boot_disc())),
+                ("CD in drive", file(machine.boot_disc())),
                 ("Floppy", file(machine.floppy.as_ref())),
                 ("Boot from", machine.effective_boot().label().to_owned()),
             ],

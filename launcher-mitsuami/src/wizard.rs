@@ -642,7 +642,7 @@ fn StoragePage() -> impl View {
             </Show>
             <PathField
                 label_width=LABEL_W
-                label="Install media (optional)"
+                label="CD in drive (optional)"
                 filter=MEDIA_FILTER
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)

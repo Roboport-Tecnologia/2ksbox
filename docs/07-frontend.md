@@ -137,7 +137,7 @@ lay theirs out (user request): General (family, name), System (memory,
 processor, acceleration, emulation optimizations, extra QEMU
 arguments), Display (adapter, Direct3D, the Voodoo 2, the shader
 profile), Audio (sound card, music, SoundFont, MT-32 ROMs), Input
-(gamepad, pointer), Network, Storage (disk, install media, floppy, boot
+(gamepad, pointer), Network, Storage (disk, CD in drive, floppy, boot
 order). The sections and their order are the model's (`wizard::Section`,
 `lc_wizard_label(LC_LABEL_SECTION, …)`); which field sits on which page
 is the front end's. The form opens on its first page for a new or
