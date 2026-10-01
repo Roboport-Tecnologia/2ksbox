@@ -236,7 +236,8 @@ impl From<(&'static str, String)> for DetailRow {
 
 /// A machine's details, with the shader column's label for it. The
 /// labels are the machine form's, so a row reads as the field it came
-/// from; a file shows its name, with its whole path kept for a tooltip.
+/// from; a file shows its name, the hard disk its name and two folders
+/// (`short_path`), each with its whole path kept for a tooltip.
 pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
     let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
     let file = |label: &'static str, path: Option<&PathBuf>| DetailRow {
@@ -287,7 +288,11 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         DetailGroup {
             title: Section::Storage.label(),
             rows: vec![
-                file("Hard disk", Some(&machine.disk)),
+                DetailRow {
+                    label: "Hard disk",
+                    value: short_path(&machine.disk),
+                    path: Some(machine.disk.clone()),
+                },
                 file("CD in drive", machine.boot_disc()),
                 file("Floppy", machine.floppy.as_ref()),
                 ("Boot from", machine.effective_boot().label().to_owned()).into(),
@@ -298,6 +303,18 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         DetailGroup { title: Section::Input.label(), rows: rows(input) },
         DetailGroup { title: Section::Network.label(), rows: rows(vec![("Networking", on_off(machine.network))]) },
     ]
+}
+
+/// A path cut to its file and the two folders above it, after `...`:
+/// `.../machines/winxp/disk.qcow2`. Enough to tell one machine's disk
+/// from another's without the whole path; a shorter path is shown whole.
+fn short_path(path: &Path) -> String {
+    let parts: Vec<_> = path.components().collect();
+    if parts.len() <= 3 {
+        return path.display().to_string();
+    }
+    let tail: PathBuf = parts[parts.len() - 3..].iter().collect();
+    Path::new("...").join(tail).display().to_string()
 }
 
 /// Write the shared shelf out in the flat form a machine's ATAPI drive

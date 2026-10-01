@@ -400,7 +400,9 @@ machinedetails_check() { # what the machine window shows of a chosen machine (do
   groups="$(tail -n +2 <<<"$o" | cut -f1 | uniq | tr '\n' ' ')"
   [ "$groups" = "System Storage Display Audio Input Network " ] || { echo "xp groups: $groups"; rc=1; }
   grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }
-  grep -qx $'Storage\tHard disk\txp.qcow2' <<<"$o" || { echo "xp's disk is not its file name"; rc=1; }
+  # The disk is its file and two folders: .../<OUT's name>/machinedetails/xp.qcow2.
+  grep -qx "Storage"$'\t'"Hard disk"$'\t'".../$(basename "$OUT")/machinedetails/xp.qcow2" <<<"$o" \
+    || { echo "xp's disk is not its file and two folders: $(grep 'Hard disk' <<<"$o")"; rc=1; }
   grep -qx $'Storage\tCD in drive\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }
   # No Direct3D on a machine without our adapter, as the form hides it.
   o="$(target/release/launcherx --machine-details "$dos" 2>&1)" || { echo "--machine-details dos failed: $o"; return 1; }
