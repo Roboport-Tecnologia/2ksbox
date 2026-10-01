@@ -2494,6 +2494,16 @@ host_stage() {
     skip bios-date "needs build/qemu/qemu-system-i386"
   fi
 
+  # the libtpms TPM backend (patch 75, track M20) with no guest: qtest
+  # drives tpm-crb's registers, and a fresh TPM, a restart on the same
+  # state file, and a savevm / loadvm round trip each have to hold
+  if [ -x build/qemu/qemu-system-x86_64 ]; then
+    run_check tpm-qtest tpm-qtest.log env OUT="$OUT/tpm-qtest" \
+      tools/tpm-qtest.py build/qemu/qemu-system-x86_64 || true
+  else
+    skip tpm-qtest "needs build/qemu/qemu-system-x86_64"
+  fi
+
   # nothing shipped links or loads one of the optional host libraries we
   # disabled (see the function: it is asked of the artefacts, because the
   # configure summary is not what a packager ends up carrying)

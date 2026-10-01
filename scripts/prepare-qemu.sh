@@ -70,6 +70,9 @@ echo "==> overlaying libdisc/ (CD-ROM image block driver: block/cdimage.c, doc 1
 rsync -c "$ROOT/libdisc/qemu/cdimage.c" "$QEMU/block/"
 rsync -c "$ROOT/libdisc/qemu/cdimage.h" "$ROOT/libdisc/libdisc.h" "$QEMU/include/block/"
 
+echo "==> overlaying tpm/ (the libtpms TPM backend: backends/tpm/tpm_libtpms.c, M20)"
+rsync -c "$ROOT/tpm/qemu/tpm_libtpms.c" "$QEMU/backends/tpm/"
+
 echo "==> overlaying gamepad/ (the two pad devices: hw/usb/dev-gamepad.c, hw/input/gameport.c, M13)"
 rsync -c "$ROOT/gamepad/qemu/dev-gamepad.c" "$QEMU/hw/usb/"
 rsync -c "$ROOT/gamepad/qemu/gameport.c" "$QEMU/hw/input/"

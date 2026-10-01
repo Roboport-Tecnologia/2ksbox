@@ -17,9 +17,11 @@
 #           (docs/build-macos.md, "The libraries"). Linux: QEMU's own
 #           glib (pcre2, glib, libslirp; static), so QEMU never shares a
 #           glib with the process it is embedded in (QEMU_DEPS in
-#           docs/development.md); the rest is the distribution's.
+#           docs/development.md), and libtpms with its libcrypto; the
+#           rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
-#           -> ninja: qemu-system-i386, qemu-img, qemu-io,
+#           -> ninja: qemu-system-i386, qemu-system-x86_64 (M20's Windows
+#           11, standalone only so far), qemu-img, qemu-io,
 #           libqemu-embed-i386.{so,dylib}
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
@@ -65,7 +67,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -263,7 +265,7 @@ if want qemu; then
     if STAMP_GITS="qemu third_party/qemu-3dfx" \
        stamp_stale qemu-prepare patches/qemu embed d3dpt/hw d3dpt/d3dpt_proto.h \
          d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h libdisc/qemu libdisc/libdisc.h \
-         libsynth/qemu libsynth/libsynth.h gamepad/qemu voodoo firmware \
+         libsynth/qemu libsynth/libsynth.h gamepad/qemu tpm/qemu voodoo firmware \
          scripts/prepare-qemu.sh third_party/qemu-3dfx/00-qemu92x-mesa-glide.patch; then
       scripts/prepare-qemu.sh
       stamp_save
@@ -363,7 +365,7 @@ if want qemu; then
       fi
       say "qemu: ninja"
       ninja -C "$QB" ${JOBS[@]+"${JOBS[@]}"} \
-        qemu-system-i386 qemu-img qemu-io "libqemu-embed-i386.$SO"
+        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO"
       BUILT+=(qemu)
     fi
   fi

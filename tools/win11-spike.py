@@ -5,8 +5,10 @@
   tools/win11-spike.py boot                      boot the installed disk, time the desktop
 
 Stock Windows 11 setup with no bypass keys: its TPM, Secure Boot and CPU
-checks run. The TPM is the distro's swtpm for now (step 2 replaces it with
-libtpms inside QEMU). The disk, firmware variables and TPM state live in
+checks run. The TPM is the distro's swtpm (TPM=swtpm) or our libtpms
+backend inside QEMU (TPM=libtpms, patch 75, M20 step 2), which takes over
+swtpm's state the first time so Windows keeps its TPM. The disk, firmware
+variables and TPM state live in
 OUT, the machine's stand-in for a bundle. The guest reports on COM1
 (tools/win11-spike/spike.ps1); this script timestamps each line into
 OUT/com1.log and dumps the screen every SHOT seconds into OUT/shots/.
@@ -22,6 +24,11 @@ Environment:
                        pc-bios/keymaps/en-us); default none
   SHOT=60              seconds between screen dumps
   SETTLE=60            boot: seconds on the desktop before the power button
+  TPM=swtpm|libtpms    the TPM backend (libtpms: OUT/tpm.permall)
+  REPORT=1             boot: on the desktop, an elevated PowerShell (Win+R,
+                       Ctrl+Shift+Enter, UAC's Yes clicked on the tablet;
+                       Windows 11's UAC has no Alt+Y) writes Get-Tpm and the
+                       endorsement key's hash to COM1 (W11-TPM)
 
 Ends a run with the ACPI power button, never a kill, unless Windows does
 not answer it.
@@ -42,11 +49,14 @@ FW = os.environ.get("FW", os.path.join(ROOT, "build/qemu/qemu-bundle/usr/local/s
 VNC = os.environ.get("VNC", "")
 SHOT = int(os.environ.get("SHOT", "60"))
 SETTLE = int(os.environ.get("SETTLE", "60"))
+TPM = os.environ.get("TPM", "swtpm")
+REPORT = os.environ.get("REPORT", "") == "1"
 SPIKE = os.path.join(ROOT, "tools/win11-spike")
 
 DISK = os.path.join(OUT, "disk.qcow2")
 VARS = os.path.join(OUT, "vars.fd")
 TPMDIR = os.path.join(OUT, "tpm")
+TPMSTATE = os.path.join(OUT, "tpm.permall")
 
 
 def die(msg):
@@ -108,6 +118,32 @@ def start_swtpm():
     die("swtpm made no socket (OUT/swtpm.log)")
 
 
+def swtpm_blob(path):
+    """libtpms's permanent state out of swtpm's file: a header (version,
+    min_version, hdrsize, flags, totlen), then tag-length-value records,
+    of which tag 1 is the plain blob (2 would be an encrypted one)."""
+    raw = open(path, "rb").read()
+    hdrsize = int.from_bytes(raw[2:4], "big")
+    tag = int.from_bytes(raw[hdrsize:hdrsize + 2], "big")
+    n = int.from_bytes(raw[hdrsize + 2:hdrsize + 6], "big")
+    if tag != 1 or hdrsize + 6 + n > len(raw):
+        die("%s: not a plain swtpm state (tag %d)" % (path, tag))
+    return raw[hdrsize + 6:hdrsize + 6 + n]
+
+
+def tpm_args():
+    """(swtpm process or None, QEMU's -tpmdev arguments)"""
+    if TPM == "libtpms":
+        old = os.path.join(TPMDIR, "tpm2-00.permall")
+        if not os.path.exists(TPMSTATE) and os.path.exists(old):
+            open(TPMSTATE, "wb").write(swtpm_blob(old))
+            log("libtpms: took over swtpm's TPM (%s)" % old)
+        return None, ["-tpmdev", "libtpms,id=tpm0,state=" + TPMSTATE]
+    swtpm, sock = start_swtpm()
+    return swtpm, ["-chardev", "socket,id=chrtpm,path=" + sock,
+                   "-tpmdev", "emulator,id=tpm0,chardev=chrtpm"]
+
+
 class Serial(threading.Thread):
     """COM1 through a socket chardev; every line timestamped from t0."""
 
@@ -146,7 +182,7 @@ def run_qemu(cds):
         p = os.path.join(OUT, name)
         if os.path.exists(p):
             os.unlink(p)
-    swtpm, tpmsock = start_swtpm()
+    swtpm, tpmdev = tpm_args()
     cpu = "host" if ACCEL == "kvm" else "max"
     args = [QEMU, "-L", FW,
             "-machine", "q35,smm=on,accel=" + ACCEL,
@@ -154,8 +190,7 @@ def run_qemu(cds):
             "-global", "driver=cfi.pflash01,property=secure,value=on",
             "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=%s/edk2-x86_64-secure-code.fd" % FW,
             "-drive", "if=pflash,format=raw,unit=1,file=" + VARS,
-            "-chardev", "socket,id=chrtpm,path=" + tpmsock,
-            "-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
+            *tpmdev,
             "-device", "tpm-crb,tpmdev=tpm0",
             "-drive", "if=none,id=d0,format=qcow2,file=" + DISK,
             "-device", "nvme,drive=d0,serial=w11spike,bootindex=1",
@@ -189,7 +224,8 @@ def run_qemu(cds):
             if q.poll() is not None:
                 die("QEMU exited at once (OUT/qemu.log)")
             time.sleep(0.1)
-    log("QEMU up, %s, %s vCPUs, %s MB; the screen is OUT/shots/latest.png" % (ACCEL, SMP, MEM))
+    log("QEMU up, %s, %s vCPUs, %s MB, TPM %s; the screen is OUT/shots/latest.png"
+        % (ACCEL, SMP, MEM, TPM))
     return q, swtpm, qmp, serial, t0
 
 
@@ -277,8 +313,61 @@ def install(iso):
     exited = wait(q, serial, shots, None, 300)
     if exited is None:
         power_off(q, qmp)
-    swtpm.wait(10)
+    if swtpm:
+        swtpm.wait(10)
     return 0
+
+
+# Typed into the Run box (259 characters at most), run elevated.
+REPORT_CMD = ("powershell -c \"$p=new-object System.IO.Ports.SerialPort COM1;$p.Open();"
+              "$t=get-tpm;$e=(Get-TpmEndorsementKeyInfo -Hash sha256).PublicKeyHash;"
+              "$p.WriteLine('W11-TPM ready='+$t.TpmReady+' owned='+$t.TpmOwned+' ek='+$e);"
+              "$p.Close()\"")
+
+
+def keys(qmp, *names):
+    qmpc.send(qmp, list(names))
+
+
+def click(qmp, x, y, w=1280, h=800):
+    """The USB tablet's absolute pointer, then a left click."""
+    move = [{"type": "abs", "data": {"axis": "x", "value": x * 32767 // w}},
+            {"type": "abs", "data": {"axis": "y", "value": y * 32767 // h}}]
+    qmpc.cmd(qmp, "input-send-event", {"events": move})
+    time.sleep(0.15)
+    for down in (True, False):
+        qmpc.cmd(qmp, "input-send-event",
+                 {"events": [{"type": "btn", "data": {"down": down, "button": "left"}}]})
+        time.sleep(0.1)
+
+
+UAC_YES = (538, 546)    # 1280x800; focus starts on No
+
+
+def report(q, qmp, serial, shots):
+    """Windows' own view of the TPM, from an elevated PowerShell."""
+    time.sleep(20)                       # let the desktop finish starting
+    keys(qmp, "meta_l", "r")
+    time.sleep(3)
+    for ch in REPORT_CMD:
+        k = qmpc.KEYMAP.get(ch)
+        if k is None:
+            k = ("shift", ch.lower()) if ch.isupper() else ch
+        keys(qmp, *(k if isinstance(k, tuple) else (k,)))
+    keys(qmp, "ctrl", "shift", "ret")
+    # UAC's prompt can take a while; a click on its Yes where there is no
+    # prompt lands on the desktop and does nothing
+    r = None
+    for attempt in range(4):
+        time.sleep(10)
+        shots.take("uac-%d.png" % attempt)
+        click(qmp, *UAC_YES)
+        r = wait(q, serial, shots, "W11-TPM", 20)
+        if r:
+            break
+    if r is None:
+        shots.take("report-fail.png")
+        log("FAIL: no W11-TPM line (shots/uac-*.png, shots/report-fail.png)")
 
 
 def boot():
@@ -294,6 +383,8 @@ def boot():
         power_off(q, qmp)
         return 1
     log("desktop at %.1f s (%s)" % (r[0], ACCEL))
+    if REPORT:
+        report(q, qmp, serial, shots)
     end = time.monotonic() + SETTLE
     while time.monotonic() < end:
         shots.tick()
@@ -302,7 +393,8 @@ def boot():
     t = time.monotonic()
     clean = power_off(q, qmp)
     log("power off %s in %.1f s" % ("clean" if clean else "FORCED", time.monotonic() - t))
-    swtpm.wait(10)
+    if swtpm:
+        swtpm.wait(10)
     return 0
 
 
@@ -310,7 +402,7 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("install", "boot"):
         print(__doc__)
         return 2
-    for tool in ("swtpm", "xorriso", "7z"):
+    for tool in (("swtpm",) if TPM == "swtpm" else ()) + ("xorriso", "7z"):
         if not shutil.which(tool):
             die("%s not found" % tool)
     if not os.access(QEMU, os.X_OK):

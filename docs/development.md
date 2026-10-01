@@ -113,7 +113,8 @@ What each stage needs to know:
   real `distlib`). It is for a sandbox that has a Python and cannot fetch
   one, such as the Flatpak.
 - **QEMU links a GLib of its own on Linux** (`scripts/build-deps.sh`
-  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static;
+  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static, and
+  libtpms with OpenSSL's libcrypto for patch 75's TPM;
   `build.sh`'s `deps` stage runs it). `configure-qemu.sh` links them
   with their symbols hidden and turns smartcard off, so
   `libqemu-embed` shows no system GLib in `ldd`. The reason is QEMU's
@@ -122,7 +123,8 @@ What each stage needs to know:
   on that context (GTK; Qt's GLib event dispatcher) would have its
   sources dispatched there (`spikes/player-gtk/README.md`). GLib 2.90
   wants meson 1.4. **`QEMU_DEPS=system`** links the distribution's GLib
-  and libslirp instead (`build.sh` and `configure-qemu.sh` both read it;
+  and libslirp instead, and libtpms if it has one (`build.sh` and
+  `configure-qemu.sh` both read it;
   `build.sh` reconfigures QEMU when it changes).
 - **A `D3DPT_PROTO_VERSION` bump makes the executor and the guest-tools
   ISO stale, silently.** The suite fails as `d3dpt-dp2: protocol

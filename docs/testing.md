@@ -76,6 +76,7 @@ copy).
 | `sb16-irq` | a DSP reset over auto-init DMA raises no IRQ 5 edge; each silence block exactly one (patch 25) |
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
 | `machine-map` | `info mtree` of a PC machine: the `mesapt` pass-through region is there, and no Glide one (patch 74, ADR-020) and no SysBus `d3dpt` one (M16 step 7) |
+| `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64` |
 | `no-optionals` | no disabled library (libpng and libjpeg among them) is linked, named in a binary, or present as a QAPI audio enumerator; on a Mac, no Homebrew path in any load command of `libqemu-embed`, `qemu-system-i386` or `qemu-img`, whose libraries are our own static builds (`build-macos.md` "The libraries") |
 | `icons` | `scripts/gen-icons.sh --check` |
 | `package` | `scripts/package-linux.sh --no-tar` (or `package-macos.sh --no-sign --no-dmg` on a Mac) |
@@ -345,6 +346,16 @@ Local only; each works on a raw copy or overlay of an image.
 | `tools/xp-diablo.sh install\|play <image>` | Diablo on 8 bpp palettized modes into Tristram |
 
 ## Other tools
+
+`tools/tpm-qtest.py [qemu-system-x86_64]` (the `tpm-qtest` host check;
+patch 75, M20 step 2): the libtpms TPM backend with no guest. QEMU runs
+under `-accel qtest` and the script is the CPU, sending raw TPM 2.0
+commands through `tpm-crb`'s registers as QEMU's `tests/qtest/tpm-util.c`
+does. A fresh TPM (Startup, GetRandom, a PCR extend checked against
+SHA-256 computed in Python, an NV index), a second QEMU on the same state
+file (the index survives, the PCR is reset), and a savevm / loadvm round
+trip (PCR and index come back, and a third QEMU reads the snapshot's
+index from the file). `OUT=`.
 
 `tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
 Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a
