@@ -115,7 +115,18 @@ pub fn report() {
             None => println!("{name:<14} (not shipped)"),
         }
     }
+    // The QEMUs the player can open, one per target (`--target`).
+    for target in QEMU_TARGETS {
+        let name = format!("qemu-{target}");
+        match qemu_embed::find(target) {
+            Some(path) => println!("{name:<14} {}", path.display()),
+            None => println!("{name:<14} (not shipped)"),
+        }
+    }
 }
+
+/// Every system emulator a machine can name with `--target`.
+pub const QEMU_TARGETS: [&str; 2] = ["i386", "x86_64"];
 
 /// Point QEMU's own `dlopen` searches at the package. A no-op in a
 /// checkout, where those searches already find `build/…`.

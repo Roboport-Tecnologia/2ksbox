@@ -379,6 +379,8 @@ fn remap(machine: &mut Machine, from: &Path, to: &Path) {
         &mut machine.shader,
         &mut machine.soundfont,
         &mut machine.mt32_roms,
+        &mut machine.efi_vars,
+        &mut machine.tpm_state,
     ]
     .into_iter()
     .flatten()

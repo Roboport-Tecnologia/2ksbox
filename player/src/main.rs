@@ -2340,6 +2340,7 @@ fn main() {
         windows_sys::Win32::Media::timeBeginPeriod(1);
     }
     // player [--shader <preset.slangp>] [--shader-params <k=v,...>]
+    //        [--pad <setting>] [--target i386|x86_64]
     //        [--mode-sweep <dir>] [--calib <bmp|dir>] [--companions]
     //        [--] <qemu args...>
     //   no args: the M0 test pattern; --mode-sweep: doc 03's mode sweep;
@@ -2350,6 +2351,24 @@ fn main() {
     if args.first().map(String::as_str) == Some("--companions") {
         companions::report();
         return;
+    }
+    // Open one QEMU and exit: which file the player's own rule finds for
+    // a target, and that it loads with everything it links. A packager's
+    // check, run under the platform's loader tracing (macOS's
+    // DYLD_PRINT_LIBRARIES); nothing else in the player opens a QEMU
+    // without a machine to run.
+    if args.first().map(String::as_str) == Some("--load-qemu") && args.len() >= 2 {
+        match qemu_embed::load(&args[1]) {
+            Ok(()) => {
+                let path = qemu_embed::find(&args[1]).unwrap_or_default();
+                println!("qemu-{} {} api {}", args[1], path.display(), qemu_embed::api_version());
+                return;
+            }
+            Err(e) => {
+                eprintln!("player: {e}");
+                std::process::exit(1);
+            }
+        }
     }
     // What gamepads this host can read, out of the binary that reads
     // them: the answer no one can get from outside the process.
@@ -2385,6 +2404,14 @@ fn main() {
         args.drain(0..2);
     }
     let pad_mode = pad::resolve_mode(pad_cli.as_deref());
+    // Which QEMU runs the machine (M20): libqemu-embed-<target>, opened
+    // before anything calls into it. i386 unless the launcher says
+    // otherwise, which it does only for a Windows 11 machine.
+    let mut target = "i386".to_string();
+    if args.first().map(String::as_str) == Some("--target") && args.len() >= 2 {
+        target = args[1].clone();
+        args.drain(0..2);
+    }
     let mut sweep = None;
     if args.first().map(String::as_str) == Some("--mode-sweep") && args.len() >= 2 {
         sweep = Some(std::path::PathBuf::from(args[1].clone()));
@@ -2397,6 +2424,12 @@ fn main() {
     }
     if args.first().map(String::as_str) == Some("--") {
         args.remove(0);
+    }
+    if !args.is_empty() {
+        if let Err(e) = qemu_embed::load(&target) {
+            eprintln!("player: {e}");
+            std::process::exit(1);
+        }
     }
     let event_loop = EventLoop::<()>::with_user_event().build().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Wait);

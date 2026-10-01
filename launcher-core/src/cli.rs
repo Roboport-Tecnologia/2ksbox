@@ -47,6 +47,7 @@ pub fn parse_family(arg: Option<&str>, usage: &str) -> Family {
         Some("xp") => Family::Xp,
         Some("dos") => Family::Dos,
         Some("other") => Family::Other,
+        Some("win11") => Family::Win11,
         _ => panic!("{usage}"),
     }
 }
@@ -72,7 +73,19 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let machine = Machine::load(Path::new(&path)).expect("load bundle");
             let mut argv = player::shader_args(&machine);
             argv.extend(player::pad_args(&machine));
+            argv.extend(player::target_args(&machine));
             println!("{}", argv.join(" "));
+        }
+        "--prepare" => {
+            // What the player's start makes before QEMU runs (a Windows
+            // 11 machine's firmware variables), for a script that runs
+            // QEMU itself from `--print-args`.
+            let path = args.next().expect("usage: --prepare <machine.toml>");
+            let machine = Machine::load(Path::new(&path)).expect("load bundle");
+            if let Err(e) = player::prepare(&machine) {
+                eprintln!("{e}");
+                return Some(1);
+            }
         }
         "--play" => {
             let path = PathBuf::from(args.next().expect("usage: --play <machine.toml>"));
@@ -136,7 +149,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             crate::fatal::record("--diagnose", &text);
         }
         "--new" => {
-            let usage = "usage: --new <win98|xp|dos|other> <name> <disk.qcow2>";
+            let usage = "usage: --new <win98|xp|dos|other|win11> <name> <disk.qcow2>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let disk = args.next().expect(usage).into();
@@ -146,7 +159,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
         "--wizard-new" => {
             // Headless equivalent of the "New machine" window: the real
             // form's `submit`, disk creation via qemu-img included.
-            let usage = "usage: --wizard-new <win98|xp|dos|other> <name> <disk-size-gb>";
+            let usage = "usage: --wizard-new <win98|xp|dos|other|win11> <name> <disk-size-gb>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let size_gb: u32 = args.next().expect(usage).parse().expect("disk size must be a number");

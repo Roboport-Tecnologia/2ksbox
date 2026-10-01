@@ -1,7 +1,8 @@
 //! The machine bundle format (doc 07): a declarative `machine.toml` the
 //! launcher reads and writes. "Hand-written bundles + the player binary is
 //! a fully supported path" (doc 07). `qemu_args` is the one place that
-//! translates a bundle into a real `qemu-system-i386` command line; no
+//! translates a bundle into a real QEMU command line (`qemu-system-i386`,
+//! or `qemu-system-x86_64` for Windows 11: `Machine::qemu_target`); no
 //! user-visible QEMU command line exists anywhere else.
 
 use serde::{Deserialize, Serialize};
@@ -29,12 +30,22 @@ pub enum Family {
     /// an RTL8139 and an ES1370. It gets 2D, the CRT shader chain and the
     /// real CD-ROM model, like the DOS family but with PCI cards.
     Other,
+    /// Windows 11 (ADR-024, track M20): the first modern box, on a
+    /// different PC. A q35 with UEFI (EDK2's secure build, its variable
+    /// store a file of the machine's own), a TPM 2.0 (libtpms inside
+    /// QEMU, its state another file of the machine's), the disk on AHCI,
+    /// HD Audio, the standard VGA and, with networking, an e1000e: every
+    /// one of them a device Windows 11 drives in the box. 64-bit, so it
+    /// runs on `qemu-system-x86_64`; hardware virtualization by default,
+    /// since nothing of the era work applies and emulation is far too
+    /// slow for it (M20 step 1: 15x slower to the desktop than KVM).
+    Win11,
 }
 
 impl Family {
     /// In the order a picker should offer them: the three the project is
-    /// built around first, then the catch-all.
-    pub const ALL: [Family; 4] = [Family::Win98, Family::Xp, Family::Dos, Family::Other];
+    /// built around first, then the era's catch-all, then the modern box.
+    pub const ALL: [Family; 5] = [Family::Win98, Family::Xp, Family::Dos, Family::Other, Family::Win11];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -42,7 +53,14 @@ impl Family {
             Family::Xp => "XP",
             Family::Dos => "DOS",
             Family::Other => "Other (BeOS, Linux, …)",
+            Family::Win11 => "Windows 11",
         }
+    }
+
+    /// The era families' machine, an i440FX PC with a BIOS, against the
+    /// modern one's q35 with UEFI and a TPM.
+    pub fn is_modern(self) -> bool {
+        matches!(self, Family::Win11)
     }
 }
 
@@ -222,6 +240,10 @@ pub fn video_choices(family: Family) -> &'static [Video] {
         // title whose modes come out wrong on one BIOS can settle. Our
         // own adapter is not offered, since it has no DOS driver.
         Family::Dos => &[Video::Std, Video::Cirrus],
+        // Windows 11's Basic Display Adapter drives the standard VGA's
+        // linear frame buffer at any resolution; nothing of ours runs
+        // there (an XP-model driver does not load past Windows 7).
+        Family::Win11 => &[Video::Std],
     }
 }
 
@@ -441,6 +463,7 @@ pub fn pad_choices(family: Family) -> &'static [Pad] {
         Family::Dos => &[Pad::None, Pad::Gameport, Pad::Keys],
         Family::Win98 => &[Pad::None, Pad::Usb, Pad::Gameport, Pad::Keys],
         Family::Xp | Family::Other => &[Pad::None, Pad::Usb, Pad::Keys],
+        Family::Win11 => &[Pad::None, Pad::Usb, Pad::Keys],
     }
 }
 
@@ -489,12 +512,16 @@ pub enum Sound {
     /// it, which is a real configuration: an MPU-401 and a module was how
     /// music was done before cards could play samples.
     None,
+    /// Intel HD Audio (the ICH9's controller and a duplex codec), the
+    /// Windows 11 machine's card: in-box since Vista.
+    Hda,
 }
 
 impl Sound {
     /// Every variant, for serde round-trips and label lookups. **Not
     /// what a picker offers**; that is `sound_choices(family)`.
-    pub const ALL: [Sound; 6] = [Sound::Sb16, Sound::Ac97, Sound::Es1370, Sound::Gus, Sound::Adlib, Sound::None];
+    pub const ALL: [Sound; 7] =
+        [Sound::Sb16, Sound::Ac97, Sound::Es1370, Sound::Gus, Sound::Adlib, Sound::Hda, Sound::None];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -503,6 +530,7 @@ impl Sound {
             Sound::Es1370 => "Ensoniq AudioPCI (ES1370)",
             Sound::Gus => "Gravis Ultrasound",
             Sound::Adlib => "AdLib (FM only)",
+            Sound::Hda => "Intel HD Audio",
             Sound::None => "No sound card",
         }
     }
@@ -515,6 +543,7 @@ impl Sound {
             Sound::Es1370 => "es1370",
             Sound::Gus => "gus",
             Sound::Adlib => "adlib",
+            Sound::Hda => "hda",
             Sound::None => "none",
         }
     }
@@ -539,6 +568,13 @@ impl Sound {
             Sound::Ac97 => device("AC97,audiodev=embed0,addr=0x04"),
             Sound::Es1370 => device("ES1370,audiodev=embed0,addr=0x04"),
             Sound::Gus => device("gus,audiodev=embed0"),
+            // The controller and its codec, two devices, the controller
+            // at the ICH9's own address.
+            Sound::Hda => {
+                let mut v = device("ich9-intel-hda,addr=0x1b");
+                v.extend(device("hda-duplex,audiodev=embed0"));
+                v
+            }
             Sound::None => Vec::new(),
         }
     }
@@ -607,6 +643,7 @@ pub fn sound_choices(family: Family) -> &'static [Sound] {
         // both of these had a driver in the box on BeOS R5 and on a
         // period Linux, where nothing of ours can be installed after.
         Family::Other => &[Sound::Es1370, Sound::Ac97, Sound::None],
+        Family::Win11 => &[Sound::Hda, Sound::None],
     }
 }
 
@@ -622,6 +659,9 @@ pub fn music_choices(family: Family) -> &'static [Music] {
     match family {
         Family::Win98 | Family::Dos => &[Music::Gm, Music::Mt32, Music::None],
         Family::Xp | Family::Other => &[Music::None, Music::Gm, Music::Mt32],
+        // An MPU-401 at 0x330 is an ISA device of the era; Windows 11
+        // has its own synthesizer and no driver for the port.
+        Family::Win11 => &[Music::None],
     }
 }
 
@@ -1190,6 +1230,21 @@ pub struct Machine {
     /// says so at start. Absent from every bundle that has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_qemu_args: Vec<String>,
+    /// Windows 11 (M20): the firmware's variable store, a qcow2 the size
+    /// of EDK2's (boot entries, Secure Boot keys). A qcow2 rather than
+    /// the raw file EDK2 ships so live snapshots can hold it, as they
+    /// hold the disk. Made from QEMU's template when the machine first
+    /// starts (`player::prepare`). Absent = `efivars.qcow2` beside the
+    /// disk (`effective_efi_vars`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efi_vars: Option<PathBuf>,
+    /// Windows 11 (M20): the TPM's permanent state, the one file the
+    /// libtpms backend keeps (patch 75). Missing means a TPM that was
+    /// never made, which the first start makes. Losing it is a new TPM
+    /// to Windows: BitLocker asks for its recovery key. Absent =
+    /// `tpm.permall` beside the disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tpm_state: Option<PathBuf>,
     /// Which of our own emulator fast paths this machine runs with
     /// (`Optimization`), holding only what differs from each one's
     /// default. Absent means all of them at their shipped setting.
@@ -1220,6 +1275,10 @@ pub fn default_accel(family: Family) -> Accel {
         // has Win9x's fast-CPU bugs: take the host's speed when it is
         // there, emulate when it isn't.
         Family::Xp | Family::Other => Accel::Auto,
+        // Hardware virtualization where the host has it. A host without
+        // it still starts the machine, at a speed step 1 measured as
+        // unusable for work, rather than refusing it.
+        Family::Win11 => Accel::Auto,
     }
 }
 
@@ -1275,7 +1334,7 @@ pub fn default_seamless_mouse(family: Family) -> bool {
 pub fn default_cpu_speed(family: Family) -> CpuSpeed {
     match family {
         Family::Dos => CpuSpeed::Dx266,
-        Family::Win98 | Family::Xp | Family::Other => CpuSpeed::Unthrottled,
+        Family::Win98 | Family::Xp | Family::Other | Family::Win11 => CpuSpeed::Unthrottled,
     }
 }
 
@@ -1299,6 +1358,8 @@ pub fn default_disk_size_gb(family: Family) -> u32 {
         Family::Win98 | Family::Other => 10,
         Family::Xp => 20,
         Family::Dos => 2,
+        // Setup refuses a disk under 64 GB.
+        Family::Win11 => 64,
     }
 }
 
@@ -1315,6 +1376,8 @@ pub fn default_ram_mb(family: Family) -> u32 {
         // No family default to inherit. An era Linux desktop or BeOS R5
         // is comfortable in 512 MB and neither needs more.
         Family::Other => 512,
+        // Setup's minimum.
+        Family::Win11 => 4096,
     }
 }
 
@@ -1342,6 +1405,21 @@ pub fn ram_mb_range(family: Family) -> std::ops::RangeInclusive<u32> {
         // the top is XP's 32-bit ceiling. BeOS R5 has a lower ceiling of
         // its own (1 GB), which the wizard states rather than enforces.
         Family::Other => 16..=3072,
+        // Setup refuses less than 4 GB; the top is a guess at what a
+        // host that runs it has to spare.
+        Family::Win11 => 4096..=32768,
+    }
+}
+
+/// How many processors the machine has. One on the era's families,
+/// which is all their software expected; Windows 11 refuses fewer than
+/// two, and gets four of the host's (all of them on a host with fewer).
+pub fn default_cpus(family: Family) -> u32 {
+    if family.is_modern() {
+        let host = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2);
+        host.clamp(2, 4)
+    } else {
+        1
     }
 }
 
@@ -1373,6 +1451,8 @@ impl Machine {
             mt32_roms: None,
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
+            efi_vars: None,
+            tpm_state: None,
             optimizations: Optimizations::default(),
         }
     }
@@ -1469,6 +1549,11 @@ impl Machine {
     /// The CPU speed this machine runs at: its own setting, or its
     /// family's default (only DOS has a throttled one).
     pub fn effective_cpu_speed(&self) -> CpuSpeed {
+        // A modern machine has no period processor to be (the form does
+        // not offer one), so a stray field cannot force it to TCG.
+        if self.family.is_modern() {
+            return CpuSpeed::Unthrottled;
+        }
         self.cpu_speed.unwrap_or_else(|| default_cpu_speed(self.family))
     }
 
@@ -1623,6 +1708,9 @@ impl Machine {
     /// given, is the flat disc-shelf file the drive answers the in-guest
     /// `CDSHELF` program from (`cdshelf/cdshelf_proto.h`).
     pub fn qemu_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
+        if self.family.is_modern() {
+            return self.modern_args(pc_bios_dir, shelf);
+        }
         // Windows 98 has no driver for an HPET (`PNP0103` is in none of
         // 98 SE's INFs) and never uses one (it times off the PIT), so on
         // 98 it is an "Unknown Device" with a yellow mark in Device
@@ -1798,13 +1886,23 @@ impl Machine {
                 // driver an era install may not have.
                 args.extend(self.audio_args());
             }
+            Family::Win11 => unreachable!("a modern family's machine is modern_args"),
         }
-        // The CD-ROM drive is always attached, empty tray and all: a
-        // real machine of the era has one, and the launcher's live disc
-        // swap (`control.rs`) needs a device to put a disc into. A drive
-        // that only existed when the bundle named a disc couldn't be
-        // loaded later. The id is what a medium change addresses
-        // (`control::CDROM_ID`).
+        args.extend(self.cdrom_args(shelf));
+        // Last, so an option given twice is the user's: QEMU takes the
+        // later of most repeated options.
+        args.extend(self.extra_qemu_args.iter().cloned());
+        args
+    }
+
+    /// The CD-ROM drive, on every machine. It is always attached, empty
+    /// tray and all: a real machine of the era has one, and the
+    /// launcher's live disc swap (`control.rs`) needs a device to put a
+    /// disc into. A drive that only existed when the bundle named a disc
+    /// couldn't be loaded later. The id is what a medium change
+    /// addresses (`control::CDROM_ID`). `bus=ide.1` is the i440FX's
+    /// secondary IDE channel and the q35's second AHCI port alike.
+    fn cdrom_args(&self, shelf: Option<&Path>) -> Vec<String> {
         let mut drive = "if=none,id=cd0,media=cdrom".to_string();
         if let Some(disc) = self.boot_disc() {
             // `qemu_medium`, not the path: a shared folder is a disc too,
@@ -1820,13 +1918,113 @@ impl Machine {
             // `player` gets.
             cd.push_str(&format!(",shelf={}", opt_value(&shelf.display().to_string())));
         }
-        args.extend(["-drive".into(), drive, "-device".into(), cd]);
-        // Last, so an option given twice is the user's: QEMU takes the
-        // later of most repeated options.
+        vec!["-drive".into(), drive, "-device".into(), cd]
+    }
+
+    /// Which QEMU runs this machine: `i386` for the era's families,
+    /// `x86_64` for Windows 11. The player opens `libqemu-embed-<this>`
+    /// (`--target`, `qemu_embed::load`).
+    pub fn qemu_target(&self) -> &'static str {
+        if self.family.is_modern() {
+            "x86_64"
+        } else {
+            "i386"
+        }
+    }
+
+    /// The firmware's variable store (`efi_vars`), or `efivars.qcow2`
+    /// beside the disk for a bundle that does not say.
+    pub fn effective_efi_vars(&self) -> PathBuf {
+        self.efi_vars.clone().unwrap_or_else(|| self.disk.with_file_name(EFI_VARS_FILE))
+    }
+
+    /// The TPM's state file (`tpm_state`), or `tpm.permall` beside the
+    /// disk.
+    pub fn effective_tpm_state(&self) -> PathBuf {
+        self.tpm_state.clone().unwrap_or_else(|| self.disk.with_file_name(TPM_STATE_FILE))
+    }
+
+    /// Windows 11's machine (M20): a q35 with UEFI and a TPM 2.0.
+    ///
+    /// * The firmware is EDK2's secure build (Secure Boot available,
+    ///   off until keys are enrolled; Windows 11 wants it possible, not
+    ///   on), which needs SMM and its flash marked secure. Its code is
+    ///   read-only from `pc-bios`, its variables the machine's own.
+    /// * The TPM is libtpms inside QEMU (patch 75) on the CRB interface
+    ///   Windows uses.
+    /// * The disk is on the q35's AHCI controller, not NVMe: QEMU 9.2's
+    ///   NVMe cannot be migrated, so a machine on it could take no live
+    ///   snapshot. Windows drives both in the box.
+    /// * `-cpu max`: the host's own CPU under KVM, everything TCG has
+    ///   under emulation, and valid for both, which `Auto`'s fallback
+    ///   list needs.
+    /// * The RTC in local time, which is what Windows reads it as.
+    /// * The PS/2 keyboard the q35 has; the tablet and a pad on xHCI.
+    fn modern_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
+        let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
+        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), "q35,smm=on".into()];
+        args.extend(self.accel_args());
+        args.extend([
+            "-m".into(),
+            self.ram_mb.to_string(),
+            "-smp".into(),
+            default_cpus(self.family).to_string(),
+            "-cpu".into(),
+            format!("max{}", self.optimization_props(Knob::Cpu)),
+            "-global".into(),
+            "driver=cfi.pflash01,property=secure,value=on".into(),
+            "-drive".into(),
+            format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(EFI_CODE_FILE)),
+            "-drive".into(),
+            format!(
+                "if=pflash,format=qcow2,unit=1,file={}",
+                opt_value(&self.effective_efi_vars().display().to_string())
+            ),
+            "-tpmdev".into(),
+            format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
+            "-device".into(),
+            "tpm-crb,tpmdev=tpm0".into(),
+            "-rtc".into(),
+            "base=localtime".into(),
+            "-drive".into(),
+            format!("file={},if=none,id=disk0", opt_value(&self.disk.display().to_string())),
+            "-device".into(),
+            "ide-hd,bus=ide.0,drive=disk0".into(),
+        ]);
+        let pad_usb = self.effective_pad() == Pad::Usb;
+        if self.seamless_mouse || pad_usb {
+            args.extend(["-device".into(), "qemu-xhci".into()]);
+        }
+        if self.seamless_mouse {
+            args.extend(["-device".into(), "usb-tablet".into()]);
+        }
+        if pad_usb {
+            args.extend(["-device".into(), "usb-gamepad".into()]);
+        }
+        args.extend(self.video_args());
+        if self.network {
+            args.extend(["-netdev".into(), "user,id=n0".into()]);
+            args.extend(["-device".into(), "e1000e,netdev=n0".into()]);
+        } else {
+            args.extend(["-nic".into(), "none".into()]);
+        }
+        args.extend(self.audio_args());
+        args.extend(self.cdrom_args(shelf));
         args.extend(self.extra_qemu_args.iter().cloned());
         args
     }
 }
+
+/// EDK2's secure x86_64 build in `pc-bios` (unpacked there by
+/// `scripts/prepare-qemu.sh`).
+pub const EFI_CODE_FILE: &str = "edk2-x86_64-secure-code.fd";
+/// The empty variable store a machine's own is made from (the x86_64
+/// firmware uses the i386 template).
+pub const EFI_VARS_TEMPLATE: &str = "edk2-i386-vars.fd";
+/// A modern machine's variable store, in its bundle directory.
+pub const EFI_VARS_FILE: &str = "efivars.qcow2";
+/// A modern machine's TPM state, in its bundle directory.
+pub const TPM_STATE_FILE: &str = "tpm.permall";
 
 /// One line of arguments, as the form's "Extra QEMU arguments" field
 /// takes them, into a list. Whitespace separates; single or double quotes

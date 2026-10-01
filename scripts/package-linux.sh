@@ -15,7 +15,7 @@
 # (packaging/flatpak/) fills `/app` this way, since an install prefix and
 # the staged tree have the same shape. It never deletes the destination.
 #
-# It does not build QEMU. build/qemu (libqemu-embed-i386.so + qemu-img)
+# It does not build QEMU. build/qemu (libqemu-embed-{i386,x86_64}.so + qemu-img)
 # and qemu/pc-bios must already be there (scripts/build.sh). The
 # guest-tools ISO is included when guest-tools/out has one.
 #
@@ -31,7 +31,9 @@
 # The layout, relative to the tree's root (= an install prefix):
 #   bin/2ksbox                        the launcher (Qt 6, ADR-015)
 #   bin/2ksbox-player                 the player
-#   lib/2ksbox/libqemu-embed-i386.so
+#   lib/2ksbox/libqemu-embed-i386.so    QEMU for the era's machines and
+#   lib/2ksbox/libqemu-embed-x86_64.so    for Windows 11; the player opens
+#                                         one per machine (--target)
 #   lib/2ksbox/libd3dpt_exec.so       the Direct3D executor and the DXVK
 #   lib/2ksbox/libdxvk_d3d9.so.0        it runs on (both or neither)
 #   lib/2ksbox/libd3dpt_exec_remote.so  the executor in another process, on
@@ -78,6 +80,7 @@ if [ -n "$PREFIX" ]; then STAGE="$PREFIX"; else STAGE="$OUT/$NAME"; fi
 
 need() { [ -e "$1" ] || { echo "package-linux.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
 need build/qemu/libqemu-embed-i386.so "scripts/configure-qemu.sh && ninja -C build/qemu libqemu-embed-i386.so"
+need build/qemu/libqemu-embed-x86_64.so "ninja -C build/qemu libqemu-embed-x86_64.so"
 need build/qemu/qemu-img "ninja -C build/qemu qemu-img"
 need qemu/pc-bios "scripts/prepare-qemu.sh"
 
@@ -97,7 +100,7 @@ mkdir -p "$STAGE"/{bin,lib/2ksbox,libexec/2ksbox,share/2ksbox/desktop,share/doc/
 
 install -m755 launcher-qt/target/release/launcher-qt "$STAGE/bin/2ksbox"
 install -m755 target/release/player "$STAGE/bin/2ksbox-player"
-install -m755 build/qemu/libqemu-embed-i386.so "$STAGE/lib/2ksbox/"
+install -m755 build/qemu/libqemu-embed-i386.so build/qemu/libqemu-embed-x86_64.so "$STAGE/lib/2ksbox/"
 install -m755 build/qemu/qemu-img "$STAGE/libexec/2ksbox/"
 # The Direct3D executor and the DXVK it runs on (doc 14), found the same
 # way and staged together. The executor `dlopen`s DXVK by the name
@@ -209,15 +212,19 @@ while read -r what path; do
     *) echo "package-linux.sh: $what resolved outside the package: $path" >&2; fail=1 ;;
   esac
 done <<< "$resolved"
-# The player's own dependency: an installed tree has no build/qemu, so the
-# origin-relative rpath (player/build.rs) is what has to find the embed
-# library. ldd resolves it exactly as the loader will.
-embed=$(cd / && env -i ldd "$STAGE/bin/2ksbox-player" | sed -n 's/.*libqemu-embed-i386.so => \([^ ]*\).*/\1/p')
-embed=$(readlink -f "$embed" 2>/dev/null || echo "$embed")  # the loader reports it via bin/../lib
-case "$embed" in
-  "$STAGE"/lib/2ksbox/*) echo "libqemu-embed  $embed" ;;
-  *) echo "package-linux.sh: the player's libqemu-embed came from $embed, not the package" >&2; fail=1 ;;
-esac
+# The player's QEMUs: it opens libqemu-embed-<target> at run time
+# (qemu_embed::search_dirs), so no import table names them and ldd cannot
+# answer. The staged player's own `--companions` says which file it would
+# open for each target, and both have to be the package's, not a build
+# tree's.
+for target in i386 x86_64; do
+  embed=$(cd / && env -i "$STAGE/bin/2ksbox-player" --companions | awk -v t="qemu-$target" '$1 == t { print $2 }')
+  embed=$(readlink -f "$embed" 2>/dev/null || echo "$embed")  # found via bin/../lib
+  case "$embed" in
+    "$STAGE"/lib/2ksbox/*) printf '%-15s%s\n' "qemu-$target" "$embed" ;;
+    *) echo "package-linux.sh: the player's QEMU for $target is ${embed:-not found}, not the package's" >&2; fail=1 ;;
+  esac
+done
 # The one companion that is not a library, the General MIDI bank. The
 # staged player's own rule has to find the copy this package staged, not
 # one left in a checkout.

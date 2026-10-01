@@ -4,21 +4,29 @@ The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
 The API is **v8** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
-library before the player links). The 3D context provider is doc 12, the
+libraries before the player runs). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
 `qemu/` as prepared from v9.2.4.
 
 ## Shape
 
-One shared library per target, `libqemu-embed-i386.{so,dylib,dll}`,
-built by QEMU's own meson from the per-target static library (which
-already excludes `system/main.c`, so there is no `main()`) plus our shim
+One shared library per target, `libqemu-embed-<target>.{so,dylib,dll}`
+(`i386` for the era's machines, `x86_64` for Windows 11), built by
+QEMU's own meson from the per-target static library (which already
+excludes `system/main.c`, so there is no `main()`) plus our shim
 `embed/libqemu_embed.c`. `prepare-qemu.sh` rsyncs `embed/` into
-`qemu/embed/`, like the 3dfx overlay. A stale copy links the player
-against an old library (`undefined symbol _qemu_embed_…`;
-`qemu-embed/build.rs` warns). The `qemu-embed` crate's bindings are
-hand-written: the API is small, `qemu_embed_api_version()` catches
-drift, and no libclang is needed.
+`qemu/embed/`, like the 3dfx overlay; a stale copy builds an old
+library (`qemu-embed/build.rs` warns).
+
+**The player links none of them** (track M20). It opens the one its
+machine needs at start (`--target`, `qemu_embed::load`): the package's
+`lib/2ksbox` (beside the executable on Windows), else the build tree the
+crate was compiled against. `load` resolves every function, then checks
+`qemu_embed_api_version()` and refuses a library of another version with
+a message naming it. The bindings are hand-written: the API is small and
+no libclang is needed. `player --load-qemu <target>` opens one and exits,
+for a packager's loader check; `player --companions` lists which file
+each target resolves to.
 
 **Thread contract.** Call `qemu_embed_new`, `_run` and `_destroy` on one
 thread. Display callbacks fire on that thread with the BQL held and must

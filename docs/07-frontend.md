@@ -822,7 +822,9 @@ checkout it was built from (`target/`, `build/qemu`, `qemu/pc-bios`,
 ```
 <prefix>/bin/2ksbox                            the launcher
 <prefix>/bin/2ksbox-player                     the player
-<prefix>/lib/2ksbox/libqemu-embed-i386.so
+<prefix>/lib/2ksbox/libqemu-embed-i386.so      QEMU for the era's machines
+<prefix>/lib/2ksbox/libqemu-embed-x86_64.so    and for Windows 11 (the player
+                                               opens one per machine)
 <prefix>/lib/2ksbox/…                          D3D executor + DXVK, wine/
 <prefix>/libexec/2ksbox/qemu-img               ours, patched, kept off PATH
 <prefix>/share/2ksbox/pc-bios/                 QEMU firmware (the player's -L)

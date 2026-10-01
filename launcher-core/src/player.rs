@@ -130,7 +130,9 @@ pub fn pc_bios_dir() -> PathBuf {
 /// player actually runs with: a named `shader_profile` (looked up in the
 /// profile library) takes precedence, then the raw `shader` override,
 /// then the library's default profile (`shader_library::default_id`,
-/// what "(default)" means), then no shader at all. A `shader_profile`
+/// what "(default)" means), then no shader at all. A modern machine
+/// skips the library's default (ADR-024): a CRT over Windows 11 is
+/// something to pick, not something to get. A `shader_profile`
 /// naming a deleted profile falls through the same way rather than
 /// failing the machine (see `shader_library::find`).
 fn resolve_shader(machine: &Machine) -> Option<ShaderProfile> {
@@ -142,6 +144,9 @@ fn resolve_shader(machine: &Machine) -> Option<ShaderProfile> {
     }
     if let Some(preset) = machine.shader.clone() {
         return Some(ShaderProfile::new(String::new(), preset));
+    }
+    if machine.family.is_modern() {
+        return None;
     }
     shader_library::find_default(&dir)
 }
@@ -180,6 +185,50 @@ pub fn pad_args(machine: &Machine) -> Vec<String> {
     }
 }
 
+/// The `--target <qemu>` argument `spawn` passes to `player`: which
+/// `libqemu-embed-<target>` runs the machine (M20). Nothing for the era's
+/// machines, which run on the player's default (`i386`), so their command
+/// line is the one it always was.
+pub fn target_args(machine: &Machine) -> Vec<String> {
+    match machine.qemu_target() {
+        "i386" => Vec::new(),
+        t => vec!["--target".to_string(), t.to_string()],
+    }
+}
+
+/// What has to exist on disk before `machine` can start, made if it does
+/// not: a modern machine's firmware variable store, a qcow2 copy of
+/// EDK2's empty one (`bundle::EFI_VARS_TEMPLATE`). Its TPM needs nothing
+/// made; a missing state file is a TPM libtpms manufactures on the first
+/// start. `spawn` calls this, and `--prepare` for a script that runs
+/// QEMU itself.
+pub fn prepare(machine: &Machine) -> std::io::Result<()> {
+    if !machine.family.is_modern() {
+        return Ok(());
+    }
+    let vars = machine.effective_efi_vars();
+    if vars.exists() {
+        return Ok(());
+    }
+    let template = pc_bios_dir().join(crate::bundle::EFI_VARS_TEMPLATE);
+    let bin = qemu_img_binary();
+    let status = crate::console::command(&bin)
+        .args(["convert", "-f", "raw", "-O", "qcow2"])
+        .arg(&template)
+        .arg(&vars)
+        .status()
+        .map_err(|e| std::io::Error::other(format!("running {}: {e}", bin.display())))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "qemu-img could not make {} from {} ({status})",
+            vars.display(),
+            template.display()
+        )))
+    }
+}
+
 /// Spawn `player` on `machine`. Inherits the launcher's stdout/stderr
 /// when there is a terminal to inherit. When there is not (a
 /// double-clicked launcher on Windows, which has no console and gives
@@ -199,6 +248,7 @@ pub fn spawn(
     qmp_socket: Option<&std::path::Path>,
     shelf: Option<&std::path::Path>,
 ) -> std::io::Result<Child> {
+    prepare(machine)?;
     let mut args = machine.qemu_args(&pc_bios_dir(), shelf);
     if let Some(extra) = qmp_socket.and_then(crate::control::qmp_args) {
         args.extend(extra);
@@ -206,6 +256,7 @@ pub fn spawn(
     let bin = player_binary();
     let mut argv: Vec<String> = shader_args(machine);
     argv.extend(pad_args(machine));
+    argv.extend(target_args(machine));
     argv.push("--".into());
     argv.extend(args);
     // Log the command line before anything is spawned: it is the first

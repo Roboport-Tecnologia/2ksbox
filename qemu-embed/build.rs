@@ -1,5 +1,7 @@
-//! Links libqemu-embed-i386 from the QEMU build dir (override with
-//! QEMU_EMBED_LIB_DIR) and bakes an rpath so `cargo run` finds it.
+//! Names the QEMU build directory to the crate (`QEMU_EMBED_BUILD_DIR`),
+//! the last place `load` looks for libqemu-embed-<target>, so a checkout's
+//! `target/release/player` runs in place. Nothing is linked: the library
+//! is opened at run time, one per machine (`src/lib.rs`).
 use std::path::PathBuf;
 
 fn main() {
@@ -24,11 +26,7 @@ fn main() {
     let dir = dir.canonicalize().map(strip_verbatim).unwrap_or(dir);
     println!("cargo:rerun-if-env-changed=QEMU_EMBED_LIB_DIR");
     warn_if_overlay_stale(&manifest);
-    println!("cargo:rustc-link-search=native={}", dir.display());
-    println!("cargo:rustc-link-lib=dylib=qemu-embed-i386");
-    // Exported to dependents as DEP_QEMU_EMBED_I386_LIBDIR (via `links`), so
-    // binaries can bake an rpath. Link-args here would not propagate.
-    println!("cargo:libdir={}", dir.display());
+    println!("cargo:rustc-env=QEMU_EMBED_BUILD_DIR={}", dir.display());
 }
 
 /// `canonicalize` on a Windows host answers `\\?\C:\...`, a verbatim path in

@@ -760,7 +760,7 @@ qtwizard_fields_check() { # the fields, family by family
   # Every other launcher check asks the model and cannot see it. So this
   # asks the *window*. It opens the real wizard headlessly on each family
   # and prints what its memory field holds beside what the form says.
-  for f in win98 xp dos other; do
+  for f in win98 xp dos other win11; do
     out="$(timeout 120 env LAUNCHER_QT_SCREEN=wizard LAUNCHER_QT_ARG="$f" LAUNCHER_QT_DELAY=250 \
            "$bin" 2>&1)"
     o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard memory: //p')"
@@ -818,7 +818,7 @@ qtwizard_fields_check() { # the fields, family by family
     [ -n "$shown" ] || { echo "$f: the Direct3D combo shows nothing"; rc=1; }
     case "$f:$o" in
       win98:*"applies true"|xp:*"applies true") ;;
-      dos:*"applies false"|other:*"applies false") ;;
+      dos:*"applies false"|other:*"applies false"|win11:*"applies false") ;;
       *) echo "$f: the Direct3D row's visibility does not follow the adapter: $o"; rc=1;;
     esac
     # The shader profile combo, whose rows come from the model: the app

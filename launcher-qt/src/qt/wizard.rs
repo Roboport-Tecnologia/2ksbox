@@ -115,6 +115,13 @@ pub mod ffi {
         #[qproperty(QString, music_note)]
         #[qproperty(QString, soundfont)]
         #[qproperty(bool, soundfont_applies)]
+        /// Rows a family may not have at all (Windows 11 has no period
+        /// processor, Voodoo 2, floppy or MIDI port): the form says.
+        #[qproperty(bool, cpu_speed_applies)]
+        #[qproperty(bool, voodoo2_applies)]
+        #[qproperty(bool, floppy_applies)]
+        #[qproperty(bool, music_applies)]
+        #[qproperty(bool, boot_applies)]
         #[qproperty(QString, mt32_roms)]
         #[qproperty(bool, mt32_roms_applies)]
         /// What a host gamepad does for this machine (M13): an index
@@ -442,6 +449,11 @@ pub struct WizardRust {
     music_note: QString,
     soundfont: QString,
     soundfont_applies: bool,
+    cpu_speed_applies: bool,
+    voodoo2_applies: bool,
+    floppy_applies: bool,
+    music_applies: bool,
+    boot_applies: bool,
     mt32_roms: QString,
     mt32_roms_applies: bool,
     pad: i32,
@@ -847,6 +859,7 @@ impl ffi::Wizard {
         let (sound, sound_labels, sound_is_default, sound_note, sound_warning);
         let (music, music_labels, music_is_default, music_note);
         let (soundfont, soundfont_applies, mt32_roms, mt32_roms_applies);
+        let (cpu_speed_applies, voodoo2_applies, floppy_applies, music_applies, boot_applies);
         let (pad, pad_applies, pad_labels, pad_is_default, pad_note, pad_warning);
         let (optimizations_mask, optimizations_summary, optimizations_note, optimizations_are_default, optimizations_all_off, optimizations_all_on);
         let (existing_disk, disk_path, disk_size_gb, install_media, floppy, boot, boot_note);
@@ -902,6 +915,11 @@ impl ffi::Wizard {
             music_note = qs(f.music_notes().join("\n"));
             soundfont = qs(&f.soundfont);
             soundfont_applies = f.soundfont_applies();
+            cpu_speed_applies = f.cpu_speed_applies();
+            voodoo2_applies = f.voodoo2_applies();
+            floppy_applies = f.floppy_applies();
+            music_applies = f.music_applies();
+            boot_applies = f.boot_applies();
             mt32_roms = qs(&f.mt32_roms);
             mt32_roms_applies = f.mt32_roms_applies();
             pad = index_of(f.pad_choices(), f.pad());
@@ -994,6 +1012,11 @@ impl ffi::Wizard {
         self.as_mut().set_music_note(music_note);
         self.as_mut().set_soundfont(soundfont);
         self.as_mut().set_soundfont_applies(soundfont_applies);
+        self.as_mut().set_cpu_speed_applies(cpu_speed_applies);
+        self.as_mut().set_voodoo2_applies(voodoo2_applies);
+        self.as_mut().set_floppy_applies(floppy_applies);
+        self.as_mut().set_music_applies(music_applies);
+        self.as_mut().set_boot_applies(boot_applies);
         self.as_mut().set_mt32_roms(mt32_roms);
         self.as_mut().set_mt32_roms_applies(mt32_roms_applies);
         self.as_mut().set_pad_applies(pad_applies);

@@ -77,8 +77,9 @@ runs, for driving one stage by hand:
 ```sh
 scripts/prepare-qemu.sh      # overlay qemu-3dfx + embed/, the patch queue, sign_commit
 scripts/configure-qemu.sh    # uv-managed Python; also builds libdisc and libsynth
-ninja -C build/qemu qemu-system-i386 qemu-img qemu-io libqemu-embed-i386.so   # .dylib on macOS
-cargo build --release        # default members; the player links libqemu-embed
+ninja -C build/qemu qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io \
+  libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS
+cargo build --release        # default members; the player opens libqemu-embed-<target> at run time
 cargo check --release --workspace          # launcher-capi, the one non-default member
 (cd launcher-qt && cargo build --release)  # the Qt launcher; its own workspace
 # Direct3D pass-through (doc 14):
@@ -435,8 +436,9 @@ finds Qt through `qmake6`. In a checkout the binary is
 root `target/release` (`LAUNCHER_PLAYER_BIN` overrides).
 
 The toolkit-free debug verbs (`launcher_core::cli`: `--print-args`,
-`--print-player-args`, `--new`, `--discs`, `--host-check`, `--paths`,
-`--diagnose`, `--wizard-edit`, …) answer identically from `launcher-qt`
+`--print-player-args`, `--prepare` (a Windows 11 machine's firmware
+variables, made before a hand-run QEMU starts it), `--new`, `--discs`,
+`--host-check`, `--paths`, `--diagnose`, `--wizard-edit`, …) answer identically from `launcher-qt`
 and from `launcherx`, a binary with no toolkit that `scripts/test.sh`
 and the guest tools drive:
 

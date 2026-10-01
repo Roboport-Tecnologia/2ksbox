@@ -20,9 +20,9 @@
 #           docs/development.md), and libtpms with its libcrypto; the
 #           rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
-#           -> ninja: qemu-system-i386, qemu-system-x86_64 (M20's Windows
-#           11, standalone only so far), qemu-img, qemu-io,
-#           libqemu-embed-i386.{so,dylib}
+#           -> ninja: qemu-system-i386, qemu-system-x86_64, qemu-img,
+#           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (the player
+#           opens the one its machine runs on; x86_64 is Windows 11's)
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
@@ -365,7 +365,7 @@ if want qemu; then
       fi
       say "qemu: ninja"
       ninja -C "$QB" ${JOBS[@]+"${JOBS[@]}"} \
-        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO"
+        qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io "libqemu-embed-i386.$SO" "libqemu-embed-x86_64.$SO"
       BUILT+=(qemu)
     fi
   fi
