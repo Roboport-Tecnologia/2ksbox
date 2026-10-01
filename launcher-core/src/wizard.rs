@@ -676,7 +676,7 @@ impl Form {
             (Accel::Tcg, _) => "Emulated Pentium 3 equivalent CPU. Suitable for older OSes.".to_string(),
         };
         // A modern guest emulated, picked or by default: a warning (user).
-        let too_slow = self.family.is_modern() && !self.uses_hw_accel();
+        let too_slow = self.family.is_modern() && !self.will_use_kvm();
         if too_slow && self.accel == Accel::Auto {
             text.push('\n');
             text.push_str(TOO_SLOW);
@@ -687,16 +687,6 @@ impl Form {
         }
         let wont_start = matches!((self.accel, self.hw_accel()), (Accel::Kvm, false));
         AccelNote { text, warning: wont_start || too_slow }
-    }
-
-    /// Whether this machine runs on hardware virtualization here: asked
-    /// for it, or on Automatic where this host has it.
-    fn uses_hw_accel(&self) -> bool {
-        match self.accel {
-            Accel::Kvm => true,
-            Accel::Auto => self.hw_accel(),
-            Accel::Tcg => false,
-        }
     }
 
     /// What this host will give the guest's 3D, under the acceleration
@@ -950,6 +940,12 @@ impl Form {
     /// something turned off says so without being opened.
     pub fn optimizations_summary(&self) -> String {
         self.optimizations.summary()
+    }
+
+    /// Whether the switches are worth showing: only where the machine
+    /// will be emulated, since they are speed-ups in the emulator (user).
+    pub fn optimizations_apply(&self) -> bool {
+        !self.will_use_kvm()
     }
 
     /// The line above the switches. On a machine that will run on KVM

@@ -404,37 +404,43 @@ fn SystemPage() -> impl View {
                 @reset=move |()| wiz.edit(Form::reset_accel)
             />
             <AccelLine note=get(wiz, |f| accel(f.accel_note()))/>
-            // A disclosure header: Qt Quick has none either, and the Qt window
-            // builds its own from a tool button.
-            <Row>
-                <Button button_style=ButtonStyle::Borderless @click=move || expanded.update(|e| *e = !*e)>
-                    {move || format!(
-                        "{} Emulation optimizations ({})",
-                        if expanded.get() { "▾" } else { "▸" },
-                        wiz.read(Form::optimizations_summary),
-                    )}
-                </Button>
-            </Row>
-            <Show when=expanded>
-                <Column gap=Spacing::Xs padding_x=Spacing::Lg>
-                    <Note text=get(wiz, |f| f.optimizations_note().to_owned())/>
-                    <For each=|| Optimization::ALL.to_vec() key=|o: &Optimization| o.label() let:opt>
-                        <Column gap=Spacing::Xs>
-                            <Checkbox
-                                checked=get(wiz, move |f| f.optimization_enabled(opt))
-                                @change=move |on| wiz.edit(|f| f.choose_optimization(opt, on))
-                            >{opt.label()}</Checkbox>
-                            <Text text_style=TextStyle::Caption>{opt.note()}</Text>
-                        </Column>
-                    </For>
-                    <Row gap=Spacing::Sm>
-                        <Button enabled=get(wiz, |f| !f.optimizations_all_off())
-                            @click=move || wiz.edit(Form::disable_all_optimizations)>"Turn all off"</Button>
-                        <Button enabled=get(wiz, |f| !f.optimizations_all_on())
-                            @click=move || wiz.edit(Form::enable_all_optimizations)>"Turn all on"</Button>
-                        <Button enabled=get(wiz, |f| !f.optimizations_are_default())
-                            @click=move || wiz.edit(Form::reset_optimizations)>"All defaults"</Button>
+            // Only where the machine will be emulated: they are speed-ups in
+            // the emulator, and do nothing under hardware virtualization.
+            <Show when=get(wiz, Form::optimizations_apply)>
+                <Column gap=Spacing::Md>
+                    // A disclosure header: Qt Quick has none either, and the Qt window
+                    // builds its own from a tool button.
+                    <Row>
+                        <Button button_style=ButtonStyle::Borderless @click=move || expanded.update(|e| *e = !*e)>
+                            {move || format!(
+                                "{} Emulation optimizations ({})",
+                                if expanded.get() { "▾" } else { "▸" },
+                                wiz.read(Form::optimizations_summary),
+                            )}
+                        </Button>
                     </Row>
+                    <Show when=expanded>
+                        <Column gap=Spacing::Xs padding_x=Spacing::Lg>
+                            <Note text=get(wiz, |f| f.optimizations_note().to_owned())/>
+                            <For each=|| Optimization::ALL.to_vec() key=|o: &Optimization| o.label() let:opt>
+                                <Column gap=Spacing::Xs>
+                                    <Checkbox
+                                        checked=get(wiz, move |f| f.optimization_enabled(opt))
+                                        @change=move |on| wiz.edit(|f| f.choose_optimization(opt, on))
+                                    >{opt.label()}</Checkbox>
+                                    <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{opt.note()}</Text>
+                                </Column>
+                            </For>
+                            <Row gap=Spacing::Sm>
+                                <Button enabled=get(wiz, |f| !f.optimizations_all_off())
+                                    @click=move || wiz.edit(Form::disable_all_optimizations)>"Turn all off"</Button>
+                                <Button enabled=get(wiz, |f| !f.optimizations_all_on())
+                                    @click=move || wiz.edit(Form::enable_all_optimizations)>"Turn all on"</Button>
+                                <Button enabled=get(wiz, |f| !f.optimizations_are_default())
+                                    @click=move || wiz.edit(Form::reset_optimizations)>"All defaults"</Button>
+                            </Row>
+                        </Column>
+                    </Show>
                 </Column>
             </Show>
             <Row gap=Spacing::Sm align=Align::Center>

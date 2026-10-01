@@ -211,6 +211,9 @@ The fields, and why each is what it is:
   `x87-pc64-as-53`, the one that changes what the guest computes. The
   section is a disclosure headed "Emulation optimizations (N of M on)",
   gives each switch's measured gain, and says they do nothing under KVM.
+  The mitsuami form shows the section only where the machine will be
+  emulated (`Form::optimizations_apply`; user, 2026-10-01); Qt still
+  shows it with that note.
   "All defaults", "Turn all off" and "Turn all on" sit above them
   (`Form::*_all_optimizations`), and the note says which of the three
   states the machine is in. Patch 21's `pinned-regs` is not offered (user decision:
