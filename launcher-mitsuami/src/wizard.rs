@@ -22,6 +22,8 @@ use std::path::PathBuf;
 /// The width of the labels in front of each control, so the controls on
 /// a page line up.
 const LABEL_W: f32 = 180.0;
+/// The pickers' and number boxes' width, so the values line up.
+const FIELD_W: f32 = 260.0;
 
 #[derive(Clone, Copy)]
 pub struct Wizard {
@@ -323,7 +325,7 @@ fn Picker(
     view! {
         <Row gap=Spacing::Sm align=Align::Center>
             <Text width=LABEL_W>{label.clone()}</Text>
-            <Select label=label width=260 options=options selected=selected @change=move |i| on_choose.call(i)/>
+            <Select label=label width=FIELD_W options=options selected=selected @change=move |i| on_choose.call(i)/>
             {reset}
         </Row>
     }
@@ -362,6 +364,7 @@ fn SystemPage() -> impl View {
                 <Text width=LABEL_W>"Memory (MB)"</Text>
                 <NumberInput
                     label="Memory (MB)"
+                    width=FIELD_W
                     range_with=get(wiz, |f| {
                         let r = f.ram_range();
                         (*r.start() as i32, *r.end() as i32)
@@ -618,6 +621,7 @@ fn StoragePage() -> impl View {
                     <Text width=LABEL_W>"New disk size (GB)"</Text>
                     <NumberInput
                         label="New disk size (GB)"
+                        width=FIELD_W
                         range_with=(1, 128)
                         value=get(wiz, |f| f.disk_size_gb as i32)
                         @change=move |gb| wiz.edit(|f| f.disk_size_gb = gb.max(1) as u32)
