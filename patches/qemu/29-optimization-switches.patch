@@ -155,10 +155,10 @@ index d1564279f7..e46f170aaf 100644
  extern bool icount_align_option;
  
 diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
-index d3b721bc07..9e0c32d1c5 100644
+index 6b15c9614c..72ed75f9b1 100644
 --- a/accel/tcg/tb-maint.c
 +++ b/accel/tcg/tb-maint.c
-@@ -946,6 +946,13 @@ static void tb_jmp_cache_inval_tb(TranslationBlock *tb)
+@@ -961,6 +961,13 @@ static void tb_jmp_cache_inval_tb(TranslationBlock *tb)
      CPUState *cpu;
  
      if (tb_cflags(tb) & CF_PCREL) {
@@ -172,7 +172,7 @@ index d3b721bc07..9e0c32d1c5 100644
          /*
           * A TB may be at any virtual address, so its jump cache slot is
           * unknown.  Flushing the whole cache (a 64 KiB memset per
-@@ -1270,7 +1277,9 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
+@@ -1285,7 +1292,9 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
           * option ROM's TPR stubs (all of a Windows guest's IRQL fast paths)
           * sit below the VAPICState the APIC writes at every interrupt.
           */
@@ -183,7 +183,7 @@ index d3b721bc07..9e0c32d1c5 100644
          page_last = MIN(page_last, last);
          tb_invalidate_phys_page_range__locked(cpu, pages, pd,
                                                page_start, page_last, 0);
-@@ -1338,21 +1347,33 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+@@ -1376,21 +1385,33 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
      }
      /* under the page lock, against a TB being added on another vCPU */
      page_lock(p);

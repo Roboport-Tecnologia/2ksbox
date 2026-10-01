@@ -50,7 +50,7 @@ index 002aa8f458..12bfcc69fd 100644
    'monitor.c',
    'tcg-accel-ops.c',
 diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
-index 22d1d4792d..d3b721bc07 100644
+index 22d1d4792d..6b15c9614c 100644
 --- a/accel/tcg/tb-maint.c
 +++ b/accel/tcg/tb-maint.c
 @@ -34,6 +34,7 @@
@@ -61,7 +61,50 @@ index 22d1d4792d..d3b721bc07 100644
  #ifdef CONFIG_USER_ONLY
  #include "user/page-protection.h"
  #define runstate_is_running()  true
-@@ -830,6 +831,10 @@ void tb_flush__exclusive_or_serial(void)
+@@ -210,6 +211,18 @@ struct PageDesc {
+      * (two g_tree lookups per write).
+      */
+     uint16_t span_in_end, span_out_lo;
++    /*
++     * Page offsets [lo, hi] that a write was absorbed in (patch 24,
++     * soft_imm_absorbs__locked): the answer depends only on the TBs on the
++     * list, so it holds until the list changes (tb_page_add,
++     * tb_page_remove and the flush empty it). A software renderer patches
++     * the same few immediates per span, and each of those writes walked the
++     * whole list, every TB-flags variant of every block on the page (up to
++     * three per block under Win98's lazy FPU switching, CR0.TS/MP): Blood
++     * spent 30-40 % of QEMU there, ~118 M TB visits a second.
++     */
++    uint16_t absorbed_lo[8], absorbed_hi[8];
++    uint8_t absorbed_n, absorbed_next;
+ };
+ 
+ void page_table_config_init(void)
+@@ -691,6 +704,7 @@ static void tb_remove_all_1(int level, void **lp)
+         for (i = 0; i < V_L2_SIZE; ++i) {
+             page_lock(&pd[i]);
+             pd[i].first_tb = (uintptr_t)NULL;
++            pd[i].absorbed_n = 0;
+             page_unlock(&pd[i]);
+         }
+     } else {
+@@ -726,6 +740,7 @@ static void tb_page_add(PageDesc *p, TranslationBlock *tb, unsigned int n)
+     tb->page_next[n] = p->first_tb;
+     page_already_protected = p->first_tb != 0;
+     p->first_tb = (uintptr_t)tb | n;
++    p->absorbed_n = 0;
+ 
+     /* the byte range this TB occupies on this page */
+     if (n == 0) {
+@@ -781,6 +796,7 @@ static void tb_page_remove(PageDesc *pd, TranslationBlock *tb)
+     PageForEachNext n1;
+ 
+     assert_page_locked(pd);
++    pd->absorbed_n = 0;
+     pprev = &pd->first_tb;
+     PAGE_FOR_EACH_TB(unused, unused, pd, tb1, n1) {
+         if (tb1 == tb) {
+@@ -830,6 +846,10 @@ void tb_flush__exclusive_or_serial(void)
      tb_remove_all();
  
      tcg_region_reset_all();
@@ -72,7 +115,7 @@ index 22d1d4792d..d3b721bc07 100644
      /* XXX: flush processor icache at this point if cache flush is expensive */
      qatomic_inc(&tb_ctx.tb_flush_count);
      qemu_plugin_flush_cb();
-@@ -1207,6 +1212,10 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
+@@ -1207,6 +1227,10 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
                  current_tb_modified = true;
                  cpu_restore_state_from_tb(cpu, current_tb, retaddr);
              }
@@ -83,7 +126,7 @@ index 22d1d4792d..d3b721bc07 100644
              do_tb_phys_invalidate(tb, true);
          }
      }
-@@ -1269,6 +1278,47 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
+@@ -1269,6 +1293,70 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
      page_collection_unlock(pages);
  }
  
@@ -99,12 +142,26 @@ index 22d1d4792d..d3b721bc07 100644
 +    TranslationBlock *tb;
 +    PageForEachNext n;
 +    bool any = false;
++    unsigned lo, hi, i;
 +
 +    if (!tcg_soft_imm) {
 +        return false;
 +    }
 +    if (((start ^ last) & TARGET_PAGE_MASK) != 0) {
 +        return false;
++    }
++    lo = start & ~TARGET_PAGE_MASK;
++    hi = last & ~TARGET_PAGE_MASK;
++    for (i = 0; i < p->absorbed_n; i++) {
++        if (lo >= p->absorbed_lo[i] && hi <= p->absorbed_hi[i]) {
++            /*
++             * Inside a range absorbed before: every TB that reaches these
++             * bytes covers them (a part of the range that reaches no TB
++             * would have its walk find nothing to throw away).
++             */
++            trace_soft_imm_absorb(start, (unsigned)(last - start + 1));
++            return true;
++        }
 +    }
 +    PAGE_FOR_EACH_TB(start, last, p, tb, n) {
 +        tb_page_addr_t tb_start, tb_last;
@@ -125,13 +182,22 @@ index 22d1d4792d..d3b721bc07 100644
 +        }
 +        any = true;
 +    }
++    if (any) {
++        i = p->absorbed_next;
++        p->absorbed_lo[i] = lo;
++        p->absorbed_hi[i] = hi;
++        p->absorbed_next = (i + 1) % ARRAY_SIZE(p->absorbed_lo);
++        if (p->absorbed_n < ARRAY_SIZE(p->absorbed_lo)) {
++            p->absorbed_n++;
++        }
++    }
 +    return any;
 +}
 +
  /*
   * len must be <= 8 and start must be a multiple of len.
   * Called via softmmu_template.h when code areas are written to with
-@@ -1294,6 +1344,15 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+@@ -1294,6 +1382,15 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
          page_unlock(p);
          return;
      }

@@ -38,7 +38,7 @@ smc-same-value combinations, the soft-imm path required to absorb), the
 DOS batteries, and the 3DMark 99 score on claude98 (doc 19).
 
 diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
-index 9e0c32d1c5..d18b2410c5 100644
+index 72ed75f9b1..bdc531e8b9 100644
 --- a/accel/tcg/tb-maint.c
 +++ b/accel/tcg/tb-maint.c
 @@ -193,15 +193,18 @@ struct PageDesc {
@@ -68,8 +68,8 @@ index 9e0c32d1c5..d18b2410c5 100644
      /*
       * Where TBs shared with a neighbouring page reach: span_in_end is one
       * past the last byte covered by TBs that start on the previous page,
-@@ -213,6 +216,14 @@ struct PageDesc {
-     uint16_t span_in_end, span_out_lo;
+@@ -225,6 +228,14 @@ struct PageDesc {
+     uint8_t absorbed_n, absorbed_next;
  };
  
 +/* the PageDesc code_map bits of page offsets [lo, hi] */
@@ -83,7 +83,7 @@ index 9e0c32d1c5..d18b2410c5 100644
  void page_table_config_init(void)
  {
      uint32_t v_l1_bits;
-@@ -737,13 +748,11 @@ static void tb_page_add(PageDesc *p, TranslationBlock *tb, unsigned int n)
+@@ -751,13 +762,11 @@ static void tb_page_add(PageDesc *p, TranslationBlock *tb, unsigned int n)
          hi = (tb_page_addr0(tb) + tb->size - 1) & ~TARGET_PAGE_MASK;
      }
      if (!page_already_protected) {
@@ -99,7 +99,7 @@ index 9e0c32d1c5..d18b2410c5 100644
      }
      if (n == 1) {
          p->span_in_end = MAX(p->span_in_end, hi + 1);
-@@ -1340,13 +1349,26 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+@@ -1378,13 +1387,26 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
      unsigned off = start & ~TARGET_PAGE_MASK;
      ram_addr_t last = start + len - 1;
      struct page_collection *pages;
@@ -127,7 +127,7 @@ index 9e0c32d1c5..d18b2410c5 100644
      if (soft_imm_absorbs__locked(p, start, last)) {
          /*
           * Every block the write can reach reads those bytes at run time
-@@ -1368,12 +1390,6 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+@@ -1406,12 +1428,6 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
          page_collection_unlock(pages);
          return;
      }

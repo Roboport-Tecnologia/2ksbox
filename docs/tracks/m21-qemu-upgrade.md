@@ -448,8 +448,8 @@ harness (`m21-base` worktree at main, QEMU 9.2.4).
 | workload | 9.2 | 11.1 | |
 |---|---|---|---|
 | 3DMark 99, 3DMarks | 6015 | 6016 | vertical blank on: game tests at the 60 Hz cap on both |
-| 3DMark 99, CPU 3DMarks | 16423 | 15954 | -2.9 %, one run each |
-| Blood e1m1, fps (5-95 s) | 124.3, 122.0, 123.0 (123.1) | 121.1, 115.4, 120.6 (119.0) | -3.3 % |
+| 3DMark 99, CPU 3DMarks | 16423 | 15954 | -2.9 %, one run each; 16662 with patch 24's absorb cache (below) |
+| Blood e1m1, fps (5-95 s) | 124.3, 122.0, 123.0 (123.1) | 121.1, 115.4, 120.6 (119.0) | -3.3 %; 164 and 182 with the absorb cache |
 | Moto Racer, race fps | 60.0 | 60.0 | at the cap on both |
 | SSE bench packed/scalar/MMX/clamp, s | 0.27/0.38/0.66/0.27 | 0.27/0.38/0.66/0.27 | after the DE-check fix |
 
@@ -474,6 +474,13 @@ harness (`m21-base` worktree at main, QEMU 9.2.4).
   What remains of the gap is small and spread out: walks a little longer
   where sampled, and 11.1's dirty-bitmap calls (`physical_memory_*`, ~1 %
   more of QEMU).
+- So patch 24 got an absorbed-range cache per page (README row 24): a
+  write inside a range absorbed before, with the page's TB list
+  unchanged since, skips the walk. On 11.1: Blood 119 → 164 and 182 fps (one run on the port tree's scratch build, one on this checkout's),
+  CPU 3DMarks 15954 → 16662 (9.2 without it: 16423); the SMC battery
+  passes in all four switch combinations, Blood's frames match a run
+  without the cache (the ceiling band is an animation that differs
+  between any two runs).
 - `tools/w98-blood-fps.py` reads 11.1's trace lines too (no `pid@epoch:`
   prefix; the `-msg timestamp=on` time instead).
 

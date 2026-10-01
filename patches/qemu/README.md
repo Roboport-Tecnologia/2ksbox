@@ -348,7 +348,12 @@ on 8/16-bit, not SHLD/SHRD). Jump targets, ports and SSE lane selectors
 stay constants. Needs a little-endian host with unaligned loads and a
 single vCPU; covers only the block's first page. Moto Racer's race
 41 → 58 fps (TB invalidations 36,500/s → 1/s); Blood's corridor
-9.4 → 131 fps. **Switch:** `soft-imm`. **Test:** `tools/smc-guest-test.py`,
+9.4 → 131 fps. Each page remembers up to eight byte ranges a write was
+absorbed in, emptied whenever its TB list changes, so a repeated write
+skips the walk over every block on the page (with Win98's lazy FPU
+switching up to three TB-flags copies of each, CR0.TS/MP): Blood spent
+30-40 % of QEMU in that walk, ~118 M TB visits a second, and went 119 →
+164-182 fps on 11.1 with the cache. **Switch:** `soft-imm`. **Test:** `tools/smc-guest-test.py`,
 which also requires four cases' fields to have been *absorbed*: a right
 answer does not prove the block survived its patches (a `pc >> 2` hash
 once let two blocks two bytes apart share a counter and compute right
