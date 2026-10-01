@@ -102,8 +102,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    details pane: the name, Start as the window's default button, the
    per-machine windows, and the core's `details`, one `Group` per page of
    the form, rebuilt per group by a keyed `For`. Activating a row starts
-   its machine. The toolbar keeps New machine, Disc shelf, Shader
-   profiles (with platform icons) and the status line, which says only
+   its machine. The toolbar keeps New, Shelf, Shaders (named so since
+   2026-10-01, user; an empty library's button stays New machine),
+   with platform icons, and the status line, which says only
    that a machine started: a start that fails is the platform's alert
    since 2026-10-01 (user), the core's `Machines::start_failed` headline
    over its error (checked on Broadway with `LAUNCHER_PLAYER_BIN` on a

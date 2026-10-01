@@ -283,9 +283,9 @@ pub fn MachinesWindow() -> impl View {
                     </Row>
                 </Show>
                 <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
-                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New machine"</Button>
-                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Disc shelf"</Button>
-                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shader profiles"</Button>
+                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
+                <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button>
+                <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button>
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
                 <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
