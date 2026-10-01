@@ -99,8 +99,13 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    today, as UTM's and VirtualBox's do. `Sidebar` was not used: its
    items are fixed when it is built and have no second line. Checked
    headless on GTK and KDE with three machines (`select:` on the XP one
-   shows its Direct3D row; DOS has none). On KDE Breeze's scroll bar is
-   drawn over the details' right edge, as mitsuami leaves it no room.
+   shows its Direct3D row; DOS has none). The name and buttons are fixed
+   above a separator; the groups are the rows of a platform list that
+   selects nothing (user), which scrolls them. In a `ScrollView`
+   Breeze's scroll bar was drawn over the groups' right edge; a list
+   keeps its rows clear of it. On Broadway a 1060 window is clamped to
+   1024 after GTK has laid the list's rows out, so a shot shows them
+   cut; at 1000 wide they fit.
 2. **The machine form (done 2026-09-27).** `src/wizard.rs`: one
    `Signal<Form>` in a `Wizard` store; every control reads it and every
    edit is `Form`'s own method, so what a field does to the ones under it

@@ -329,8 +329,11 @@ fn MachineRow(dir: PathBuf) -> impl View {
     }
 }
 
-/// The chosen machine: its name, what can be done to it, and its
-/// settings, a group per page of the machine form.
+/// The chosen machine: its name and what can be done to it, fixed at the
+/// top, then its settings, a group per page of the machine form, as the
+/// rows of a platform list that selects nothing. The list scrolls, so each
+/// platform keeps its rows clear of its own scroll bar (Breeze's is drawn
+/// over a scroll view's content).
 #[component]
 fn Details() -> impl View {
     let library = use_store::<Library>();
@@ -343,7 +346,7 @@ fn Details() -> impl View {
     let bundle = move || library.bundle_path(&current());
     let running = move || library.is_running(&current());
     view! {
-        <ScrollView grow=1.0 min_width=0>
+        <Column grow=1.0 min_width=0 min_height=0>
             <Column padding=Spacing::Xl gap=Spacing::Lg>
                 <Column gap=Spacing::Xs>
                     <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
@@ -377,15 +380,20 @@ fn Details() -> impl View {
                         }
                     }>"Clone"</Button>
                 </Row>
-                <For
-                    each=move || library.details(&current())
-                    key=|g: &DetailGroup| g.clone()
-                    let:group
-                >
-                    <DetailBox group=group/>
-                </For>
             </Column>
-        </ScrollView>
+            <Separator/>
+            <List
+                each=move || library.details(&current())
+                key=|g: &DetailGroup| g.clone()
+                selection_mode=SelectionMode::None
+                list_style=ListStyle::Plain
+                grow=1.0
+                min_height=0
+                let:group
+            >
+                <DetailBox group=group/>
+            </List>
+        </Column>
     }
 }
 
@@ -405,7 +413,9 @@ fn DetailBox(group: DetailGroup) -> impl View {
         })
         .collect();
     view! {
-        <Group title=group.title gap=Spacing::Sm>{rows}</Group>
+        <Column padding_x=Spacing::Xl padding_y=Spacing::Sm>
+            <Group title=group.title gap=Spacing::Sm>{rows}</Group>
+        </Column>
     }
 }
 
