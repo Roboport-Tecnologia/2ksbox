@@ -91,6 +91,23 @@ impl Discs {
         }
     }
 
+    /// Turn a disc's label into a field, filled with the label.
+    fn start_rename(&self, path: &Path) {
+        let label = self.read(|s| s.discs().iter().find(|d| d.path == path).map(|d| d.label.clone()));
+        if let Some(label) = label {
+            self.editing.set(Some((path.to_path_buf(), label)));
+        }
+    }
+
+    fn remove(&self, path: &Path) {
+        self.editing.update(|e| {
+            if e.as_ref().is_some_and(|(p, _)| p == path) {
+                *e = None;
+            }
+        });
+        self.edit(|s| s.remove(path));
+    }
+
     /// Write the label being edited, if any.
     fn commit_label(&self) {
         let Some((path, label)) = self.editing.get_untracked() else { return };
@@ -276,9 +293,11 @@ fn DiscList() -> impl View {
     }
 }
 
-/// One disc: its kind, its label with a pencil to rename it, what it is
-/// and where it lives, then ▶ (or "In drive") on a machine's shelf, and
-/// Remove.
+/// One disc: its kind, its label with a pencil to rename it (shown while
+/// the pointer is over the row), what it is and where it lives, then ▶
+/// (or "In drive") on a machine's shelf, and Remove. A right click offers
+/// the same, which is the keyboard's way to Rename, since a keyboard never
+/// hovers.
 #[component]
 fn DiscRow(path: PathBuf) -> impl View {
     let discs = use_store::<Discs>();
@@ -289,6 +308,8 @@ fn DiscRow(path: PathBuf) -> impl View {
         move || path.clone()
     };
     let (p1, p2, p3, p4, p5, p6, p7) = (p(), p(), p(), p(), p(), p(), p());
+    let (m1, m2, m3) = (p(), p(), p());
+    let hovered = signal(false);
     let row = move |path: &Path| discs.read(|s| s.discs().iter().position(|d| d.path == path));
     let field = move |path: &Path, f: fn(&Shelf, usize) -> String| discs.read(|s| row(path).map(|r| f(s, r))).unwrap_or_default();
     let editing = {
@@ -302,8 +323,29 @@ fn DiscRow(path: PathBuf) -> impl View {
         let path = p2.clone();
         move || discs.read(|s| row(&path).is_some_and(|r| s.row_in_drive(r)))
     };
+    let menu = (
+        MenuItem::new("Rename").on_select(move || {
+            discs.start_rename(&m1);
+            field_ref.select_text(0..usize::MAX);
+        }),
+        MenuItem::new("Insert")
+            .enabled({
+                let in_drive = in_drive.clone();
+                move || discs.read(Shelf::for_machine) && !in_drive()
+            })
+            .on_select(move || discs.insert(&m2)),
+        MenuSeparator::new(),
+        MenuItem::new("Remove from shelf").on_select(move || discs.remove(&m3)),
+    );
     view! {
-        <Row padding_y=Spacing::Sm gap=Spacing::Lg align=Align::Center tooltip=full>
+        <Row
+            padding_y=Spacing::Sm
+            gap=Spacing::Lg
+            align=Align::Center
+            tooltip=full
+            context_menu=menu
+            @hover=move |over| hovered.set(over)
+        >
             <Icon name={let path = p3.clone(); move || {
                 discs.read(|s| row(&path).and_then(|r| s.row_kind(r))).map_or(icons::DISCS, kind_icon).to_owned()
             }} color=Color::SecondaryLabel icon_size=20.0 />
@@ -315,21 +357,22 @@ fn DiscRow(path: PathBuf) -> impl View {
                         move || field(&path, |s, r| s.discs()[r].label.clone())
                     };
                     // The pencil floats past the label's end, taking no
-                    // room in the row.
+                    // room in the row, and shows while the row is hovered.
                     view! {
                         <Row align_self=Align::Start min_width=0>
-                            <Text max_lines=1 shrink=1.0 min_width=0>{label.clone()}</Text>
+                            <Text max_lines=1 shrink=1.0 min_width=0>{label}</Text>
                             <Button
                                 absolute
                                 start={Length::Percent(100.0)}
                                 top={Length::Px(-7.0)}
                                 margin_start=Spacing::Xs
+                                hidden=move || !hovered.get()
                                 icon=icons::EDIT
                                 icon_only=true
                                 button_style=ButtonStyle::Borderless
                                 tooltip="Rename"
                                 @click=move || {
-                                    discs.editing.set(Some((path.to_path_buf(), label())));
+                                    discs.start_rename(&path);
                                     // Asked before the field is built, done once it is.
                                     field_ref.select_text(0..usize::MAX);
                                 }
@@ -374,15 +417,7 @@ fn DiscRow(path: PathBuf) -> impl View {
                 icon_only=true
                 button_style=ButtonStyle::Borderless
                 tooltip="Remove from shelf"
-                @click=move || {
-                    let path = p7.clone();
-                    discs.editing.update(|e| {
-                        if e.as_ref().is_some_and(|(p, _)| p == path.as_ref()) {
-                            *e = None;
-                        }
-                    });
-                    discs.edit(|s| s.remove(&path));
-                }
+                @click=move || discs.remove(&p7)
             >"Remove"</Button>
         </Row>
     }

@@ -177,9 +177,11 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    runs to the window's edges with the side padding inside it, so the
    scroll bar stays clear of the buttons (user). A row is its
    kind's icon, the label with a pencil floating past its end (absolute,
-   taking no room; to show only on hover once mitsuami has hover, which
-   the user is adding) that turns it into a field (written on Enter or
-   focus leaving), the
+   taking no room; shown only while the row is hovered, mitsuami
+   637772f's `on_hover`, with the row's context menu, Rename, Insert,
+   Remove from shelf, as the keyboard's way in; clicked through on
+   Broadway) that turns it into a field, focused with the label selected
+   (written on Enter or focus leaving), the
    core's "Disc image · ~/path" line, ▶ (Insert) or "In drive", and the
    trash button. The rules are doc 07's "One drive": Insert sets the boot
    disc, and on a running machine swaps the disc now too; the card polls
