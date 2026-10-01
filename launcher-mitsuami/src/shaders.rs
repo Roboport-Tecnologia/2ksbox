@@ -258,9 +258,12 @@ pub fn ShaderProfilesWindow() -> impl View {
                 {crate::shot::arm(&["profiles", "saveprofile"])}
                 <Toolbar>
                     <Button icon=crate::machines::icons::NEW @click=move || shaders.open_editor(Editor::new_profile)>
-                        "New profile"
+                        "New"
                     </Button>
                     <Button
+                        icon=crate::machines::icons::CLEAR
+                        icon_only=true
+                        tooltip="No default"
                         enabled=move || shaders.profiles.with(|p| p.iter().any(|e| e.is_default))
                         @click=move || {
                             if let Err(e) = shader_library::set_default(&Shaders::dir(), None) {

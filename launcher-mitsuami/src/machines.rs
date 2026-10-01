@@ -463,6 +463,9 @@ pub(crate) mod icons {
     pub const CLONE: &str = platform! {
         macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
     };
+    pub const CLEAR: &str = platform! {
+        macos => "xmark.circle", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E894}",
+    };
     pub const TRASH: &str = platform! {
         macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
     };

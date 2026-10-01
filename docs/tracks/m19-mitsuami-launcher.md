@@ -172,8 +172,9 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
    alert, Cancel the default (the question is the core's
    `shader_library::delete_question`); a row opens in the editor when
    activated; checked by clicks through Broadway's page: the switch moved
-   the default, Cancel kept the file, Delete removed it; New profile and
-   No default in the window's toolbar; the preset collection's download
+   the default, Cancel kept the file, Delete removed it; New and a clear
+   icon, tooltip "No default", in the window's toolbar (user); the
+   preset collection's download
    row) and the editor
    (name, preset, the parameters as box + slider + description, the
    preview image). The preview is the core's render path
