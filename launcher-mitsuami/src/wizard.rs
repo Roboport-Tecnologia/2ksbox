@@ -82,6 +82,7 @@ impl Wizard {
             Some("dos") => Some(Family::Dos),
             Some("other") => Some(Family::Other),
             Some("win98") => Some(Family::Win98),
+            Some("win11") => Some(Family::Win11),
             _ => None,
         };
         let section = parts.next().and_then(|p| p.parse::<usize>().ok()).and_then(|i| Section::ALL.get(i).copied());

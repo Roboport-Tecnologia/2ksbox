@@ -116,6 +116,10 @@ pub struct AccelNote {
     pub warning: bool,
 }
 
+/// What the acceleration note says of a modern guest emulated: Windows
+/// 11 takes minutes to start, and runs no better after.
+const TOO_SLOW: &str = "Emulated CPU is too slow to run this OS.";
+
 /// A sentence's first letter in upper case.
 fn capitalized(text: &str) -> String {
     let mut chars = text.chars();
@@ -668,20 +672,32 @@ impl Form {
             (Accel::Auto, false) => format!("No {hw} on this host, so the machine will be emulated."),
             (Accel::Kvm, true) => format!("{} is available.", capitalized(&hw)),
             (Accel::Kvm, false) => format!("No {hw} on this host. This machine won't start."),
-            (Accel::Tcg, _) if self.family.is_modern() => {
-                "Emulated. Windows 11 takes minutes to start this way.".to_string()
-            }
+            (Accel::Tcg, _) if self.family.is_modern() => TOO_SLOW.to_string(),
             // Every era family runs `-cpu pentium3` (bundle::qemu_args).
             (Accel::Tcg, _) => "Emulated Pentium 3 equivalent CPU. Suitable for older OSes.".to_string(),
         };
-        if self.family.is_modern() && self.accel == Accel::Auto && !self.hw_accel() {
-            text.push_str("\nWindows 11 takes minutes to start this way.");
+        // A modern guest emulated, picked or by default: a warning (user).
+        let too_slow = self.family.is_modern() && !self.uses_hw_accel();
+        if too_slow && self.accel == Accel::Auto {
+            text.push('\n');
+            text.push_str(TOO_SLOW);
         }
         if self.family == Family::Win98 && self.accel != Accel::Tcg && self.hw_accel() {
             text.push('\n');
             text.push_str(&format!("Under {hw} Windows 98 runs at full host speed, which triggers its fast-CPU bugs."));
         }
-        AccelNote { text, warning: matches!((self.accel, self.hw_accel()), (Accel::Kvm, false)) }
+        let wont_start = matches!((self.accel, self.hw_accel()), (Accel::Kvm, false));
+        AccelNote { text, warning: wont_start || too_slow }
+    }
+
+    /// Whether this machine runs on hardware virtualization here: asked
+    /// for it, or on Automatic where this host has it.
+    fn uses_hw_accel(&self) -> bool {
+        match self.accel {
+            Accel::Kvm => true,
+            Accel::Auto => self.hw_accel(),
+            Accel::Tcg => false,
+        }
     }
 
     /// What this host will give the guest's 3D, under the acceleration
