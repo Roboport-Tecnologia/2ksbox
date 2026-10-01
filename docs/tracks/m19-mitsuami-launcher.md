@@ -135,6 +135,16 @@ wide, so a 1060 window is cut at the right edge there. The debug verbs are
      run disposes, so the effect's own `stale = false` cancelled it and
      the animation stopped after one frame. The effect also reads
      `stale` before any `||`, or it stops following it.
+   - **A picture bigger than the area is cut, never scaled down.** The
+     core renders it at scale 1, larger than the area, and the caller
+     shows its centre (the player crops the same way; the Qt window
+     clips its rectangle). mitsuami has no clip, so `render` crops the
+     frame's pixels to the area before they become the `Image`, which
+     never pushes the layout. Checked headless: a 1600x900 picture shows
+     its centre filling the preview on KDE. CRT Aperture on a 440-line
+     picture at exactly 1x is black in the core too (`--preview-shader`):
+     its `floor(OutputSize.y * SourceSize.w)` is 0 there, a float that
+     falls just short of 1.0; the preset's, not ours.
    - **The preview's wgpu device must not be dropped at exit.** The
      reactive runtime is torn down with the main thread's thread-locals,
      and wgpu's queue, dropped then, touched a wgpu thread-local already

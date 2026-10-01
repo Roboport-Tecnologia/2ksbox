@@ -172,10 +172,19 @@ impl Shaders {
             self.preview_error.set(Some("no frame rendered".to_owned()));
             return;
         };
-        let rgba: Vec<u8> = rgb.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+        // A picture bigger than the area renders at scale 1, bigger than
+        // the area: show its centre and cut what overflows, as the player
+        // and the Qt window (`clip`) do. Never scaled down.
         let (vw, vh) = preview.viewport();
+        let (cw, ch) = (vw.min(w.max(1)).min(fw), vh.min(h.max(1)).min(fh));
+        let (x0, y0) = ((fw - cw) / 2, (fh - ch) / 2);
+        let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+        for row in rgb.chunks_exact(fw as usize * 3).skip(y0 as usize).take(ch as usize) {
+            let row = &row[x0 as usize * 3..(x0 + cw) as usize * 3];
+            rgba.extend(row.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]));
+        }
         self.preview_error.set(None);
-        self.frame.set(Some(Frame { width: vw as f32, height: vh as f32, pixels: Pixels::new(fw, fh, rgba) }));
+        self.frame.set(Some(Frame { width: cw as f32, height: ch as f32, pixels: Pixels::new(cw, ch, rgba) }));
     }
 
     fn frame_interval(&self) -> Option<Duration> {
