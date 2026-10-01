@@ -118,7 +118,7 @@ pub struct AccelNote {
 
 /// What the acceleration note says of a modern guest emulated: Windows
 /// 11 takes minutes to start, and runs no better after.
-const TOO_SLOW: &str = "Emulated CPU is too slow to run this OS.";
+const TOO_SLOW: &str = "CPU emulation is too slow to run this OS.";
 
 /// A sentence's first letter in upper case.
 fn capitalized(text: &str) -> String {
@@ -521,8 +521,7 @@ impl Form {
             ),
             Family::Win11 if cfg!(target_os = "linux") => Some(
                 "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
-                 Install from Microsoft's Windows 11 ISO (x64).\n\
-                 Needs hardware acceleration. Emulated, Windows 11 takes minutes to start.",
+                 Install from Microsoft's Windows 11 ISO (x64).",
             ),
             Family::Win11 => Some("Windows 11 machines don't run on this computer yet."),
             _ => None,
