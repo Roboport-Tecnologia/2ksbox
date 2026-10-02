@@ -1,0 +1,8 @@
+# Every file is checked out exactly as committed, whatever core.autocrlf
+# says. Git for Windows sets autocrlf=true system-wide, which turns the
+# patch queue, the shell scripts and the INFs into CRLF: prepare-qemu.sh
+# then fails with "patch does not apply" and bash with "$'\r': command not
+# found". The few files committed with CRLF (the 9x DDK headers, reference
+# logs) keep theirs. Submodules are not covered; build-windows.sh checks
+# them (docs/build-windows.md).
+* -text

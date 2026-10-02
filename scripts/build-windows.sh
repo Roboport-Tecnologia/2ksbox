@@ -114,12 +114,17 @@ else
 fi
 
 if [ -n "$NATIVE" ]; then
-  # A checkout with CRLF line endings fails far from here: every patch of
-  # the queue "does not apply". Git for Windows converts by default.
-  if [ -f qemu/configure ] && grep -q $'\r' qemu/configure; then
-    echo "build-windows.sh: the checkout has CRLF line endings; clone again with core.autocrlf=false (docs/build-windows.md)" >&2
+  # CRLF fails far from here: every patch of the queue "does not apply".
+  # Git for Windows sets core.autocrlf=true system-wide, so a clone or a
+  # worktree made outside MSYS2's own git converts. .gitattributes keeps
+  # this repository's files as committed; submodules have their own
+  # attributes, so every git this build runs (submodule init, prepare's
+  # restores, DXVK's nested submodules) is told not to convert.
+  if grep -q $'\r' scripts/prepare-qemu.sh; then
+    echo "build-windows.sh: the checkout has CRLF line endings; check it out again with core.autocrlf=false (docs/build-windows.md)" >&2
     exit 1
   fi
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
   missing=()
   for t in git rsync diff cmp cygpath gcc g++ clang ld.lld ninja meson pkg-config windres glslangValidator cargo rustc; do
     command -v "$t" >/dev/null || missing+=("$t")
@@ -139,6 +144,16 @@ fi
 if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/qemu-1/hw/mesa/meson.build ]; then
   say "git submodule update --init (qemu, qemu-3dfx)"
   git submodule update --init --depth 1 qemu third_party/qemu-3dfx
+fi
+# A submodule already checked out with CRLF is checked out again as
+# committed. Only pinned upstream trees live there, and prepare restores
+# and re-patches qemu/ and DXVK anyway.
+if [ -n "$NATIVE" ]; then
+  git submodule --quiet foreach --recursive 'echo "$displaypath"' | while read -r s; do
+    git -C "$s" ls-files --eol | grep -q '^i/lf[[:space:]]*w/crlf' || continue
+    echo "    $s: checked out with CRLF line endings; checking it out again"
+    (cd "$s" && git ls-files -z | xargs -0 rm -f && git checkout -- .)
+  done
 fi
 
 # The patch queue is applied to the one qemu/ tree both builds compile

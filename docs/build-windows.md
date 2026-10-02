@@ -521,7 +521,7 @@ Once, on the PC:
 # 1. MSYS2 from https://www.msys2.org, then the "MSYS2 MINGW64" shell:
 pacman -Syu                                   # again if it asks to restart
 pacman -S git
-git config --global core.autocrlf false       # CRLF breaks every patch of the queue
+git config --global core.autocrlf false       # belt and braces: CRLF breaks every patch of the queue
 cd /c && git clone --recurse-submodules --shallow-submodules https://github.com/davidrios/2ksbox
 cd 2ksbox && scripts/build-windows.sh --msys2-deps
 
@@ -533,6 +533,14 @@ echo 'export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"' >> ~/.bashrc && 
 mkdir -p /c/WATCOM && tar -C /c/WATCOM -xf ow-snapshot.tar.xz
 echo 'export WATCOM=/c/WATCOM' >> ~/.bashrc && . ~/.bashrc
 ```
+
+Line endings: Git for Windows (the `git` outside MSYS2, which Visual
+Studio and most editors use) sets `core.autocrlf=true` system-wide, and a
+clone or `git worktree add` made with it converts. `.gitattributes`
+(`* -text`) keeps this repository's files as committed regardless. The
+submodules have their own attributes, so `build-windows.sh` runs every
+git with `core.autocrlf=false` and checks out again any submodule it
+finds converted.
 
 Then, as often as needed:
 
