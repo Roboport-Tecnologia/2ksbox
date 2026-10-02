@@ -277,8 +277,9 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
 `player-mitsuami/` takes the same command line and every `PLAYER_*`
 knob, which are `player-core`'s. It is its own cargo workspace: `cd
 player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
---features kde,gilrs` for Kirigami), and `LAUNCHER_PLAYER_BIN` points a
-launcher at it. Its chords are the winit player's, as menu shortcuts
+--features kde,gilrs` for Kirigami). It is the default player: once it
+is built, a launcher in the checkout starts it instead of the winit one
+(`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
 (Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
 Screen, Release Mouse, Send Shortcuts to Guest, the two screenshots), and
 a keyboard close asks in the platform's alert. Two knobs of its own:
@@ -455,8 +456,9 @@ installs as `2ksbox` (ADR-015); the egui front end was deleted
 needs Qt 6. `build.sh`'s `qt` stage builds it; a host with no Qt 6 skips
 that stage and can roll no package. There is no CMake: `cxx-qt-build`
 finds Qt through `qmake6`. In a checkout the binary is
-`launcher-qt/target/release/launcher-qt`, and it finds the player in the
-root `target/release` (`LAUNCHER_PLAYER_BIN` overrides).
+`launcher-qt/target/release/launcher-qt`, and it finds the player as
+every launcher does (doc 07: the mitsuami player when built, else the
+root `target/release`; `LAUNCHER_PLAYER_BIN` overrides).
 
 The toolkit-free debug verbs (`launcher_core::cli`: `--print-args`,
 `--print-player-args`, `--prepare` (a Windows 11 machine's firmware

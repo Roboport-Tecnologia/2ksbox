@@ -37,7 +37,8 @@ cargo build --release --no-default-features --features kde,gilrs   # Kirigami (n
 
 mitsuami comes from the same pinned `rev` as `launcher-mitsuami`; bump
 both together. `--features qemu-x86_64` (or `qemu-aarch64`) links the other
-embed library, as for the winit player, into a target dir of its own.
+embed library, as for the winit player, into a target dir of its own:
+`--target-dir target/qemu-x86_64`, where the launcher looks for it.
 
 ## Test loop
 
@@ -59,8 +60,13 @@ embed library, as for the winit player, into a target dir of its own.
 - `PLAYER_INPUT_LOG=1` prints every `SurfaceInput` with the lock and grab
   state; `PLAYER_SURFACE_LOG=1` every size the surface reports. Every other
   `PLAYER_*` knob is the core's and works as in the winit player.
-- The launcher starts it in the winit player's place with
-  `LAUNCHER_PLAYER_BIN=<…>/player-mitsuami/target/release/player-mitsuami`.
+- It is the default player (user, 2026-10-02): a launcher in a checkout
+  (`launcher-mitsuami`, `launcherx`) starts it whenever
+  `player-mitsuami/target/<the launcher's profile>/player-mitsuami` is
+  built, and the winit player only when it is not (`launcherx --paths`
+  says which). `LAUNCHER_PLAYER_BIN` still overrides; the winit player is
+  one `LAUNCHER_PLAYER_BIN=target/release/player` away. Packages still
+  ship the winit player until step 6.
 
 ## Steps
 

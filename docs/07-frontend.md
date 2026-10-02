@@ -79,10 +79,13 @@ player line runs a machine with nothing else.
   (family devices, shelf, QMP socket, shader profile), so a bundle alone
   does not say what ran.
 - **The player is found** at `LAUNCHER_PLAYER_BIN`, else the installed
-  prefix's `2ksbox-player`, else beside the launcher, else the root
-  workspace's `target/<same profile>/player` (`launcher-qt` builds into
-  its own `launcher-qt/target/`, where no player sits). `--paths` prints
-  the player it will use.
+  prefix's `2ksbox-player`, else, in a checkout, the mitsuami player
+  (M22, the default) when `player-mitsuami/target/<same profile>/` has
+  it, else the winit player beside the launcher, else the root
+  workspace's `target/<same profile>/player` (`launcher-mitsuami` and
+  `launcher-qt` build into their own `target/`, where no player sits).
+  Another target's player follows the same order under
+  `qemu-<target>/`. `--paths` prints the players it will use.
 - **Clone…** (`launcher-core/src/clone_machine.rs`) makes a new machine
   with the same settings and **its own copy of the disk**, wherever that
   disk is, since two machines on one image corrupt it the day both run.

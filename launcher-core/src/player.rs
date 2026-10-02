@@ -12,12 +12,15 @@ use std::path::PathBuf;
 use std::process::Child;
 
 /// The `player` binary: `bin/2ksbox-player` in an installed tree
-/// (`paths.rs`), otherwise beside the launcher's own executable (the
+/// (`paths.rs`). In a checkout, the mitsuami player (track M22, the
+/// default player) wherever it is built, `player-mitsuami/target/<profile>`;
+/// otherwise the winit player beside the launcher's own executable (the
 /// workspace's binaries share `target/<profile>`), and failing that the
-/// workspace's own `target/<profile>`. That last case is `launcher-qt`,
-/// which is outside the root workspace (so `cargo build` never needs
-/// Qt 6) and builds into `launcher-qt/target/<profile>`, with no player
-/// beside it. `LAUNCHER_PLAYER_BIN` overrides all of it.
+/// workspace's own `target/<profile>`. That last case is a launcher
+/// outside the root workspace (`launcher-mitsuami`, `launcher-qt`, so
+/// `cargo build` never needs their toolkits), which builds into its own
+/// `target/<profile>` with no player beside it. `LAUNCHER_PLAYER_BIN`
+/// overrides all of it.
 pub fn player_binary() -> PathBuf {
     if let Ok(p) = std::env::var("LAUNCHER_PLAYER_BIN") {
         return p.into();
@@ -29,6 +32,9 @@ pub fn player_binary() -> PathBuf {
         let _ = prefix;
         let name = if cfg!(windows) { "2ksbox-player.exe" } else { "2ksbox-player" };
         return crate::paths::bin_dir().join(name);
+    }
+    if let Some(m) = mitsuami_player("") {
+        return m;
     }
     let name = if cfg!(windows) { "player.exe" } else { "player" };
     let exe = std::env::current_exe().expect("current_exe");
@@ -202,8 +208,9 @@ pub fn pad_args(machine: &Machine) -> Vec<String> {
 /// run on [`player_binary`] and Windows 11 on the x86_64 build of the same
 /// player (track M20): `bin/2ksbox-player-x86_64` installed,
 /// `target/qemu-x86_64/<profile>/player` in a checkout (`scripts/build.sh`
-/// builds it there, with its own feature), `LAUNCHER_PLAYER_X86_64_BIN`
-/// over both.
+/// builds it there, with its own feature), the mitsuami player's
+/// `player-mitsuami/target/qemu-x86_64/<profile>` before it when built,
+/// `LAUNCHER_PLAYER_X86_64_BIN` over all of them.
 pub fn player_binary_for(machine: &Machine) -> PathBuf {
     target_player_binary(machine.qemu_target())
 }
@@ -221,9 +228,32 @@ pub fn target_player_binary(target: &str) -> PathBuf {
     if crate::paths::install_prefix().is_some() {
         return crate::paths::bin_dir().join(format!("2ksbox-player-{target}{exe}"));
     }
+    if let Some(m) = mitsuami_player(&format!("qemu-{target}")) {
+        return m;
+    }
+    crate::paths::checkout("target").join(format!("qemu-{target}")).join(launcher_profile()).join(format!("player{exe}"))
+}
+
+/// The mitsuami player in a checkout, if it is built for the launcher's
+/// own profile: `player-mitsuami/target/<sub>/<profile>/player-mitsuami`,
+/// `sub` empty for the era's player and `qemu-<target>` for another
+/// target's (the winit player's layout, in mitsuami's own workspace).
+fn mitsuami_player(sub: &str) -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "player-mitsuami.exe" } else { "player-mitsuami" };
+    let mut p = crate::paths::checkout("player-mitsuami/target");
+    if !sub.is_empty() {
+        p.push(sub);
+    }
+    let p = p.join(launcher_profile()).join(exe);
+    p.exists().then_some(p)
+}
+
+/// The cargo profile the launcher was built with, its executable's
+/// directory name (`release`, `debug`): a debug launcher finds the debug
+/// player.
+fn launcher_profile() -> std::ffi::OsString {
     let current = std::env::current_exe().expect("current_exe");
-    let profile = current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned();
-    crate::paths::checkout("target").join(format!("qemu-{target}")).join(profile).join(format!("player{exe}"))
+    current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned()
 }
 
 /// What has to exist on disk before `machine` can start, made if it does
