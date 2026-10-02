@@ -97,6 +97,9 @@ const VARS: [(&str, &str); 7] = [
     ("soundfont", "LIBSYNTH_SF2"),
 ];
 
+#[cfg(not(target_os = "macos"))]
+fn checkout_vulkan() {}
+
 /// A checkout's Vulkan on macOS, which has none of its own: the newest
 /// `~/VulkanSDK/<version>/macOS` with KosmicKrisp in it, the SDK
 /// `scripts/package-macos.sh` copies into the app, and the launcher's
@@ -108,11 +111,10 @@ const VARS: [(&str, &str); 7] = [
 /// first makes those leaf-name opens return it (dyld matches an image
 /// already loaded); its driver is named as the package's is. Nothing
 /// when the caller set a loader path or a driver, or a loader is found
-/// already.
+/// already. A `#[cfg]` rather than `cfg!()`: Windows' `libc` has no
+/// `dlopen`.
+#[cfg(target_os = "macos")]
 fn checkout_vulkan() {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
     let Some(home) = std::env::var_os("HOME") else { return };
     let version = |d: &Path| -> Vec<u32> {
         let name = d.parent().and_then(Path::file_name).and_then(|n| n.to_str()).unwrap_or("");

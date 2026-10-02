@@ -24,7 +24,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         python3 python3-pip python3-setuptools rsync sed tar which xorriso zip zstd \
     && dnf clean all -y
 
-# QEMU 9.2's mkvenv supports Python 3.8-3.13 and Fedora's default is newer
+# QEMU 11.1's mkvenv supports Python 3.9-3.13 and Fedora's default is newer
 # (3.14 breaks it), so the build gets its own interpreter. It is the
 # constraint scripts/configure-qemu.sh enforces on every host, met here by
 # a package rather than by uv. `distlib` is installed for real because
