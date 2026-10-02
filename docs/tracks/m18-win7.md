@@ -184,11 +184,20 @@ device's half is plain QEMU C and builds anywhere.
      disabled, so Windows boots to its VGA desktop; the CD with the
      build, the driver copied and enabled from an elevated console, a
      reboot). A boot that hangs costs nothing.
-   Next: the mode the desktop starts in (640x480: no EDID, so a monitor
-   descriptor or a preferred mode it honours), the hardware cursor
-   (SetPointerShape/Position on the CURSOR registers), the vertical-blank
-   interrupt (ControlInterrupt, flips), then step 6, the user-mode driver
-   that DWM needs.
+   - **1024x768 from an EDID.** With no descriptor Windows started at
+     640x480 and ignored the preferred mode of RecommendMonitorModes;
+     QueryDeviceDescriptor now answers a made-up EDID 1.3 block
+     (manufacturer "TKS", name "2ksbox", preferred timing 1024x768 at 60
+     Hz VESA DMT) and the desktop starts there.
+   - **The hardware cursor** (register set v4, as the XP driver uses it):
+     the image in the 16 KiB above the segment (taken off its top),
+     monochrome / colour / masked colour converted to a8r8g8b8, Windows 7
+     hands a 64x64 colour pointer. SetPointerPosition's X / Y are the
+     image's corner, not the hot spot: with the pointer clicked at
+     (700, 300) the device read CURSOR_X / Y = 700 / 300 with HOT 3 / 3
+     (`xp /9wx <BAR 1>+0x90` in the monitor).
+   Next: the vertical-blank interrupt (ControlInterrupt, flips), then
+   step 6, the user-mode driver that DWM needs.
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the

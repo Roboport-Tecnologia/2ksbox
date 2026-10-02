@@ -57,6 +57,9 @@ typedef struct D3DPT_ADAPTER {
     ULONG nmodes;
     ULONG cur_w, cur_h, cur_pitch, cur_hz;  /* what CommitVidPn programmed */
     PUCHAR vram;                      /* the segment mapped (kernel VA): the "GPU" is the CPU */
+    ULONG vram_map;                   /* bytes mapped: the segment, then the cursor image */
+    ULONG cursor_off;                 /* VRAM offset of the cursor image (above the segment), 0 = none */
+    ULONG cursor_hot_x, cursor_hot_y;
     PUCHAR *ap_va;                    /* segment 2, the aperture: each page's kernel VA, or NULL */
     struct D3DPT_AP_MAP { PVOID base; PMDL mdl; BOOLEAN mine; } *ap_map; /* at a mapping's first page */
     volatile LONG fence_done;         /* the last submission fence executed */
@@ -297,11 +300,20 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
         a->seg_size = a->vram_len;
     }
 
+    /* The hardware cursor's image (register set v4) takes the top of what
+     * is left, outside the segment dxgkrnl manages. */
+    a->vram_map = a->seg_size;
+    a->cursor_off = 0;
+    if ((a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_CURSOR) && a->seg_size > 2 * D3DPT_FB_CURSOR_BYTES) {
+        a->cursor_off = (a->seg_size - D3DPT_FB_CURSOR_BYTES) & ~(PAGE_SIZE - 1);
+        a->seg_size = a->cursor_off;
+    }
+
     read_modes(a);
 
     /* The segment as the "GPU" sees it: paging transfers, fills and the
      * presents' blits run on the CPU at submit time, through this. */
-    a->vram = MmMapIoSpace(a->vram_phys, a->seg_size, MmWriteCombined);
+    a->vram = MmMapIoSpace(a->vram_phys, a->vram_map, MmWriteCombined);
     if (!a->vram) {
         dbg_line("StartDevice: cannot map the segment");
         unmap(a);
@@ -341,7 +353,7 @@ static void unmap(D3DPT_ADAPTER *a)
         a->ap_va = NULL;
     }
     if (a->vram) {
-        MmUnmapIoSpace(a->vram, a->seg_size);
+        MmUnmapIoSpace(a->vram, a->vram_map);
         a->vram = NULL;
     }
     if (a->regs) {
@@ -385,12 +397,18 @@ static VOID d3dpt_unload(VOID)
 /* ---------------------------------------------- what dxgkrnl asks next */
 
 /* What the adapter can do, as dxgkrnl asks right after StartDevice: a
- * WDDM 1.0 GPU with one engine, 32-bit addresses, no overlays, no swizzling
- * and, for now, no hardware cursor (the XP driver's CURSOR registers come
- * with the VidPN work). */
-static NTSTATUS driver_caps(DXGK_DRIVERCAPS *c)
+ * WDDM 1.0 GPU with one engine, 32-bit addresses, no overlays, no swizzling,
+ * and the device's hardware cursor when it has one. */
+static NTSTATUS driver_caps(const D3DPT_ADAPTER *a, DXGK_DRIVERCAPS *c)
 {
     RtlZeroMemory(c, sizeof(*c));
+    if (a->cursor_off) {            /* the device's cursor sprite, any of the three kinds */
+        c->MaxPointerWidth = D3DPT_FB_CURSOR_MAX;
+        c->MaxPointerHeight = D3DPT_FB_CURSOR_MAX;
+        c->PointerCaps.Monochrome = 1;
+        c->PointerCaps.Color = 1;
+        c->PointerCaps.MaskedColor = 1;
+    }
     c->HighestAcceptableAddress.QuadPart = 0xffffffffull;
     c->MaxAllocationListSlotId = 16;
     c->MaxQueuedFlipOnVSync = 1;
@@ -447,7 +465,7 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
     switch (q->Type) {
     case DXGKQAITYPE_DRIVERCAPS:
         st = q->OutputDataSize < sizeof(DXGK_DRIVERCAPS)
-             ? STATUS_INVALID_PARAMETER : driver_caps((DXGK_DRIVERCAPS *)q->pOutputData);
+             ? STATUS_INVALID_PARAMETER : driver_caps(a, (DXGK_DRIVERCAPS *)q->pOutputData);
         break;
     case DXGKQAITYPE_QUERYSEGMENT:
         st = query_segment(a, q);
@@ -579,17 +597,66 @@ static NTSTATUS d3dpt_query_child_status(IN_CONST_PVOID ctx, INOUT_PDXGK_CHILD_S
     }
 }
 
-/* No EDID yet: the monitor's modes come from RecommendMonitorModes, out of
- * the host's mode table (the XP driver's list). */
+/*
+ * The monitor's EDID, made up: with none Windows starts the desktop at
+ * 640x480. One block, EDID 1.3, manufacturer "TKS", its preferred timing
+ * 1024x768 at 60 Hz (VESA DMT: 65 MHz, 1344x806 total), the established
+ * 640x480 / 800x600 / 1024x768, the name "2ksbox". The rest of the host's
+ * mode table still comes from RecommendMonitorModes.
+ */
+static const UCHAR edid_block[128] = {
+    0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,     /* header */
+    0x51, 0x73, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,     /* "TKS", product 1, no serial */
+    0x01, 0x24, 0x01, 0x03,                             /* week 1 of 2026, EDID 1.3 */
+    0x80, 0x22, 0x1b, 0x78, 0x06,                       /* digital, 34x27 cm, gamma 2.2, sRGB + preferred */
+    0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26, 0x0f, 0x50, 0x54, /* sRGB chromaticity */
+    0x21, 0x08, 0x00,                                   /* 640x480, 800x600, 1024x768 at 60 */
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,     /* no standard timings */
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    /* detailed timing 1: 1024x768 at 60 */
+    0x64, 0x19, 0x00, 0x40, 0x41, 0x00, 0x26, 0x30,
+    0x18, 0x88, 0x36, 0x00, 0x54, 0x0e, 0x11, 0x00, 0x00, 0x18,
+    /* monitor name */
+    0x00, 0x00, 0x00, 0xfc, 0x00, '2', 'k', 's', 'b', 'o', 'x', 0x0a,
+    0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+    /* range limits: 50-75 Hz, 30-80 kHz, 170 MHz */
+    0x00, 0x00, 0x00, 0xfd, 0x00, 0x32, 0x4b, 0x1e, 0x50, 0x11, 0x00, 0x0a,
+    0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+    /* dummy */
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00                                          /* no extensions, checksum (set below) */
+};
+
 static DXGKDDI_QUERY_DEVICE_DESCRIPTOR d3dpt_query_device_descriptor;
 static NTSTATUS d3dpt_query_device_descriptor(IN_CONST_PVOID ctx, IN_ULONG uid,
                                               INOUT_PDXGK_DEVICE_DESCRIPTOR desc)
 {
+    UCHAR sum = 0;
+    ULONG i, n;
+
     UNREFERENCED_PARAMETER(ctx);
     UNREFERENCED_PARAMETER(uid);
-    UNREFERENCED_PARAMETER(desc);
-    dbg_line("QueryDeviceDescriptor");
-    return STATUS_MONITOR_NO_DESCRIPTOR;
+    dbg_hex("d3dptkmd: QueryDeviceDescriptor offset ", desc->DescriptorOffset);
+    dbg_hex(" length ", desc->DescriptorLength);
+    dbg_puts("\n");
+    if (desc->DescriptorOffset >= sizeof(edid_block)) {
+        return STATUS_MONITOR_NO_MORE_DESCRIPTOR_DATA;
+    }
+    n = sizeof(edid_block) - desc->DescriptorOffset;
+    if (n > desc->DescriptorLength) {
+        n = desc->DescriptorLength;
+    }
+    for (i = 0; i < sizeof(edid_block) - 1; i++) {
+        sum = (UCHAR)(sum + edid_block[i]);
+    }
+    for (i = 0; i < n; i++) {
+        ULONG at = desc->DescriptorOffset + i;
+
+        ((PUCHAR)desc->DescriptorBuffer)[i] =
+            at == sizeof(edid_block) - 1 ? (UCHAR)(0x100 - sum) : edid_block[at];
+    }
+    return STATUS_SUCCESS;
 }
 
 static DXGKDDI_SET_POWER_STATE d3dpt_set_power_state;
@@ -644,15 +711,96 @@ static NTSTATUS d3dpt_query_interface(IN_CONST_PVOID ctx, IN_PQUERY_INTERFACE qi
 STUB2(DXGKDDI_ACQUIRESWIZZLINGRANGE, d3dpt_acquire_swizzling_range, IN_CONST_HANDLE, INOUT_PDXGKARG_ACQUIRESWIZZLINGRANGE)
 STUB2(DXGKDDI_RELEASESWIZZLINGRANGE, d3dpt_release_swizzling_range, IN_CONST_HANDLE, IN_CONST_PDXGKARG_RELEASESWIZZLINGRANGE)
 STUB2(DXGKDDI_SETPALETTE, d3dpt_set_palette, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETPALETTE)
-/* no hardware cursor yet: a refused shape makes GDI draw the pointer */
-STUB2(DXGKDDI_SETPOINTERSHAPE, d3dpt_set_pointer_shape, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETPOINTERSHAPE)
 STUB2(DXGKDDI_ESCAPE, d3dpt_escape, IN_CONST_HANDLE, IN_CONST_PDXGKARG_ESCAPE)
 
+/* ------------------------------------------------------ hardware cursor
+ * (register set v4, doc 15 "The hardware cursor"), as the XP display
+ * driver does it: the pointer converted to a8r8g8b8 into the VRAM above
+ * the segment, the device told, the host showing it as its own cursor.
+ * Larger pointers than D3DPT_FB_CURSOR_MAX are refused, and dxgkrnl then
+ * has GDI draw them. */
+static ULONG ptr_bit(const UCHAR *rows, ULONG pitch, ULONG row, ULONG x)
+{
+    return (rows[row * pitch + (x >> 3)] >> (7 - (x & 7))) & 1;
+}
+
+static DXGKDDI_SETPOINTERSHAPE d3dpt_set_pointer_shape;
+static NTSTATUS APIENTRY d3dpt_set_pointer_shape(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SETPOINTERSHAPE s)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    const UCHAR *px = (const UCHAR *)s->pPixels;
+    ULONG w = s->Width, ht = s->Height, i, j;
+    PULONG img;
+    static ULONG logged;
+
+    if (logged < 8) {
+        logged++;
+        dbg_hex("d3dptkmd: SetPointerShape flags=", s->Flags.Value);
+        dbg_hex(" ", w);
+        dbg_hex(" x ", ht);
+        dbg_hex(" pitch ", s->Pitch);
+        dbg_puts("\n");
+    }
+    if (!a->cursor_off || !w || !ht || w > D3DPT_FB_CURSOR_MAX || ht > D3DPT_FB_CURSOR_MAX ||
+        s->XHot >= w || s->YHot >= ht || !px) {
+        return STATUS_NOT_SUPPORTED;
+    }
+    img = (PULONG)(a->vram + a->cursor_off);
+    if (s->Flags.Monochrome) {
+        /* AND rows then XOR rows: AND 1 / XOR 0 transparent, AND 0 black
+         * or white by XOR, AND 1 / XOR 1 (invert) black, as a sprite
+         * cannot invert */
+        for (j = 0; j < ht; j++) {
+            for (i = 0; i < w; i++) {
+                ULONG and_ = ptr_bit(px, s->Pitch, j, i), xr = ptr_bit(px, s->Pitch, ht + j, i);
+
+                img[j * w + i] = (and_ && !xr) ? 0 : (xr && !and_) ? 0xffffffffu : 0xff000000u;
+            }
+        }
+    } else {
+        for (j = 0; j < ht; j++) {
+            const ULONG *row = (const ULONG *)(px + j * s->Pitch);
+
+            for (i = 0; i < w; i++) {
+                ULONG c = row[i];
+
+                if (s->Flags.MaskedColor) {
+                    /* the top byte is a mask: 0 draws the colour, 0xff XORs
+                     * it, where black is no change (transparent) and any
+                     * other colour shows as itself */
+                    c = (c >> 24) && !(c & 0x00ffffffu) ? 0 : (c | 0xff000000u);
+                }
+                img[j * w + i] = c;
+            }
+        }
+    }
+    a->cursor_hot_x = s->XHot;
+    a->cursor_hot_y = s->YHot;
+    a->regs[D3DPT_FB_REG_CURSOR_ADDR / 4] = a->cursor_off;
+    a->regs[D3DPT_FB_REG_CURSOR_W / 4] = w;
+    a->regs[D3DPT_FB_REG_CURSOR_H / 4] = ht;
+    a->regs[D3DPT_FB_REG_CURSOR_HOT_X / 4] = s->XHot;
+    a->regs[D3DPT_FB_REG_CURSOR_HOT_Y / 4] = s->YHot;
+    a->regs[D3DPT_FB_REG_CURSOR_DEFINE / 4] = 1;
+    return STATUS_SUCCESS;
+}
+
+/* X and Y are the pointer image's corner; the device takes the hot spot. */
 static DXGKDDI_SETPOINTERPOSITION d3dpt_set_pointer_position;
 static NTSTATUS APIENTRY d3dpt_set_pointer_position(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SETPOINTERPOSITION p)
 {
-    UNREFERENCED_PARAMETER(h);
-    UNREFERENCED_PARAMETER(p);
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+
+    if (!a->cursor_off) {
+        return STATUS_SUCCESS;
+    }
+    if (!p->Flags.Visible) {
+        a->regs[D3DPT_FB_REG_CURSOR_ENABLE / 4] = 0;
+        return STATUS_SUCCESS;
+    }
+    a->regs[D3DPT_FB_REG_CURSOR_X / 4] = (ULONG)(p->X + (INT)a->cursor_hot_x);
+    a->regs[D3DPT_FB_REG_CURSOR_Y / 4] = (ULONG)(p->Y + (INT)a->cursor_hot_y);
+    a->regs[D3DPT_FB_REG_CURSOR_ENABLE / 4] = 1;
     return STATUS_SUCCESS;
 }
 
