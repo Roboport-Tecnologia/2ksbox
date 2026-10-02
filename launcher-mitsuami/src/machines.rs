@@ -579,9 +579,10 @@ pub(crate) mod icons {
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
     };
-    // A question mark; macOS has no toolbar button for it, so no symbol.
+    // A question mark, and on GTK its About icon, an "i" (user). macOS has
+    // no toolbar button for it, so no symbol.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub const ABOUT: &str = platform! {
-        macos => "", gtk => "dialog-question-symbolic", kde => "dialog-question", windows => "\u{E897}",
+        macos => "", gtk => "help-about-symbolic", kde => "dialog-question", windows => "\u{E897}",
     };
 }
