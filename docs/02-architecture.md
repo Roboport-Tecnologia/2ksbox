@@ -44,7 +44,7 @@ GPL-2.0 for everything that links it.
 ┌───────────────────────── launcher process ───────────────────────────┐
 │  launcher-core (Rust): bundles, library, disc shelf, snapshots,      │
 │  shader profiles, preview, every window's state machine              │
-│  front ends: launcher-qt (Qt 6/QML via cxx-qt, ships as `2ksbox`),   │
+│  front ends: launcher-mitsuami (AppKit/WinUI 3/GTK 4, as `2ksbox`),  │
 │  launcher-capi (C ABI), launcherx (toolkit-free debug verbs)         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -75,8 +75,8 @@ this header.
 ## Language policy (ADR-004)
 
 - **Rust:** the player, `qemu-embed`, `launcher-core`, `launcher-capi`
-  and `launcher-qt`'s bridges (cxx-qt, with QML and a few small C++
-  shims), `shader-chain`, `libdisc` (CD model and parsers, a staticlib
+  and `launcher-mitsuami` (native widgets through the mitsuami toolkit),
+  `shader-chain`, `libdisc` (CD model and parsers, a staticlib
   with a C API for QEMU's ATAPI device), `libsynth` (the music engines,
   doc 20), `gamepad`, and host-side tools.
 - **C/C++:** our QEMU patches and devices (embed, `d3dpt/`, `voodoo/`,
@@ -129,7 +129,7 @@ player/          the player: winit window, wgpu present, audio, gamepads
 qemu-embed/      hand-written Rust bindings to libqemu_embed.h
 embed/           the embed library's C sources, overlaid into qemu/embed/
 launcher-core/   everything the launcher decides; src/bin/launcherx.rs
-launcher-qt/     the shipped launcher (Qt 6 / QML, cxx-qt), its own workspace
+launcher-mitsuami/ the shipped launcher (mitsuami: AppKit, WinUI 3, GTK 4), its own workspace
 launcher-capi/   launcher-core as a C ABI (non-default workspace member)
 shader-chain/    librashader-on-wgpu chain shared by player and launcher
 libdisc/         CD-ROM model, image formats, C API, discx

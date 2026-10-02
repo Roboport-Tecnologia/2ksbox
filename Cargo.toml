@@ -6,9 +6,9 @@ members = ["player", "player-core", "libdisc", "libsynth", "gamepad", "launcher-
 # unless they are building a front end in another language.
 # `cargo check --workspace` (scripts/build.sh) is what keeps it from
 # rotting; `cargo build -p launcher-capi` when you want it. The launcher
-# itself is `launcher-qt/`, its own workspace so that nothing here needs
-# Qt 6 (ADR-015); the egui front end that used to be a member here was
-# retired on 2026-09-13 (ADR-017).
+# itself is `launcher-mitsuami/`, its own workspace so that nothing here
+# needs GTK (ADR-023); the egui front end that used to be a member here
+# was retired on 2026-09-13 (ADR-017), and the Qt one on 2026-10-02.
 default-members = ["player", "player-core", "libdisc", "libsynth", "gamepad", "launcher-core", "qemu-embed", "shader-chain"]
 
 [workspace.package]

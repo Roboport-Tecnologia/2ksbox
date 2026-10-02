@@ -2,7 +2,7 @@
 //!
 //! On Windows the launcher is `windows_subsystem = "windows"`
 //! (`console.rs` says why), and a windowed process has no stderr. A
-//! panic, or a QML engine that fails to load, prints into nothing and the
+//! panic, or a toolkit that fails to load, prints into nothing and the
 //! process disappears with no window and no message. The report that
 //! comes back is "it didn't start, no error", which names no cause.
 //!

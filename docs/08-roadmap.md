@@ -100,17 +100,20 @@ multisession, CHD (the track doc).
 
 ## M6: Launcher and packaging
 
-Doc 07. `launcher-core` owns every rule (ADR-014); `launcher-qt` is the
-shipped front end (ADR-015, egui deleted by ADR-017); `launcher-capi`
-and `launcherx` are its other callers. Done: the library and form (four
-families and their pickers), the disc shelf, snapshots, shader profiles
-with a live preview, clone. Packages: a Linux tarball, a Flatpak
-(`org.kde.Platform` 6.10, offline), a macOS app in two builds (ADR-019)
+Doc 07. `launcher-core` owns every rule (ADR-014); `launcher-mitsuami`
+is the shipped front end since 2026-10-02 (ADR-023, track M19: AppKit,
+WinUI 3, GTK 4), after the Qt one (ADR-015, deleted that day) and egui
+(deleted by ADR-017); `launcher-capi` and `launcherx` are its other
+callers. Done: the library and form (four families and their pickers),
+the disc shelf, snapshots, shader profiles with a live preview, clone.
+Packages: a Linux tarball (the host's GTK 4), a Flatpak
+(`org.gnome.Platform` 49, offline), a macOS app in two builds (ADR-019)
 and a Windows zip.
 
-**Left:** an AppImage, a Windows installer, the preview as a
-`QQuickRhiItem`, grid thumbnails, bundle import/export, Flathub
-screenshots (the track doc's "Open").
+**Left:** an AppImage, a Windows installer, grid thumbnails, bundle
+import/export, Flathub screenshots (the track doc's "Open"); the Linux,
+macOS and Flatpak packagers' first runs with the mitsuami launcher
+(M19).
 
 ## M7: XP display driver
 
@@ -167,10 +170,11 @@ Carmageddon in Mode X, Blood in a DOS box.
 ## M11: Windows host
 
 `docs/build-windows.md`. A cross build from Linux (QEMU with clang,
-patch 68) into a portable zip with the Qt launcher: WHPX, the WGL
-backend, DXVK as `dxvk_d3d9.dll`, Windows' own Direct3D 9 below the
-floor (ADR-007). A native MSYS2 build serves debugging on the user's
-PC, where guests run.
+patch 68) into a portable zip: WHPX, the WGL backend, DXVK as
+`dxvk_d3d9.dll`, Windows' own Direct3D 9 below the floor (ADR-007). A
+native MSYS2 build serves debugging on the user's PC, where guests run.
+The launcher is WinUI 3, built with MSVC on the PC only (ADR-023, since
+2026-10-02; the Qt launcher before), so the zip is rolled there.
 
 **Left:** Moto Racer's speed on the PC, live control over AF_UNIX, the
 Windows-built ISO in a guest, an installer, DXGI zero-copy, a check that

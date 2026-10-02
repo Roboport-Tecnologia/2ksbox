@@ -11,8 +11,8 @@
 //!
 //! Library edits save as they are made, with no "Save" button, because a
 //! shelf is a list of things you own, not a document being drafted. The
-//! front end decides when they are written: Qt's `TextField` calls
-//! `set_label` then `flush` once on `editingFinished`, rather than
+//! front end decides when they are written: a label field calls
+//! `set_label` then `flush` once when its edit is finished, rather than
 //! writing the file on every keystroke.
 //!
 //! The rows are in the shelf's own order (by label, `disc_library`'s
@@ -130,8 +130,8 @@ impl Shelf {
     ///
     /// The row moves to where the new name belongs (the shelf is kept in
     /// order by label), so a caller holding row numbers must re-read
-    /// them. Qt's `beginResetModel` bracket around every shelf operation
-    /// already does.
+    /// them. A front end that re-reads the whole shelf after every
+    /// operation already does.
     pub fn set_label(&mut self, row: usize, label: &str) {
         let Some(disc) = self.library.discs.get_mut(row) else { return };
         if disc.label == label {

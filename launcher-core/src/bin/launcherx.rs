@@ -1,17 +1,18 @@
 //! `launcherx`: the launcher's toolkit-free verbs with no front end.
 //!
 //! Every verb that needs no GUI lives in `launcher_core::cli`, so
-//! `launcher-qt` and this binary answer them identically (doc 07,
+//! `launcher-mitsuami` and this binary answer them identically (doc 07,
 //! ADR-014). This binary builds with nothing installed, while
-//! `launcher-qt` needs Qt 6. `scripts/test.sh` drives the launcher
-//! through it for that reason. The suite runs before every commit, on
-//! hosts with no Qt, and must not pay for a front end to answer
-//! `--print-args`.
+//! `launcher-mitsuami` needs its platform toolkit. `scripts/test.sh`
+//! drives the launcher through it for that reason. The suite runs before
+//! every commit, on hosts with no GUI toolkit, and must not pay for a
+//! front end to answer `--print-args`.
 //!
 //! It is a test and debugging tool. No packager installs it; the shipped
-//! command is `2ksbox`, which is `launcher-qt` (ADR-015). It cannot do
-//! the headless frame grabs of real windows, which need a toolkit and
-//! belong to `launcher-qt` (`QT_QPA_PLATFORM=offscreen`, doc 07).
+//! command is `2ksbox`, which is `launcher-mitsuami` (ADR-023). It cannot
+//! do the headless screenshots of real windows, which need a toolkit and
+//! belong to `launcher-mitsuami` (`LAUNCHER_SHOT` / `LAUNCHER_SCREEN`,
+//! its `src/shot.rs`).
 
 fn main() {
     // No `fatal::install` here, unlike the front end. It exists because a
@@ -29,7 +30,7 @@ fn main() {
         Some(code) => std::process::exit(code),
         None => {
             eprintln!("launcherx: unknown verb {verb}");
-            eprintln!("  (the headless window frame grabs are the front end's: `launcher-qt`)");
+            eprintln!("  (the headless window frame grabs are the front end's: `launcher-mitsuami`)");
             std::process::exit(2);
         }
     }

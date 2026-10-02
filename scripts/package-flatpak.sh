@@ -9,9 +9,9 @@
 # patched, and QEMU's compile fails deep inside on a header neither build
 # uses (`hw/core/sysbus.h: No such file`). Run one, then the other.
 #
-# The runtime is `org.kde.Platform`, because the launcher is Qt 6 / QML
-# (ADR-015) and KDE's runtime carries Qt. The first build downloads the
-# ~3 GB runtime + SDK pair.
+# The runtime is `org.gnome.Platform`, because the launcher is mitsuami
+# on GTK 4 (ADR-023) and GNOME's runtime carries GTK 4. The first build
+# downloads the runtime + SDK pair.
 #
 #   scripts/package-flatpak.sh              build, install --user, smoke check
 #   scripts/package-flatpak.sh --no-install just build into the repo
@@ -147,27 +147,30 @@ smoke() {
   case "$out" in *"/.var/app/$APPID/"*) ;; *)
     echo "package-flatpak.sh: the library is not under ~/.var/app/$APPID" >&2; fail=1 ;;
   esac
-  # And the window, which `--paths` never reaches. The launcher is Qt 6 /
-  # QML (ADR-015), and Qt resolves its platform plugin and every QtQuick
-  # module by name at run time, out of the runtime rather than /app. A
-  # wrong `runtime:` line would break that while every check above stayed
-  # green, so ask for a real window: the launcher's own headless grab
-  # (doc 07), offscreen, and a PNG out of it.
+  # And the window, which `--paths` never reaches. The launcher is GTK 4
+  # (ADR-023), out of the runtime rather than /app, so a wrong `runtime:`
+  # line would break it while every check above stayed green. So ask for a
+  # real window: the launcher's own headless grab (`LAUNCHER_SHOT`), on a
+  # private Broadway display started inside the sandbox (the runtime's
+  # `gtk4-broadwayd`), so nothing opens on the desktop, and a PNG out of
+  # it.
   # Under $HOME, not /tmp. The sandbox has a /tmp of its own, so a grab
   # written there is invisible to this shell and the check fails on a good
   # package. `$HOME` is the same path on both sides, and this app has
   # `--filesystem=host`.
   local shot="$HOME/.2ksbox-flatpak-window.png"
   rm -f "$shot"
-  echo "==> flatpak run $APPID (offscreen window grab)"
-  flatpak run --user --command=2ksbox \
-    --env=QT_QPA_PLATFORM=offscreen --env=LAUNCHER_QT_SHOT="$shot" \
-    --env=LAUNCHER_QT_DELAY=1500 "$APPID//$BRANCH" >/dev/null 2>&1 || true
+  echo "==> flatpak run $APPID (window grab on Broadway)"
+  flatpak run --user --command=sh --env=LAUNCHER_SHOT="$shot" "$APPID//$BRANCH" -c '
+      gtk4-broadwayd :37 >/dev/null 2>&1 & b=$!
+      sleep 1
+      GDK_BACKEND=broadway BROADWAY_DISPLAY=:37 GTK_USE_PORTAL=0 timeout 60 2ksbox
+      kill $b' >/dev/null 2>&1 || true
   if [ -s "$shot" ]; then
-    echo "window         $(du -h "$shot" | cut -f1) grabbed offscreen: QML, plugins and all"
+    echo "window         $(du -h "$shot" | cut -f1) grabbed on Broadway: GTK 4 from the runtime"
     rm -f "$shot"
   else
-    echo "package-flatpak.sh: the app opened no window offscreen — Qt's QML modules or platform plugin are not in the runtime" >&2
+    echo "package-flatpak.sh: the app drew no window (LAUNCHER_SHOT on Broadway) — is GTK 4 in the runtime?" >&2
     fail=1
   fi
   return $fail

@@ -3,8 +3,9 @@
 //! player uses, re-rendered whenever the preset, its parameter values or
 //! the image change.
 //!
-//! **It opens its own GPU.** Qt Quick renders through QRhi and cxx-qt
-//! exposes no handle to it, so `headless()` opens a windowless device
+//! **It opens its own GPU.** The front end draws with the platform's own
+//! widgets, which hand out no GPU device to render into, so
+//! `headless()` opens a windowless device
 //! (~40 MB of VRAM and one more driver context) and the front end reads
 //! the frame back to the CPU (`read_frame`). Everything in between
 //! (decoding the image, the source-size cap, loading the chain, the
@@ -28,8 +29,8 @@ const MAX_SOURCE_H: u32 = 1200;
 /// presents the same preset at on a machine of the era. The preview
 /// counts frames off this clock rather than counting its own renders
 /// (see `shader_chain::Chain::run_at`). A front end that cannot redraw
-/// this often (the Qt build reads every frame back to the CPU and hands
-/// it over as a file) then shows an effect at its real speed with frames
+/// this often (every frame is read back to the CPU and handed to the
+/// window as pixels) then shows an effect at its real speed with frames
 /// missing, not in slow motion.
 pub const FRAME_RATE: f64 = 60.0;
 

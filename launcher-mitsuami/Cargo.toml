@@ -9,10 +9,9 @@ edition = "2024"
 license = "GPL-2.0-or-later"
 description = "Companion launcher, a native front end over launcher-core on mitsuami (ADR-023, track M19)."
 
-# Its own workspace, excluded from the root one like `launcher-qt`, so a
-# plain `cargo build` at the repository root never needs GTK 4 (or Qt,
-# with the `kde` feature) development files. Build it from this
-# directory.
+# Its own workspace, excluded from the root one, so a plain
+# `cargo build` at the repository root never needs GTK 4 (or Qt, with
+# the `kde` feature) development files. Build it from this directory.
 [workspace]
 
 [features]

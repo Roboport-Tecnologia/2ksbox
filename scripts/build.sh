@@ -12,9 +12,9 @@
 # Stages, in the order they must run:
 #
 #   deps    scripts/build-deps.sh into build/deps/<arch>. macOS: the
-#           libraries QEMU links (glib, pixman, libslirp, zstd; static)
-#           and the launcher's Qt 6, built from source for the floor
-#           (docs/build-macos.md, "The libraries"). Linux: QEMU's own
+#           libraries QEMU links (glib, pixman, libslirp, zstd; static),
+#           built from source for the floor (docs/build-macos.md, "The
+#           libraries"). Linux: QEMU's own
 #           glib (pcre2, glib, libslirp; static), so QEMU never shares a
 #           glib with the process it is embedded in (QEMU_DEPS in
 #           docs/development.md), and libtpms with its libcrypto; the
@@ -38,10 +38,11 @@
 #           one non-default member, `launcher-capi`, compiling. On Linux
 #           also Windows 11's player, into target/qemu-x86_64; on an Arm
 #           host Windows 11 on Arm's, into target/qemu-aarch64.
-#   qt      cargo build --release in launcher-qt/ (its own workspace):
-#           the Qt 6 / QML launcher that every package ships (ADR-015).
-#           Needs Qt 6 development files. Without them the stage is
-#           skipped and this host can build no package.
+#   mitsuami cargo build --release in launcher-mitsuami/ (its own
+#           workspace): the launcher every package ships (ADR-023), on
+#           AppKit on a Mac and GTK 4 on Linux. Linux needs GTK 4 (4.10+)
+#           development files; without them the stage is skipped and this
+#           host can build no package.
 #   dxvk    prepare-dxvk.sh -> configure-dxvk.sh -> ninja
 #   exec    build-d3dpt-exec.sh: libd3dpt_exec, the D3D executor. Runs
 #           after `dxvk`, whose headers it compiles against.
@@ -59,9 +60,9 @@
 # With everything up to date a run takes a couple of seconds thanks to the
 # stamps below, and needs no network.
 #
-# `launcher-qt/` stays its own cargo workspace (ADR-015), so a plain
-# `cargo build` at the root never needs Qt 6. The `rust` stage, the test
-# suite and a Mac or CI checkout then work on a host with no Qt.
+# `launcher-mitsuami/` stays its own cargo workspace (ADR-023), so a plain
+# `cargo build` at the root never needs GTK. The `rust` stage, the test
+# suite and a CI checkout then work on a host with no GTK.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -77,7 +78,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -98,7 +99,7 @@ while [ $# -gt 0 ]; do
     -t|--test) RUN_TEST=1; shift ;;
     --x86_64) X86_64=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    deps|qemu|edk2|virtio|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
+    deps|qemu|edk2|virtio|rust|mitsuami|dxvk|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -124,16 +125,16 @@ if [ -n "$X86_64" ] && [ -z "$ROSETTA" ]; then
 fi
 # Where this build's outputs go, and the cargo target that puts them
 # there. The native build's are the defaults every doc names.
-QB=build/qemu; TD=target/release; QTD=launcher-qt/target/release; CT=()
+QB=build/qemu; TD=target/release; LTD=launcher-mitsuami/target/release; CT=()
 if [ -n "$ROSETTA" ]; then
   QB=build/x86_64/qemu; TD=target/x86_64-apple-darwin/release
-  QTD=launcher-qt/target/x86_64-apple-darwin/release; CT=(--target x86_64-apple-darwin)
+  LTD=launcher-mitsuami/target/x86_64-apple-darwin/release; CT=(--target x86_64-apple-darwin)
   echo "==> the Intel build, under Rosetta: $QB, $TD"
 fi
 
 EXPLICIT=""
 if [ ${#STAGES[@]} -eq 0 ]; then
-  STAGES=(deps qemu edk2 virtio rust qt dxvk exec guest)
+  STAGES=(deps qemu edk2 virtio rust mitsuami dxvk exec guest)
 else
   EXPLICIT=1
 fi
@@ -199,7 +200,7 @@ if [ "$(uname -s)" = Darwin ]; then
   # rustc's default, 11.0). A workspace this run will not rebuild is left
   # alone, since cleaning it would leave no binary at all (`build.sh guest`
   # once took the player with it).
-  for spec in "rust:$TD/player" "qt:$QTD/launcher-qt"; do
+  for spec in "rust:$TD/player" "mitsuami:$LTD/launcher-mitsuami"; do
     bin=${spec#*:}
     want "${spec%%:*}" && [ -f "$bin" ] || continue
     built=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
@@ -246,17 +247,13 @@ if want deps; then
   elif ! have meson || ! have ninja || ! have pkg-config; then
     skip deps "needs meson, ninja and pkg-config" || true
   else
-    say "deps: glib, pixman, libslirp, zstd and Qt 6 ($(uname -m), macOS $MACOSX_DEPLOYMENT_TARGET)"
+    say "deps: glib, pixman, libslirp and zstd ($(uname -m), macOS $MACOSX_DEPLOYMENT_TARGET)"
     # The script's own stamps (name, version, patch set, floor) skip what
     # is built, so a patch edit rebuilds its package alone; a recipe
-    # change for the same version wants `build-deps.sh --clean` by hand,
-    # since a clean here would rebuild Qt (an hour) on every edit to the
-    # script.
+    # change for the same version wants `build-deps.sh --clean` by hand.
     if stamp_stale "deps-$(uname -m)" scripts/build-deps.sh patches/deps \
        || [ ! -f "build/deps/$(uname -m)/lib/pkgconfig/glib-2.0.pc" ] \
-       || [ ! -x "build/deps/$(uname -m)/bin/qmake" ] \
-       || ! ls "build/deps/$(uname -m)"/.built-glib-*-"$MACOSX_DEPLOYMENT_TARGET" >/dev/null 2>&1 \
-       || ! ls "build/deps/$(uname -m)"/.built-qtdeclarative-*-"$MACOSX_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+       || ! ls "build/deps/$(uname -m)"/.built-glib-*-"$MACOSX_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
       scripts/build-deps.sh
       stamp_save
       DEPS_FRESH=1
@@ -462,28 +459,19 @@ if want rust; then
   fi
 fi
 
-# --- qt ---------------------------------------------------------------
-# The launcher every package ships (ADR-015). Its own cargo workspace, so
+# --- mitsuami ---------------------------------------------------------
+# The launcher every package ships (ADR-023). Its own cargo workspace, so
 # it is a stage of its own rather than a member of the one above, which
-# keeps Qt 6 off the default build path. There is no CMake step.
-# cxx-qt-build finds Qt through `qmake6` and drives moc and
-# qmltyperegistrar itself, so the tool to look for is qmake6.
-if want qt; then
-  # On a Mac the Qt is ours (the deps stage), named to cxx-qt-build
-  # through QMAKE, never a qmake6 found on PATH.
-  if [ "$(uname -s)" = Darwin ] && [ -z "${QMAKE:-}" ] && [ -x "build/deps/$(uname -m)/bin/qmake" ]; then
-    export QMAKE="$PWD/build/deps/$(uname -m)/bin/qmake"
-  fi
-  if ! have cargo; then skip qt "no cargo" || true
-  elif ! have qmake6 && [ -z "${QMAKE:-}" ]; then
-    case "$(uname -s)" in
-      Darwin) skip qt "no Qt (scripts/build.sh deps builds it)" || true ;;
-      *)      skip qt "no qmake6 (qt6-base + qt6-declarative)" || true ;;
-    esac
+# keeps GTK off the default build path. On a Mac it is AppKit and needs
+# nothing; on Linux GTK 4, found through pkg-config by gtk4-rs.
+if want mitsuami; then
+  if ! have cargo; then skip mitsuami "no cargo" || true
+  elif [ "$(uname -s)" != Darwin ] && ! pkg-config --atleast-version=4.10 gtk4 2>/dev/null; then
+    skip mitsuami "no GTK 4.10+ development files (gtk4)" || true
   else
-    say "qt: cargo build --release (launcher-qt)"
-    ( cd launcher-qt && cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"} )
-    BUILT+=(qt)
+    say "mitsuami: cargo build --release (launcher-mitsuami)"
+    ( cd launcher-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"} )
+    BUILT+=(mitsuami)
   fi
 fi
 
@@ -599,9 +587,9 @@ for s in ${SKIPPED[@]+"${SKIPPED[@]}"}; do
   case "$s" in
     exec*) [ -f "build/d3dpt/libd3dpt_exec.$SO" ] \
              && stale+=("build/d3dpt/libd3dpt_exec.$SO (scripts/build-d3dpt-exec.sh)") ;;
-    # A host with no Qt builds everything except the front end the
+    # A host with no GTK builds everything except the front end the
     # packages install, and nothing else here would say so.
-    qt*) echo "    note: no Qt 6, so no launcher and no package from this host" ;;
+    mitsuami*) echo "    note: no launcher, so no package from this host" ;;
   esac
 done
 if [ ${#stale[@]} -gt 0 ]; then

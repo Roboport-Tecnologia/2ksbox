@@ -2,22 +2,27 @@
 
 Opened 2026-09-27 (user: "start the new mitsuami launcher"). ADR-023: a
 front end on mitsuami, the user's own toolkit (platform widgets: AppKit,
-WinUI 3, GTK 4, Kirigami), runs beside `launcher-qt` until it has every
-window, then replaces it in the packages. Read `docs/00-status.md` first
+WinUI 3, GTK 4, Kirigami). It ran beside the Qt launcher until it had
+every window, and since 2026-10-02 (step 7) it is the only launcher:
+every package ships it as `2ksbox`, and `launcher-qt/` is deleted
+(user: "remove the other launchers code completely. only mitsuami
+launcher will be used now"). Read `docs/00-status.md` first
 for the track rules, doc 07 for what the launcher does, and M6's track
 doc for the rules on working on the launcher (scratch libraries).
 
 ## Scope and files
 
-`launcher-mitsuami/` (its own cargo workspace, like `launcher-qt`, so the
-root build never needs GTK). The core stays M6's and ADR-014's: a
-sentence or a rule a window needs goes into `launcher-core`, never here.
-Nothing in `launcher-qt/` changes for this track until the flip.
+`launcher-mitsuami/` (its own cargo workspace, so the root build never
+needs GTK). The core stays M6's and ADR-014's: a sentence or a rule a
+window needs goes into `launcher-core`, never here. The packagers are
+M6's too; each stages this launcher as `2ksbox` and opens its window
+with `LAUNCHER_SHOT`.
 
 ## Building
 
 ```sh
-cd launcher-mitsuami && cargo build              # GTK 4 (4.10+) on Linux
+scripts/build.sh mitsuami                        # release; GTK 4 (4.10+) on Linux
+cd launcher-mitsuami && cargo build              # a debug build
 cargo build --no-default-features --features kde # Kirigami
 ```
 
@@ -31,15 +36,21 @@ mitsuami = { path = "/path/to/mitsuami/crates/mitsuami" }
 ```
 
 and bump `rev` to the pushed mitsuami commit before committing here.
-Windows builds natively with MSVC and needs the Windows App Runtime 2.4.
-The root `rust-toolchain.toml` says `stable`, which on a PC whose rustup
-host is `x86_64-pc-windows-gnu` (the MSYS2 setup, `docs/build-windows.md`)
-is the GNU toolchain, so name the MSVC one (Visual Studio's C++ tools
-must be installed; no developer prompt needed):
+A dependency change, a new mitsuami `rev` included (it is a git
+dependency), means regenerating `packaging/flatpak/cargo-sources.json`
+with `scripts/gen-flatpak-cargo-sources.sh`.
 
-```powershell
-cd launcher-mitsuami; cargo +stable-x86_64-pc-windows-msvc build
-```
+Windows builds natively with MSVC (WinUI 3) and needs the Windows App
+Runtime 2.4+, so the launcher is built only on a PC, never in the cross
+build: `scripts/build-windows.sh mitsuami` in MSYS2's MINGW64 shell. The
+root `rust-toolchain.toml` says `stable`, which on a PC whose rustup
+host is `x86_64-pc-windows-gnu` (the MSYS2 setup, `docs/build-windows.md`)
+is the GNU toolchain, so the script names the MSVC one (Visual Studio's
+C++ tools must be installed; no developer prompt needed). It drops
+MSYS2's `/usr/bin` from `PATH` for that cargo run, because coreutils'
+`link` would be found before Microsoft's `link.exe` ("link: extra
+operand"), and links with `+crt-static`, so the binary needs no C
+runtime beside it.
 
 To play from it, start it with `scripts/win-run.sh mitsuami` in MSYS2's
 MINGW64 shell (a release build). The mitsuami player has no Windows build
@@ -47,7 +58,7 @@ yet (M22 step 4), so the launcher's fallback is the winit player, which on
 Windows is only ever the MinGW build in `target/x86_64-pc-windows-gnu/`.
 Run on its own, the launcher looks for `target/release/player.exe` and
 finds nothing. The script points it at that player and puts the embed DLL
-and the executor on its path, as it does for the Qt launcher.
+and the executor on its path.
 
 On Windows the toolbar sits in the title bar beside the caption buttons,
 as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
@@ -71,7 +82,7 @@ network share blocks for seconds, so the shelf was slow to appear.
 
 ## Test loop
 
-The same scratch variables as `launcher-qt` (M6 "Rules for working on the
+The scratch variables of M6's track doc ("Rules for working on the
 launcher"), then a shot on a private Broadway display, so nothing opens
 on the desktop:
 
@@ -120,8 +131,9 @@ and photograph the screen it is on:
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
 | `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |
-| `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one | The machine window
-is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times in all; 1060, 920, 820 before). The debug verbs are
+| `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one |
+
+The machine window is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times in all; 1060, 920, 820 before). The debug verbs are
 `launcher_core::cli`'s, as in every front end.
 
 ## Steps
@@ -189,11 +201,11 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    - Text colour: done in step 6 (mitsuami 0e474a9, `Color::Warning`).
    - A dialog's start folder: done in step 6 (mitsuami 6beec2e).
    - The optimizations disclosure closes when the page changes (each page
-     is rebuilt by its `Show`); the Qt window keeps it open.
+     is rebuilt by its `Show`); the Qt window kept it open.
 3. **Clone, snapshots and the disc shelf (done 2026-09-27).** `clone.rs`,
    `snaps.rs`, `discs.rs`, each a store over its core model. Clone is a
    dialog 480 wide (560 until 2026-10-01, user) whose height follows its content (`FollowHeight`, as the Qt
-   one's is bound to it: the warning and the progress bar grow it) that
+   one's was bound to it: the warning and the progress bar grow it) that
    polls the copy's thread and puts the new row in the list. Snapshots is the tree, rows keyed by snapshot id (qcow2
    reuses an id once its snapshot is deleted, so a row reads its fields
    by key), Restore asking once, a poll while a live job runs. Since
@@ -208,7 +220,7 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    plus a margin after the trash button (user, 2026-10-01), and padded
    above and below so a row is 32 pt and its buttons don't fill it (user,
    2026-10-01: "too cramped"; the shader list's actions too);
-   the Qt window still asks on Restore's button and deletes without
+   the Qt window asked on Restore's button and deleted without
    asking. Checked by clicks through Broadway's page on a scratch tree: a
    snapshot taken from the sheet landed under the current one, Cancel
    took none; in each alert Cancel changed nothing, Restore moved the
@@ -261,7 +273,7 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    (name, preset, the parameters as box + slider + description, the
    preview image). The preview is the core's render path
    (`launcher_core::preview`) and its frame goes into an `Image` as
-   pixels, with no BMP on disk as in Qt. Checked headless: the CRT
+   pixels, with no BMP on disk as Qt had. Checked headless: the CRT
    Aperture preset over an XP screenshot, the same with BRIGHTNESS
    overridden to 0.3 (the preview renders again, darker), and a profile
    saved and listed. Not driven: dragging a slider, the download, an
@@ -278,7 +290,7 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    - **A picture bigger than the area is cut, never scaled down.** The
      core renders it at scale 1, larger than the area, and the caller
      shows its centre (the player crops the same way; the Qt window
-     clips its rectangle). mitsuami has no clip, so `render` crops the
+     clipped its rectangle). mitsuami has no clip, so `render` crops the
      frame's pixels to the area before they become the `Image`, which
      never pushes the layout. Checked headless: a 1600x900 picture shows
      its centre filling the preview on KDE. CRT Aperture on a 440-line
@@ -299,7 +311,7 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    another alert (OK, or Retry / Cancel on a failure); a collection that
    landed refreshes the profile manager and the Shader column. Every
    other headless screen runs without it. Checked headless with scripted
-   answers, the Qt check's sequence: declining writes the marker, the
+   answers, the Qt check's sequence then: declining writes the marker, the
    next start asks nothing, a yes onto a download that can't succeed
    comes back as Retry / Cancel with the core's failure line. Not seen:
    the real alerts on a desktop. A download that runs was seen on
@@ -317,18 +329,18 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
      with no window to go in should wait for one, not answer.
 6. **What Qt does that mitsuami has no call for yet**. The app ID, name
    and icon came with mitsuami cf35de4 (`App::id`, `name`, `icon` in
-   `main.rs`: `paths::APP_ID` and the 256 px PNG `launcher-qt` uses);
+   `main.rs`: `paths::APP_ID` and the 256 px PNG `launcher-qt` used);
    under Sway the window's `app_id` is `com._2ksbox.Launcher`. GTK shows
    only the theme's icon by that name, so a run from the build has none,
    as with Qt on Wayland. mitsuami 0e474a9 (2026-10-01) gave `Text` a
-   colour, the platform's own where Qt fixes one: warnings are
+   colour, the platform's own where Qt fixed one: warnings are
    `Color::Warning` (amber on GTK, Breeze's orange on KDE), every error
    line `Color::Error` (they were the Callout style), the preview's
    placeholder `SecondaryLabel`, and since 2026-10-01 every note under a
    form control `SecondaryLabel` too (user), each at its note's size as
-   Qt does
+   Qt did
    (checked headless on `clone:<machine>:same`, which shows both). A disc label is now also written when its field loses
-   focus (`@blur`, as Qt's `editingFinished`; not driven headless).
+   focus (`@blur`, as Qt's `editingFinished` did; not driven headless).
    mitsuami 4cdac37 closed the last two: `Truncation::Start` cuts a
    disc's folder and a profile's preset path at their start, as Qt's
    `ElideLeft` (checked headless on GTK and KDE with a long folder), and
@@ -338,19 +350,59 @@ is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times 
    asked of mitsuami is done.
    Widgets mitsuami won't have are ours, as `#[component]`s in their own
    module. The first is `src/path_field.rs`, `PathField` (the caption,
-   the text input and Browse…, as `PathField.qml`): the form, the shader
+   the text input and Browse…, as `PathField.qml` was): the form, the shader
    editor use it (the shelf's Add disc field until 2026-10-01). `@edit`
    gets a typed or picked path. What its dialog needed went into mitsuami 6beec2e
    (`OpenFile::start_folder`, `FileFilter::all`), so it does what the Qt
-   field does: it opens at `browse::browse_start` (the field's folder,
+   field did: it opens at `browse::browse_start` (the field's folder,
    else `empty_dir`, which the preset field sets to the preset
    collection, else the last folder browsed), and "All files" follows the
    field's filter. The shelf's Add menu starts at the last folder too.
-   `LAUNCHER_PICK=<label>=<path>` is the probe, as `pickdisc` is for Qt:
+   `LAUNCHER_PICK=<label>=<path>` is the probe, as `pickdisc` was for Qt:
    the field with that caption prints the dialog it would open
    (`pick <label>: start …, filters […]`) and takes `<path>` as its
    answer.
-7. **A `mitsuami` stage in `scripts/build.sh`, the offscreen shot in each
-   packager, then the flip**: every package ships this as `2ksbox`,
-   `launcher-qt` is deleted, ADR-015 is marked superseded, the Flatpak's
-   runtime decided (GNOME, or `kde` on `org.kde.Platform`).
+7. **The flip (done 2026-10-02, user: "remove the other launchers code
+   completely").** `launcher-qt/` and `tools/qtmin/` are deleted, and
+   ADR-023 supersedes ADR-015. What changed with it:
+   - `scripts/build.sh` has a `mitsuami` stage (`cargo build --release`
+     in `launcher-mitsuami/`; GTK 4.10+ development files on Linux,
+     nothing on macOS) in place of the `qt` stage, and
+     `scripts/build-deps.sh` no longer builds Qt
+     (`patches/deps/qtdeclarative` is gone).
+   - Every package ships this launcher as `2ksbox`. The Linux tarball
+     depends on the host's GTK 4, not Qt. The Flatpak moved from
+     `org.kde.Platform` 6.10 to `org.gnome.Platform` 49 (user). The
+     macOS app carries no toolkit (AppKit): no `macdeployqt`, no Qt
+     frameworks, QML or plugin pruning. On Windows the launcher is the
+     one MSVC binary (WinUI 3, static C runtime, the Windows App Runtime
+     2.4+), built only on a PC by `build-windows.sh mitsuami`, so the
+     Windows package is rolled on the PC; the MSIX declares the App
+     Runtime as a `PackageDependency`.
+   - Every packager's window check is the launcher's own grab,
+     `LAUNCHER_SHOT=<png>` (`src/shot.rs`), on a private Broadway
+     display on Linux (`gtk4-broadwayd`, `GDK_BACKEND=broadway`); on
+     macOS and Windows the window shows briefly. The Qt-era
+     `QT_QPA_PLATFORM=offscreen`, `LAUNCHER_QT_SHOT`,
+     `LAUNCHER_QT_SCREEN` and `LAUNCHER_QT_ARG` are gone.
+   - In `scripts/test.sh` the `qt-*` window checks (`qt-wizard`,
+     `qt-close`, `qt-esc`, `qt-profilesclose`, `qt-about`,
+     `qt-profile`, `qt-shelf`, `qt-firstrun`, `qt-clone`,
+     `qt-snapshots`) gave way to one `mitsuami` check: the main window's
+     shot, `create:xp:Probe box` saving a machine, `firstrun:no` asking
+     with the model's headline and writing the marker, and the `about`
+     shot (on Broadway on Linux).
+   - The macOS floor stays 12.0 (`scripts/macos-floor.sh`), but Qt 6.9
+     no longer sets it; it stands until the AppKit launcher's own floor
+     is measured.
+
+## Left
+
+- Run the Linux, macOS and Flatpak packagers with this launcher. Their
+  window checks are new and have not run; only the Windows packager
+  has, on the PC, and it passed except for a pre-existing bug in the
+  executor on the system's d3d9.
+- Regenerate `packaging/flatpak/cargo-sources.json`
+  (`scripts/gen-flatpak-cargo-sources.sh`; mitsuami is a git
+  dependency).
+- Measure the macOS floor with the AppKit launcher.

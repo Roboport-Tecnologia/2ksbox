@@ -22,6 +22,8 @@ cd "$ROOT"
 OUT="$ROOT/build/test"; mkdir -p "$OUT"
 STAGE="${1:-host}"
 OS="$(uname -s)"; ARCH="$(uname -m)"
+# The launcher every package installs (ADR-023), its own cargo workspace.
+LAUNCHER_BIN=launcher-mitsuami/target/release/launcher-mitsuami
 DX="$ROOT/third_party/dxvk/include/native"
 GOLDEN="$ROOT/reference/d3d/rig-2026-09-03/d3dgame9-w300-ff.bmp"
 HUD_MASK="0,368,270,112"
@@ -76,7 +78,7 @@ if ! command -v timeout >/dev/null; then
       # The watchdog gets none of the command's descriptors. A caller
       # reading the output through a pipe (`o="$(timeout … | sed …)"`)
       # waits for every writer to close it, so a watchdog that inherited
-      # stdout held the pipe for the whole limit and every Qt check took
+      # stdout held the pipe for the whole limit and every window check took
       # its full 120 s on a Mac without coreutils. Afterwards the sleep is
       # killed with the subshell, or it lives on orphaned.
       ( sleep "$s"; kill -9 "$p" 2>/dev/null ) >/dev/null 2>&1 </dev/null & w=$!
@@ -610,98 +612,6 @@ snaptree_check() { # the snapshot window's tree (doc 07): the launcher's own rec
   o="$(tree "$bundle")"; [ "$o" = "$want" ] || { echo "after deleting f: got $o, wanted $want"; rc=1; }
   return $rc
 }
-qtclone_check() { # the Qt "Clone…" window, driven (doc 07)
-  local rc=0 dir="$OUT/qtclone" bin="launcher-qt/target/release/launcher-qt" bundle o saved
-  rm -rf "$dir"; mkdir -p "$dir/library"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  head -c 4194304 /dev/urandom >"$dir/disk.img"
-  bundle="$(target/release/launcherx --new win98 Original "$dir/disk.img")" || { echo "--new failed"; return 1; }
-  # The probe opens the window on the row, types a name over the one it
-  # offers, presses Clone and waits the copy out through the same timer a
-  # person's click is polled by. What it guards is the wiring: the offered
-  # name reaching the field, the typed one reaching the model, the window
-  # going away when the copy lands and the grid rescanning to show it.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=clone LAUNCHER_QT_ARG="$bundle" LAUNCHER_QT_DELAY=300 \
-       "$bin" 2>&1 | sed -n 's/^\[diag\] clone //p')"
-  [ -n "$o" ] || { echo "the probe printed no clone line"; return 1; }
-  printf '  %s\n' "$o"
-  printf '%s' "$o" | grep -qF 'offered [Original (copy)] model [Original (copy)], window true, can clone true' \
-    || { echo "the window did not come up offering Original (copy)"; rc=1; }
-  printf '%s' "$o" | grep -q 'settled: open=false, window false, error \[\], status \[cloned Original as Typed twin\]' \
-    || { echo "the clone did not land cleanly, or the window stayed up"; rc=1; }
-  printf '%s' "$o" | grep -q 'grid 2$' || { echo "the grid did not rescan to two machines"; rc=1; }
-  saved="$(printf '%s' "$o" | sed -n 's/.*saved \(.*\), grid.*/\1/p')"
-  grep -qx 'name = "Typed twin"' "$saved" 2>/dev/null || { echo "no bundle called Typed twin at '$saved'"; rc=1; }
-  cmp -s "$dir/disk.img" "$(dirname "$saved")/disk.img" || { echo "the clone has no copy of the disk"; rc=1; }
-  # The same, with "same hard disk" ticked: the window warns, and the new
-  # machine names the original's disk and has no copy of it.
-  rm -rf "$(dirname "$saved")"
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=clone LAUNCHER_QT_ARG="$bundle;same" LAUNCHER_QT_DELAY=300 \
-       "$bin" 2>&1 | sed -n 's/^\[diag\] clone //p')"
-  printf '  %s\n' "$o"
-  printf '%s' "$o" | grep -q 'same disk true, warning \[Only one machine at a time' \
-    || { echo "ticking same hard disk did not reach the model, or no warning"; rc=1; }
-  saved="$(printf '%s' "$o" | sed -n 's/.*saved \(.*\), grid.*/\1/p')"
-  grep -qx "disk = \"$(realpath "$dir/disk.img")\"" "$saved" 2>/dev/null \
-    || { echo "the same-disk clone does not name the original disk: $(grep '^disk' "$saved" 2>&1)"; rc=1; }
-  [ ! -e "$(dirname "$saved")/disk.img" ] || { echo "the same-disk clone copied the disk"; rc=1; }
-  # Then the window left open (`;show`) and measured: it is as tall as its
-  # content and no taller. It used to be a fixed 280 with a band of nothing
-  # above the buttons (user nag, 2026-09-23), and a first fix bound the
-  # size limits to the window's own height, which the platform breaks at
-  # show, so the window stayed at the 28 it was before the layout had a
-  # size.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=clone LAUNCHER_QT_ARG="$bundle;show" LAUNCHER_QT_DELAY=300 \
-       "$bin" 2>&1 | sed -n 's/^\[diag\] clone layout: //p')"
-  [ -n "$o" ] || { echo "the probe printed no clone layout line"; return 1; }
-  printf '  %s\n' "$o"
-  printf '%s' "$o" | awk '{
-      split($2, wh, "x"); sub("h=", "", $4); h = wh[2] + 0; l = $4 + 0
-      if (h != l + 28) { print "the window is " h " tall over a layout of " l ": not sized to its content"; exit 1 }
-      if (h < 60 || h > 220) { print "the window is " h " tall: not a note, a name and two buttons"; exit 1 }
-    }' || rc=1
-  return $rc
-}
-qtsnapshots_check() { # the Qt snapshots window's layout (doc 07)
-  local dir="$OUT/qtsnapshots" bin="launcher-qt/target/release/launcher-qt" img=build/qemu/qemu-img bundle o size hx rx
-  rm -rf "$dir"; mkdir -p "$dir/library"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" LAUNCHER_QEMU_IMG_BIN="$img" QT_QPA_PLATFORM=offscreen
-  "$img" create -q -f qcow2 "$dir/disk.qcow2" 64M || { echo "qemu-img create failed"; return 1; }
-  "$img" snapshot -c one "$dir/disk.qcow2" || { echo "qemu-img snapshot failed"; return 1; }
-  bundle="$(target/release/launcherx --new win98 Snap "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
-  # The window opened on a stopped machine with one snapshot, no status
-  # and no error, at its own size and then at its narrowest, where the
-  # rows (which also hold the two buttons) once squeezed their columns
-  # while the header kept its own (user report, 2026-09-23).
-  # - The list box is the one item that grows, so the "New snapshot" row
-  #   must end at the bottom of the column, give or take the one spacing
-  #   (8) above the empty status row. A nested layout fills by default,
-  #   and the status row (both children hidden until there is a status)
-  #   had no maximum, so it split the spare height with the list box and
-  #   the list stopped halfway down the window.
-  # - The header's column edges are the first row's, to the pixel.
-  for size in "" 640x320; do
-    o="$(timeout 120 env LAUNCHER_QT_SCREEN=snapshots LAUNCHER_QT_ARG="$bundle" LAUNCHER_QT_DELAY=300 \
-         LAUNCHER_QT_SIZE="$size" "$bin" 2>&1 | sed -n 's/^\[diag\] snapshots layout: //p')"
-    [ -n "$o" ] || { echo "the probe printed no snapshots layout line"; return 1; }
-    echo "  $o"
-    printf '%s\n' "$o" | awk '{
-        for (i = 1; i <= NF; i++) {
-          if ($i ~ /^h=/ && col == "") { col = substr($i, 3); continue }
-          if ($i == "new-row") { ry = substr($(i+1), 3); rh = substr($(i+2), 3) }
-        }
-        sub(/,$/, "", col); sub(/,$/, "", ry); sub(/,$/, "", rh)
-        exit !(ry + rh >= col - 9)
-      }' || { echo "the \"New snapshot\" row does not end at the bottom: something below it took the list box's height"; return 1; }
-    hx="$(printf '%s\n' "$o" | sed -n 's/.*header x=\[\([^]]*\)\].*/\1/p')"
-    rx="$(printf '%s\n' "$o" | sed -n 's/.*row x=\[\([^]]*\)\].*/\1/p')"
-    [ -n "$hx" ] && [ "$hx" = "$rx" ] \
-      || { echo "the header's columns do not start where the first row's do"; return 1; }
-  done
-  return 0
-}
 shaderdefaults_check() { # the first-run shader offer and its starter profiles (doc 07)
   local rc=0 dir="$OUT/shaderdefaults" o preset n
   rm -rf "$dir"; mkdir -p "$dir/profiles" "$dir/empty"
@@ -800,355 +710,51 @@ shaderdefaults_check() { # the first-run shader offer and its starter profiles (
   [ "$(target/release/launcherx --default-shader-profile)" = "(none)" ] || { echo "a deleted default profile is still the default"; rc=1; }
   return $rc
 }
-qtfirstrun_check() { # the Qt first-run offer, driven (doc 07)
-  local rc=0 dir="$OUT/qtfirstrun" bin="launcher-qt/target/release/launcher-qt" o
+mitsuami_check() { # the launcher's window, driven through its probes (doc 07, track M19)
+  local rc=0 dir="$OUT/mitsuami" bin="$LAUNCHER_BIN" o broadway=""
   rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles" "$dir/empty"
   export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
   export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" LAUNCHER_SHADERS_DIR="$dir/empty"
-  export QT_QPA_PLATFORM=offscreen
-  # Like `qt-wizard` and `qt-profile`, this asks the *window*. The model
-  # can be right about there being no presets and the dialog still never
-  # appear (it is shown on a property that has to be published before the
-  # first frame, the trap the whole port is written around), or appear
-  # and never go away.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=firstrun LAUNCHER_QT_ARG=decline LAUNCHER_QT_DELAY=300 \
-       "$bin" 2>&1 | sed -n 's/^\[diag\] firstrun/firstrun/p')"
-  [ -n "$o" ] || { echo "the probe printed no firstrun line"; return 1; }
-  printf '%s\n' "$o" | sed 's/^/  /'
-  printf '%s' "$o" | grep -q "firstrun: open=true, dialog=true, step=asking" \
-    || { echo "the dialog was not up on a launcher with no presets"; rc=1; }
-  # It is Qt's own confirmation dialog, application-modal (2), with the
-  # platform's Yes (0x4000) and No (0x10000), 81920 together. Neither
-  # the modality nor the buttons are things this project draws, and a
-  # hand-built row of buttons in a popup is what this replaced.
-  printf '%s' "$o" | grep -q "modality=2, buttons=81920" \
-    || { echo "not an application-modal Yes/No dialog"; rc=1; }
-  # The words in it are the shared model's (ADR-014). A sentence typed
-  # into QML drifts between front ends.
-  printf '%s' "$o" | grep -q "firstrun text: No CRT shader presets are installed yet" \
-    || { echo "the dialog's text is not the model's headline"; rc=1; }
-  printf '%s' "$o" | grep -q "slang-shaders (~50 MB) into $dir/empty" \
-    || { echo "the dialog does not say what it will download or where"; rc=1; }
-  # No, through the dialog's own rejected signal. This tests the wiring
-  # from a standard button to the model's verb, not a call into the model.
-  printf '%s' "$o" | grep -q "firstrun declined: open=false, step=$" \
-    || { echo "the dialog's No did not answer the offer"; rc=1; }
-  [ -f "$dir/profiles/first-run.txt" ] || { echo "declining through the window wrote no marker"; rc=1; }
+  # GTK draws on a private Broadway display (`gtk4-broadwayd`), so nothing
+  # opens on the desktop and the suite runs with no desktop at all. AppKit
+  # has no such mode: on a Mac each probe's window shows for a moment.
+  if [ "$OS" = Linux ]; then
+    command -v gtk4-broadwayd >/dev/null || { echo "no gtk4-broadwayd (GTK 4's own tools)"; return 1; }
+    mkdir -m700 "$dir/run"
+    export XDG_RUNTIME_DIR="$dir/run" GDK_BACKEND=broadway BROADWAY_DISPLAY=":$((20 + RANDOM % 50))" GTK_USE_PORTAL=0
+    gtk4-broadwayd "$BROADWAY_DISPLAY" >/dev/null 2>&1 &
+    broadway=$!
+    for _ in $(seq 50); do [ -n "$(ls -A "$dir/run")" ] && break; sleep 0.1; done
+  fi
+  # `LAUNCHER_SCREEN` picks the window and what it does, `LAUNCHER_SHOT`
+  # draws it into a PNG and exits (launcher-mitsuami/src/shot.rs).
+  probe() { timeout 120 env LAUNCHER_SCREEN="$1" LAUNCHER_SHOT="$dir/$2.png" "$bin" 2>&1; }
 
-  # Asked once: the next start comes up on the grid, with nothing over it.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=firstrun LAUNCHER_QT_DELAY=300 "$bin" 2>&1 \
-       | sed -n 's/^\[diag\] firstrun: //p')"
-  case "$o" in "open=false, dialog=false"*) ;; *) echo "the offer came back on the next start: $o"; rc=1;; esac
+  # The machine window, and a picture of it.
+  o="$(probe "" main)"
+  [ -s "$dir/main.png" ] || { echo "the machine window drew nothing: $o"; rc=1; }
+  # A fresh form filled on an existing disk and submitted, then the machine
+  # window with the new row: the wizard's whole path through the window.
+  o="$(probe "create:xp:Probe box" create)"
+  printf '%s' "$o" | grep -q "create: saved Some(" || { echo "the form saved nothing: $o"; rc=1; }
+  [ -f "$dir/library/probe-box/machine.toml" ] || { echo "no probe-box/machine.toml in the library"; rc=1; }
+  # The first-run offer on a launcher with no presets, answered No
+  # through the platform's own alert: asked with the shared model's words,
+  # and never again (the marker).
+  o="$(probe firstrun:no firstrun)"
+  printf '%s\n' "$o" | grep '^\[launcher\] firstrun' | sed 's/^/  /'
+  printf '%s' "$o" | grep -q "firstrun Asking: No CRT shader presets are installed yet" \
+    || { echo "the offer did not ask with the model's headline"; rc=1; }
+  printf '%s' "$o" | grep -q "firstrun settled: open=false" || { echo "No did not settle the offer"; rc=1; }
+  [ -f "$dir/profiles/first-run.txt" ] || { echo "declining wrote no marker"; rc=1; }
+  # About, with the credits.
+  o="$(probe about about)"
+  [ -s "$dir/about.png" ] || { echo "About drew nothing: $o"; rc=1; }
 
-  # Yes, and then what replaces the question. The download is pointed at
-  # a path that cannot be created, so it fails at once and the run needs
-  # no network. What is checked is the *sequence*. The question is
-  # answered, the download is not in a dialog at all (`busy`, which the
-  # header shows), and then a second dialog comes up with its own words
-  # and the platform's Retry (0x80000) + Cancel (0x400000) = 4718592. One
-  # dialog cannot follow the model through this, because a MessageDialog's
-  # `accept()` and `close()` both emit `rejected()`, which answers it.
-  rm -rf "$dir/profiles"; mkdir -p "$dir/profiles"
-  o="$(timeout 120 env LAUNCHER_SHADERS_DIR=/proc/nowhere/shaders LAUNCHER_QT_SCREEN=firstrun \
-       LAUNCHER_QT_ARG=accept LAUNCHER_QT_DELAY=300 "$bin" 2>&1 | sed -n 's/^\[diag\] firstrun/firstrun/p')"
-  printf '%s\n' "$o" | sed 's/^/  /'
-  printf '%s' "$o" | grep -q "firstrun accepted: dialog=true, step=running, busy=true" \
-    || { echo "Yes did not start the download"; rc=1; }
-  printf '%s' "$o" | grep -q "firstrun settled: result=true, step=failed, buttons=4718592" \
-    || { echo "the failure did not come back as a Retry/Cancel dialog"; rc=1; }
-  printf '%s' "$o" | grep -q "text=Couldn't download the shader presets" \
-    || { echo "the result dialog is not showing the model's failure line"; rc=1; }
-  return $rc
-}
-qtwizard_check() { # what the Qt wizard's memory field *shows* (doc 07)
-  qtwizard_fields_check || return 1
-  # Where the form opens. A ScrollView keeps its position across a hide
-  # and a show, so editing one machine after another opened the second
-  # wherever the first was left. The window starts on its first page at
-  # the top for a new machine and for a different one than it last
-  # showed, and keeps its page and scroll when the same one is reopened.
-  local rc=0 out y sec
-  out="$(timeout 120 env LAUNCHER_QT_SCREEN=wizardscroll LAUNCHER_QT_DELAY=250 \
-         launcher-qt/target/release/launcher-qt 2>&1)"
-  printf '%s\n' "$out" | sed -n 's/^\[diag\] wizardscroll /  /p'
-  at() { printf '%s\n' "$out" | sed -n "s/^\[diag\] wizardscroll $1: section=[0-9]* y=\([0-9.]*\).*/\1/p"; }
-  sec() { printf '%s\n' "$out" | sed -n "s/^\[diag\] wizardscroll $1: section=\([0-9]*\) y=.*/\1/p"; }
-  y="$(at 'edit scrolled')"
-  [ -n "$y" ] && [ "${y%.*}" -gt 0 ] || { echo "the probe could not scroll the form (y=$y)"; return 1; }
-  [ "$(sec 'edit scrolled')" = 1 ] || { echo "the probe is not on the System page (section=$(sec 'edit scrolled'))"; return 1; }
-  [ "$(at 'same again')" = "$y" ] || { echo "reopening the same machine did not keep its scroll position ($(at 'same again') vs $y)"; rc=1; }
-  [ "$(sec 'same again')" = 1 ] || { echo "reopening the same machine did not keep its page (section=$(sec 'same again'))"; rc=1; }
-  for step in 'fresh after edit' 'fresh again' 'edit after fresh'; do
-    y="$(at "$step")"; sec="$(sec "$step")"
-    [ "${y%.*}" = 0 ] || { echo "$step: the form did not open at the top (y=$y)"; rc=1; }
-    [ "$sec" = 0 ] || { echo "$step: the form did not open on its first page (section=$sec)"; rc=1; }
-  done
+  if [ -n "$broadway" ]; then kill "$broadway" 2>/dev/null; wait "$broadway" 2>/dev/null; fi
   return $rc
 }
 
-qtwizard_fields_check() { # the fields, family by family
-  local rc=0 dir="$OUT/qtwizard" bin="launcher-qt/target/release/launcher-qt" f o out shown model lo hi n all step line
-  rm -rf "$dir"; mkdir -p "$dir/library"
-  # A scratch library, never the user's own, since the window lists it on
-  # the way up. Offscreen, so a check never puts a window on the desktop.
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  # Two profiles in the scratch library, for the shader picker below: a
-  # profile is a name and a preset path, and the path is not opened
-  # until a machine runs with it.
-  mkdir -p "$dir/profiles"
-  printf 'name = "Aperture"\npreset = "crt/crt-aperture.slangp"\n\n[params]\n' > "$dir/profiles/aperture.toml"
-  printf 'name = "Lottes"\npreset = "crt/crt-lottes.slangp"\n\n[params]\n' > "$dir/profiles/lottes.toml"
-  # "The model is right and the control disagrees" is a whole class of Qt
-  # bug (a spin box bounds the value it is handed against the range it
-  # has at that moment, and does not revisit it when the range widens).
-  # Every other launcher check asks the model and cannot see it. So this
-  # asks the *window*. It opens the real wizard headlessly on each family
-  # and prints what its memory field holds beside what the form says.
-  for f in win98 xp dos other win11; do
-    out="$(timeout 120 env LAUNCHER_QT_SCREEN=wizard LAUNCHER_QT_ARG="$f" LAUNCHER_QT_DELAY=250 \
-           "$bin" 2>&1)"
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard memory: //p')"
-    if [ -z "$o" ]; then echo "$f: the wizard printed no memory line"; rc=1; continue; fi
-    shown="$(printf '%s' "$o" | sed -n 's/^shown \([0-9]*\).*/\1/p')"
-    model="$(printf '%s' "$o" | sed -n 's/.*model \([0-9]*\).*/\1/p')"
-    lo="$(printf '%s' "$o" | sed -n 's/.*range \([0-9]*\)\.\..*/\1/p')"
-    hi="$(printf '%s' "$o" | sed -n 's/.*range [0-9]*\.\.\([0-9]*\).*/\1/p')"
-    [ "$shown" = "$model" ] || { echo "$f: the memory field shows $shown, the form says $model"; rc=1; }
-    [ "$model" -ge "$lo" ] && [ "$model" -le "$hi" ] \
-      || { echo "$f: $model is outside the family's own range $lo..$hi"; rc=1; }
-    echo "  $f: $o"
-    # The same class of bug from the other side, the one a user hit. A
-    # name is typed into the field and then a combo box touched. A text
-    # field writes the model *property* alone, so a verb that republishes
-    # the form without catching it up first puts the form's own (empty)
-    # name back, and the typed name disappears. The page switch is such a
-    # verb too (the name vanished on a click on "System" and back), so the
-    # probe pages away and back before the family (whose own verb catches
-    # the form up) and reads the field after both.
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard name: //p')"
-    shown="$(printf '%s' "$o" | sed -n 's/^shown \[\(.*\)\] model \[.*\]$/\1/p')"
-    model="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] model \[\(.*\)\]$/\1/p')"
-    [ "$shown" = "Typed name" ] || { echo "$f: the name field lost what was typed (shows: $shown)"; rc=1; }
-    [ "$model" = "Typed name" ] || { echo "$f: the model lost the typed name (holds: $model)"; rc=1; }
-    # ...and the extra QEMU arguments, bound the same way and typed
-    # before the same family switch.
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard extra args: //p')"
-    shown="$(printf '%s' "$o" | sed -n 's/^shown \[\(.*\)\] model \[.*\]$/\1/p')"
-    model="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] model \[\(.*\)\]$/\1/p')"
-    [ "$shown" = '-name "typed args"' ] || { echo "$f: the extra-arguments field lost what was typed (shows: $shown)"; rc=1; }
-    [ "$model" = '-name "typed args"' ] || { echo "$f: the model lost the typed extra arguments (holds: $model)"; rc=1; }
-    # Every page fits the window as it opens. The height is sized to the
-    # tallest page, so a page that grows past it makes the form scroll.
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard pages: //p')"
-    [ -n "$o" ] || { echo "$f: the wizard printed no pages line"; rc=1; }
-    over="$(printf '%s\n' "$o" | awk -F', ' '{ room = $1; sub(/^room /, "", room); sub(/ of.*/, "", room)
-        for (i = 2; i <= NF; i++) { split($i, a, " "); if (a[2] + 0 > room + 0) printf "%s %s > %s ", a[1], a[2], room } }')"
-    [ -z "$over" ] || { echo "$f: a page is taller than the window's room for it: $over"; rc=1; }
-    # The Direct3D row (ADR-007's 2026-09-21 amendment), and a third
-    # shape of the same class. A QML binding that names a property the
-    # object has not got gives no warning, and the combo box comes up
-    # empty. This row first shipped that way (cxx-qt's auto camel-case had
-    # made it `d3D9Labels`). So the count and the text are asked of the
-    # *window*: every entry this host can run, one of them showing. That
-    # is three on Windows and two elsewhere, since only Windows offers the
-    # system Direct3D 9. Whether the row is there at all is the adapter's
-    # answer, and only the two Windows families start on ours.
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard direct3d: //p')"
-    shown="$(printf '%s' "$o" | sed -n 's/^shown \[\(.*\)\] of .*/\1/p')"
-    n="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] of \([0-9]*\) .*/\1/p')"
-    echo "  $f: direct3d $o"
-    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) want=3 ;; *) want=2 ;; esac
-    [ "$n" = "$want" ] || { echo "$f: the Direct3D combo has $n entries, not the $want this host offers"; rc=1; }
-    [ -n "$shown" ] || { echo "$f: the Direct3D combo shows nothing"; rc=1; }
-    case "$f:$o" in
-      win98:*"applies true"|xp:*"applies true") ;;
-      dos:*"applies false"|other:*"applies false"|win11:*"applies false") ;;
-      *) echo "$f: the Direct3D row's visibility does not follow the adapter: $o"; rc=1;;
-    esac
-    # The shader profile combo, whose rows come from the model: the app
-    # default and the two profiles planted above, the default showing on
-    # a new machine.
-    o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard shader: //p')"
-    shown="$(printf '%s' "$o" | sed -n 's/^shown \[\(.*\)\] of .*/\1/p')"
-    n="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] of \([0-9]*\) .*/\1/p')"
-    echo "  $f: shader $o"
-    [ "$n" = 3 ] || { echo "$f: the shader profile combo has $n entries, not the default and the two profiles"; rc=1; }
-    # A Windows 11 machine's default runs no shader, and the row says so.
-    want="(default)"; [ "$f" = win11 ] && want="(default) None"
-    [ "$shown" = "$want" ] || { echo "$f: a new machine's shader profile combo shows [$shown], not [$want]"; rc=1; }
-    case "$o" in *"model 0 default true") ;; *) echo "$f: the model does not say the default: $o"; rc=1;; esac
-  done
-  # The optimization shortcuts beside boxes that were clicked by hand
-  # ("Turn all on / off does nothing" after three boxes had been
-  # unticked). The model moved every time, so only the window can say
-  # whether the boxes did. Every step must show what the form says, and
-  # the form must be where the button said.
-  out="$(timeout 120 env LAUNCHER_QT_SCREEN=optall LAUNCHER_QT_DELAY=250 "$bin" 2>&1)"
-  o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] optall //p')"
-  n="$(printf '%s\n' "$o" | sed -n 's/^boxes \([0-9]*\)$/\1/p')"
-  [ -n "$n" ] && [ "$n" -gt 0 ] || { echo "optall: the probe printed no box count"; return 1; }
-  all=$(( (1 << n) - 1 ))
-  for step in clicked on off defaults; do
-    line="$(printf '%s\n' "$o" | sed -n "s/^$step: //p")"
-    [ -n "$line" ] || { echo "optall: no '$step' line"; rc=1; continue; }
-    shown="$(printf '%s' "$line" | sed -n 's/^shown \([0-9]*\) model.*/\1/p')"
-    model="$(printf '%s' "$line" | sed -n 's/.* model \([0-9]*\)$/\1/p')"
-    echo "  optall $step: $line"
-    [ "$shown" = "$model" ] || { echo "optall $step: the boxes show $shown, the form says $model"; rc=1; }
-    [ "$step" != on ] || [ "$model" = "$all" ] || { echo "optall: Turn all on left the form at $model"; rc=1; }
-    [ "$step" != off ] || [ "$model" = 0 ] || { echo "optall: Turn all off left the form at $model"; rc=1; }
-  done
-  return $rc
-}
-qtclose_check() { # the title bar's close button on a Qt dialog (doc 07)
-  local dir="$OUT/qtclose" bin="launcher-qt/target/release/launcher-qt" o n modal
-  rm -rf "$dir"; mkdir -p "$dir/library"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  # Cancel calls `close()`, which Qt guards against re-entry; the title
-  # bar's button hands Qt a close *event*, which it does not. A window
-  # whose `visibleChanged` clears a model flag that in turn calls
-  # `close()` re-enters from inside the first event and gets a second,
-  # and the platform hide that ends the modal session on macOS is
-  # skipped. The probe sends the event and counts what the window saw.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=closebox LAUNCHER_QT_DELAY=250        "$bin" 2>&1 | sed -n 's/^\[diag\] closebox: //p')"
-  [ -n "$o" ] || { echo "the probe printed no closebox line"; return 1; }
-  echo "  $o"
-  n="$(printf '%s' "$o" | sed -n 's/^\([0-9]*\) close events.*/\1/p')"
-  modal="$(printf '%s' "$o" | sed -n 's/.*modal left=\(-*[0-9]*\).*/\1/p')"
-  [ "$n" = 1 ] || { echo "the wizard window saw $n close events for one click; close() re-entered from its own hide"; return 1; }
-  [ "$modal" = 0 ] || { echo "a modal window is still registered after the close (modal left=$modal)"; return 1; }
-  printf '%s' "$o" | grep -q "open=false, visible=false" \
-    || { echo "the wizard's flag or window did not follow the close: $o"; return 1; }
-  return 0
-}
-qtesc_check() { # Esc reaches the shader editor opened from the profile list (doc 07)
-  local dir="$OUT/qtesc" bin="launcher-qt/target/release/launcher-qt" o
-  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  # Every secondary window closes on Esc through a `Shortcut`, and Quick
-  # Controls matches a window's shortcut when the window `isActive()`.
-  # A transient window is active whenever its parent is, so every visible
-  # secondary window matches at once. The editor is the one window opened
-  # over *another* (the profile list), and two matches for one key is an
-  # ambiguous shortcut, which Qt fires in neither, so Esc did nothing in
-  # the editor. The list stands down while the editor is open, so exactly
-  # one may match.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=escfocus LAUNCHER_QT_DELAY=400 "$bin" 2>&1 \
-       | sed -n 's/^\[diag\] escfocus editor: //p')"
-  [ -n "$o" ] || { echo "the probe printed no escfocus line"; return 1; }
-  echo "  $o"
-  printf '%s' "$o" | grep -q "visible=true, focus=\[Shader profile\], esc armed=true, esc matches=1$" \
-    || { echo "Esc in the editor is not one armed shortcut in the focused window: $o"; return 1; }
-  return 0
-}
-qtabout_check() { # the About window shows every credit `launcher_core::about` lists (doc 07)
-  local dir="$OUT/qtabout" bin="launcher-qt/target/release/launcher-qt" o want
-  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  want="$("$bin" --about | grep -c '^  ')"
-  [ "$want" -gt 0 ] || { echo "--about listed no credits"; return 1; }
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=about LAUNCHER_QT_DELAY=250 "$bin" 2>&1 \
-       | sed -n 's/^\[diag\] about: //p')"
-  [ -n "$o" ] || { echo "the probe printed no about line"; return 1; }
-  printf '  %s\n' "$o"
-  printf '%s' "$o" | grep -q "^heading '2ksbox  [0-9]" || { echo "no name and version in the heading"; return 1; }
-  printf '%s' "$o" | grep -q "credits $want\$" || { echo "the window does not show the $want credits --about lists"; return 1; }
-  return 0
-}
-qtprofilesclose_check() { # closing the profile list must not bring the wizard back (doc 07)
-  local dir="$OUT/qtprofilesclose" bin="launcher-qt/target/release/launcher-qt" o
-  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  # The wizard window used to put itself away by writing the `open`
-  # property, which left the form's own flag up. Closing the profile list
-  # rescans the wizard's profiles, a republish, which raised the property
-  # again and showed the wizard (user report, 2026-09-23). The window now
-  # goes through `dismiss()`, and this asks after both closes.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=profilesclose LAUNCHER_QT_DELAY=250 "$bin" 2>&1 \
-       | sed -n 's/^\[diag\] profilesclose //p')"
-  [ -n "$o" ] || { echo "the probe printed no profilesclose line"; return 1; }
-  printf '  %s\n' "$o"
-  printf '%s' "$o" | grep -q "after cancel: open=false, visible=false" \
-    || { echo "the wizard did not go away on Cancel"; return 1; }
-  printf '%s' "$o" | grep -q "after list: open=false, visible=false" \
-    || { echo "closing the profile list brought the wizard back"; return 1; }
-  return 0
-}
-qtprofile_check() { # the Qt shader-profile windows, driven (doc 07)
-  local rc=0 dir="$OUT/qtprofile" bin="launcher-qt/target/release/launcher-qt" o list shown
-  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  # Like `qt-wizard`, this asks the *windows*. Both failures it guards
-  # against left the model right and the screen wrong. The editor's Save
-  # handler reached for the list window's own `profiles` model, which is
-  # not a property of the editor window, and the TypeError took the
-  # `changed()` beside it down too, so the profile was written and the
-  # list behind it never heard. And the
-  # preset field wrote its own bound property, which destroys the
-  # binding that feeds it, so a fresh profile's empty path never reached
-  # the field. The preset does not have to exist: saving a profile
-  # stores the path, and an unreadable one is a parse error the editor
-  # shows rather than a refusal.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=saveprofile LAUNCHER_QT_ARG="$dir/crt.slangp" \
-       LAUNCHER_QT_DELAY=300 "$bin" 2>&1 | sed -n 's/^\[diag\] saveprofile: //p')"
-  [ -n "$o" ] || { echo "the probe printed no saveprofile line"; return 1; }
-  printf '%s\n' "$o" | sed 's/^/  /'
-  list="$(printf '%s' "$o" | sed -n 's/.*list \([0-9]*\) -> \([0-9]*\).*/\1 \2/p')"
-  [ "$list" = "0 1" ] || { echo "the saved profile did not reach the list (list $list)"; rc=1; }
-  printf '%s' "$o" | grep -q "editor open=false" \
-    || { echo "the editor stayed open after a successful save"; rc=1; }
-  ls "$dir/profiles"/*.toml >/dev/null 2>&1 || { echo "no profile was written at all"; rc=1; }
-  shown="$(printf '%s' "$o" | sed -n "s/.*fresh preset field '\([^']*\)'.*/\1/p")"
-  [ -z "$shown" ] || { echo "New profile… still shows the last preset ($shown)"; rc=1; }
-  return $rc
-}
-qtshelf_check() { # the Qt disc shelf's "Add disc" field, driven (doc 07)
-  local rc=0 dir="$OUT/qtshelf" bin="launcher-qt/target/release/launcher-qt" o count field start
-  rm -rf "$dir"; mkdir -p "$dir/library"
-  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
-  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
-  export LAUNCHER_BROWSE_MEMORY="$dir/last-browse.txt"
-  # Brackets and a space, like a disc named after its year. The dialog's
-  # URL leaves `[` `]` encoded in `toString()`, and QML that stripped
-  # `file://` off that shelved `%5B1996%5D`, a path that does not exist.
-  local iso="$dir/Game [1996].iso"
-  : > "$iso"
-  # A file dialog belongs to the window system and cannot be opened
-  # offscreen, so the probe hands the field the path the dialog would
-  # have. Every line of the wiring under test is downstream of that.
-  # A picked disc must be on the shelf without a second click (it once
-  # only filled the field), and the field it came through is left empty,
-  # so the button beside it goes back to being for typing.
-  o="$(timeout 120 env LAUNCHER_QT_SCREEN=pickdisc LAUNCHER_QT_ARG="$iso" LAUNCHER_QT_DELAY=300 \
-       "$bin" 2>&1 | sed -n 's/^\[diag\] pickdisc: //p')"
-  [ -n "$o" ] || { echo "the probe printed no pickdisc line"; return 1; }
-  echo "  $o"
-  count="$(printf '%s' "$o" | sed -n 's/^shelf \([0-9]*\),.*/\1/p')"
-  field="$(printf '%s' "$o" | sed -n 's/.*field \[\(.*\)\], status.*/\1/p')"
-  [ "$count" = 1 ] || { echo "the picked disc did not reach the shelf (it holds $count)"; rc=1; }
-  [ -z "$field" ] || { echo "the picked path was left in the field ($field)"; rc=1; }
-  grep -qF "path = \"$iso\"" "$dir/discs.toml" 2>/dev/null \
-    || { echo "the shelf file does not name the disc by its own path"; cat "$dir/discs.toml" 2>/dev/null; rc=1; }
-  grep -q "%5B" "$dir/discs.toml" 2>/dev/null && { echo "the shelved path is still URL-encoded"; rc=1; }
-  # Every dialog backend on Linux matches its globs case-sensitively, so
-  # a lower-case-only filter hid `GAME.CUE`. The dialog must be handed
-  # both spellings (`browse::extensions`).
-  printf '%s' "$o" | grep -q 'filters \[Disc images (.*\*\.cue \*\.CUE' \
-    || { echo "the disc dialog's filter has no upper-case globs"; rc=1; }
-  # The next "Browse…" on an empty field opens where that disc was picked.
-  # The shelf's adder empties itself, so without this every dialog after
-  # the first started over in the working directory. The core decides, so
-  # the core's own verb is asked.
-  start="$(target/release/launcherx --browse-start "" file)"
-  [ "$start" = "$dir" ] || { echo "an empty field's Browse… would open in '$start', not '$dir'"; rc=1; }
-  return $rc
-}
 dirshelf_check() { # a shared folder as a disc, from the shelf to a real QEMU (M5g)
   local rc=0 dir="$OUT/dirshelf" bundle args o spaced comma plain shelf_file
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -2538,35 +2144,13 @@ host_stage() {
   else
     skip shader-defaults "needs target/release/launcherx and the slang-shaders submodule"
   fi
-  # The launcher's own window (ADR-015: the Qt build is the one every
-  # package installs). Still conditional, because it is its own cargo
-  # workspace and a host with no Qt 6 builds everything else.
-  if [ -x launcher-qt/target/release/launcher-qt ]; then
-    run_check qt-wizard qt-wizard.log qtwizard_check || true
-    run_check qt-close qt-close.log qtclose_check || true
-    run_check qt-esc qt-esc.log qtesc_check || true
-    run_check qt-profilesclose qt-profilesclose.log qtprofilesclose_check || true
-    run_check qt-about qt-about.log qtabout_check || true
-    run_check qt-profile qt-profile.log qtprofile_check || true
-    run_check qt-shelf qt-shelf.log qtshelf_check || true
-    run_check qt-firstrun qt-firstrun.log qtfirstrun_check || true
-    run_check qt-clone qt-clone.log qtclone_check || true
-    if [ -x build/qemu/qemu-img ]; then
-      run_check qt-snapshots qt-snapshots.log qtsnapshots_check || true
-    else
-      skip qt-snapshots "needs build/qemu/qemu-img"
-    fi
+  # The launcher's own window (ADR-023: launcher-mitsuami is the one every
+  # package installs). Conditional, because it is its own cargo workspace
+  # and a Linux host with no GTK 4 builds everything else.
+  if [ -x "$LAUNCHER_BIN" ]; then
+    run_check mitsuami mitsuami.log mitsuami_check || true
   else
-    skip qt-wizard "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-close "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-esc "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-profilesclose "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-about "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-profile "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-shelf "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-firstrun "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-clone "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
-    skip qt-snapshots "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
+    skip mitsuami "needs $LAUNCHER_BIN (scripts/build.sh mitsuami)"
   fi
 
   # the host GPU probe (ADR-013): what the launcher tells someone about 3D
@@ -2717,10 +2301,10 @@ host_stage() {
   # firmware and guest-tools. The launcher's paths are otherwise baked in
   # at compile time and a regression there only shows on someone else's
   # machine. Rolls no tarball (the check is the point, not the archive).
-  if [ ! -x launcher-qt/target/release/launcher-qt ]; then
-    # The package installs the Qt launcher (ADR-015), so a checkout that
-    # has not built it cannot be packaged at all.
-    skip package "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
+  if [ ! -x "$LAUNCHER_BIN" ]; then
+    # The package installs the launcher (ADR-023), so a checkout that has
+    # not built it cannot be packaged at all.
+    skip package "needs $LAUNCHER_BIN (scripts/build.sh mitsuami)"
   elif [ "$OS" = Linux ] && [ -f build/qemu/libqemu-embed-i386.so ] && [ -x build/qemu/qemu-img ] && [ -d qemu/pc-bios ]; then
     run_check package package.log scripts/package-linux.sh --no-tar --out "$OUT/package" || true
   elif [ "$OS" = Darwin ] && [ -f build/qemu/libqemu-embed-i386.dylib ] && [ -x build/qemu/qemu-img ] && [ -d qemu/pc-bios ]; then
@@ -2740,7 +2324,7 @@ host_stage() {
   # must find them all inside the app. Only when that build exists; a Mac
   # that never made it is not a failure.
   if [ "$OS" = Darwin ] && [ "$ARCH" = arm64 ]; then
-    if [ -f build/x86_64/qemu/libqemu-embed-i386.dylib ] && [ -x launcher-qt/target/x86_64-apple-darwin/release/launcher-qt ]; then
+    if [ -f build/x86_64/qemu/libqemu-embed-i386.dylib ] && [ -x launcher-mitsuami/target/x86_64-apple-darwin/release/launcher-mitsuami ]; then
       run_check package-x86_64 package-x86_64.log scripts/package-macos.sh --x86_64 --no-build --no-sign --no-dmg --out "$OUT/package-x86_64" || true
     else
       skip package-x86_64 "no Intel build (scripts/build.sh --x86_64)"
@@ -2751,7 +2335,7 @@ host_stage() {
   # usable as one. A C program creates a DOS machine through the shared
   # wizard, puts a disc on the shelf and reads both back. It is the only
   # check on the C front end, so a rename or a changed default in a model
-  # shows up here as well as in the Qt launcher.
+  # shows up here as well as in the launcher.
   # A scratch library and shelf, never the user's own.
   if cargo build -p launcher-capi >"$OUT/capi-build.log" 2>&1; then
     CAPI_LIB=""

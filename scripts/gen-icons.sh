@@ -10,7 +10,7 @@
 # Everything below is derived from it and checked in, because the places
 # that consume an icon cannot run ImageMagick:
 #
-#   * `launcher-qt` embeds one with `include_bytes!` at compile time,
+#   * `launcher-mitsuami` embeds one with `include_bytes!` at compile time,
 #   * the Flatpak build is offline and installs files, it does not draw them,
 #   * the Windows package is cross-built in a container without ImageMagick,
 #   * a user running `packaging/linux/install.sh` from a tarball has no

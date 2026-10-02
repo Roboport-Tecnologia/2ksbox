@@ -1,7 +1,7 @@
 /* The 2ksbox launcher, as a C library (doc 07).
  *
  * Everything the launcher does that is not drawing lives in one Rust
- * crate (`launcher-core`), and the project's Qt/QML front end is a view
+ * crate (`launcher-core`), and the project's launcher (on mitsuami) is a view
  * over it. This header offers the same to a front end that is not Rust.
  * It was shaped for a native macOS app in Swift (Swift imports a C header
  * directly, with no bridge), but anything that speaks C works.
@@ -100,7 +100,7 @@ typedef struct LcWizard LcWizard;
 
 /* The combo boxes' labels, in the order every index below uses. Fill a
  * picker by walking `index` until this returns NULL, rather than
- * retyping the strings, as the Qt front end does. */
+ * retyping the strings, as the project's own launcher does. */
 #define LC_LABEL_FAMILY    0u
 #define LC_LABEL_ACCEL     1u
 #define LC_LABEL_CPU_SPEED 2u

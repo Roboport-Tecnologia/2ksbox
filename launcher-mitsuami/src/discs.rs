@@ -13,7 +13,7 @@
 //! A label is edited in place, opened by a double click on it (or off
 //! macOS the pencil beside it), and written when Enter
 //! is pressed, when the field loses focus, or when the window closes with
-//! the edit still in it, as the Qt window's `editingFinished`: the core
+//! the edit still in it: the core
 //! re-sorts the shelf on every label change, so writing each keystroke
 //! would move the row being typed in.
 

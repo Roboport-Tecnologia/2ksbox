@@ -17,8 +17,8 @@ use std::process::Child;
 /// otherwise the winit player beside the launcher's own executable (the
 /// workspace's binaries share `target/<profile>`), and failing that the
 /// workspace's own `target/<profile>`. That last case is a launcher
-/// outside the root workspace (`launcher-mitsuami`, `launcher-qt`, so
-/// `cargo build` never needs their toolkits), which builds into its own
+/// outside the root workspace (`launcher-mitsuami`, so `cargo build`
+/// never needs its toolkits), which builds into its own
 /// `target/<profile>` with no player beside it. `LAUNCHER_PLAYER_BIN`
 /// overrides all of it.
 pub fn player_binary() -> PathBuf {

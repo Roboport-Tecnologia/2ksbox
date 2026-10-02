@@ -191,7 +191,7 @@ impl Editor {
     }
 
     /// Re-read the preset's parameters if the path changed. Cheap enough
-    /// to call from a field's commit handler (the Qt build does) or on
+    /// to call from a field's commit handler or on
     /// every frame.
     pub fn reparse(&mut self) {
         let trimmed = self.preset_path.trim();

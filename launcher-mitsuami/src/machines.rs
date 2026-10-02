@@ -138,7 +138,7 @@ impl Library {
     }
 
     /// Reap any player that exited. A child process cannot push that news,
-    /// so the window polls, as the Qt window's `Timer` does.
+    /// so the window polls.
     async fn poll(self) {
         loop {
             sleep(Duration::from_millis(500)).await;
@@ -167,7 +167,7 @@ pub fn MachinesWindow() -> impl View {
     crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
     // The first-run offer asks on a real start, and on
     // `firstrun[:<answers>]` with scripted answers; every other headless
-    // screen runs without it, as the Qt build's do.
+    // screen runs without it.
     if std::env::var_os("LAUNCHER_SCREEN").is_none() {
         offer.start(library, shaders, None);
     }

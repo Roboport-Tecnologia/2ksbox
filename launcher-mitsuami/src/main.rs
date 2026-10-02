@@ -7,12 +7,11 @@
 //!
 //! So this crate is only view code: signals that mirror a core model, and
 //! a `view!` per window. Nothing here decides anything about machines,
-//! discs or shaders. It is the official launcher, and replaces the
-//! deprecated `launcher-qt` in the packages when M19 moves them over
-//! (ADR-023).
+//! discs or shaders. It is the launcher, the one every package ships as
+//! `2ksbox` (ADR-023).
 //!
-//! It is **not** in the root workspace, like `launcher-qt`: build it from
-//! this directory, so the root `cargo build` never needs GTK.
+//! It is **not** in the root workspace: build it from this directory, so
+//! the root `cargo build` never needs GTK.
 
 // A windowed program on Windows, because a console-subsystem binary opens
 // a black terminal on every double-click. The debug verbs still print:
@@ -41,7 +40,7 @@ fn main() {
     // exists (`host_gpu::announce_driver`'s one rule).
     launcher_core::host_gpu::announce_driver();
     // Debug verbs first, before a window exists: `launcher_core::cli`'s,
-    // so this binary answers every one `launcherx` and `launcher-qt` do.
+    // so this binary answers every one `launcherx` does.
     let mut args = std::env::args().skip(1);
     if let Some(verb) = args.next() {
         launcher_core::console::attach_parent();
@@ -53,7 +52,7 @@ fn main() {
     }
 
     launcher_core::fatal::note("the event loop");
-    // The app's identity, as `launcher-qt` gives Qt: the desktop-entry
+    // The app's identity, given to the toolkit: the desktop-entry
     // name a Wayland compositor matches a window to its launcher by (and
     // the themed icon GTK and KDE look up under it), and the picture for
     // the platforms that take one (the Dock outside a bundle, Windows'

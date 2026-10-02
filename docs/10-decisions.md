@@ -22,7 +22,7 @@ The roadmap is doc 08.
 | 012 | Win98 gets the XP driver over a shared core | accepted |
 | 013 | Below the Vulkan 1.3 floor, no DXVK device; no second executor | accepted, amended; points 1 and 3 **superseded by 018** |
 | 014 | One launcher library, front ends draw it | accepted; "two front ends" **ended by 017** |
-| 015 | The Qt front end is the shipped one | accepted; "keep `launcher/`" **reversed by 017** |
+| 015 | The Qt front end is the shipped one | **superseded by 023** (2026-10-02); "keep `launcher/`" reversed by 017 |
 | 016 | The Voodoo 2 is emulated beside the Glide pass-through | accepted; "beside" superseded by 020 |
 | 017 | The egui front end is retired | accepted |
 | 018 | Below the Vulkan floor, the executor runs on Wine on the host; WineD3D-in-guest retired | accepted, retirement done 2026-09-23 |
@@ -30,7 +30,7 @@ The roadmap is doc 08.
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
-| 023 | The launcher moves to mitsuami | accepted, work in M19 |
+| 023 | The launcher moves to mitsuami | accepted; done 2026-10-02 (every package ships it, `launcher-qt` deleted) |
 | 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
 | 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22 |
 
@@ -454,8 +454,10 @@ workspace, so a root `cargo build` never needs Qt 6.
 
 ## ADR-015: The Qt front end is the one the packages ship (2026-09-07)
 
-**Status.** Accepted. Its "keep `launcher/` as an unshipped second
-front end" was reversed by ADR-017.
+**Status.** **Superseded by ADR-023** on 2026-10-02: the packages ship
+`launcher-mitsuami`, and `launcher-qt/` was deleted (user). Its "keep
+`launcher/` as an unshipped second front end" was reversed by ADR-017.
+Kept for the record.
 
 **Decision.** `launcher-qt` is **the** launcher. Every packager (Linux,
 the Flatpak, macOS, Windows) installs it as `2ksbox`.
@@ -766,10 +768,12 @@ there.
 
 ## ADR-023: The launcher moves to mitsuami, native widgets on every platform (2026-09-27)
 
-**Status.** Accepted; supersedes ADR-015 once track M19 flips what the
-packages ship. Since 2026-10-02 (user) `launcher-mitsuami` is the
-official launcher and `launcher-qt` is deprecated: no more changes go
-into it, though the packages still build it until M19 moves them over.
+**Status.** Accepted, and done: it **supersedes ADR-015**. On
+2026-10-02 (user) `launcher-mitsuami` became the official launcher, and
+the same day every package moved to it and `launcher-qt/` was deleted
+(user: "only mitsuami launcher will be used now"), with `tools/qtmin/`,
+the Qt half of `scripts/build-deps.sh` and the cross image's Qt.
+`launcherx` and `launcher-capi` stay.
 
 **Decision** (user decision). The launcher's next front end is
 `launcher-mitsuami/`, on mitsuami (`github.com/Roboport-Tecnologia/mitsuami`,
@@ -787,10 +791,15 @@ lists).
 
 **Costs.** The Windows launcher needs MSVC and the Windows App Runtime
 2.4 (user: a native Windows build is fine), so it leaves the Linux cross
-build; the player and QEMU stay on it (separate processes). The Linux
-build needs GTK 4.10+ development files; the Flatpak either moves to a
-GNOME runtime or builds with `kde` on `org.kde.Platform`, decided when
-it is packaged.
+build; the player and QEMU stay on it (separate processes). So the
+Windows package comes from a PC (`build-windows.sh mitsuami`,
+`package-windows.sh`, both in MSYS2's MINGW64 shell); the launcher links
+its C runtime statically, and the MSIX declares the App Runtime as a
+package dependency. The Linux build needs GTK 4.10+ development files
+and the tarball the host's GTK 4; the Flatpak moved to
+`org.gnome.Platform` 49 (user decision, 2026-10-02). The packagers'
+window check is the launcher's own `LAUNCHER_SHOT` (GTK on a private
+Broadway display, AppKit and WinUI on the desktop for a moment).
 
 **Unchanged.** ADR-014: every rule and every sentence stays in
 `launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami

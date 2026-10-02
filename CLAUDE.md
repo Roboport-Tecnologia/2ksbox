@@ -2,8 +2,8 @@
 
 An open-source, cross-platform stack that runs Windows 98 / XP (and DOS
 and other era OSes) as "native vintage boxes": a patched QEMU (qemu-3dfx
-for 3D) **in-process** in a Rust player with a CRT shader chain, a Qt
-launcher over a shared Rust library, and our own devices and guest
+for 3D) **in-process** in a Rust player with a CRT shader chain, a
+native launcher (mitsuami) over a shared Rust library, and our own devices and guest
 drivers for Direct3D, CD-ROM and music, and an emulated Voodoo 2 for
 Glide. Since ADR-024 it is also a general-purpose VM manager: modern
 guests (Windows 11 first, track M20) run under hardware virtualization,
@@ -49,24 +49,25 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
 - **One launcher library, thin front ends** (ADR-014, doc 07).
   `launcher-core/` decides everything: bundle format, library, disc
   shelf, snapshots, shader profiles, preview, **every window's state
-  machine and the sentences it shows**. `launcher-qt/` (Qt 6 / QML) is a
-  view. Nothing another front end could get differently goes in a front
-  end (not a family default, not a note under a checkbox, not a combo's
+  machine and the sentences it shows**. The launcher is a view.
+  Nothing another front end could get differently goes in a front end
+  (not a family default, not a note under a checkbox, not a combo's
   labels). Toolkit-free debug verbs are `launcher_core::cli`, answered
-  identically by `launcher-qt` and `launcherx`. `launcher-capi/` is the C
+  identically by the launcher and `launcherx`. `launcher-capi/` is the C
   ABI, the root workspace's one non-default member (kept compiling by
-  `cargo check --release --workspace`). `launcher-qt` is outside the root
-  workspace, so `cargo build` never needs Qt. **The egui front end was
-  deleted** (ADR-017, user decision); don't bring it back.
-- **`launcher-mitsuami/` is the official launcher** (ADR-023, track M19:
-  native widgets through mitsuami, pinned by git rev; user, 2026-10-02).
-  New launcher work goes there. **`launcher-qt/` is deprecated: make no
-  changes to it** (user). It is still what the packages build as
-  `2ksbox` (ADR-015) until M19 moves packaging over; `scripts/build.sh`
-  has a `qt` stage. Every Qt packager opens
-  a **real window offscreen** (`QT_QPA_PLATFORM=offscreen` +
-  `LAUNCHER_QT_SHOT`) and requires a PNG, because a missing Qt platform
-  plugin or QML module is invisible to every other check.
+  `cargo check --release --workspace`). **The egui and Qt front ends
+  were deleted** (ADR-017, ADR-023, user decisions); don't bring either
+  back.
+- **`launcher-mitsuami/` is the only launcher** (ADR-023, track M19:
+  native widgets through mitsuami, pinned by git rev; user, 2026-10-02):
+  AppKit, WinUI 3, GTK 4 (Kirigami with `kde`). Every package ships it as
+  `2ksbox`; `scripts/build.sh` has a `mitsuami` stage. It is outside the
+  root workspace, so `cargo build` never needs GTK. Every packager opens
+  a **real window** through its `LAUNCHER_SHOT` (GTK on a private
+  Broadway display) and requires a PNG, because a missing toolkit is
+  invisible to every other check. On Windows it is the one MSVC binary
+  (WinUI 3, static C runtime, the Windows App Runtime 2.4+), built only
+  on a PC (`build-windows.sh mitsuami`).
 - **Rust wherever possible** (ADR-004); C only inside QEMU/qemu-3dfx and
   guest-side era code. Python is uv-managed (3.12).
 - **Everything open source; Apple Silicon must work (TCG).** Two macOS
@@ -74,11 +75,12 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   only (DXVK + KosmicKrisp, no Wine, no Rosetta) and never gets a pre-26
   version. The **community** build (`scripts/package-macos.sh
   --community`, Developer ID DMG) runs down to **macOS 12**
-  (`scripts/macos-floor.sh`, set by Qt 6.9), carries the M15 Wine
+  (`scripts/macos-floor.sh`; Qt 6.9 set it, and it stands until the
+  AppKit launcher's own floor is measured), carries the M15 Wine
   executor, and permits Intel Macs untested; no row claims Intel until
   one has run the reference scene. **Nothing the app carries comes from
   Homebrew** (user decision 2026-09-23): `scripts/build-deps.sh` builds
-  QEMU's libraries (static) and Qt from pinned sources into
+  QEMU's libraries (static) from pinned sources into
   `build/deps/<arch>`; Homebrew is build tools only, never propose
   `brew install` for anything that ships. The Intel app is made on the
   Air under Rosetta (`scripts/build.sh --x86_64`, `package-macos.sh
@@ -186,7 +188,7 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
 
 ```sh
 git clone --recurse-submodules --shallow-submodules <repo>
-scripts/build.sh          # everything: qemu, rust, qt, dxvk, executor, guest ISO
+scripts/build.sh          # everything: qemu, rust, mitsuami, dxvk, executor, guest ISO
 scripts/build.sh --test   # ... then the host test stage
 ```
 
@@ -201,9 +203,11 @@ knobs, `QEMU_PYTHON` and the macOS floor: `docs/development.md`,
 carries no developer content.
 
 Windows is a **cross build from Linux** (`scripts/win-cross.sh`,
-`scripts/build-windows.sh`, `scripts/package-windows.sh`) into
-`build/win/` and `target/x86_64-pc-windows-gnu/`, never over native
-artefacts. QEMU there is built with **clang**, not mingw GCC (GCC's
+`scripts/build-windows.sh`) into `build/win/` and
+`target/x86_64-pc-windows-gnu/`, never over native artefacts, except
+the launcher (WinUI 3, MSVC), which builds only on Windows, so the
+package (`scripts/package-windows.sh`) is rolled and checked on the PC,
+in MSYS2's MINGW64 shell, with no podman. QEMU there is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and

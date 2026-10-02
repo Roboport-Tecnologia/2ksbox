@@ -39,6 +39,14 @@
        the package has been considered on; nothing older is claimed. -->
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <!-- The launcher is WinUI 3 (launcher-mitsuami, ADR-023), so the
+         package needs the Windows App Runtime 2.4 or later, which the
+         Store installs with the app. Windows adds it to the package graph
+         before the launcher starts, so mitsuami does not bootstrap it. -->
+    <PackageDependency
+      Name="Microsoft.WindowsAppRuntime.2"
+      MinVersion="2.4.0.0"
+      Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
   </Dependencies>
 
   <Resources>

@@ -11,17 +11,17 @@
 # than the runtime's (2.44 vs 2.42 as of writing) and our embed library
 # already references GLIBC_2.43, so host-built binaries will not run here.
 #
-# The runtime is KDE's, not freedesktop's, because the launcher is Qt 6 /
-# QML (`launcher-qt`, ADR-015). `org.kde.Platform` ships Qt;
-# `org.freedesktop.Platform` does not, and building Qt as a module here
-# costs hours. 6.10 is a thin layer on `org.freedesktop.Platform` 25.08,
-# so the rest of the build is unchanged: same glibc, same
+# The runtime is GNOME's, not freedesktop's, because the launcher is
+# mitsuami on GTK 4 (`launcher-mitsuami`, ADR-023; user decision
+# 2026-10-02). `org.gnome.Platform` ships GTK 4; `org.freedesktop.Platform`
+# does not. 49 is a layer on `org.freedesktop.Platform` 25.08, so the rest
+# of the build is unchanged: same glibc, same
 # `org.freedesktop.Sdk.Extension.rust-stable//25.08`, same Python 3.13 for
 # QEMU's configure.
 app-id: com._2ksbox.Launcher
-runtime: org.kde.Platform
-runtime-version: '6.10'
-sdk: org.kde.Sdk
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: 2ksbox
@@ -116,10 +116,10 @@ modules:
           # QEMU's configure treats a tree with no .git as a tarball
           # build, which is what we want here.
           - target
-          # `launcher-qt` is its own cargo workspace with its own
-          # target/ (3+ GB). `target` above is a path from the source
-          # root, not a name matched at every level.
-          - launcher-qt/target
+          # `launcher-mitsuami` is its own cargo workspace with its own
+          # target/. `target` above is a path from the source root, not a
+          # name matched at every level.
+          - launcher-mitsuami/target
           - build
           - .git
           # `third_party/dxvk` is not skipped (63 MB, subprojects
@@ -130,8 +130,9 @@ modules:
           - third_party/slang-shaders
           - .claude
       # Every crate of both lock files (the workspace's and
-      # `launcher-qt/`'s) as declared sources, unpacked into
-      # `cargo/vendor` with a `cargo/config` that redirects crates-io at
+      # `launcher-mitsuami/`'s, mitsuami itself a git source at its pinned
+      # rev) as declared sources, unpacked into `cargo/vendor` with a
+      # `cargo/config` that redirects crates-io and the git repository at
       # them; `CARGO_HOME` above points at that directory.
       - cargo-sources.json
       # QEMU's own glib (scripts/build-deps.sh, which on Linux builds
@@ -175,12 +176,11 @@ modules:
       # Windows 11's player (track M20): the same, linked to the x86_64
       # QEMU, in a target directory of its own.
       - cargo build --release --locked --offline -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
-      # `launcher-qt` is its own cargo workspace (ADR-015), so it is its
-      # own build command; `CARGO_HOME` above points both at the one
+      # `launcher-mitsuami` is its own cargo workspace (ADR-023), so it is
+      # its own build command; `CARGO_HOME` above points both at the one
       # vendored directory, which cargo-sources.json fills from both lock
-      # files. cxx-qt-build finds Qt through `qmake6` in the SDK and
-      # drives moc and qmltyperegistrar itself. There is no CMake step.
-      - cd launcher-qt && cargo build --release --locked --offline
+      # files. GTK 4 is the SDK's.
+      - cd launcher-mitsuami && cargo build --release --locked --offline
       # DXVK and the Direct3D executor (doc 14), for the same reason and
       # with the same constraint: the SDK has meson, ninja, glslang and
       # the Vulkan headers, DXVK's subprojects are vendored and it declares

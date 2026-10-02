@@ -1,8 +1,9 @@
 //! The launcher, minus the drawing.
 //!
-//! The front end over this crate is `launcher-qt/` (Qt 6 / QML through
-//! cxx-qt, doc 07). `launcher-capi/` is the same crate as a C ABI, and
-//! `launcherx` is its toolkit-free verbs with no front end at all. The
+//! The front end over this crate is `launcher-mitsuami/` (the platform's
+//! own widgets through mitsuami, ADR-023, doc 07). `launcher-capi/` is
+//! the same crate as a C ABI, and `launcherx` is its toolkit-free verbs
+//! with no front end at all. The
 //! rule is that **everything a front end could get differently lives
 //! here**, including the windows' own behaviour, not only the file
 //! formats and the subprocesses. Which memory default follows the family
@@ -13,12 +14,13 @@
 //! events that call in.
 //!
 //! The rule comes from two front ends that each held their own copy. An
-//! egui build and the Qt one once shared only the file formats, and they
+//! egui build and a Qt one once shared only the file formats, and they
 //! drifted. The Qt wizard had no processor, floppy or boot field, its
 //! networking checkbox didn't follow the family, and saving a new shader
-//! profile dropped the parameter overrides in one of them. The egui build
-//! is gone (ADR-017), and the rule stays because a C front end over
-//! `launcher-capi` would drift the same way.
+//! profile dropped the parameter overrides in one of them. Both are gone
+//! (ADR-017, ADR-023), and the rule stays because a C front end over
+//! `launcher-capi`, or a second front end beside mitsuami, would drift
+//! the same way.
 //!
 //! Three groups of modules:
 //!

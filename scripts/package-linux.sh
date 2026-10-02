@@ -19,17 +19,16 @@
 # and qemu/pc-bios must already be there (scripts/build.sh). The
 # guest-tools ISO is included when guest-tools/out has one.
 #
-# The launcher is `launcher-qt`, the Qt 6 / QML front end over
-# `launcher-core` (ADR-015). Qt itself is not in the tarball. It is
-# ~38 MB of shared libraries, QML modules and plugins that every
-# distribution packages, and a bundled copy would still have to match the
-# host's Wayland, OpenGL and fontconfig stacks. So the package depends on
-# the system's `qt6-base` + `qt6-declarative` (+ `qt6-quickcontrols2`),
-# and the check below lists what the staged launcher resolves. For a host
-# with no Qt 6 there is the Flatpak, which gets Qt from `org.kde.Platform`.
+# The launcher is `launcher-mitsuami`, the front end on mitsuami over
+# `launcher-core` (ADR-023), on GTK 4 here. GTK itself is not in the
+# tarball: every distribution packages it, and a bundled copy would still
+# have to match the host's Wayland, OpenGL and fontconfig stacks. So the
+# package depends on the system's GTK 4 (4.10 or later), and the check
+# below lists what the staged launcher resolves. For a host with no GTK 4
+# there is the Flatpak, which gets it from `org.gnome.Platform`.
 #
 # The layout, relative to the tree's root (= an install prefix):
-#   bin/2ksbox                        the launcher (Qt 6, ADR-015)
+#   bin/2ksbox                        the launcher (mitsuami on GTK 4, ADR-023)
 #   bin/2ksbox-player                 the player, on QEMU for the era's
 #   lib/2ksbox/libqemu-embed-i386.so    machines
 #   bin/2ksbox-player-x86_64          the same player for Windows 11, on
@@ -88,10 +87,10 @@ if [ "$BUILD" = 1 ]; then
   cargo build --release -p player
   cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
   # Its own cargo workspace, so its own build command (as scripts/build.sh's
-  # `qt` stage). That boundary keeps Qt 6 off the root `cargo build`.
-  ( cd launcher-qt && cargo build --release )
+  # `mitsuami` stage). That boundary keeps GTK off the root `cargo build`.
+  ( cd launcher-mitsuami && cargo build --release )
 fi
-need launcher-qt/target/release/launcher-qt "scripts/build.sh qt"
+need launcher-mitsuami/target/release/launcher-mitsuami "scripts/build.sh mitsuami"
 need target/release/player
 need target/qemu-x86_64/release/player "scripts/build.sh rust"
 
@@ -100,7 +99,7 @@ need target/qemu-x86_64/release/player "scripts/build.sh rust"
 [ -n "$PREFIX" ] || rm -rf "$STAGE"
 mkdir -p "$STAGE"/{bin,lib/2ksbox,libexec/2ksbox,share/2ksbox/desktop,share/doc/2ksbox}
 
-install -m755 launcher-qt/target/release/launcher-qt "$STAGE/bin/2ksbox"
+install -m755 launcher-mitsuami/target/release/launcher-mitsuami "$STAGE/bin/2ksbox"
 install -m755 target/release/player "$STAGE/bin/2ksbox-player"
 install -m755 target/qemu-x86_64/release/player "$STAGE/bin/2ksbox-player-x86_64"
 install -m755 build/qemu/libqemu-embed-i386.so build/qemu/libqemu-embed-x86_64.so "$STAGE/lib/2ksbox/"
@@ -176,20 +175,18 @@ install -m755 packaging/linux/install.sh "$STAGE/install.sh"
 install -m644 COPYING THIRD-PARTY-NOTICES.md README.md "$STAGE/share/doc/2ksbox/"
 
 # --- the check -------------------------------------------------------
-# Qt is the one thing this package does not carry, so a user would find
-# its absence before any check here did. A launcher with an unresolved
-# `libQt6Quick.so.6` says "No such file or directory" and nothing else.
-# `ldd` answers for the import tables. The QML modules and the platform
-# plugin are not in them but come from the same packages, so what is
-# listed here is also what the tarball's README has to name.
+# GTK 4 is the one thing this package does not carry, so a user would
+# find its absence before any check here did. A launcher with an
+# unresolved `libgtk-4.so.1` says "No such file or directory" and nothing
+# else. `ldd` answers for the import tables.
 fail=0
 missing=$(ldd "$STAGE/bin/2ksbox" | grep 'not found' || true)
 if [ -n "$missing" ]; then
   printf '%s\n' "$missing" | sed 's/^/  /' >&2
-  echo "package-linux.sh: the staged launcher has unresolved libraries (install qt6-base and qt6-declarative)" >&2
+  echo "package-linux.sh: the staged launcher has unresolved libraries (install GTK 4)" >&2
   fail=1
 else
-  echo "qt             $(ldd "$STAGE/bin/2ksbox" | grep -c 'libQt6') Qt 6 libraries, all from the system"
+  echo "gtk            $(ldd "$STAGE/bin/2ksbox" | sed -n 's/.*\(libgtk-4[^ ]*\) =>.*/\1/p' | head -1), from the system"
 fi
 
 # A launcher that still answers with the checkout it was built from is not
@@ -277,21 +274,33 @@ dxvk        libdxvk_d3d9.so.0
 d3dpt-remote libd3dpt_exec_remote.so
 wine-host   wine/d3dpt-exec-host.exe
 EOF
-# The window itself, which `--paths` cannot reach. Qt resolves its
-# platform plugin and every QML module the views import at run time, by
-# name, from directories no import table mentions. A package that passed
-# every check above still opens nothing on a host whose Qt is half
-# installed, and says so in one stderr line a double-click never shows.
-# The launcher's own headless grab (doc 07) is the check:
-# `QT_QPA_PLATFORM=offscreen` plus `LAUNCHER_QT_SHOT`. A PNG out the other
-# end means a real window with real QML in it.
+# The window itself, which `--paths` cannot reach: a package that passed
+# every check above still opens nothing on a host whose GTK is half
+# installed. The launcher's own headless grab (`LAUNCHER_SHOT`,
+# launcher-mitsuami/src/shot.rs) opens the machine window, draws it into
+# a PNG and exits. It draws on a private Broadway display
+# (`gtk4-broadwayd`, GTK's own), so nothing opens on the packager's
+# desktop and it works with no desktop at all. A PNG out the other end
+# means a real GTK window with our widgets in it.
 shot="$scratch/window.png"
-if (cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machines" \
-      QT_QPA_PLATFORM=offscreen LAUNCHER_QT_SHOT="$shot" LAUNCHER_QT_DELAY=1500 \
-      "$STAGE/bin/2ksbox" >/dev/null 2>&1) && [ -s "$shot" ]; then
-  echo "window         $(du -h "$shot" | cut -f1) grabbed offscreen: QML, plugins and all"
+if command -v gtk4-broadwayd >/dev/null; then
+  run="$scratch/run"; mkdir -m700 "$run"
+  disp=$((20 + RANDOM % 50))
+  XDG_RUNTIME_DIR="$run" gtk4-broadwayd ":$disp" >/dev/null 2>&1 &
+  broadway=$!
+  for _ in $(seq 50); do [ -n "$(ls -A "$run" 2>/dev/null)" ] && break; sleep 0.1; done
+  if (cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machines" XDG_RUNTIME_DIR="$run" \
+        GDK_BACKEND=broadway BROADWAY_DISPLAY=":$disp" GTK_USE_PORTAL=0 \
+        LAUNCHER_SHOT="$shot" timeout 60 "$STAGE/bin/2ksbox" >/dev/null 2>&1) && [ -s "$shot" ]; then
+    echo "window         $(du -h "$shot" | cut -f1) grabbed on a private Broadway display"
+  else
+    echo "package-linux.sh: the staged launcher drew no window (LAUNCHER_SHOT on Broadway)" >&2
+    fail=1
+  fi
+  kill "$broadway" 2>/dev/null || true
+  wait "$broadway" 2>/dev/null || true
 else
-  echo "package-linux.sh: the staged launcher opened no window offscreen (Qt QML modules or platform plugin missing)" >&2
+  echo "package-linux.sh: no gtk4-broadwayd (GTK 4's own tools), so the window cannot be checked" >&2
   fail=1
 fi
 

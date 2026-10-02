@@ -1,14 +1,12 @@
 //! A path field: a caption, a text input for a path, and "Browse…" onto
-//! the platform's file dialog, as `launcher-qt`'s `PathField.qml` is.
-//! Every window with a path in it uses this one.
+//! the platform's file dialog. Every window with a path in it uses this one.
 //!
 //! Typing is still allowed (a path the user already knows, or one on a
 //! mount the dialog can't reach). What the dialog offers, where it opens
 //! and where a pick lands are `launcher_core::browse`'s (`extensions`,
 //! `browse_start`, `picked`, `remember`), as in every front end.
 //!
-//! `LAUNCHER_PICK=<label>=<path>` is the probe's way in, as `launcher-qt`'s
-//! `pickdisc` is: the field with that caption prints the dialog it would
+//! `LAUNCHER_PICK=<label>=<path>` is the probe's way in: the field with that caption prints the dialog it would
 //! open (`pick <label>: start …, filters …`), then takes `<path>` as the
 //! dialog's answer, down the same line a real pick goes. The dialog itself
 //! is modal and needs a human.

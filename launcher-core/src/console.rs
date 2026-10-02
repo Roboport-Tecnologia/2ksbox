@@ -117,19 +117,22 @@ pub fn inherits_output() -> bool {
 /// Whether this process has a console attached at all.
 /// End the process after a debug verb has answered, with `code`.
 ///
-/// On Windows this is `TerminateProcess`, not `exit`, and the reason is
-/// the Qt launcher's own global statics. The QML module compiled into
-/// that binary registers its units in a `QGlobalStatic` at start-up,
-/// whose destructor calls back into `Qt6Qml.dll`. With msvcrt as the C
-/// runtime, the executable's destructors run inside msvcrt's own
-/// `DLL_PROCESS_DETACH`, which `LdrShutdownProcess` reaches only after
-/// it has detached the Qt DLLs loaded after msvcrt, so the destructor
-/// called into a library already torn down and every verb ended in
-/// `0xC0000005` after printing its whole answer (a GUI run, which tears
-/// Qt down in order through `QGuiApplication`'s destructor, was fine).
-/// There is nothing to run at that point: the verb wrote what it had,
-/// and this flushes what Rust still buffers. The player ends its
-/// headless paths the same way, for a different atexit hazard.
+/// On Windows this is `TerminateProcess`, not `exit`: a verb ends
+/// without running any global destructors, its own or a linked
+/// library's. There is nothing to run at that point: the verb wrote
+/// what it had, and this flushes what Rust still buffers. The player
+/// ends its headless paths the same way, for a different atexit hazard.
+///
+/// The Qt launcher (retired 2026-10-02) is what made the rule. The QML
+/// module compiled into that msvcrt-linked binary registered its units
+/// in a `QGlobalStatic` whose destructor called back into `Qt6Qml.dll`.
+/// The executable's destructors ran inside msvcrt's own
+/// `DLL_PROCESS_DETACH`, which `LdrShutdownProcess` reached only after
+/// it had detached the Qt DLLs loaded after msvcrt, so every verb ended
+/// in `0xC0000005` after printing its whole answer. Today's launcher is
+/// an MSVC binary with a static CRT, not that msvcrt arrangement, but a
+/// verb still has no teardown worth the risk of a library that repeats
+/// it.
 ///
 /// Elsewhere `exit` orders the teardown correctly and is used as is.
 pub fn exit_after_verb(code: i32) -> ! {

@@ -2,8 +2,7 @@
 //! start of a launcher with no preset collection, a question; after a
 //! yes, a small progress bar in the machine window's toolbar; then
 //! what came of it. The steps and every sentence are the core's. The
-//! question and the outcome are the platform's own alert, as the Qt build
-//! uses Qt's `MessageDialog`.
+//! question and the outcome are the platform's own alert.
 //!
 //! `LAUNCHER_SCREEN=firstrun[:<answers>]` scripts the alerts instead:
 //! each one prints what it would have shown and takes the next answer

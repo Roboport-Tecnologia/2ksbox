@@ -55,8 +55,8 @@ pub enum Step {
 /// ends once formatted the same sentence separately ("Downloading shader
 /// presets… 12.3 MB" in Rust and in QML), which is the drift
 /// `launcher-core` exists to prevent. A front end lays `headline` and
-/// `detail` out the way its toolkit does (Qt's `MessageDialog` puts them
-/// in `text` and `informativeText`) and writes neither.
+/// `detail` out the way its toolkit does (an alert's message and its
+/// informative text) and writes neither.
 pub struct Message {
     pub step: Step,
     /// The situation, in one line.
@@ -67,7 +67,7 @@ pub struct Message {
 }
 
 /// The offer's whole state machine. Built by `check`, polled by `state`
-/// from a timer (Qt), the same way `editor::Presets` is.
+/// from a timer or a polling task, the same way `editor::Presets` is.
 #[derive(Default)]
 pub struct FirstRun {
     profiles_dir: PathBuf,

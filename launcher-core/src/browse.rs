@@ -1,8 +1,9 @@
 //! The part of "Browse…" that is not a dialog.
 //!
-//! The file dialog itself is the toolkit's (Qt ships `QtQuick.Dialogs`'
-//! `FileDialog`, onto the XDG portal on Linux, `NSOpenPanel` on macOS and
-//! `IFileDialog` on Windows). This module holds the decision any front
+//! The file dialog itself is the toolkit's (mitsuami's is GTK's
+//! `FileDialog`, onto the XDG portal, or `QtQuick.Dialogs`' under
+//! Kirigami on Linux, `NSOpenPanel` on macOS and `FileOpenPicker` on
+//! Windows). This module holds the decision any front
 //! end has to get right: which extensions a field offers, and which
 //! directory the dialog opens in. A `.slangp` lives somewhere nobody
 //! would navigate to by hand, so a wrong start directory leaves the user
@@ -12,13 +13,14 @@ use std::path::{Path, PathBuf};
 
 /// One extension filter for a dialog (e.g. `("Disk images", &["qcow2"])`).
 /// A plain pair rather than a toolkit type, so each front end turns it
-/// into whatever its own dialog wants (for Qt's `nameFilters`, a
+/// into whatever its own dialog wants (for mitsuami, a `FileFilter` over
+/// [`extensions`]; for a dialog that takes name filters, a
 /// `"Disk images (*.qcow2)"` string from [`name_filter`]).
 pub type Filter<'a> = (&'a str, &'a [&'a str]);
 
 /// The extensions a dialog is handed: each one in lower and upper case.
 /// The constants are lower case, and on Linux every backend (the XDG
-/// portal, GTK, Qt's own dialog) matches the glob case-sensitively, so a
+/// portal, GTK, KDE's dialog) matches the glob case-sensitively, so a
 /// `GAME.CUE` written by a DOS-era tool was hidden from the disc shelf's
 /// "Browse…". Both spellings rather than a `*.[cC][uU][eE]` class,
 /// because Windows' and macOS's dialogs take no classes and a backend
@@ -36,9 +38,10 @@ pub fn extensions(filter: Filter) -> Vec<String> {
     out
 }
 
-/// A Qt-style `"Disk images (*.qcow2 *.QCOW2 *.img *.IMG)"` name filter.
-/// Qt's `FileDialog` takes those, so the QML uses these constants instead
-/// of repeating the extension lists by hand.
+/// A `"Disk images (*.qcow2 *.QCOW2 *.img *.IMG)"` name filter, for a
+/// dialog that takes its filters as one string per entry, so such a front
+/// end uses these constants instead of repeating the extension lists by
+/// hand.
 pub fn name_filter(filter: Filter) -> String {
     let globs: Vec<String> = extensions(filter).iter().map(|e| format!("*.{e}")).collect();
     format!("{} ({})", filter.0, globs.join(" "))
@@ -76,10 +79,10 @@ pub fn start_dir(value: &str) -> Option<PathBuf> {
 /// here.
 ///
 /// The launcher keeps the last-used location itself because no platform
-/// picker did. Qt's `FileDialog` handed an empty folder opens in the
-/// working directory, so every empty field (a new machine's, and the
-/// disc shelf's adder, which empties itself after every disc) started
-/// over from there.
+/// picker did. The Qt launcher's `FileDialog` (retired 2026-10-02),
+/// handed an empty folder, opened in the working directory, so every
+/// empty field (a new machine's, and the disc shelf's adder, which
+/// empties itself after every disc) started over from there.
 pub fn browse_start(value: &str, empty_dir: Option<&Path>) -> Option<PathBuf> {
     start_dir(value).or_else(|| empty_dir.map(|d| d.to_path_buf())).or_else(last_dir)
 }

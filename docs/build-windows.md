@@ -1,10 +1,11 @@
-# Building and packaging for Windows (from Linux)
+# Building and packaging for Windows
 
-The Windows package is a **cross build from Linux**: QEMU with a mingw
-toolchain, Rust for `x86_64-pc-windows-gnu`, the Qt launcher and the
-Direct3D executor, rolled into a portable zip. The same stages also
-build **natively under MSYS2** for debugging with gdb on a Windows PC
-("Building on Windows" below), and the package rolls there too, with no
+Everything but the launcher is a **cross build from Linux**: QEMU with a
+mingw toolchain, Rust for `x86_64-pc-windows-gnu` and the Direct3D
+executor. The same stages also build **natively under MSYS2** on a
+Windows PC ("Building on Windows" below), with gdb. The launcher,
+`launcher-mitsuami` on WinUI 3 (ADR-023), is an MSVC binary and builds
+**only** there, so the portable zip is rolled on the PC too, with no
 container, checked by Windows itself rather than wine.
 
 The package runs on the user's PC (Ryzen 9 5900X, RTX 3090), 3D guests
@@ -14,15 +15,18 @@ Names and the install layout are in doc 07.
 ## The short version
 
 ```sh
-scripts/win-cross.sh --build      # once: the cross container (~5 min, ~3 GB)
-scripts/build-windows.sh          # qemu, rust, qt, exec, guest-tools
-scripts/package-windows.sh        # the zip, checked under wine
+# on the PC, in MSYS2's MINGW64 shell ("Building on Windows"):
+scripts/build-windows.sh          # qemu, rust, mitsuami, exec, guest-tools
+scripts/package-windows.sh        # the zip, checked on this PC
 scripts/package-windows.sh --msix # ... and the Store's MSIX layout ("The Store package")
+
+# on Linux, everything but the launcher:
+scripts/win-cross.sh --build      # once: the cross container (~5 min, ~3 GB)
+scripts/build-windows.sh          # qemu, rust, exec, guest-tools
 ```
 
-Or on the PC, in MSYS2's MINGW64 shell, after a native
-`scripts/build-windows.sh`: the same `scripts/package-windows.sh`, no
-podman (below, "Packaging on Windows").
+A Linux host can still roll the zip under wine, given a launcher built
+on a PC in `launcher-mitsuami/target/release/` (below, "The checks").
 
 The artefact is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
 Windows output goes to `build/win/` and `target/x86_64-pc-windows-gnu/`,
@@ -78,7 +82,7 @@ Three things that look like the build ignoring you:
 |---|---|---|
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
 | `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu` |
-| `qt` | `launcher-qt/target/x86_64-pc-windows-gnu/release/launcher-qt.exe` | the package's `2ksbox.exe` (ADR-015); its own workspace |
+| `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe` | the package's `2ksbox.exe` (ADR-023); its own workspace; Windows only, MSVC ("The launcher") |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its host test, the offscreen-GL probe |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, built only if absent |
 
@@ -90,8 +94,8 @@ directories under it.
 
 ```
 2ksbox.exe  2ksbox-player.exe  qemu-img.exe
-libqemu-embed-i386.dll  d3dpt_exec.dll  dxvk_d3d9.dll  <the mingw runtime, Qt>
-pc-bios\  guest-tools\  shaders\  tools\  doc\  plugins\  qml\  qt.conf
+libqemu-embed-i386.dll  d3dpt_exec.dll  dxvk_d3d9.dll  <the mingw runtime>
+pc-bios\  guest-tools\  shaders\  tools\  doc\
 2ksbox-debug.bat
 ```
 
@@ -126,15 +130,10 @@ nothing of ours ran, and the exit code says why (`0xC0000135` a missing
 DLL, `0xC0000142` an initialiser, `0xC0000005` a fault).
 
 **A verb ends the process with `TerminateProcess`, not `exit`**
-(`launcher_core::console::exit_after_verb`). The QML module compiled
-into `2ksbox.exe` keeps a `QGlobalStatic` whose destructor calls into
-`Qt6Qml.dll`; with msvcrt as the C runtime the executable's destructors
-run inside msvcrt's `DLL_PROCESS_DETACH`, after the Qt DLLs (loaded
-later, detached earlier) are gone, so every `--paths` and `--diagnose`
-printed its whole answer and then died with `0xC0000005` (found
-2026-09-23 running the staged package natively). A GUI run tears Qt
-down in order and never saw it. The verb has written everything by
-then; Rust's buffers are flushed and the process is ended.
+(`launcher_core::console::exit_after_verb`): it has written everything
+by then, and no global destructor runs after its DLLs are gone. The Qt
+launcher (retired 2026-10-02) printed every `--paths` and `--diagnose`
+answer and then died with `0xC0000005` in a Qt destructor that way.
 
 **The DLLs are a closure, not a list.** `objdump` walks the staged
 binaries' import tables and ships what is in the mingw sysroot, never
@@ -145,8 +144,11 @@ tables miss what is loaded at run time (`libepoxy-0.dll` names `libEGL`
 was dropped), so a second pass searches every staged binary for the
 name of any sysroot DLL not yet staged.
 
-**`package-windows.sh` runs the staged package under wine**, from
-outside the checkout with an empty environment:
+### The checks
+
+**`package-windows.sh` runs the staged package**, on Windows itself
+("Packaging on Windows") or under wine on Linux, from outside the
+checkout with an empty environment:
 
 - the launcher's `--paths` must answer inside the package;
 - the player's `--companions` must name the staged executor and
@@ -154,17 +156,19 @@ outside the checkout with an empty environment:
 - the display driver's host test must draw through that pair and read
   the right pixels (through winevulkan; skipped without a Vulkan device);
 - the packaged `qemu-img.exe` must write a qcow2, which also proves the
-  DLL closure.
+  DLL closure;
+- `2ksbox.exe` must not import `vcruntime*` / `msvcp*` (it links its C
+  runtime statically; "The launcher").
 
 Wine is not the target, so a failure there is investigated, not
 believed; but a package that fails these is broken on every Windows.
+Wine has no WinUI 3, so the launcher's window is not tried there.
 
 ### Packaging on Windows
 
 In MSYS2's MINGW64 shell the script needs no container and no wine.
-The mingw runtime, Qt's plugins and QML trees and the binutils are
-MSYS2's own (`/mingw64/bin`, `/mingw64/share/qt6`, `objdump`, `strip`),
-the ones the native build linked against. The DLL closure is the same
+The mingw runtime and the binutils are MSYS2's own (`/mingw64/bin`,
+`objdump`, `strip`), the ones the native build linked against. The DLL closure is the same
 walk; Windows' Vulkan loader is never staged although `/mingw64/bin`
 carries one (`vulkan-1.dll` must be the GPU driver's).
 
@@ -176,10 +180,17 @@ scratch directory, because Windows' known folders, not the environment,
 place `%APPDATA%`. The `LAUNCHER_PACKAGED=1` check has to see the real
 `%USERPROFILE%\2ksbox`; a run leaves it as it found it.
 
-This is the target, so two reports become verdicts: the offscreen window
-grab must write its PNG, and the display driver's host test must pass
-on the PC's own `system32\d3d9.dll` (`D3DPT_D3D9=system`) as well as on
-DXVK. `wgl-probe` answers for the PC's real GL.
+This is the target, so two reports become verdicts: the launcher must
+draw its window (`LAUNCHER_SHOT`, which starts WinUI 3 and the Windows
+App Runtime; the window shows for a moment), and the display driver's
+host test must pass on the PC's own `system32\d3d9.dll`
+(`D3DPT_D3D9=system`) as well as on DXVK. `wgl-probe` answers for the
+PC's real GL.
+
+The first run with the mitsuami launcher (2026-10-02) passed every
+check but one: 16 mingw DLLs where the Qt launcher needed 71, the window
+drawn, the C runtime static. The one is the executor's open thread on
+the system d3d9 (00-status).
 
 ## Which Direct3D 9 the executor runs on
 
@@ -243,37 +254,35 @@ guest on the user's PC reads `NVIDIA GeForce RTX 3090/PCIe/SSE2`.
   offscreen pbuffer", not "does our dispatch survive" (it resolves its
   pointers with a context current).
 
-## Qt, which the package carries
+## The launcher
 
-`2ksbox.exe` is `launcher-qt` (ADR-015), so the zip carries Qt's DLLs,
-the platform plugin and the QtQuick QML trees. Fedora ships
-`mingw64-qt6-*` to link against, a native Qt of the same version for the
-build-time tools, and `x86_64-w64-mingw32-qmake-qt6`, which answers
-`QT_INSTALL_*` with the target's paths and `QT_HOST_*` with the host's,
-as cxx-qt's cargo-only build needs.
+`2ksbox.exe` is `launcher-mitsuami` (ADR-023): WinUI 3 through
+mitsuami, the only MSVC binary in the package and the only one the
+Linux cross image cannot build. `build-windows.sh mitsuami` builds it in
+MSYS2's MINGW64 shell with `cargo +stable-x86_64-pc-windows-msvc` (Visual
+Studio's C++ tools must be installed; `rustup toolchain install
+stable-x86_64-pc-windows-msvc` once), into
+`launcher-mitsuami/target/release/`.
 
-- `CXX_QT_AUTORCC_OPTIONS=--no-zstd` (set in the image): the host `rcc`
-  has zstd and the mingw `Qt6Core` does not.
-- **There is no cross `windeployqt`**, so `package-windows.sh` copies
-  the plugin directories (**no window without
-  `plugins\platforms\qwindows.dll`**, in no import table), the QML
-  module trees the views import, and a `qt.conf` pointing at both. The
-  DLL closure walks plugins and QML modules too.
-- A PE import library only satisfies symbols already undefined when the
-  linker reaches it, so `launcher-qt/build.rs` names
-  `-lQt6QuickControls2` again after the archive holding
-  `appearance.cpp`.
-- **Two emutls registries.** rustc links libgcc statically while
-  `libstdc++-6.dll` uses `libgcc_s_seh-1.dll`'s, so cxx-qt's
-  `std::call_once` reached a `__once_proxy` reading `NULL` and the
-  launcher died before `main` (`0xC0000005`).
-  `launcher-qt/src/once_proxy.cpp` supplies a local proxy
-  (`tools/qtmin/` has the diagnosis).
-
-The package checks require `--paths` to answer and the staged launcher
-to open a window offscreen. Under wine the window grab is a report, not
-a verdict (wine's Qt 6 is not the target's); the last word is
-`2ksbox-debug.bat` on a real PC.
+- **Coreutils' `link` shadows Microsoft's.** MSYS2's `/usr/bin` has a
+  `link.exe` of its own, found before Visual Studio's ("link: extra
+  operand"), so the stage runs cargo with `/usr/bin` and `/bin` off
+  `PATH`. `/mingw64/bin` stays, for `windres`.
+- **A static C runtime** (`-C target-feature=+crt-static`), so the exe
+  imports no `vcruntime140.dll`, which no Windows comes with; the
+  packager checks it stays that way. It talks to the player and QEMU
+  only through a command line, so the two C runtimes never meet.
+- **The Windows App Runtime 2.4 or later** is a framework package that
+  Microsoft installs once per PC. mitsuami adds it to the process at
+  start (a dynamic package dependency); without it the launcher's log
+  says to install it. The zip cannot carry it; the MSIX declares it
+  (`PackageDependency` on `Microsoft.WindowsAppRuntime.2`), and the
+  Store installs it with the app.
+- **The icon and manifest** come from `packaging/windows/win-icon.rs`,
+  as for the player: on MSVC `windres` writes a `.res` that Microsoft's
+  linker takes as it is, and the linker makes no manifest of its own
+  (`/MANIFEST:NO`). WinUI starts with that manifest (checked
+  2026-10-02).
 
 ## The Store package
 
@@ -480,12 +489,12 @@ emulated regardless.
 
 ## Building on Windows
 
-For a fault that shows only on real Windows, `scripts/build-windows.sh`
-runs all its stages in **MSYS2's MINGW64 shell** with no container, and
-`scripts/win-run.sh` runs the result out of the checkout. Every stage
-builds on the user's PC and the launcher runs there; the ISO this build
-makes has not yet been booted in a guest. `scripts/package-windows.sh`
-rolls and checks the zip there too ("Packaging on Windows").
+`scripts/build-windows.sh` runs all its stages in **MSYS2's MINGW64
+shell** with no container, and `scripts/win-run.sh` runs the result out
+of the checkout. Every stage builds on the user's PC and the launcher
+runs there; the ISO this build makes has not yet been booted in a
+guest. The launcher builds only here, so `scripts/package-windows.sh`
+rolls and checks the zip here too ("Packaging on Windows").
 
 **MINGW64, not UCRT64 or CLANG64**: it is the cross image's ABI (msvcrt,
 GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`), so a fault
@@ -514,12 +523,12 @@ echo 'export WATCOM=/c/WATCOM' >> ~/.bashrc && . ~/.bashrc
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu rust qt exec, and the ISO if there is none
+scripts/build-windows.sh                  # qemu rust mitsuami exec, and the ISO if there is none
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, after a driver change
-scripts/win-run.sh launcher               # the Qt launcher, out of the checkout
-scripts/win-run.sh mitsuami               # launcher-mitsuami (MSVC, its own build), same setup
+scripts/win-run.sh launcher               # the launcher, out of the checkout
 GDB=1 scripts/win-run.sh player ...       # the player under gdb
+scripts/package-windows.sh                # the zip ("Packaging on Windows")
 ```
 
 `scripts/win-run.sh` stands in for the one-folder package: it puts
@@ -538,7 +547,7 @@ What differs from the cross build, and why:
   `file://C:/…` wheels URL, a host named `C:`; patch 69 fixed that
   until 11.0 passed a plain path.)
 - **Optional libraries are pinned off.** QEMU links what it detects, and
-  MSYS2 with Qt has zstd, gnutls and others the cross image lacks, so
+  MSYS2 has zstd, gnutls and others the cross image lacks, so
   native `configure-qemu.sh` disables each one the cross build lacks.
 - **lld is named through meson's `CC_LD`**, because a native meson
   cannot run the `clang-mingw-cc` shell script as a compiler. Same
@@ -547,21 +556,7 @@ What differs from the cross build, and why:
   `qemu-embed/build.rs` strips `canonicalize`'s `\\?\` prefix, because
   the linker appends `/libqemu-embed-…` and `/` is not a separator in a
   verbatim path.
-- **Qt's tools run from `build/win/qt-host`.** qt-build-utils starts
-  moc, rcc, qmltyperegistrar and qmlcachegen with an *empty*
-  environment, and MSYS2 installs them in `share/qt6/bin`, away from
-  their DLLs, so none starts ("moc unexpectedly exited"). The `qt` stage
-  copies each tool beside its DLLs (found with `ldd`) and sets `QMAKE` to
-  `packaging/windows/qmake-host.c`, a static wrapper that answers the
-  tool-directory queries with that folder and passes the rest to
-  `qmake6`. It then test-runs each tool with an empty environment and
-  prints what failed (qt-build-utils only says "could not find Qt").
-- **GCC 16 has no `std::__once_call` to borrow.** Its libstdc++ is built
-  with `_GLIBCXX_NO_EXTERN_THREAD_LOCAL`, so the pre-`main` fault cannot
-  happen and `once_proxy.cpp` compiles only where that macro is absent.
-  The package still carries it.
-- **Package versions follow MSYS2** (Qt 6.11 against Fedora's 6.10, GCC
-  16 against 15), so the zip remains the verdict.
+- **Package versions follow MSYS2** (GCC 16 against Fedora's 15).
 - `prepare-qemu.sh` runs every git through `qgit`, which retries on
   `Unable to create index.lock: File exists`, a scanner holding the lock
   of the git that just exited (00-status, "Building").

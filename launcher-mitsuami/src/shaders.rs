@@ -2,8 +2,7 @@
 //! (`launcher_core::editor::Editor`) with its live preview, which is the
 //! core's own render path (`launcher_core::preview`, the player's integer
 //! scale and letterbox on a windowless wgpu device). Its frame reaches the
-//! window as pixels in an `Image`, where the Qt build goes through a BMP on
-//! disk.
+//! window as pixels in an `Image`, with no file on disk in between.
 //!
 //! The preview renders at the size of the area it sits in (`use_size`),
 //! again when that size, the parameters or the picture changed, and, for
@@ -174,7 +173,7 @@ impl Shaders {
         };
         // A picture bigger than the area renders at scale 1, bigger than
         // the area: show its centre and cut what overflows, as the player
-        // and the Qt window (`clip`) do. Never scaled down.
+        // does. Never scaled down.
         let (vw, vh) = preview.viewport();
         let (cw, ch) = (vw.min(w.max(1)).min(fw), vh.min(h.max(1)).min(fh));
         let (x0, y0) = ((fw - cw) / 2, (fh - ch) / 2);
@@ -660,8 +659,7 @@ pub fn save_probe(shaders: Shaders, preset: &str) {
 }
 
 /// For the headless `editor:<preset>[;<image>[;<param>=<value>]]`
-/// screen: the editor on a preset and a picture, as the Qt build's
-/// `editPreset` does, with one parameter overridden as its box and slider
+/// screen: the editor on a preset and a picture, with one parameter overridden as its box and slider
 /// would (the preview must render again for it).
 pub fn edit_preset(shaders: Shaders, arg: &str) {
     let mut parts = arg.split(';');

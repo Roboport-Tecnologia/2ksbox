@@ -10,19 +10,24 @@
 #                                              #     (scripts/package-msix.sh)
 #   scripts/package-windows.sh --out DIR       # default build/win/package
 #
-# `2ksbox.exe` is `launcher-qt`, the Qt 6 / QML launcher (ADR-015), and
-# the package carries the Qt runtime it needs: the DLLs, the platform
-# plugin and the QML module trees, none of which Windows has.
+# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023),
+# the one MSVC binary here (`build-windows.sh mitsuami`, Windows only),
+# with a static C runtime. It needs no DLL of ours, but it runs on the
+# Windows App Runtime 2.4 or later, a framework Microsoft installs once
+# per PC; the zip cannot carry it, and the Store's MSIX declares it as a
+# dependency instead. So the package comes from a Windows PC, where that
+# launcher is built.
 #
 # It runs in two places, and builds nothing in either
 # (scripts/build-windows.sh does that, and this script says so if an
 # artefact is missing):
 #
-#   - a Linux host, not inside scripts/win-cross.sh: the checks need wine,
-#     which the cross image does not carry, and the mingw sysroot, Qt and
+#   - a Linux host, not inside scripts/win-cross.sh, given a launcher
+#     built on Windows in launcher-mitsuami/target/release: the checks need
+#     wine, which the cross image does not carry, and the mingw sysroot and
 #     strip come out of that image (podman) when the host has none;
-#   - MSYS2's MINGW64 shell on Windows, after a native build: the sysroot,
-#     Qt and binutils are MSYS2's own (/mingw64), no container, and the
+#   - MSYS2's MINGW64 shell on Windows, after a native build: the sysroot
+#     and binutils are MSYS2's own (/mingw64), no container, and the
 #     checks run the package itself, with nothing but Windows on PATH and
 #     the launcher's data in a scratch directory (LAUNCHER_DATA_DIR), not
 #     the user's %APPDATA%. There the window grab and the system-Direct3D
@@ -41,10 +46,7 @@
 #   dxvk_d3d9.dll               DXVK's d3d9, the executor's default,
 #                               renamed so it is never mistaken for
 #                               Windows' own d3d9.dll (D3DPT_D3D9=system)
-#   *.dll                       the mingw and Qt 6 runtimes those need
-#   plugins\                    Qt's platform plugin and friends
-#   qml\                        the QtQuick module trees the views import
-#   qt.conf                     where Qt looks for those two
+#   *.dll                       the mingw runtime those need
 #   pc-bios\                    QEMU firmware
 #   soundfonts\                 the General MIDI bank (doc 20)
 #   guest-tools\                the guest-tools ISO
@@ -84,20 +86,20 @@ VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 NAME="2ksbox-$VERSION-windows-x86_64"
 STAGE="$OUT/$NAME"
 TARGET="$ROOT/target/x86_64-pc-windows-gnu/release"
-QT_TARGET="$ROOT/launcher-qt/target/x86_64-pc-windows-gnu/release"
+LAUNCHER="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"
 Q="$ROOT/build/win/qemu"
 
 need() { [ -e "$1" ] || { echo "package-windows.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
 need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu"
 need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu"
-need "$QT_TARGET/launcher-qt.exe" "scripts/build-windows.sh qt"
+need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
 need "$TARGET/player.exe"        "scripts/build-windows.sh rust"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/doc"
 
-install -m755 "$QT_TARGET/launcher-qt.exe" "$STAGE/2ksbox.exe"
+install -m755 "$LAUNCHER" "$STAGE/2ksbox.exe"
 install -m755 "$TARGET/player.exe" "$STAGE/2ksbox-player.exe"
 install -m755 "$Q/qemu-img.exe" "$STAGE/"
 install -m755 "$Q/libqemu-embed-i386.dll" "$STAGE/"
@@ -216,44 +218,6 @@ pause
 BAT
 chmod 644 "$STAGE/2ksbox-debug.bat"
 
-# --- the Qt runtime ---------------------------------------------------
-# Qt needs more than its DLLs: a platform plugin (there is no window
-# without `platforms/qwindows.dll`) and the QML modules the views import,
-# neither of which is in any import table. Fedora's mingw packages have no
-# cross `windeployqt`, so this is that step written out: the plugin
-# directories, the three QML module trees `qml/*.qml`
-# imports (QtQuick pulls Controls, Layouts, Dialogs, Templates and
-# Effects with it), and a `qt.conf` so Qt resolves both relative to the
-# executable instead of to the build machine's absolute paths.
-# MSYS2 keeps the same two trees under share/qt6.
-QTROOT=${WIN_QTROOT:-$([ -n "$NATIVE" ] && echo /mingw64/share/qt6 || echo /usr/x86_64-w64-mingw32/sys-root/mingw/lib/qt6)}
-if [ ! -d "$QTROOT" ] && [ -z "$NATIVE" ]; then
-  QTROOT="$ROOT/build/win/qt6"
-  echo "==> copying the mingw Qt runtime out of the cross image"
-  rm -rf "$QTROOT"      # for the same reason as the sysroot copy above
-  mkdir -p "$QTROOT"
-  scripts/win-cross.sh bash -c \
-    "cp -a /usr/x86_64-w64-mingw32/sys-root/mingw/lib/qt6/plugins \
-           /usr/x86_64-w64-mingw32/sys-root/mingw/lib/qt6/qml '$QTROOT/'"
-fi
-need "$QTROOT/plugins/platforms" "$([ -n "$NATIVE" ] && echo "MSYS2's mingw-w64-x86_64-qt6-base" || echo "the cross image's mingw Qt 6")"
-mkdir -p "$STAGE/plugins" "$STAGE/qml"
-for d in platforms imageformats iconengines styles tls; do
-  [ -d "$QTROOT/plugins/$d" ] && cp -a "$QTROOT/plugins/$d" "$STAGE/plugins/"
-done
-for m in QtQuick QtQml QtCore; do
-  [ -d "$QTROOT/qml/$m" ] && cp -a "$QTROOT/qml/$m" "$STAGE/qml/"
-done
-cat > "$STAGE/qt.conf" <<'EOF'
-; Qt's own paths, relative to this executable. Without it a deployed
-; build looks for its plugins and QML modules where they were on the
-; machine that compiled Qt.
-[Paths]
-Prefix = .
-Plugins = plugins
-Qml2Imports = qml
-EOF
-
 # --- the DLL closure --------------------------------------------------
 # Everything our four binaries import, transitively, that is not a
 # Windows system DLL. A missing one of these is the classic Windows
@@ -280,7 +244,8 @@ fi
 if [ ! -d "$SYSROOT" ] && [ -z "$NATIVE" ]; then
   # The sysroot lives in the cross container, so ask it for a copy every
   # time. A kept copy is a snapshot of an older image; one from before Qt
-  # was in the image once quietly packaged a launcher with no Qt6Core.dll.
+  # was in the image once quietly packaged the old Qt launcher with no
+  # Qt6Core.dll.
   SYSROOT="$ROOT/build/win/sysroot-bin"
   echo "==> copying the mingw runtime out of the cross image"
   rm -rf "$SYSROOT"
@@ -292,11 +257,10 @@ command -v "$OBJDUMP" >/dev/null || { echo "package-windows.sh: no $OBJDUMP (WIN
 
 imports() { "$OBJDUMP" -p "$1" | sed -n 's/^\tDLL Name: //p'; }
 
-# Every binary in the package is a root, not just the ones at the top. A
-# Qt platform plugin or a QML module's DLL sits in a subdirectory, imports
-# half of Qt, and is loaded by name at run time, so nothing above it names
-# what it needs. Its imports resolve from the executable's own directory,
-# which is where the closure puts everything.
+# Every binary in the package is a root, not just the ones at the top
+# (tools\wgl-probe.exe sits in a subdirectory). Its imports resolve from
+# the executable's own directory, which is where the closure puts
+# everything.
 staged_binaries() { find "$STAGE" \( -name '*.dll' -o -name '*.exe' \) -type f; }
 
 # Seeded with what is Windows' even where a sysroot carries a copy:
@@ -443,8 +407,8 @@ if [ -n "$RUN" ]; then
 
   resolved=$(runpkg 2ksbox.exe --paths 2>/dev/null || true)
   if [ -z "$resolved" ]; then
-    # The Qt launcher once could not answer, while its `std::call_once`
-    # died before `main` (M11). That bug is fixed, so silence fails.
+    # A launcher that dies before `main` answers nothing, so silence
+    # fails.
     echo "package-windows.sh: the staged launcher printed nothing for --paths" >&2
     fail=1
   else
@@ -576,35 +540,35 @@ EOF
     fail=1
   fi
 
-  # A window, which `--paths` never opens. Qt finds its platform plugin
-  # and its QML modules by name at run time, out of `plugins\` and
-  # `qml\` beside the executable, and no import table says so. A package
-  # that answers every question above can still show nothing on a real PC.
-  # Under wine the grab is a report, not a verdict (wine's Qt is not the
-  # target's), but the staged files below are a verdict: without
-  # `qwindows.dll` the package cannot open a window anywhere. Natively the
-  # grab is a verdict too.
-  if [ -f "$STAGE/plugins/platforms/qwindows.dll" ] && [ -f "$STAGE/qml/QtQuick/qmldir" ]; then
-    echo "qt runtime     platforms\\qwindows.dll and the QtQuick modules are staged"
-  else
-    echo "package-windows.sh: no plugins\\platforms\\qwindows.dll or no qml\\QtQuick: the launcher would open no window" >&2
+  # The launcher's C runtime, which the closure above cannot see: an MSVC
+  # binary that imports vcruntime140.dll (or a ucrt redistributable DLL)
+  # needs a Visual C++ redistributable no Windows comes with, and a PC
+  # without it shows a loader dialog before any code of ours runs.
+  # `build-windows.sh mitsuami` links it statically; this keeps it so.
+  if imports "$STAGE/2ksbox.exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
+    echo "package-windows.sh: 2ksbox.exe imports $(imports "$STAGE/2ksbox.exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(build it with +crt-static: scripts/build-windows.sh mitsuami)" >&2
     fail=1
+  else
+    echo "c runtime      2ksbox.exe links its C runtime statically"
   fi
+  # A window, which `--paths` never opens: WinUI 3 and the Windows App
+  # Runtime start only then. The launcher's own headless grab
+  # (`LAUNCHER_SHOT`, launcher-mitsuami/src/shot.rs) opens the machine
+  # window, draws it into a PNG and exits. Natively that is a verdict (it
+  # shows for a moment on this desktop). Wine has no WinUI, so there it is
+  # not tried, and the real answer is 2ksbox-debug.bat on a PC.
   shot="$scratch/window.png"
-  # `T=90`: the grab is the one call here that opens a Qt window, and a
-  # Qt window under wine with the offscreen plugin and no display can
-  # never come back. Without the bound the script hangs here instead of
-  # taking the "no offscreen grab" branch below.
-  T=90 runpkg QT_QPA_PLATFORM=offscreen LAUNCHER_QT_SHOT="$(winpath "$shot")" LAUNCHER_QT_DELAY=2000 \
-      2ksbox.exe >/dev/null 2>&1 || true
-  if [ -s "$shot" ]; then
-    echo "window         grabbed offscreen$([ "$RUN" = wine ] && echo ' under wine'): QML, plugins and all"
-    rm -f "$shot"
-  elif [ "$RUN" = native ]; then
-    echo "package-windows.sh: the staged launcher grabbed no window offscreen (QT_QPA_PLATFORM=offscreen LAUNCHER_QT_SHOT=)" >&2
-    fail=1
+  if [ "$RUN" = native ]; then
+    T=90 runpkg LAUNCHER_SHOT="$(winpath "$shot")" 2ksbox.exe >/dev/null 2>&1 || true
+    if [ -s "$shot" ]; then
+      echo "window         drawn by the staged launcher on WinUI 3"
+      rm -f "$shot"
+    else
+      echo "package-windows.sh: the staged launcher drew no window (LAUNCHER_SHOT); is the Windows App Runtime 2.4+ installed?" >&2
+      fail=1
+    fi
   else
-    echo "window         (no offscreen grab under wine; the real answer is 2ksbox-debug.bat on a PC)"
+    echo "window         (WinUI 3 does not run under wine; the real answer is 2ksbox-debug.bat on a PC)"
   fi
 
   # The bundle-creating path end to end: the staged launcher runs the

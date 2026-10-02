@@ -24,7 +24,7 @@ packaging, logs and licensing. Neighbours:
 | Guest music | We build OPL3 and MPU-401 devices over `libsynth` (doc 20) |
 | CRT shaders | Exists: libretro slang presets through librashader (a library, not RetroArch) |
 | Player | We build it: in-process QEMU, wgpu + librashader, mode analysis, low-latency audio (Rust) |
-| Launcher | We build `launcher-core`, shipped as `launcher-qt` (Qt 6 / QML via cxx-qt), and `launcher-capi` for other languages |
+| Launcher | We build `launcher-core`, shipped as `launcher-mitsuami` (native widgets through mitsuami: AppKit, WinUI 3, GTK 4), and `launcher-capi` for other languages |
 | CD-ROM backend | We build `libdisc` (cue/bin, subchannel, CD-DA, `isodir:` folders), the ATAPI patches, the disc shelf |
 | Machine families | We build Win98, XP, DOS (throttled CPU rates) and Other |
 
@@ -67,9 +67,11 @@ Also: [testing](testing.md), [macOS](build-macos.md),
 
 `scripts/build.sh` is the one command, and the one to run after every
 `git pull`; it redoes only what changed. `--help` lists the stages
-(`deps qemu edk2 virtio rust qt dxvk exec guest`; `deps` builds QEMU's
-libraries from source, on macOS Qt too, [build-macos.md](build-macos.md)
-"The libraries"; `edk2` and `virtio` are an Arm host's alone, Windows
+(`deps qemu edk2 virtio rust mitsuami dxvk exec guest`; `deps` builds
+QEMU's libraries from source, [build-macos.md](build-macos.md) "The
+libraries"; `mitsuami` is the launcher, which needs GTK 4.10+
+development files on Linux (`pkg-config gtk4`) and nothing extra on a
+Mac; `edk2` and `virtio` are an Arm host's alone, Windows
 11 on Arm's firmware (`scripts/build-edk2.sh`, `patches/edk2/README.md`)
 and drivers disc (`scripts/build-virtio-win.sh`)). Naming
 stages builds only those,
@@ -90,7 +92,7 @@ scripts/build-virtio-win.sh  # its drivers disc, build/virtio-win/2ksbox-drivers
 cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64   # its player
 codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player   # a Mac: HVF
 cargo check --release --workspace          # launcher-capi, the one non-default member
-(cd launcher-qt && cargo build --release)  # the Qt launcher; its own workspace
+(cd launcher-mitsuami && cargo build --release)  # the launcher; its own workspace
 # Direct3D pass-through (doc 14):
 scripts/prepare-dxvk.sh && scripts/configure-dxvk.sh && ninja -C build/dxvk && scripts/build-d3dpt-exec.sh
 # the guest-tools ISO (SETUP.EXE, the guest DLLs, both display drivers):
@@ -130,8 +132,7 @@ What each stage needs to know:
   `libqemu-embed` shows no system GLib in `ldd`. The reason is QEMU's
   main loop: it iterates GLib's global default `GMainContext` on QEMU's
   thread, and with a GLib shared with its process, a toolkit that runs
-  on that context (GTK; Qt's GLib event dispatcher) would have its
-  sources dispatched there (`tracks/m22-mitsuami-player.md`, "Why QEMU links a GLib of its own"). GLib 2.90
+  on that context (GTK) would have its sources dispatched there (`tracks/m22-mitsuami-player.md`, "Why QEMU links a GLib of its own"). GLib 2.90
   wants meson 1.4. **`QEMU_DEPS=system`** links the distribution's GLib
   and libslirp instead, and libtpms if it has one (`build.sh` and
   `configure-qemu.sh` both read it;
@@ -448,32 +449,63 @@ On a Linux host, frames go through the embed backend's dma-buf ring
 ## The launcher's front ends
 
 `launcher-core` decides everything and a front end draws and forwards
-events (doc 07, ADR-014). `launcher-qt` is the one every package
-installs as `2ksbox` (ADR-015); the egui front end was deleted
-(ADR-017).
+events (doc 07, ADR-014). `launcher-mitsuami` is the only front end
+and the one every package installs as `2ksbox` (ADR-023, which
+supersedes ADR-015): native widgets through the mitsuami toolkit,
+AppKit on macOS, WinUI 3 on Windows, GTK 4 on Linux (Kirigami with
+`--no-default-features --features kde`). The Qt launcher
+(`launcher-qt`) was deleted on 2026-10-02 (user decision), as the egui
+one was before it (ADR-017).
 
-`launcher-qt` is its own cargo workspace, so a root `cargo build` never
-needs Qt 6. `build.sh`'s `qt` stage builds it; a host with no Qt 6 skips
-that stage and can roll no package. There is no CMake: `cxx-qt-build`
-finds Qt through `qmake6`. In a checkout the binary is
-`launcher-qt/target/release/launcher-qt`, and it finds the player as
-every launcher does (doc 07: the mitsuami player when built, else the
-root `target/release`; `LAUNCHER_PLAYER_BIN` overrides).
+`launcher-mitsuami` is its own cargo workspace, so a root `cargo build`
+never needs GTK. `build.sh`'s `mitsuami` stage builds it; a Linux host
+with no GTK 4.10+ development files skips that stage and can roll no
+package. On Windows it is the one MSVC binary (WinUI 3, static C
+runtime) and builds only on a PC (`scripts/build-windows.sh mitsuami`,
+[build-windows.md](build-windows.md)). Run it from a checkout with
+
+```sh
+(cd launcher-mitsuami && cargo run --release)
+launcher-mitsuami/target/release/launcher-mitsuami   # or the built binary
+scripts/win-run.sh launcher                          # Windows, in MSYS2's MINGW64 shell
+```
+
+It finds the player as every launcher does (doc 07: the mitsuami player
+when built, else the root `target/release`; `LAUNCHER_PLAYER_BIN`
+overrides).
 
 The toolkit-free debug verbs (`launcher_core::cli`: `--print-args`,
 `--print-player-args`, `--prepare` (a Windows 11 machine's firmware
 variables, made before a hand-run QEMU starts it), `--new`, `--discs`,
-`--host-check`, `--paths`, `--diagnose`, `--wizard-edit`, …) answer identically from `launcher-qt`
-and from `launcherx`, a binary with no toolkit that `scripts/test.sh`
-and the guest tools drive:
+`--host-check`, `--paths`, `--diagnose`, `--wizard-edit`, …) answer
+identically from `launcher-mitsuami` and from `launcherx`, a binary
+with no toolkit that `scripts/test.sh` and the guest tools drive:
 
 ```sh
 cargo build --release -p launcher-core --bin launcherx
 target/release/launcherx --print-args ~/.local/share/2ksbox/machines/xp/machine.toml
 ```
 
-`launcher-qt` grabs its real windows headless itself
-(`QT_QPA_PLATFORM=offscreen` with `LAUNCHER_QT_SHOT`, doc 07).
+The launcher grabs its own real windows: `LAUNCHER_SHOT=<png>`
+(`launcher-mitsuami/src/shot.rs`) draws the window's content into a PNG
+after `LAUNCHER_SHOT_DELAY_MS` (800) and exits, and `LAUNCHER_SCREEN`
+picks the window (unset is the machine window; `wizard[:<family>…]`,
+`edit:<machine.toml>`, `clone:<machine.toml>` and the rest are in
+[tracks/m19-mitsuami-launcher.md](tracks/m19-mitsuami-launcher.md)
+"Test loop"). On Linux it runs on a private Broadway display, so
+nothing opens on the desktop:
+
+```sh
+gtk4-broadwayd :7 &
+LAUNCHER_LIBRARY_DIR=/tmp/lib LAUNCHER_DISC_LIBRARY=/tmp/discs.toml \
+LAUNCHER_SHADER_PROFILES_DIR=/tmp/profiles \
+GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 GTK_USE_PORTAL=0 \
+LAUNCHER_SHOT=/tmp/main.png launcher-mitsuami/target/release/launcher-mitsuami
+```
+
+AppKit has no offscreen mode, so on a Mac the window shows for a
+moment. `LAUNCHER_SHOT_TREE=1` also prints every node's kind and frame.
+`scripts/test.sh`'s `mitsuami` check drives the windows this way.
 
 **`launcher-capi`** is a C ABI over the same models (opaque handles,
 index-addressed rows, caller-owned strings) for a front end in Swift or
@@ -499,8 +531,10 @@ and never runs the suite.
 
 Everything is named **2ksbox** (ADR-011). The install layout every
 package shares is doc 07's "The install layout". Every packager opens
-the staged launcher's real window offscreen and requires a PNG, because
-Qt's platform plugin and QML modules are named in no import table.
+the staged launcher's real window with `LAUNCHER_SHOT` and requires a
+PNG (on Linux and in the Flatpak on a private Broadway display),
+because a toolkit that is half installed passes every other check and
+opens nothing.
 
 ### Linux tarball
 
@@ -513,11 +547,10 @@ It stages the launcher, the player, the embed library, our `qemu-img`,
 the firmware, the guest-tools ISO and the libraries QEMU `dlopen`s
 (executor + DXVK, the Wine pair) into one relocatable
 prefix, checks that everything resolves inside it from a scrubbed
-environment (`docs/testing.md`), and rolls a tarball. **Qt 6 is not in
-it**: it needs the distribution's `qt6-base` and `qt6-declarative`
-(Debian/Ubuntu: `libqt6quick6` plus the `qml6-module-qtquick-*`
-packages), and `install.sh` names them when the loader cannot find
-them. The extracted tree runs in place (`bin/2ksbox`); `install.sh`
+environment (`docs/testing.md`), and rolls a tarball. **GTK 4 is not in
+it**: it needs the distribution's GTK 4, 4.10 or later (Arch and
+Fedora: `gtk4`; Debian/Ubuntu: `libgtk-4-1`), and `install.sh` names
+it when the loader cannot find it. The extracted tree runs in place (`bin/2ksbox`); `install.sh`
 copies it into a prefix (`~/.local` by default) with a desktop entry,
 `com._2ksbox.Launcher.desktop` (the window's `app_id`). The tarball
 ships no system libraries, so it wants a host much like the one that
@@ -530,10 +563,11 @@ scripts/package-flatpak.sh          # build, install --user, smoke check
 flatpak run com._2ksbox.Launcher
 ```
 
-Built from source against `org.kde.Sdk` 6.10 (Qt from KDE's runtime,
-`org.freedesktop.Platform` 25.08 underneath). Set `FLATPAK_BUILD_DIR`
-(and flatpak's own `FLATPAK_USER_DIR`) to keep the ~12 GB build tree off
-the root filesystem. The build is offline, as Flathub requires: every
+Built from source against `org.gnome.Sdk` 49 (GTK 4 from GNOME's
+runtime, `org.freedesktop.Platform` 25.08 underneath; it was
+`org.kde.Platform` 6.10 while the launcher was Qt, until 2026-10-02).
+Set `FLATPAK_BUILD_DIR` (and flatpak's own `FLATPAK_USER_DIR`) to keep
+the ~12 GB build tree off the root filesystem. The build is offline, as Flathub requires: every
 crate is declared with a checksum in `packaging/flatpak/cargo-sources.json`.
 Run `scripts/gen-flatpak-cargo-sources.sh` and commit the result
 whenever a dependency changes. Both manifests take their branch from the
@@ -573,8 +607,8 @@ Direct3D note says so on a below-floor host.
 ### macOS (`2ksbox.app` / `.dmg`)
 
 `scripts/package-macos.sh` on Apple Silicon bundles the whole non-system
-dylib closure, Qt through `macdeployqt`, and the executor with the
-LunarG loader and KosmicKrisp, then signs with the
+dylib closure and the executor with the LunarG loader and KosmicKrisp
+(the launcher is on AppKit and brings no toolkit), then signs with the
 hardened runtime and the JIT entitlement, notarizes and staples.
 `--community` is ADR-019's community build, which adds the Wine pair.
 `--x86_64` (after `scripts/build.sh --x86_64`) is the Intel app, made on
@@ -587,9 +621,12 @@ build".
 
 Cross-built from Linux in a Fedora mingw-w64 container
 (`scripts/win-cross.sh --build`, `scripts/build-windows.sh`,
-`scripts/package-windows.sh`): `2ksbox.exe` (the Qt launcher),
-`2ksbox-player.exe`, `libqemu-embed-i386.dll`, the executor with DXVK,
-`qemu-img.exe`, firmware and guest tools in one portable folder. The
+`scripts/package-windows.sh`, which also runs natively in MSYS2):
+`2ksbox.exe` (the launcher, WinUI 3, the one MSVC binary, built on a PC
+with `build-windows.sh mitsuami`; it needs the Windows App Runtime 2.4
+or later), `2ksbox-player.exe`, `libqemu-embed-i386.dll`, the executor
+with DXVK, `qemu-img.exe`, firmware and guest tools in one portable
+folder. The
 same folder packs as an MSIX for the Microsoft Store
 (`scripts/package-msix.sh`, on a PC with the Windows SDK).
 Details: [build-windows.md](build-windows.md).
@@ -606,35 +643,18 @@ Details: [build-windows.md](build-windows.md).
   no stdout, `2ksbox-debug.bat` in the package does that.
 - Every Play writes the full player command line to `launcher.log` as
   `[player] …`, quoted for pasting back into a shell.
-- The Qt front end follows the desktop's light or dark mode. On Windows
-  it uses Qt's Windows 11 style, FluentWinUI3
-  (`QT_QUICK_CONTROLS_STYLE=Windows` is the older look); elsewhere Fusion
-  or the macOS style. Never force a palette: a Quick Controls style draws
-  its controls in the *platform theme's* palette, and a palette handed to
-  the application reaches only the surfaces around them, which made a
-  mixed look. `LAUNCHER_QT_SCHEME=light|dark` forces a scheme for a
-  comparison; `launcher.log` records the style and colours a run got.
-- On Linux the launcher asks for the **XDG desktop portal platform
-  theme** (`QT_QPA_PLATFORMTHEME=xdgdesktopportal`, set in `main.rs` when
-  the variable is empty). Qt picks a theme by `XDG_CURRENT_DESKTOP`, and
-  a session it matches nothing to (sway, a plain window manager) gets
-  one with no file dialog and no colour scheme: Qt's own picker and a
-  light window on a dark desktop. The portal theme wraps the theme Qt
-  would have picked and defers to it when the bus has no file chooser,
-  so KDE and GNOME lose nothing. Set the variable yourself to compare
-  (`gtk3`, `kde`, or empty for Qt's choice).
 
 ## Licensing, for packagers
 
 Everything that links QEMU in-process is GPL-2.0: the `player`,
 `qemu-embed`, and `libdisc` and `libsynth`, which are compiled into QEMU.
 
-The **launcher** (`launcher-core`, `launcher-qt`, `launcher-capi`) and
+The **launcher** (`launcher-core`, `launcher-mitsuami`, `launcher-capi`) and
 the `shader-chain` crate it shares with the player are
 **GPL-2.0-or-later** (ADR-009). None links QEMU (the launcher spawns the
 player as a separate process), and they link Apache-2.0 crates (`ring`
 under `ureq`'s rustls, among others) that GPLv2 cannot take and GPLv3
-can. `launcher-qt` links Qt 6 under the LGPLv3 for the same reason.
+can.
 
 Original code is Rust wherever possible (ADR-004); C appears only inside
 QEMU / qemu-3dfx and in guest-side era code. The GPLv2 text is in

@@ -66,23 +66,6 @@ RUN curl -fsSL -o /tmp/libslirp.tar.gz \
     && ninja -C /tmp/libslirp-v${LIBSLIRP}/build install \
     && rm -rf /tmp/libslirp.tar.gz /tmp/libslirp-v${LIBSLIRP}
 
-# Qt 6 for the launcher (launcher-qt, ADR-015), both halves of a cross
-# build. The mingw libraries and headers are what the binary links
-# against; the *native* Qt of the same version runs the tools here (moc,
-# rcc, qmltyperegistrar, qmlcachegen). Fedora ships both at 6.10.3, plus a
-# native `x86_64-w64-mingw32-qmake-qt6` that answers with the mingw paths
-# for the target and /usr/lib64/qt6 for the host, which is what cxx-qt's
-# cargo-only build asks qmake for.
-RUN dnf install -y --setopt=install_weak_deps=False \
-        mingw64-qt6-qtbase mingw64-qt6-qtdeclarative \
-        qt6-qtbase-devel qt6-qtdeclarative-devel \
-    && dnf clean all -y
-# The cross qmake. Also, the host rcc has zstd and the mingw Qt6Core does
-# not, so a resource compiled with the default algorithm asks the target
-# for `qResourceFeatureZstd()` and does not link. zlib instead.
-ENV QMAKE=/usr/bin/x86_64-w64-mingw32-qmake-qt6 \
-    CXX_QT_AUTORCC_OPTIONS=--no-zstd
-
 # Rust, in the image rather than on the host. The same stable channel the
 # native build uses, plus the windows-gnu target. CARGO_HOME/RUSTUP_HOME
 # live under /opt so a bind-mounted checkout never inherits (or writes)

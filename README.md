@@ -44,9 +44,9 @@ media, licences and disc dumps.
 
 | Host | Requirements |
 |---|---|
-| Linux | An x86-64 machine. KVM for near-native XP (optional; Windows 98 is emulated on purpose). A GPU with Vulkan 1.3 for the fast Direct3D path. Without it, Direct3D runs through Wine on the host if Wine is installed; with neither, the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
+| Linux | An x86-64 machine with GTK 4.10 or newer. KVM for near-native XP (optional; Windows 98 is emulated on purpose). A GPU with Vulkan 1.3 for the fast Direct3D path. Without it, Direct3D runs through Wine on the host if Wine is installed; with neither, the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
 | macOS | Apple Silicon, macOS 15 or newer. Guests are emulated (no x86 virtualization on these Macs) and still run faster than a period PC. The fast Direct3D path needs macOS 26; on older releases Direct3D runs through Wine if it is installed, and with no Wine the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
-| Windows | 64-bit Windows 10 or 11. WHPX (the Windows Hypervisor Platform) accelerates XP when it is enabled. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
+| Windows | 64-bit Windows 10 or 11 with the Windows App Runtime 2.4 or later. WHPX (the Windows Hypervisor Platform) accelerates XP when it is enabled. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
 
 You also need install media for the guest operating system (your own
 Windows 98 / XP CD image, a DOS floppy or CD) and, for games, dumps of
@@ -69,7 +69,7 @@ Debian 12 and 13 and Ubuntu 24.04 and 26.04.
 |---|---|---|
 | Compilers and build tools | `base-devel git ninja meson pkgconf` | `build-essential git ninja-build meson pkg-config` |
 | QEMU's libraries | `pixman zlib libffi mesa libx11` | `libpixman-1-dev zlib1g-dev libffi-dev libgl-dev libx11-dev` |
-| The launcher (Qt 6) | `qt6-base qt6-declarative` | `qt6-base-dev qt6-declarative-dev qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-dialogs` |
+| The launcher (GTK 4.10 or newer) | `gtk4` | `libgtk-4-dev` |
 | Direct3D executor (optional) | `vulkan-headers vulkan-icd-loader glslang` | `libvulkan-dev glslang-tools` |
 | Direct3D through Wine, for a GPU without Vulkan 1.3 (optional) | `mingw-w64-gcc wine` | `g++-mingw-w64-x86-64 wine` |
 | Guest tools disc (optional) | `mingw-w64-gcc nasm xorriso` | `gcc-mingw-w64-i686 nasm xorriso` |
@@ -78,6 +78,10 @@ QEMU gets a GLib of its own: the build downloads GLib, PCRE2 and libslirp
 and builds them for it, which needs meson 1.4 or newer. Debian 12 and
 Ubuntu 24.04 package older ones; there, `uv tool install meson` (uv is
 below) gives a newer one.
+
+The launcher draws with the system's GTK 4, so a machine that only
+runs 2ksbox needs GTK 4 itself (Arch `gtk4`, Debian/Ubuntu
+`libgtk-4-1`); the development package above brings it.
 
 The guest tools disc also needs **Open Watcom v2** for the Windows 98
 display driver. Unpack the `ow-snapshot.tar.xz`
@@ -101,7 +105,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```sh
 xcode-select --install
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install ninja meson cmake pkg-config gnu-sed uv   # build tools; the app's libraries and Qt are built from source by the build
+brew install ninja meson pkg-config gnu-sed uv   # build tools; the app's libraries are built from source by the build
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -110,8 +114,9 @@ Optional on macOS: `brew install mingw-w64 nasm xorriso` and Open Watcom
 for the Direct3D executor on macOS 26 (the recipe is in
 [docs/build-macos.md](docs/build-macos.md)).
 
-**Windows.** The Windows build is made *on a Linux machine* with podman
-or docker and copied over as a zip (step 5).
+**Windows.** The launcher (WinUI 3) builds only on Windows, with
+Visual Studio's C++ tools, so the Windows package is made on a Windows
+PC in MSYS2 (step 5).
 
 ### 2. Get the source
 
@@ -139,7 +144,7 @@ build: install the tool and run the command again.
 
 Check two lines in the summary:
 
-- `qt` must be built, or there is no launcher.
+- `mitsuami` must be built, or there is no launcher.
 - `guest` should be built. Without the guest-tools disc there are no
   guest drivers, and a machine has plain VGA and no 3D.
 
@@ -148,7 +153,7 @@ After every `git pull`, run `scripts/build.sh` again.
 ### 4. Run it
 
 ```sh
-launcher-qt/target/release/launcher-qt
+launcher-mitsuami/target/release/launcher-mitsuami
 ```
 
 Nothing has to be installed: the launcher finds the player, QEMU, the
@@ -159,18 +164,22 @@ on macOS).
 
 ### 5. Windows
 
-The Windows build is a cross build on Linux, in a podman (or docker)
-container the first command makes:
+The launcher is a WinUI 3 program built with MSVC, so the package comes
+from a Windows PC. In MSYS2's MINGW64 shell, with rustup's
+`stable-x86_64-pc-windows-msvc` toolchain and Visual Studio's C++
+tools:
 
 ```sh
-scripts/win-cross.sh --build      # once: the cross container (~5 min, ~3 GB)
+scripts/build-windows.sh --msys2-deps   # once: what the build needs
 scripts/build-windows.sh
 scripts/package-windows.sh
 ```
 
 The result is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
-Unzip it anywhere on the Windows machine and run `2ksbox.exe`. The
-details, and a native build in MSYS2 for debugging, are in
+Unzip it anywhere and run `2ksbox.exe`; it needs the Windows App
+Runtime 2.4 or later, which Microsoft installs once per PC. The rest of
+the build can also be cross-built on Linux in a podman (or docker)
+container; the details are in
 [docs/build-windows.md](docs/build-windows.md).
 
 ## First run
@@ -258,8 +267,8 @@ machine's settings for games that want a real PS/2 mouse.
 
 ## When something goes wrong
 
-- **"Something is missing."** `2ksbox --paths` (`launcher-qt --paths` in
-  a checkout) prints where this build looks for each companion program
+- **"Something is missing."** `2ksbox --paths` (`launcher-mitsuami
+  --paths` in a checkout) prints where this build looks for each companion program
   and file. `2ksbox --diagnose` prints the same plus what it found of
   this host's 3D, and writes it to `launcher.log` beside the machine
   library. Attach that log to a bug report. On Windows,

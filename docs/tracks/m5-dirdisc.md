@@ -27,8 +27,10 @@ test loop, traps and open items. The design:
   checking the host path.
 - Launcher, shared with M6: `launcher-core/src/disc_library.rs`
   (`qemu_medium`), `bundle.rs` (comma doubling), `control.rs` (forced
-  insert), `cli.rs` (`--discs publish`), `launcher-qt/qml/DiscShelfWindow.qml`
-  ("Add folder…").
+  insert), `cli.rs` (`--discs publish`), and the disc shelf's "Add
+  folder…" (then `launcher-qt/qml/DiscShelfWindow.qml`; since
+  2026-10-02 the Add menu's "Folder as disc…" in
+  `launcher-mitsuami/src/discs.rs`).
 - `libdisc.h` did not change: `libdisc_open` on a directory is the whole
   interface, so `LIBDISC_API_VERSION` stays 1.
 

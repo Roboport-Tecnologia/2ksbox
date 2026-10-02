@@ -1,4 +1,4 @@
-//! Every debug verb that needs no toolkit, in one place, so the Qt
+//! Every debug verb that needs no toolkit, in one place, so the
 //! launcher and `launcherx` answer the same ones with the same code
 //! (doc 07; the verb table is in `docs/development.md`). They are how
 //! the launcher is tested: the policy is integration and end-to-end
@@ -10,8 +10,8 @@
 //! call it first thing, before a GUI exists.
 //!
 //! The headless screenshots are not here, because they need the
-//! toolkit: `launcher-qt` renders its real windows under
-//! `QT_QPA_PLATFORM=offscreen` and `grabToImage` (`qt/diag.rs`).
+//! toolkit: `launcher-mitsuami` photographs its real windows with
+//! `LAUNCHER_SHOT` and `LAUNCHER_SCREEN` (its `src/shot.rs`).
 
 use crate::bundle::{self, Family, Machine, Music, Optimization, Sound};
 use crate::{browse, clone_machine, control, disc_library, firstrun, library, machines, player, preview,

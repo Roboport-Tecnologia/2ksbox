@@ -6,11 +6,13 @@
 #
 # Why this number (docs/build-macos.md, "The floor"): the app carries
 # nothing of the Mac's package manager any more (scripts/build-deps.sh
-# builds QEMU's libraries and Qt from source, user decision 2026-09-23),
-# so the floor is set by what those sources support. Qt 6.9 is the newest
-# line that still runs on macOS 12 (6.11 needs 13; 6.5 reached 11 but its
-# open-source line ended in 2023). QEMU, glib, pixman, libslirp, zstd, the
-# LunarG loader, KosmicKrisp and Rust all go lower. `scripts/build.sh`
+# builds QEMU's libraries from source, user decision 2026-09-23), so the
+# floor is set by what those sources support. It was Qt 6.9's, the newest
+# Qt line that still ran on macOS 12, while the launcher was Qt. The
+# launcher is now launcher-mitsuami on AppKit (ADR-023), and 12 stands
+# until a Mac that old has run it: mitsuami's own AppKit floor is not
+# measured yet. QEMU, glib, pixman, libslirp, zstd, the LunarG loader,
+# KosmicKrisp and Rust all go lower. `scripts/build.sh`
 # builds everything for this target and `package-macos.sh` fails on any
 # file above it. A preset MACOSX_DEPLOYMENT_TARGET wins everywhere, for a
 # one-off build.

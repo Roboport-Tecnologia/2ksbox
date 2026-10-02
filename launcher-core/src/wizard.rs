@@ -10,10 +10,10 @@
 //! `seamless_mouse_notes()` and prints them; it never composes its own.
 //! When two front ends each composed them, they told the user different
 //! things about the same checkbox ("Windows won't see a card" against
-//! "the guest won't see a card"), and the Qt one also lacked the
-//! processor, floppy and boot fields.
+//! "the guest won't see a card"), and the Qt one (retired) also lacked
+//! the processor, floppy and boot fields.
 //!
-//! A retained-mode front end (Qt) has a property setter and no
+//! A retained-mode front end has a property setter and no
 //! before/after pair to compare. So a field with a consequence (family,
 //! memory, acceleration, networking, the processor) is private, with a
 //! `choose_*` that applies the consequence and a `reset_*` that puts it
@@ -386,7 +386,7 @@ impl Form {
     }
 
     /// The same, from a bundle path, for a front end that addresses
-    /// windows by path (Qt does; every window there re-reads the bundle
+    /// windows by path (one where every window re-reads the bundle
     /// rather than being handed a copy). The load error, if any, lands
     /// in `error` and the form does not open.
     pub fn open_edit_path(&mut self, bundle_path: PathBuf) {
@@ -426,8 +426,8 @@ impl Form {
 
     /// The bundle being edited, `None` for a new machine. This is the
     /// form's identity, for a front end that keeps something per machine
-    /// (the Qt window keeps its scroll position while the same machine is
-    /// reopened and starts at the top for another).
+    /// (a window that keeps its scroll position while the same machine
+    /// is reopened and starts at the top for another).
     pub fn bundle_path(&self) -> Option<&Path> {
         self.editing.as_ref().map(|e| e.bundle_path.as_path())
     }
@@ -1189,9 +1189,9 @@ impl Form {
     /// modern machine, `shader_library::default_label_for`), then every profile of the
     /// library by name, in `shader_library::scan`'s order. A front end hands the same `profiles` to the three verbs
     /// below, so a row is a profile and nothing in the widget translates
-    /// between an index and an id. When the Qt window did that itself it
-    /// needed a delegate of its own, and its combo box looked unlike the
-    /// others in the form.
+    /// between an index and an id. When the Qt launcher's window (retired
+    /// 2026-10-02) did that itself it needed a delegate of its own, and
+    /// its combo box looked unlike the others in the form.
     pub fn shader_profile_labels(&self, profiles: &[ProfileEntry]) -> Vec<String> {
         std::iter::once(shader_library::default_label_for(self.family, profiles))
             .chain(profiles.iter().map(|e| e.profile.name.clone()))

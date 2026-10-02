@@ -4,8 +4,8 @@
 //! The rows are `library::scan`'s entries and the running set is a
 //! `bundle directory -> Child` map, where absence means "not running".
 //! `reap` removes an entry the moment its child exits. A player process
-//! cannot push that news, so the front end polls (the Qt build from a
-//! `Timer`).
+//! cannot push that news, so the front end polls (`launcher-mitsuami`
+//! from a task on the window, every half second).
 //!
 //! `play` publishes the shared shelf to the machine's drive before
 //! spawning, so a disc added since the last run is on it. It derives the

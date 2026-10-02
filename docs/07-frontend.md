@@ -3,7 +3,7 @@
 There are two programs (ADR-005). The **player** runs one machine in one
 window, and the **launcher** manages the library and spawns a player per
 machine. This document covers both, the split between the launcher's
-core and its Qt front end, the C ABI, and the package layout. The
+core and its mitsuami front end, the C ABI, and the package layout. The
 display pipeline and input model are doc 03, the embed API doc 11, the
 machine definitions per family doc 06, and the build and packaging
 commands `docs/development.md` and `docs/build-macos.md` /
@@ -42,14 +42,14 @@ player line runs a machine with nothing else.
 
 ### The library
 
-- A grid of machines shows the family and running state, and Play
+- The library shows each machine's family and running state, and Start
   spawns a player. "Running" is the launcher's own child *or* a
   listening monitor socket, so a player started by `--play` counts too.
   The launcher only observes (`try_wait`); a spawned player outlives it.
   Machines are in name order, ignoring case (`library::scan`, user,
   2026-10-02).
-- **On mitsuami the library is a list beside the chosen machine's
-  details**, as UTM and VirtualBox lay theirs out (user, 2026-10-01).
+- **The library is a list beside the chosen machine's details**, as
+  UTM and VirtualBox lay theirs out (user, 2026-10-01).
   The machines run down the leading side, each with its name and
   `Machines::subtitle` (family and state); double-click or Return starts
   one. Beside them: the chosen machine's name, Start and its windows
@@ -60,8 +60,7 @@ player line runs a machine with nothing else.
   that family (no Direct3D row without our adapter), and a path shows
   its file name. The toolbar keeps what is not about one machine: New
   machine, Disc shelf, Shader profiles and the status line; no button
-  label there ends in "…" (user). The Qt
-  window keeps its grid until the flip.
+  label there ends in "…" (user).
 - **About 2ksbox** (2026-10-02) shows the version, the licence and
   the projects 2ksbox is built on, grouped by what they do for it, each
   a link with its licence. The list is `launcher_core::about` (the
@@ -71,8 +70,7 @@ player line runs a machine with nothing else.
   the toolbar, except on macOS (user), where it is the application
   menu's About item: the app's menu bar is set on macOS only, one item
   with `MenuRole::About`, which AppKit moves into the application menu.
-  The deprecated Qt launcher got the same window first (a "?" and a
-  `Qt.labs.platform` menu), checked by `qt-about`.
+  The `mitsuami` check grabs it (`LAUNCHER_SCREEN=about`).
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Play is logged with the line it ran**, quoted to paste back
@@ -84,8 +82,8 @@ player line runs a machine with nothing else.
   prefix's `2ksbox-player`, else, in a checkout, the mitsuami player
   (M22, the default) when `player-mitsuami/target/<same profile>/` has
   it, else the winit player beside the launcher, else the root
-  workspace's `target/<same profile>/player` (`launcher-mitsuami` and
-  `launcher-qt` build into their own `target/`, where no player sits).
+  workspace's `target/<same profile>/player` (`launcher-mitsuami`
+  builds into its own `target/`, where no player sits).
   "Same profile" falls back to `release`: a debug launcher runs the
   release player `scripts/build.sh` made when no debug one is built.
   Another target's player follows the same order under
@@ -98,7 +96,7 @@ player line runs a machine with nothing else.
   shader, a SoundFont) stays shared. A relative backing file is made
   absolute (`qemu-img rebase -u`). A running machine is refused. The
   copy runs on a thread and writes `machine.toml` last, so a clone in
-  progress or failed never shows in the grid. It cannot be cancelled
+  progress or failed never shows in the list. It cannot be cancelled
   mid-file: `std::fs::copy` keeps the kernel's fast paths (reflinks,
   `copy_file_range`). **"Use the same hard disk instead of copying it"**
   (user request, 2026-09-26) makes the clone name the original's disk by
@@ -113,7 +111,7 @@ player line runs a machine with nothing else.
   copy a new TPM"** is ticked (user decision, 2026-10-01): then its state
   file and the snapshots' copies of it stay behind, and the clone's
   first start makes a new TPM.
-- **Not built:** last-frame thumbnails in the grid, and bundle
+- **Not built:** last-frame thumbnails in the list, and bundle
   import/export.
 
 ### The bundle
@@ -200,7 +198,7 @@ The fields, and why each is what it is:
   Automatic read as nonsense), so on a host without it the list is
   Automatic and Emulation; a machine already set to it keeps the entry,
   under the note that it won't start. `launcherx --kvm [machine.toml]`
-  prints the list. The Qt window still lists all three. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
+  prints the list. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
   `whpx` then `tcg` on Windows), not a probe of ours that could be stale
   by spawn time. On macOS and Windows the hypervisor is Windows 11's
   alone and an era machine is emulated (`-accel tcg`; user, 2026-10-02:
@@ -233,9 +231,8 @@ The fields, and why each is what it is:
   `x87-pc64-as-53`, the one that changes what the guest computes. The
   section is a disclosure headed "Emulation optimizations (N of M on)",
   gives each switch's measured gain, and says they do nothing under KVM.
-  The mitsuami form shows the section only where the machine will be
-  emulated (`Form::optimizations_apply`; user, 2026-10-01); Qt still
-  shows it with that note.
+  The form shows the section only where the machine will be emulated
+  (`Form::optimizations_apply`; user, 2026-10-01).
   "All defaults", "Turn all off" and "Turn all on" sit above them
   (`Form::*_all_optimizations`), and the note says which of the three
   states the machine is in. Patch 21's `pinned-regs` is not offered (user decision:
@@ -369,20 +366,20 @@ The fields, and why each is what it is:
   own eject change it too; the matching row reads "In drive". A disc's
   kind is disc, folder or guest tools (`DiscKind`), not its image
   format. `launcherx --drive` prints the card and rows; the `drive`
-  check runs it against a paused QEMU. The Qt window keeps its separate
-  Boot and live Insert until mitsuami replaces it.
+  check runs it against a paused QEMU.
 - **Sorted by label**, case-insensitively, with **digit runs compared as
   numbers** (`disc 10` after `disc 2`). It is an invariant of
   `DiscLibrary`, not a sort each view does, because the flat file the
   in-guest `CDSHELF` lists is addressed by slot number, and a view that
   sorted for itself would offer one disc and load another. So a row
   index is good only until the next edit, and a rename in progress must
-  not re-sort (Qt re-sorts on `editingFinished`). The `shelforder`
-  check covers it.
-- **"Browse…" adds the disc** the moment the dialog closes (user
-  report); the field stays for a *typed* path. `PathField` emits
-  `picked` beside `edited`, and the `qt-shelf` check hands the field the
-  path a dialog would have and asks whether the shelf grew.
+  not re-sort (the label is written on Enter or when its field loses
+  focus). The `shelforder` check covers it.
+- **Adding a disc puts it on the shelf** the moment the dialog closes
+  (user report). The shelf's Add menu (Disc image…, Folder as disc…,
+  Guest tools ISO) starts at the last folder browsed, and the shelf
+  takes dropped images and folders too; there is no typed-path field
+  (2026-10-01).
 - **A host folder is a disc too** ("Add folder…"): the drive gets
   `isodir:<path>`, an ISO 9660 + Joliet volume generated over the tree
   (doc 17 §8). That is how a patch, a save game or a folder of
@@ -497,9 +494,7 @@ and runs without live control.
   `SHADER_DEFAULT_LABEL`, then the library by name),
   `shader_profile_index` the current row (0 for a profile that no
   longer exists, which is what the machine plays with), and
-  `choose_shader_profile` / `reset_shader_profile` are the verbs. The
-  Qt window rescans the library when a profile is saved or deleted
-  while the form is open (`refreshProfiles`).
+  `choose_shader_profile` / `reset_shader_profile` are the verbs.
 - **The library has a default profile** (user decision 2026-09-24): one
   file beside the profiles, `default-profile.txt`, naming a profile id
   (`shader_library::default_id` / `set_default`; one file rather than a
@@ -508,7 +503,7 @@ and runs without live control.
   default (`shader_profile = None`, the picker's first row) plays
   through it: `player::resolve_shader` goes named profile, raw `shader`
   path, the library's default, nothing. The picker's first row and the
-  grid's "Shader" column say which ("(default) CRT Aperture",
+  library's "Shader" column say which ("(default) CRT Aperture",
   `shader_library::default_label`; bare "(default)" with none marked).
   The profile window's rows carry a "default" mark and a "Use as
   default" button, and "No default" clears it; deleting the default
@@ -531,7 +526,7 @@ and runs without live control.
   interrupted download never reads as installed. Symlinks, special
   entries and `..` paths are skipped.
 - **The first run** (`launcher_core::firstrun`) offers the download once
-  at start-up, as a modal question over the grid, when no collection
+  at start-up, as a modal question over the machine window, when no collection
   exists anywhere (a button two windows deep is where a new user never
   looks); the profile manager has the button too. Answering either way
   writes `first-run.txt` into the *profile* directory (a download
@@ -549,11 +544,13 @@ and runs without live control.
   (the collection, for a preset), else **the last directory any dialog
   browsed** (`browse::remember`, one line in `<data dir>/
   last-browse.txt`, `LAUNCHER_BROWSE_MEMORY` overrides), else the OS
-  default. A Qt dialog given an empty folder opens in the working
-  directory, which is why the memory exists. `launcherx --browse-start`
-  prints the answer.
-- **A path a dialog hands back goes through `browse::picked`** (the Qt
-  front end's `local_path`, and the disc library on load). Inside the
+  default. The memory exists because a dialog given no folder opened in
+  the working directory (the Qt launcher's did). `launcherx
+  --browse-start` prints the answer, and `LAUNCHER_PICK=<label>=<path>`
+  makes the launcher's field with that caption print the dialog it
+  would open and take `<path>` as the answer (track M19).
+- **A path a dialog hands back goes through `browse::picked`** (the
+  launcher's `PathField` and shelf, and the disc library on load). Inside the
   Flatpak the portal's dialog returns a document-portal path,
   `$XDG_RUNTIME_DIR/doc/<id>/<name>`, even though the app can reach the
   host: only the picked file is there, so a `.cue`'s tracks are not
@@ -573,8 +570,9 @@ and runs without live control.
   the CPU first (`MAX_SOURCE_W/H`).
 - **The preview moves when the preset does** (interlacing, phosphor
   decay, NTSC shimmer). `preview::Preview::frame_interval` says how
-  often to draw (`None` for a still preset) and the front end obeys (a
-  QML `Timer`). The frame number comes from a clock at `FRAME_RATE`
+  often to draw (`None` for a still preset) and the front end obeys
+  (the editor sleeps one interval and marks the preview stale, so a
+  still preset runs no timer). The frame number comes from a clock at `FRAME_RATE`
   (60/s), not a count of renders, so the effect runs at the player's
   speed and drops frames rather than running slow.
   `shader_chain::preset_is_animated` looks for a *use* of `FrameCount`
@@ -597,13 +595,23 @@ and runs without live control.
 ## One front end over a core
 
 The launcher is **one front end over one library** (ADR-014).
-`launcher-qt/` on Qt 6 / QML through cxx-qt is a view over
-`launcher-core/`, which has two more callers with no window:
-`launcher-capi/` (the same models as a C ABI) and `launcherx` (every
-toolkit-free debug verb, `launcher_core::cli`, which `launcher-qt`
-answers identically). Why Qt ships is ADR-015; why egui was deleted is
-ADR-017. `launcher-qt` is outside the root workspace so a plain `cargo
-build` never needs Qt 6; build it with `scripts/build.sh qt`, no CMake.
+`launcher-mitsuami/` (ADR-023, track M19) is a view over
+`launcher-core/` in mitsuami's platform widgets: AppKit on macOS,
+WinUI 3 on Windows, GTK 4 on Linux, or Kirigami with the `kde` feature.
+Since 2026-10-02 it is the only launcher and every package ships it as
+`2ksbox` (user: "remove the other launchers code completely"). The
+core has two more callers with no window: `launcher-capi/` (the same
+models as a C ABI) and `launcherx` (every toolkit-free debug verb,
+`launcher_core::cli`, which the launcher answers identically). Each
+window is a `#[component]` reading a `Store` that holds the core model;
+a keyed platform `List` keeps a row mounted while its key lives, so rows
+read their fields from the model by key instead of holding copies.
+`launcher-mitsuami` is its own cargo workspace, outside the root one, so
+a plain `cargo build` never needs GTK; build it with `scripts/build.sh
+mitsuami` (GTK 4.10+ development files on Linux, nothing on macOS) and
+on Windows with `scripts/build-windows.sh mitsuami`. The Qt 6 / QML
+launcher that shipped before it (ADR-015, superseded by ADR-023) was
+deleted on 2026-10-02, and the egui one before that (ADR-017).
 
 ### What is in the core, and why all of it
 
@@ -626,92 +634,63 @@ stories. A front end prints `ram_note()`, `accel_note()` and
 and their `label()`s, and a field with a consequence has only
 `choose_*`, so the drift ADR-014 records cannot be expressed.
 
-**What the core does not protect against.** A retained-mode front end
-copies the model onto properties in a `publish()` some verb must call,
-and a property nobody published stays at its default, which looks like
-a real answer. Every Qt-only bug so far had a correct model, so the
-`qt-*` checks ask the **window** what it shows. The rules that came out
-of them:
+**What the core does not protect against.** Every bug the Qt launcher
+had of its own came with a correct model: the window showed something
+else. The lessons outlived it and hold for any front end:
 
-1. **A QObject whose properties are read before any verb must publish
-   in `cxx_qt::Initialize`**, the constructor QML uses, or it shows
-   defaults ("Download presets ()" on a machine that had them).
-2. **A control that clamps is given its range before its value.** A
-   `SpinBox` bounds a value against the range it has *at that moment*
-   and never revisits it (`ram_mb` before `ram_min`/`ram_max` opened a
-   new Win98 machine on 32 MB). Ranges publish first, `Wizard` publishes
-   in `Initialize`, and `open` last, since that shows the window.
-   `qt-wizard` compares the memory field with the form.
-3. **A window whose model flag drives it must not `close()` itself from
-   its own `visibleChanged`.** Closing from the title bar re-entered
-   `close()`, and on Cocoa the outer close skipped `endModalSession`,
-   leaving the main window locked. The guard is `closeIfShown`. The
-   `closebox` probe sends a real close *event* (`src/close_event.cpp`)
-   and `qt-close` wants exactly one.
-4. **A component never writes the property its owner binds to, and a
-   window never reaches for another window's model.** `PathField`
-   assigning its own `value` destroyed the binding; it is now
-   controlled (`value` in, `edited(path)` out, the owner writes the
-   model). A handler calling another window's `profiles.refresh()`
-   threw a `TypeError` and took the `changed()` beside it along. Wiring
-   between windows belongs in `Main.qml`, which owns both.
-5. **A value that lives in two places needs one rule for which way it
-   flows.** A keystroke is a C++ write and does not break a binding, so
-   a verb that published while someone typed wrote older text back into
-   the field. Every form-changing verb goes through one
-   `Wizard::edit(|form| …)` (pull, change, publish), and the shader
-   editor's verbs call `ShaderEditor::catch_up` first (except
-   `new_profile` and `edit`, where the model is deliberately newer). The
-   `saveprofile` and `qt-wizard` probes type with `insert`, as a key
-   press does.
-6. **A window puts itself away through the model, never by writing the
-   `open` property.** `wizard.open = false` changed the property and
-   left the form's own flag up, so the next republish (closing the
-   profile list rescans the wizard's profiles) raised the property again
-   and showed the wizard over nothing (user report, 2026-09-23). Every
-   flag-driven window's Cancel and `visibleChanged` call its model's
-   `dismiss()`; `qt-profilesclose` closes the list after a cancelled
-   wizard and wants it to stay down.
+1. **Ask the window, not the model.** A check that asks the model
+   passes on a broken window, so the launcher's checks drive the real
+   window (`LAUNCHER_SCREEN`, below) and read what it shows or wrote.
+2. **A value that lives in two places needs one rule for which way it
+   flows.** A verb that republished the form while someone typed wrote
+   older text back into the field. Every edit is the model's own method,
+   and a window reads the model rather than keeping a copy.
+3. **A window puts itself away through the model.** Hiding the window
+   and leaving the model's "open" flag up showed it again on the next
+   republish, over nothing.
+4. **A rule typed into a view drifts.** A label, a range or which row
+   applies, written in the view, came out different from the core's
+   (ADR-014's record); the view only asks.
+5. **A control's state is not a checkbox when it is "showing / hidden"**:
+   a tick before "Emulation optimizations" said clearing it turns them
+   off. A disclosure is a disclosure.
+6. **File dialog filters are case-sensitive on Linux**, so `*.cue` hid
+   `GAME.CUE`; `browse::extensions` gives each extension in both cases
+   (not `[cC]`, which Windows and macOS dialogs do not take).
 
 ### What the front end still owns
 
 These are the toolkit's, and any other front end owes them too:
 
-| | Qt (`launcher-qt/`) |
+| | mitsuami (`launcher-mitsuami/`) |
 |---|---|
-| the file dialog | `QtQuick.Dialogs`; the desktop's own through Qt's platform theme, which on Linux `main.rs` names as the XDG portal's (otherwise a session Qt matches no theme to gets Qt's own picker) |
-| when to redraw | a `Timer` per thing watched, off when idle |
-| "the list changed" | `beginResetModel` / `dataChanged` |
-| a destructive restore | a confirmation dialog |
-| the preview frame | CPU readback → temp BMP → `Image` |
-| secondary screens | real top-level windows |
-| a headless frame | `QT_QPA_PLATFORM=offscreen` + `grabToImage` |
-
-**The shader preview is the one place the Qt build is worse, and it is
-fixable, in C++.** Qt Quick renders through QRhi and cxx-qt exposes no
-handle to it, so `launcher-qt` opens a second, windowless wgpu device
-(~40 MB of VRAM) and reads each frame back into a temp BMP: ~3 ms of
-readback plus ~4 ms of write per 1280×960 frame, on every slider drag
-(PNG took ~90 ms). The fix is a `QQuickRhiItem` subclass importing the
-Vulkan image.
+| the file dialog | the platform's (`OpenFile`, started at `browse::browse_start`; the answer through `browse::picked`) |
+| when to redraw | a reactive `Store`; timers only for what is watched (the 500 ms reap, the drive's 2 s poll, a live snapshot job) |
+| "the list changed" | a keyed `List` / `For`, rows read by key |
+| a destructive restore | the platform's alert, Cancel the default |
+| the preview frame | the core's RGB pixels into an `Image`, cropped to its area, no file on disk |
+| secondary screens | real top-level windows, and sheets |
+| a headless frame | `LAUNCHER_SHOT=<png>` (`launcher-mitsuami/src/shot.rs`) |
 
 The shader manager is **two windows** (list and editor), not one that
 resizes between modes, because a mapped window's size is the window
-manager's to ignore (trap 4 below).
+manager's to ignore.
 
 ### Proving the core is the one implementation
 
 - `--preview-shader` is `launcher_core::preview` on a headless device,
-  the same code the Qt preview runs.
+  the same code the launcher's preview runs.
 - `launcherx`, `launcher-core`'s own binary, is what `scripts/test.sh`
   and `tools/dos-guest-test.py` drive, so the suite builds no GUI
   toolkit to ask `--print-args` a question.
-- `LAUNCHER_QT_SCREEN=create LAUNCHER_QT_ARG=dos:<name>` creates a
-  machine through the real QML form offscreen, and its `machine.toml`
-  is the model's (64 MB, `tcg`, no network, no tablet, `486dx2-66`).
-  The screens and probes are listed in `docs/tracks/m6-launcher.md`.
+- `LAUNCHER_SCREEN=create:<family>:<name>` fills the real form on a
+  fresh machine and submits it, and its `machine.toml` is the model's.
+  The `mitsuami` check does it for XP, beside the main window's shot,
+  `firstrun:no` (the model's headline, and the marker written) and
+  `about`; on Linux on a private Broadway display. The screens are
+  listed in `docs/tracks/m19-mitsuami-launcher.md`.
 
-## A third front end: `launcher-core` as a library
+## A second caller: `launcher-core` as a library
 
 `launcher-capi/` is the C ABI that lets a front end in another language
 be a view over the same models, shaped for a native macOS app in Swift,
@@ -721,7 +700,7 @@ which imports a C header with no bridge crate.
   code.
 - Each window is an **opaque handle** (`lc_wizard_new` /
   `lc_wizard_free` …). Rows are addressed by index, one field at a time,
-  as the Qt build's `QAbstractListModel::data` reads them.
+  as a platform list reads them.
 - Strings out are owned by the caller (`lc_string_free`) and never
   `NULL` for empty, so `NULL` means only "no such row".
 - Nothing blocks on a guest. The long operations poll
@@ -736,139 +715,28 @@ is the smallest front end and a test (the `capi` check). Another front
 end owes the table above, and `lc_editor_read_frame` hands over RGB8
 for the preview.
 
-## The next front end: mitsuami
+## Shipping the launcher
 
-`launcher-mitsuami/` (ADR-023, track M19) is the same view over
-`launcher-core` in mitsuami's platform widgets: AppKit, WinUI 3, GTK 4, or
-Kirigami. It owes the table above like any front end, and replaces
-`launcher-qt` once it has every window. Each window is a `#[component]`
-reading a `Store` that holds the core model; a keyed platform `List`
-keeps a row mounted while its key lives, so rows read their fields from
-the model by key instead of holding copies.
+The launcher brings no toolkit of its own: it is the platform's widgets,
+so what each package carries for it is the platform's to supply:
 
-## Shipping Qt
-
-### What shipping Qt costs
-
-Qt is a shared library, so every packager gained a job (ADR-015):
-
-| package | how Qt gets there |
+| package | what the launcher needs there |
 |---|---|
-| Linux tarball (`scripts/package-linux.sh`) | not carried: a dependency on `qt6-base` + `qt6-declarative`, named by `install.sh` when the loader cannot find them |
-| Flatpak (`packaging/flatpak/`) | the runtime **is** Qt: `org.kde.Platform` 6.10, the same freedesktop base |
-| macOS (`scripts/package-macos.sh`) | `macdeployqt` before our own dylib closure, with `-qmldir=launcher-qt/qml` |
-| Windows (`scripts/package-windows.sh`, and its MSIX through `package-msix.sh`) | staged by hand: DLLs through the import walk, plus `plugins/`, `qml/` and a `qt.conf`; there is no cross `windeployqt` |
+| Linux tarball (`scripts/package-linux.sh`) | the host's GTK 4, not carried; `install.sh` names the distribution's package when it is missing |
+| Flatpak (`packaging/flatpak/`) | the runtime: `org.gnome.Platform` 49, which ships GTK 4 (user decision, 2026-10-02) |
+| macOS (`scripts/package-macos.sh`) | nothing: AppKit is the system's |
+| Windows (`scripts/package-windows.sh`, and its MSIX through `package-msix.sh`) | the Windows App Runtime 2.4+ (WinUI 3); the launcher is the one MSVC binary, with the static C runtime, and the MSIX declares the App Runtime as a `PackageDependency` |
 
-- **Our QML is compiled into the binary as a Qt resource**
-  (`build.rs`'s `QmlModule`), so an installed launcher needs no `qml/`
-  of its own. `macdeployqt`'s import scanner reads source, so it must be
-  pointed at `launcher-qt/qml`, or the app dies on `module "QtQuick" is
-  not installed`.
-- **A package can pass every other check and open nothing.** Qt resolves
-  its platform plugin and QML modules by name at run time, from
-  directories no import table names. Each packager therefore opens a
-  real window offscreen (`QT_QPA_PLATFORM=offscreen`,
-  `LAUNCHER_QT_SHOT=<png>`) and requires the PNG; on macOS under
-  `DYLD_PRINT_LIBRARIES=1`, so the QML engine's images must be the
-  app's own. The Flatpak's sandbox has its own `/tmp`, so its PNG goes
-  under `$HOME`. On the Windows PC the grab of the *main* window (no
-  `LAUNCHER_QT_SCREEN`) is a blank white PNG, with or without the
-  executables' manifest (A/B on 2026-09-23, identical files; cause not
-  found), while a named screen (`LAUNCHER_QT_SCREEN=wizard`) grabs a
-  real picture: to prove the launcher runs there, grab a named screen.
-
-### Five Qt traps, each of which cost real time
-
-1. **cxx-qt's generated setter skips the notify when the value already
-   matches.** Writing `rust_mut().open = true` and then `set_open(true)`
-   emits nothing, and every window opened once and stopped reacting.
-   The fix is state in a core model *beside* the properties: a
-   `publish` writes every property through its setter, and the fields
-   are never assigned anywhere else.
-2. **`grabToImage` only works on an item the QML engine created.** A
-   window's `contentItem`, `Overlay.overlay` and a `Popup`'s default
-   `contentItem` are made in C++ and refuse silently, so the screenshot
-   path grabs an item each window declares.
-3. **`property var` holding a QObject gives QML no metadata**, so a
-   binding on it is read once. Use the registered type (`property
-   ShaderEditor editor`).
-4. **A `Window`'s size cannot be changed after the window manager has
-   mapped it.** The WM's own resize breaks a binding, and an assignment
-   may be ignored. A window that wants two sizes is two windows.
-5. **A `MessageDialog` cannot be driven from outside: `accept()` and
-   `close()` both come back as `rejected()`.** A dialog whose visibility
-   followed the model answered its own question: the first-run Yes
-   started the download, the code closed the dialog, and the close
-   arrived as "No". Hence **one dialog per thing to answer, closed only
-   by a press of its buttons** (`FirstRunDialog.qml`,
-   `FirstRunResultDialog.qml`, the download between them in the
-   launcher's header). A probe presses a button by emitting `accepted` /
-   `rejected`, never by calling the like-named methods.
-
-### More Qt traps
-
-- **Bindings and bridges.** A binding to a `Q_INVOKABLE` never
-  re-evaluates, so per-family lists are properties, and the optimization
-  checkboxes bind one bitmask property (`optimizationsMask`; cxx-qt has
-  no `QList<bool>`). A bridge method without `#[qinvokable]` is not
-  callable from QML: a `TypeError` in the log and a click that does
-  nothing ("Turn all on / off" shipped that way; the `optall` probe
-  clicks them now). `#[auto_cxx_name]` turns `d3d9_labels` into
-  `d3D9Labels`, and QML cannot tell that a binding names a missing
-  property, so the Direct3D row shipped as a label over an empty combo;
-  the D3D9 properties name their `cxx_name`, and `qt-wizard` asks the
-  combo's count and text. **A combo box with a `delegate` of its own is
-  drawn by that delegate, not by the style**: the shader profile picker
-  had one and lost the highlight, hover and bold current row every other
-  picker has. Its rows now come from the model, and `qt-wizard` asks
-  that combo too.
-- **Every verb that republishes the form pulls the text fields first**
-  (through `edit`, rule 5 of "What is in the core"); a page switch once
-  wrote a stale empty name over a typed one. `qt-wizard` pages away and
-  back before it reads the name.
-- **Esc.** Each secondary window binds Esc to `close()` with a
-  `Shortcut`, which fired while that window's own file dialog was up (on
-  macOS the dialog is a sheet and AppKit offers the key to the window
-  under it). `PathField` publishes `browsing`, and the shelf, the form
-  and the shader editor disable Esc while any `PathField` or their
-  `FolderDialog` is open; a new dialog there joins that `enabled:` line.
-  **At most one visible window may have an armed Esc**: a transient
-  window reports `isActive()` whenever its parent is, and two matches
-  for one key are ambiguous, so neither fires. A window opened over
-  another disarms the one under it. The `escfocus` probe and `qt-esc`
-  want exactly one match (`src/focus_window.cpp` names the focus window,
-  which `Window.active` cannot).
-- **Native styles.** Never replace a Quick Controls control's
-  `background` or `contentItem`: on macOS and Windows `appearance.cpp`
-  keeps the native style, which refuses and warns for every instance.
-  The lists are stock `ListView` + `ItemDelegate`. Quick Controls has
-  no disclosure widget, so `launcher-qt/qml/Disclosure.qml` is ours (a
-  rotating triangle). Nothing whose state is "showing / hidden" gets a
-  checkbox: a tick before "Emulation optimizations" said clearing it
-  turns them off.
-- **Layouts.** A layout row that can be empty beside a list says
-  `Layout.fillHeight: false`. A nested layout whose children are all
-  hidden has no maximum and takes a share of the spare height (the
-  snapshots list stopped halfway, `qt-snapshots`). A grid column sized
-  by `Layout.preferredWidth` alone moves with its text, so pin minimum =
-  preferred = maximum and let one column take the spare width. A header
-  row over a list of delegates must be laid out from the *same* widths
-  as a row, buttons included: the snapshots header had no buttons, so
-  at a width where a row no longer fit, the row's columns shrank and
-  the header's did not (`SnapshotsWindow.qml` reserves the armed
-  "Restore"'s room in the header; `qt-snapshots` compares the edges at
-  the window's narrowest). Name a
-  font family the platform has (Menlo / Consolas / `monospace`), or pay
-  for a font-alias scan and a warning.
-- **File dialogs.** An extension filter is case-sensitive on Linux, so
-  `*.cue` hid `GAME.CUE`. `browse::extensions` gives each extension in
-  both cases (not `[cC]`, which Windows and macOS dialogs do not take)
-  and `PathField` hides the doubled list with `HideNameFilterDetails`; a
-  mixed-case `.Cue` is still missed. A dialog's URL is not `file://` +
-  a path: stripping the prefix left `[` `]` percent-encoded, so every
-  dialog converts through `Browse.localPath` (`QUrl::toLocalFile`).
-  `qt-shelf` asks the real dialog for `*.CUE` and picks `Game
-  [1996].iso`.
+**Every packager opens the staged launcher's window and requires a
+PNG**, since a package can pass every other check and still open
+nothing (the Qt launcher's lesson: a toolkit's pieces found by name at
+run time). The grab is the launcher's own, `LAUNCHER_SHOT=<png>`
+(`launcher-mitsuami/src/shot.rs`), which draws the window into a PNG
+and exits; `LAUNCHER_SCREEN` picks the window. On Linux and in the
+Flatpak it runs on a private Broadway display (`gtk4-broadwayd`,
+`GDK_BACKEND=broadway`), so nothing opens on the desktop; on macOS and
+Windows the window shows briefly, on macOS under
+`DYLD_PRINT_LIBRARIES=1`.
 
 ## Platform packaging
 
@@ -925,10 +793,10 @@ Three rules hold it together:
 
 On macOS the `.app`'s `Contents` is the prefix, with `MacOS/` doing
 `bin/`'s job (`paths::bin_dir()`). Windows is flat. The launcher's
-window carries the same identity: `app_id` = `com._2ksbox.Launcher`
-through `QGuiApplication::setDesktopFileName`, and the icon through
-`setWindowIcon` in `launcher-qt/src/window_icon.cpp` (cxx-qt-lib binds
-`QImage` but not `QIcon`).
+window carries the same identity through mitsuami's `App::id`, `name`
+and `icon` in `launcher-mitsuami/src/main.rs` (`paths::APP_ID`, "2ksbox"
+and the 256 px PNG), so under Wayland its `app_id` is
+`com._2ksbox.Launcher`.
 
 **The icon is one master and one generator.** `packaging/icon/
 2ksbox.png` is padded to 512×512, and every size (16–512 PNGs and a
@@ -941,14 +809,16 @@ path into the desktop entry's `Icon=` (a prefix outside `XDG_DATA_DIRS`
 cannot resolve a theme name). macOS builds its `.icns` from the same
 PNGs. On Windows the `.ico` goes *inside* every .exe as a resource, the
 only thing Explorer reads: `packaging/windows/win-icon.rs` is
-`include!`d by the build scripts of `launcher-qt` and `player` (a
+`include!`d by the build scripts of `launcher-mitsuami` and `player` (a
 build-dependency would have to be vendored into the Flatpak's offline
 sources), writes a two-line `.rc` (the icon, and the application
 manifest `packaging/windows/app.manifest`, which declares per-monitor
-DPI awareness for the Store's certification kit), runs
-`x86_64-w64-mingw32-windres` and links the object. A host without
-windres gets a warning and an icon-less binary with mingw's default
-manifest. The loose `.ico` ships too, for shortcuts.
+DPI awareness for the Store's certification kit) and runs `windres`.
+For the MinGW player it links the object; for the MSVC launcher
+windres writes a `.res`, which Microsoft's linker takes as it is, told
+to make no manifest of its own. A host without windres gets a warning
+and an icon-less binary with the default manifest. The loose `.ico`
+ships too, for shortcuts.
 
 **AppStream metadata** (`com._2ksbox.Launcher.metainfo.xml`, into
 `share/metainfo`) carries a deliberately **empty** OARS rating: it
@@ -963,27 +833,36 @@ screenshots) needs somewhere to host them.
 - **Linux.** `scripts/package-linux.sh` stages the layout, asks the
   staged launcher and player where everything resolves with a scrubbed
   environment (`--paths`, `--companions`, a machine created and
-  translated to a command line), and rolls a tarball whose `install.sh`
-  copies the tree into a prefix. **The Flatpak** (`packaging/flatpak/`,
+  translated to a command line, the window grabbed on Broadway), and
+  rolls a tarball whose `install.sh` copies the tree into a prefix and
+  names the GTK 4 package to install when the host has none. **The
+  Flatpak** (`packaging/flatpak/`,
   `scripts/package-flatpak.sh`) is the primary Linux target (user
   decision: Flatpak first, then an AppImage), for distribution rather
   than sandboxing: no distro `qemu` can replace our patch queue, and
   Flathub is where a stranger finds a Linux app. The sandbox is mostly
   nominal (`/dev/kvm`, the GPU, the network, and `--filesystem=host`,
-  because bundles store absolute paths to discs and disks). It builds from source (host binaries need a newer
+  because bundles store absolute paths to discs and disks). Its runtime
+  is `org.gnome.Platform` 49, for GTK 4 (user decision, 2026-10-02; it
+  was `org.kde.Platform` while the launcher was Qt). It builds from
+  source (host binaries need a newer
   glibc than the runtime's), offline, through `package-linux.sh --prefix
   /app`, plus libslirp (absent from the runtime; `-netdev user` needs
-  it) and a build-only `distlib`.
+  it) and a build-only `distlib`. Its crates, mitsuami's git checkout
+  among them, are listed in `packaging/flatpak/cargo-sources.json`
+  (`scripts/gen-flatpak-cargo-sources.sh`).
 - **macOS.** A signed, notarized .app with the JIT entitlement, native
   on Apple Silicon, carrying its whole non-system dylib closure (the Mac
-  that runs it has no Homebrew and no Vulkan), in **two builds
-  (ADR-019)**. Recipe and reasoning: `docs/build-macos.md` ("The app",
-  "The floor").
-- **Windows.** A portable zip, cross-built from Linux
-  (`scripts/package-windows.sh`, `docs/build-windows.md`), and the same
-  tree as an MSIX for the Microsoft Store (`scripts/package-msix.sh`,
+  that runs it has no Homebrew and no Vulkan) and no toolkit (the
+  launcher is AppKit), in **two builds (ADR-019)**. Recipe and
+  reasoning: `docs/build-macos.md` ("The app", "The floor").
+- **Windows.** A portable zip (`scripts/package-windows.sh`,
+  `docs/build-windows.md`) and the same tree as an MSIX for the
+  Microsoft Store (`scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`; `build-windows.md` "The Store
-  package"). Hardware acceleration is WHPX for Windows 11 machines,
+  package"). The launcher is built only on a PC (`build-windows.sh
+  mitsuami`, MSVC, WinUI 3, needing the Windows App Runtime 2.4+), so the
+  package is rolled on the PC. Hardware acceleration is WHPX for Windows 11 machines,
   stated beside the picker, with TCG as the fallback; era machines are
   emulated.
 

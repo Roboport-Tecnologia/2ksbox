@@ -12,8 +12,8 @@ with `cargo metadata`:
 ```sh
 cargo metadata --format-version 1 > /tmp/meta.json
 python3 tools/third-party-notices.py /tmp/meta.json player
-(cd launcher-qt && cargo metadata --format-version 1) > /tmp/meta-qt.json
-python3 tools/third-party-notices.py /tmp/meta-qt.json launcher-qt
+(cd launcher-mitsuami && cargo metadata --format-version 1) > /tmp/meta-mitsuami.json
+python3 tools/third-party-notices.py /tmp/meta-mitsuami.json launcher-mitsuami
 ```
 
 ## QEMU
@@ -162,31 +162,33 @@ For how those interact with the player's GPL-2.0-only status, see
 
 **MPL-2.0+** (1): `smartstring`
 
-### `launcher-qt`: 272 third-party crates
+### `launcher-mitsuami`: 340 third-party crates
 
-**MIT OR Apache-2.0** (158): `allocator-api2`, `android_system_properties`, `anyhow`, `arc-swap`, `arrayvec`, `ash`, `base64`, `bitflags`, `bumpalo`, `cc`, `cfg-if`, `chacha20`, `clang-format`, `cpufeatures`, `crc`, `crc-catalog`, `crc32fast`, `crossbeam-deque`, `crossbeam-epoch`, `crossbeam-utils`, `cxx`, `cxx-build`, `cxx-gen`, `cxx-qt`, `cxx-qt-build`, `cxx-qt-gen`, `cxx-qt-lib`, `cxx-qt-macro`, `cxxbridge-flags`, `cxxbridge-macro`, `directories`, `dirs-next`, `dirs-sys`, `dirs-sys-next`, `document-features`, `either`, `errno`, `fdeflate`, `find-msvc-tools`, `fixedbitset`, `flate2`, `futures-core`, `futures-task`, `futures-util`, `getrandom`, `glob`, `glslang`, `glslang-sys`, `gpu-allocator`, `half`, `hashbrown`, `http`, `httparse`, `image`, `indoc`, `itoa`, `jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `libc`, `link-cplusplus`, `litrs`, `lock_api`, `log`, `naga`, `naga-types`, `ndk-sys`, `num-derive`, `num-traits`, `once_cell`, `parking_lot`, `parking_lot_core`, `percent-encoding`, `petgraph`, `pkg-config`, `png`, `presser`, `proc-macro2`, `profiling`, `qt-build-utils`, `quote`, `rand`, `rand_core`, `range-alloc`, `raw-window-metal`, `rayon`, `rayon-core`, `regex`, `regex-automata`, `regex-syntax`, `renderdoc-sys`, `rustls-pki-types`, `rustversion`, `scopeguard`, `scratch`, `semver`, `serde`, `serde_core`, `serde_derive`, `serde_json`, `serde_spanned`, `shlex`, `smallvec`, `spirv-cross-sys`, `spirv-cross2`, `spirv-cross2-derive`, `static_assertions`, `syn`, `tar`, `thiserror`, `thiserror-impl`, `toml`, `toml_datetime`, `toml_parser`, `toml_writer`, `unicode-segmentation`, `unicode-width`, `unty`, `ureq`, `ureq-proto`, `utf8-zero`, `wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`, `wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `web-sys`, `wgpu`, `wgpu-core`, `wgpu-core-deps-apple`, `wgpu-core-deps-emscripten`, `wgpu-core-deps-windows-linux-android`, `wgpu-hal`, `wgpu-naga-bridge`, `wgpu-types`, `windows`, `windows-collections`, `windows-core`, `windows-future`, `windows-implement`, `windows-interface`, `windows-link`, `windows-numerics`, `windows-result`, `windows-strings`, `windows-sys`, `windows-targets`, `windows-threading`, `windows_aarch64_gnullvm`, `windows_aarch64_msvc`, `windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`, `windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`, `xattr`
+**MIT OR Apache-2.0** (171): `allocator-api2`, `android_system_properties`, `arc-swap`, `arrayvec`, `as-raw-xcb-connection`, `ash`, `base64`, `bitflags`, `bumpalo`, `cc`, `cfg-expr`, `cfg-if`, `chacha20`, `cpufeatures`, `crc`, `crc-catalog`, `crc32fast`, `crossbeam-deque`, `crossbeam-epoch`, `crossbeam-utils`, `directories`, `dirs-next`, `dirs-sys`, `dirs-sys-next`, `displaydoc`, `document-features`, `either`, `errno`, `fdeflate`, `field-offset`, `find-msvc-tools`, `fixedbitset`, `flate2`, `futures-channel`, `futures-core`, `futures-executor`, `futures-io`, `futures-macro`, `futures-task`, `futures-util`, `getrandom`, `glob`, `glslang`, `glslang-sys`, `gpu-allocator`, `half`, `hashbrown`, `heck`, `http`, `httparse`, `image`, `itoa`, `jni-sys`, `jni-sys-macros`, `jobserver`, `js-sys`, `libc`, `litrs`, `lock_api`, `log`, `mitsuami`, `mitsuami-appkit`, `mitsuami-core`, `mitsuami-gtk`, `mitsuami-linux`, `mitsuami-macros`, `mitsuami-reactive`, `mitsuami-widgets`, `mitsuami-winui`, `naga`, `naga-types`, `ndk-sys`, `num-derive`, `num-traits`, `once_cell`, `parking_lot`, `parking_lot_core`, `percent-encoding`, `petgraph`, `pkg-config`, `png`, `presser`, `proc-macro-crate`, `proc-macro2`, `profiling`, `quote`, `rand`, `rand_core`, `range-alloc`, `raw-window-metal`, `rayon`, `rayon-core`, `regex`, `regex-automata`, `regex-syntax`, `renderdoc-sys`, `rustc_version`, `rustls-pki-types`, `rustversion`, `scopeguard`, `semver`, `serde`, `serde_core`, `serde_derive`, `serde_json`, `serde_spanned`, `shlex`, `simdutf8`, `smallvec`, `spirv-cross-sys`, `spirv-cross2`, `spirv-cross2-derive`, `static_assertions`, `syn`, `system-deps`, `tar`, `thiserror`, `thiserror-impl`, `toml`, `toml_datetime`, `toml_edit`, `toml_parser`, `toml_writer`, `unic-langid`, `unic-langid-impl`, `unicode-segmentation`, `unicode-width`, `unty`, `ureq`, `ureq-proto`, `utf8-zero`, `wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`, `wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `web-sys`, `wgpu`, `wgpu-core`, `wgpu-core-deps-apple`, `wgpu-core-deps-emscripten`, `wgpu-core-deps-windows-linux-android`, `wgpu-hal`, `wgpu-naga-bridge`, `wgpu-types`, `windows`, `windows-collections`, `windows-core`, `windows-future`, `windows-implement`, `windows-interface`, `windows-link`, `windows-numerics`, `windows-reference`, `windows-result`, `windows-strings`, `windows-sys`, `windows-targets`, `windows-threading`, `windows-time`, `windows_aarch64_gnullvm`, `windows_aarch64_msvc`, `windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`, `windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`, `x11rb`, `x11rb-protocol`, `xattr`
 
-**MIT** (33): `array-concat`, `bincode`, `bincode_derive`, `block2`, `bytes`, `cfg_aliases`, `convert_case`, `crunchy`, `data-encoding`, `dlib`, `libm`, `libredox`, `nom`, `nom_locate`, `objc2`, `objc2-encode`, `objc2-foundation`, `ordered-float`, `platform-dirs`, `redox_syscall`, `redox_users`, `simd-adler32`, `slab`, `strumbra`, `unsigned-varint`, `vec_extract_if_polyfill`, `virtue`, `wayland-sys`, `which`, `winnow`, `xml-rs`, `zigzag`, `zmij`
+**MIT** (63): `array-concat`, `bincode`, `bincode_derive`, `block2`, `bytes`, `cairo-rs`, `cairo-sys-rs`, `cfg_aliases`, `crunchy`, `data-encoding`, `dlib`, `gdk-pixbuf`, `gdk-pixbuf-sys`, `gdk4`, `gdk4-sys`, `gio`, `gio-sys`, `glib`, `glib-macros`, `glib-sys`, `gobject-sys`, `graphene-rs`, `graphene-sys`, `gsk4`, `gsk4-sys`, `gtk4`, `gtk4-macros`, `gtk4-sys`, `libadwaita`, `libadwaita-sys`, `libm`, `libredox`, `memoffset`, `nom`, `nom_locate`, `objc2`, `objc2-encode`, `objc2-foundation`, `ordered-float`, `pango`, `pango-sys`, `platform-dirs`, `quick-xml`, `redox_syscall`, `redox_users`, `simd-adler32`, `slab`, `strumbra`, `taffy`, `tokio`, `unsigned-varint`, `vec_extract_if_polyfill`, `version-compare`, `virtue`, `wayland-backend`, `wayland-client`, `wayland-protocols`, `wayland-scanner`, `wayland-sys`, `winnow`, `xml-rs`, `zigzag`, `zmij`
 
-**Apache-2.0 OR MIT** (10): `autocfg`, `bit-set`, `bit-vec`, `equivalent`, `indexmap`, `pin-project-lite`, `portable-atomic`, `portable-atomic-util`, `rustc-hash`, `zeroize`
+**Zlib OR Apache-2.0 OR MIT** (17): `bytemuck`, `bytemuck_derive`, `dispatch2`, `objc2-app-kit`, `objc2-cloud-kit`, `objc2-core-data`, `objc2-core-foundation`, `objc2-core-graphics`, `objc2-core-image`, `objc2-core-text`, `objc2-core-video`, `objc2-game-controller`, `objc2-io-surface`, `objc2-metal`, `objc2-quartz-core`, `objc2-quick-look-thumbnailing`, `objc2-uniform-type-identifiers`
+
+**Apache-2.0 OR MIT** (15): `autocfg`, `bit-set`, `bit-vec`, `equivalent`, `fluent-bundle`, `fluent-langneg`, `fluent-syntax`, `indexmap`, `intl-memoizer`, `multiversion_no_op`, `pin-project-lite`, `portable-atomic`, `portable-atomic-util`, `rustc-hash`, `zeroize`
+
+**MIT/Apache-2.0** (12): `core_detect`, `downcast-rs`, `filetime`, `fs2`, `khronos-egl`, `linked-hash-map`, `scoped-tls`, `type-map`, `version_check`, `winapi`, `winapi-i686-pc-windows-gnu`, `winapi-x86_64-pc-windows-gnu`
 
 **MPL-2.0 OR GPL-3.0-only** (9): `librashader`, `librashader-cache`, `librashader-common`, `librashader-pack`, `librashader-preprocess`, `librashader-presets`, `librashader-reflect`, `librashader-runtime`, `librashader-runtime-wgpu`
 
-**MIT/Apache-2.0** (8): `filetime`, `fs2`, `khronos-egl`, `linked-hash-map`, `version_check`, `winapi`, `winapi-i686-pc-windows-gnu`, `winapi-x86_64-pc-windows-gnu`
+**Apache-2.0** (7): `codespan-reporting`, `gethostname`, `gl_generator`, `glutin_wgl_sys`, `khronos_api`, `rspirv`, `spirv`
 
-**Zlib OR Apache-2.0 OR MIT** (8): `bytemuck`, `bytemuck_derive`, `dispatch2`, `objc2-core-foundation`, `objc2-core-graphics`, `objc2-io-surface`, `objc2-metal`, `objc2-quartz-core`
-
-**Apache-2.0** (6): `codespan-reporting`, `gl_generator`, `glutin_wgl_sys`, `khronos_api`, `rspirv`, `spirv`
+**Apache-2.0/MIT** (5): `bytecount`, `halfbrown`, `intl_pluralrules`, `pollster`, `rustc-hash`
 
 **Unlicense OR MIT** (5): `aho-corasick`, `byteorder-lite`, `memchr`, `termcolor`, `winapi-util`
-
-**Apache-2.0/MIT** (4): `bytecount`, `halfbrown`, `pollster`, `rustc-hash`
 
 **MIT OR Apache-2.0 OR Zlib** (4): `glow`, `raw-window-handle`, `zune-core`, `zune-jpeg`
 
 **Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT** (3): `linux-raw-sys`, `rustix`, `wasi`
 
 **ISC** (3): `libloading`, `rustls-webpki`, `untrusted`
+
+**Unicode-3.0** (3): `tinystr`, `zerofrom`, `zerovec`
 
 **Zlib** (3): `foldhash`, `slotmap`, `zlib-rs`
 
@@ -204,7 +206,11 @@ For how those interact with the player's GPL-2.0-only status, see
 
 **Apache-2.0 AND ISC** (1): `ring`
 
+**Apache-2.0 OR GPL-2.0-only** (1): `self_cell`
+
 **Apache-2.0 OR ISC OR MIT** (1): `rustls`
+
+**Apache-2.0 WITH LLVM-exception** (1): `target-lexicon`
 
 **BSD-3-Clause** (1): `subtle`
 
@@ -219,3 +225,4 @@ For how those interact with the player's GPL-2.0-only status, see
 **MIT OR Zlib OR Apache-2.0** (1): `miniz_oxide`
 
 **MPL-2.0+** (1): `smartstring`
+

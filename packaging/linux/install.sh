@@ -86,21 +86,18 @@ echo "installed into $prefix"
 echo "  launcher: $prefix/bin/$app"
 echo "  player:   $prefix/bin/$app-player"
 
-# Qt 6 is the one thing this package does not carry (ADR-015): every
+# GTK 4 is the one thing this package does not carry (ADR-023): every
 # distribution has it, and a copy of our own would still have to match the
 # host's Wayland, OpenGL and fontconfig. Say so here rather than let the
-# launcher fail with a loader error nobody can act on. The QML modules are
-# invisible to ldd (a missing QtQuick.Controls is a stderr error about a
-# module, not a missing library), so the package names are given whole.
+# launcher fail with a loader error nobody can act on.
 if command -v ldd >/dev/null && ldd "$prefix/bin/$app" 2>/dev/null | grep -q 'not found'; then
   echo
-  echo "  Qt 6 is missing on this system, so the launcher will not start:"
+  echo "  GTK 4 is missing on this system, so the launcher will not start:"
   ldd "$prefix/bin/$app" | grep 'not found' | sed 's/^/    /'
   echo "  Install it from your distribution:"
-  echo "    Arch          qt6-base qt6-declarative"
-  echo "    Fedora        qt6-qtbase-gui qt6-qtdeclarative"
-  echo "    Debian/Ubuntu libqt6quick6 qml6-module-qtquick-controls \\"
-  echo "                  qml6-module-qtquick-dialogs qml6-module-qtquick-layouts"
+  echo "    Arch          gtk4"
+  echo "    Fedora        gtk4"
+  echo "    Debian/Ubuntu libgtk-4-1"
 fi
 case ":$PATH:" in
   *":$prefix/bin:"*) ;;

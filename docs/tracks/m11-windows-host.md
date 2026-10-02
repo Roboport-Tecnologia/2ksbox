@@ -7,9 +7,9 @@ the user's PC (Ryzen 9 5900X, RTX 3090, the `base98-br` image), 3D guests
 included on both Direct3D backends and the OpenGL pass-through. This file
 keeps scope, test loop, traps and open items. The design:
 
-- `docs/build-windows.md`: the container, the stages, the DLL closure, Qt
-  deployment, `2ksbox-debug.bat`, the Direct3D 9 backends, WGL, WHPX, the
-  native MSYS2 build.
+- `docs/build-windows.md`: the container, the stages, the DLL closure,
+  the WinUI launcher (MSVC, built on the PC), `2ksbox-debug.bat`, the
+  Direct3D 9 backends, WGL, WHPX, the native MSYS2 build.
 - Patch 68 (clang-built QEMU) in `patches/qemu/README.md`.
 - Doc 12 "The WGL rule"; ADR-007 and its second amendment for which
   Direct3D 9 the executor runs on; doc 03 "Input path" and
@@ -22,20 +22,18 @@ keeps scope, test loop, traps and open items. The design:
 - Build: `scripts/build-windows.sh` (cross, and native under MSYS2
   MINGW64), the `--windows` mode of `scripts/configure-qemu.sh` and
   `scripts/build-d3dpt-exec.sh`, `scripts/win-run.sh`,
-  `packaging/windows/qmake-host.c`, `guest-tools/msys2-i686.sh`.
+  `guest-tools/msys2-i686.sh`.
 - Package: `scripts/package-windows.sh`; the Store's MSIX: `scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`, `packaging/windows/Assets/`,
   `scripts/win-sideload.ps1`; the submission: `packaging/windows/store-listing.md`,
   `docs/privacy.md`; the executables'
   manifest `packaging/windows/app.manifest` (with the icon, `win-icon.rs`).
-- The Qt reproducer `tools/qtmin/` (its README has the `__once_proxy`
-  diagnosis); the fix is `launcher-qt/src/once_proxy.cpp`.
 - Windows branches of shared code: `embed/mglcntx_embed.c` (WGL) and
   `tools/wgl-probe.c`; `launcher-core/src/console.rs`, `fatal.rs`,
   `paths.rs`, `player.rs`, `wizard.rs`, `bundle.rs` (one-folder layout,
   WHPX naming), `control.rs` (live control over Winsock AF_UNIX);
   `player-core/src/qmp.rs`, `player/src/kbcapture.rs`;
-  `launcher-qt/src/appearance.cpp`; `d3dpt/hw/d3dpt_exec_load.c`,
+  `d3dpt/hw/d3dpt_exec_load.c`,
   `d3dpt/exec/*.cpp`; `libdisc/src/bin/discx.rs`.
 - Patches added: 68 (clang), 69 (mkvenv's `file://C:/…` wheels URL under
   Python 3.14); Windows hunks in 10, 13, 50.
@@ -44,9 +42,9 @@ keeps scope, test loop, traps and open items. The design:
 
 ```sh
 scripts/win-cross.sh --build          # once, and after a Dockerfile change
-scripts/build-windows.sh              # qemu rust qt exec guest (cross)
+scripts/build-windows.sh              # qemu rust exec guest (cross; the launcher is the PC's)
 scripts/build-windows.sh rust         # one stage (stages are positional)
-scripts/package-windows.sh            # the zip, then its checks under wine
+scripts/package-windows.sh            # the zip under wine, given a launcher built on the PC
 scripts/package-windows.sh --msix     # ... and the Store MSIX layout, packed on the PC
 ```
 
@@ -86,10 +84,10 @@ Detailed in `docs/build-windows.md`:
 - `windows_subsystem = "windows"` loses the console for debug verbs and
   the player's output, and cmd does not wait for a windowed program ("The
   package").
-- Two emutls registries killed the Qt launcher before `main`
-  (`0xC0000005`); a PE import library only satisfies symbols already
-  undefined; the host rcc needs `CXX_QT_AUTORCC_OPTIONS=--no-zstd` ("Qt,
-  which the package carries").
+- MSYS2's coreutils `link` shadows MSVC's `link.exe`, and an MSVC exe
+  imports `vcruntime140.dll` unless linked `+crt-static` ("The
+  launcher"). The Qt launcher's emutls and import-library traps went
+  with it (2026-10-02).
 - A COFF weak external is not an ELF weak definition, so
   `mglcntx_mingw.c` is split ("OpenGL for a Win98 guest").
 - QEMU is built with clang because mingw GCC's emulated TLS made a VGA

@@ -5,13 +5,13 @@
 # (scripts/win-cross.sh, packaging/windows/Dockerfile) except the guest
 # tools and the packaging step, which run on the host.
 #
-# In MSYS2's MINGW64 shell on Windows the same stages build natively, for
-# debugging on the PC. They use the cross image's compilers, C runtime and
-# Rust target, so a native build is the build that ships. The guest-tools
-# ISO builds there too, with MSYS2's i686 toolchain
-# (guest-tools/msys2-i686.sh), and so does the package
-# (scripts/package-windows.sh, checked on Windows itself). Run what was
-# built with scripts/win-run.sh.
+# In MSYS2's MINGW64 shell on Windows the same stages build natively. They
+# use the cross image's compilers, C runtime and Rust target, so a native
+# build is the build that ships. The guest-tools ISO builds there too,
+# with MSYS2's i686 toolchain (guest-tools/msys2-i686.sh). The launcher
+# (`mitsuami`, WinUI 3 with MSVC) builds *only* there, so the package
+# comes from Windows (scripts/package-windows.sh, checked on Windows
+# itself). Run what was built with scripts/win-run.sh.
 #
 #   scripts/build-windows.sh                everything this host can build
 #   scripts/build-windows.sh qemu rust      only those stages
@@ -26,11 +26,15 @@
 #   rust    cargo build --release --target x86_64-pc-windows-gnu: the
 #           player, launcher-core, discx. Runs after `qemu`, because the
 #           player links the embed DLL from build/win/qemu.
-#   qt      cargo build in launcher-qt/ (its own workspace): the Qt 6 /
-#           QML launcher that every package ships (ADR-015). Cross-compiled
-#           like the rest. The image carries the mingw Qt to link against
-#           and a native Qt of the same version for moc, rcc and
-#           qmltyperegistrar.
+#   mitsuami (Windows only) cargo build --release in launcher-mitsuami/
+#           (its own workspace): the launcher every package ships
+#           (ADR-023), on WinUI 3. It is the one MSVC binary here
+#           (cargo +stable-x86_64-pc-windows-msvc, Visual Studio's C++
+#           tools), linked with a static C runtime so it needs no
+#           vcruntime DLL, and it runs on the Windows App Runtime 2.4+,
+#           which a PC installs once. It talks to the rest only through
+#           the player's command line, so the C runtimes never meet. The
+#           cross image has no MSVC, so a Linux host skips it.
 #   exec    DXVK's d3d9.dll into build/win/dxvk (configure-dxvk.sh
 #           --windows), then build-d3dpt-exec.sh --windows: d3dpt_exec.dll,
 #           the Direct3D executor (doc 14). The package ships DXVK as
@@ -73,7 +77,7 @@ esac
 MSYS2_PACKAGES=(git rsync diffutils
   mingw-w64-x86_64-{gcc,clang,lld,gdb,ninja,meson,pkgconf,python,python-distlib}
   mingw-w64-x86_64-{glib2,pixman,zlib,libepoxy,libslirp}
-  mingw-w64-x86_64-{glslang,qt6-base,qt6-declarative}
+  mingw-w64-x86_64-glslang
   mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd)
 
 JOBS=(); PACKAGE=""; STAGES=(); EXPLICIT=""
@@ -87,11 +91,11 @@ while [ $# -gt 0 ]; do
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
     -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    qemu|rust|qt|exec|guest) STAGES+=("$1"); shift ;;
+    qemu|rust|mitsuami|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu rust qt exec guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu rust mitsuami exec guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -120,7 +124,6 @@ if [ -n "$NATIVE" ]; then
   for t in git rsync diff cmp cygpath gcc g++ clang ld.lld ninja meson pkg-config windres glslangValidator cargo rustc; do
     command -v "$t" >/dev/null || missing+=("$t")
   done
-  want qt && ! command -v qmake6 >/dev/null && missing+=(qmake6)
   if [ ${#missing[@]} -gt 0 ]; then
     echo "build-windows.sh: not found: ${missing[*]} -- run scripts/build-windows.sh --msys2-deps" >&2
     exit 1
@@ -131,7 +134,6 @@ if [ -n "$NATIVE" ]; then
   [ "$host" = x86_64-pc-windows-gnu ] || {
     echo "build-windows.sh: rustc's host is $host; run: rustup default stable-x86_64-pc-windows-gnu" >&2; exit 1; }
   export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-gcc}"
-  export QMAKE="${QMAKE:-qmake6}"
 fi
 
 if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/qemu-1/hw/mesa/meson.build ]; then
@@ -202,73 +204,29 @@ if want rust; then
   BUILT+=(rust)
 fi
 
-# launcher-qt is its own cargo workspace (so a plain `cargo build` never
-# needs Qt), which is why this is a separate stage with its own directory
-# rather than another member of the one above.
-# MSYS2 only. qt-build-utils runs moc and the other Qt tools with an empty
-# environment, and MSYS2 keeps them in share/qt6/bin, away from the DLLs in
-# bin/ they load. With no PATH none of them starts ("moc unexpectedly
-# exited"). build/win/qt-host gets a copy of each tool beside its own DLL
-# closure (ldd), and QMAKE becomes packaging/windows/qmake-host.c, which
-# answers the tool-directory queries with that folder and passes everything
-# else to qmake6. MSYS2's own tree is not touched.
-msys2_qt_host() {
-  local dir="$ROOT/build/win/qt-host" libexec tool dll real
-  libexec="$(cygpath -u "$(qmake6 -query QT_HOST_LIBEXECS | tr -d '\r')")"
-  rm -rf "$dir" && mkdir -p "$dir"
-  for tool in moc rcc qmltyperegistrar qmlcachegen qtpaths; do
-    [ -f "$libexec/$tool.exe" ] || continue
-    cp "$libexec/$tool.exe" "$dir/"
-    ldd "$libexec/$tool.exe" | awk '$3 ~ /^\/mingw64\// { print $3 }' | while read -r dll; do
-      [ -f "$dir/$(basename "$dll")" ] || cp "$dll" "$dir/"
-    done
-  done
-  # whether `command -v` says .exe or not, exactly one
-  real="$(cygpath -m "$(command -v qmake6)")"; real="${real%.exe}.exe"
-  printf '#define REAL_QMAKE "%s"\n#define HOST_TOOLS "%s"\n' "$real" "$(cygpath -m "$dir")" \
-    > "$dir/qt-host-paths.h"
-  gcc -O2 -Wall -static -I"$dir" -o "$dir/qmake-host.exe" packaging/windows/qmake-host.c
-  export QMAKE="$(cygpath -m "$dir/qmake-host.exe")"
-  # Run each the way qt-build-utils does, with no environment at all,
-  # because its own failure is "could not find Qt" with the output thrown
-  # away. MSYS2's `env -i` would not do, since it puts Windows' own
-  # variables back for a native program. A native Python's env={} does not.
-  python3 - "$QMAKE" "$real" "$(cygpath -m "$dir")" <<'PY' || exit 1
-import os, subprocess, sys
-qmake, real, tools = sys.argv[1:4]
-def run(what, argv):
-    try:
-        r = subprocess.run(argv, env={}, capture_output=True, text=True)
-    except OSError as e:
-        print(f"    {what}: cannot start: {e}")
-        return None
-    if r.returncode != 0:
-        print(f"    {what}: exit {r.returncode:#x}\n      stdout: {r.stdout.strip()!r}\n      stderr: {r.stderr.strip()!r}")
-        return None
-    return r.stdout.strip()
-v = run("qmake-host -query QT_VERSION", [qmake, "-query", "QT_VERSION"])
-if v is None:
-    run("qmake6 itself, the same way", [real, "-query", "QT_VERSION"])
-    print("build-windows.sh: the QMAKE wrapper does not answer with no environment (above)")
-    sys.exit(1)
-print(f"    qmake-host: Qt {v}, tools from {run('qmake-host -query QT_HOST_LIBEXECS', [qmake, '-query', 'QT_HOST_LIBEXECS'])}")
-bad = [t for t in ("moc", "rcc", "qmltyperegistrar", "qmlcachegen", "qtpaths")
-       if os.path.exists(os.path.join(tools, t + ".exe"))
-       and run(t + " --help", [os.path.join(tools, t + ".exe"), "--help"]) is None]
-if bad:
-    print("build-windows.sh: these Qt tools do not start with no environment: " + " ".join(bad))
-    sys.exit(1)
-PY
-}
-
-if want qt; then
-  if [ -z "$NATIVE" ] && ! scripts/win-cross.sh test -x /usr/bin/x86_64-w64-mingw32-qmake-qt6; then
-    skip qt "the cross image has no mingw Qt 6 (rebuild it: scripts/win-cross.sh --build)" || true
+# --- mitsuami ---------------------------------------------------------
+# The launcher (ADR-023), WinUI 3 through mitsuami: MSVC, so natively only,
+# and into launcher-mitsuami/target/release, where package-windows.sh and
+# win-run.sh look. `+crt-static` keeps vcruntime140.dll out of its import
+# table: that DLL is not part of Windows, and a PC without Visual C++'s
+# redistributable would get a loader dialog before any code of ours ran.
+if want mitsuami; then
+  MSVC=stable-x86_64-pc-windows-msvc
+  if [ -z "$NATIVE" ]; then
+    skip mitsuami "the WinUI launcher builds with MSVC, on Windows (MSYS2's MINGW64 shell)" || true
+  elif ! rustup run "$MSVC" rustc -V >/dev/null 2>&1; then
+    skip mitsuami "no $MSVC toolchain (rustup toolchain install $MSVC; needs Visual Studio's C++ tools)" || true
   else
-    [ -z "$NATIVE" ] || msys2_qt_host
-    say "qt: cargo build --release --target x86_64-pc-windows-gnu (launcher-qt)"
-    inw sh -c 'cd launcher-qt && exec cargo build --release --target x86_64-pc-windows-gnu'
-    BUILT+=(qt)
+    say "mitsuami: cargo +$MSVC build --release (launcher-mitsuami)"
+    # Without MSYS2's /usr/bin (and /bin, the same directory) on PATH:
+    # its `link` is coreutils' and is found before Microsoft's link.exe
+    # ("link: extra operand"). /mingw64/bin stays, for windres.
+    nolink=""; IFS=: read -ra dirs <<< "$PATH"
+    for d in "${dirs[@]}"; do case "$d" in /usr/bin|/bin) ;; *) nolink="${nolink:+$nolink:}$d" ;; esac; done
+    cargo=$(command -v cargo)
+    ( cd launcher-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
+        "$cargo" "+$MSVC" build --release )
+    BUILT+=(mitsuami)
   fi
 fi
 

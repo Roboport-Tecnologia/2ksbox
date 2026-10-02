@@ -31,8 +31,8 @@
 //!   snapshot taken before any of this has neither, and restores the
 //!   disk alone, as it always did.
 //!
-//! The front end still owns when `poll` is called (Qt runs a `Timer`
-//! that stops when there is no job) and how a destructive restore is
+//! The front end still owns when `poll` is called (a timer or task that
+//! stops when there is no job) and how a destructive restore is
 //! confirmed.
 
 use crate::bundle::Machine;

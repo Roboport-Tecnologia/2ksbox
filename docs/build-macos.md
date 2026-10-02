@@ -12,7 +12,7 @@ Mac").
 ```sh
 xcode-select --install                       # Apple clang + git
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install ninja meson cmake pkg-config gnu-sed uv   # build tools only ("The libraries" below)
+brew install ninja meson pkg-config gnu-sed uv   # build tools only ("The libraries" below)
 brew install mingw-w64 xorriso nasm mtools   # guest-tools ISO, the Wine pair, the DOS batteries
 brew install autoconf automake libtool       # libtpms (the Windows 11 TPM) builds from its git tarball
 brew install llvm lld                        # Windows 11 on Arm's firmware (scripts/build-edk2.sh)
@@ -21,12 +21,15 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 - **No library the app carries comes from Homebrew.** `build.sh`'s
   `deps` stage (`scripts/build-deps.sh`) builds QEMU's libraries (glib,
-  pixman, libslirp, zstd; static) and Qt 6 itself (qtbase,
-  qtshadertools, qtdeclarative, and qttools for `macdeployqt`) from
-  pinned upstream tarballs into `build/deps/<arch>`, the first time in
-  about an hour, and `configure-qemu.sh`, the `qt` stage and the
-  packager use nothing else. meson, ninja, cmake and pkg-config are
-  needed to build them and ship nothing.
+  pixman, libslirp, zstd, and libtpms with OpenSSL's libcrypto; static)
+  from pinned upstream tarballs into `build/deps/<arch>`, and
+  `configure-qemu.sh` and the packager use nothing else. meson, ninja
+  and pkg-config are needed to build them and ship nothing.
+- **The launcher needs nothing extra.** `launcher-mitsuami` (ADR-023)
+  is on AppKit, which every Mac has; `build.sh`'s `mitsuami` stage is a
+  plain `cargo build --release` in `launcher-mitsuami/`. Until
+  2026-10-02 the launcher was Qt, and the `deps` stage built Qt from
+  source too.
 - **llvm and lld** build EDK2 for the aarch64 `virt` board (`build.sh`'s
   `edk2` stage, `scripts/build-edk2.sh`, track M20 step 4): Apple's
   clang cannot link the ELF images EDK2 turns into PE. The firmware is
@@ -130,11 +133,6 @@ Mac specifics of the stages:
   without an `@available` check fails the build instead of dying on the
   floor's macOS (`strchrnul`, declared from 15.4 and found by meson
   anyway, is patch 46).
-- **A hand-run `cargo build` in `launcher-qt/` uses our Qt too**:
-  `launcher-qt/build.rs` sets `QMAKE` to `build/deps/<arch>/bin/qmake`
-  when that exists and nothing preset it. Before it did, one such build
-  found Homebrew's `qmake6` on `PATH`, and the package failed on a
-  launcher built for macOS 26 with QtDBus and brotli in its closure.
 - `configure-qemu.sh` uses uv's Python only; a Python complaint means uv
   is not on `PATH`. Under Rosetta (`--x86_64`) it takes uv's x86_64
   build of the same version, because meson takes the machine its
@@ -238,12 +236,7 @@ scripts/package-macos.sh --x86_64 --no-notarize # the Intel app, from scripts/bu
 ```
 
 `--no-build`, `--no-notarize`, `--identity`, `--keychain-profile` and
-`--out` are in the script's header. The script's own `cargo build` of
-the launcher runs with `QMAKE` pointed at `build/deps/<arch>/bin/qmake`,
-as `build.sh`'s qt stage does; before 2026-09-24 it set `QMAKE` only
-after building, so a Homebrew Qt on `PATH` (6.11 on the Air) compiled a
-`qt_version_tag_6_11` into the launcher and the link against our 6.9.3
-frameworks failed. Notarization credentials, once:
+`--out` are in the script's header. Notarization credentials, once:
 
 ```sh
 xcrun notarytool store-credentials 2ksbox-notary \
@@ -265,37 +258,20 @@ walk stays, because a library found under `/opt/homebrew` or
 `/usr/local` is a configure that went wrong, and the `no-optionals`
 check fails on the same thing earlier.
 
-**Qt comes through `macdeployqt`**, run first on a bundle that already
-has its `Info.plist` (it reads `CFBundleExecutable`), into `Frameworks`,
-`PlugIns` and `Resources/qml`. It needs help:
+**The launcher brings no toolkit.** `MacOS/2ksbox` is
+`launcher-mitsuami` (ADR-023) on AppKit, which every Mac has, so the
+app has no `Frameworks`, `PlugIns` or deployment step of a toolkit; the
+dylib closure above is the whole story. (Until 2026-10-02 the launcher
+was Qt and `macdeployqt` filled those directories.)
 
-- **`-qmldir=launcher-qt/qml` is required.** Our QML is a compiled-in
-  resource, so without it the scanner deploys no modules and the app
-  dies on `module "QtQuick" is not installed`.
-- **It deploys whole categories.** With Homebrew's Qt, which symlinked
-  every formula into one tree, VirtualKeyboard, Scene2D/3D, Pdf and
-  the like arrived without their frameworks (34 `ERROR: Cannot resolve
-  rpath` pairs, folded into one line). Our Qt has only the modules the
-  launcher imports, so there is little to prune, but the guard stays:
-  a plugin whose framework is not in the bundle is removed, then the
-  dangling QML module (a module's plugin under `Resources/qml` is a
-  **symlink** into `PlugIns`).
-- **It leaves what it keeps half-wired.** A copied plugin keeps the
-  rpaths it was built with, which resolve nowhere in a bundle. The
-  staging gives every plugin rpaths into `Contents/Frameworks` from
-  itself and from its loading executable (a QML plugin reached through
-  the symlink has the wrong `@loader_path`), and every plain dylib in
-  `Frameworks` an `@rpath` id and `@loader_path`.
-- **The ad-hoc re-sign finds every Mach-O by file type, not mode.** An
-  arm64 binary whose load commands changed under its signature is
-  killed silently, and a QML plugin or Qt framework can arrive mode 644.
-- The offscreen platform plugin is copied beside the cocoa one for the
-  window check, and the launcher draws **Fusion** there
-  (`launcher-qt/src/appearance.cpp`): the macOS style paints real Cocoa
-  views, Qt 6.9 names it by the operating system rather than the
-  platform, and on the offscreen platform its first Button died in
-  `objc_msgSend`. Any `QT_QPA_PLATFORM` but cocoa gets Fusion; a real
-  window still gets the macOS style.
+**The ad-hoc re-sign finds every Mach-O by file type, not mode.** An
+arm64 binary whose load commands changed under its signature is killed
+silently (`SIGKILL` and nothing else), so the staging re-signs every
+Mach-O ad hoc after rewriting install names; the Developer ID signature
+replaces it further down.
+
+The `Info.plist` is written once, at the end of the staging, with
+`LSMinimumSystemVersion` measured from the bundle ("The floor" below).
 
 **The Vulkan driver** is the one companion no load command names. The
 app carries the LunarG loader and KosmicKrisp with its own ICD manifest,
@@ -322,11 +298,15 @@ environment and system directories. The packager requires that
 - the packaged player runs under `DYLD_PRINT_LIBRARIES=1` and **every
   image the loader touches** must be inside the app, `/usr/lib` or
   `/System`;
-- the staged launcher **opens a real window**
-  (`QT_QPA_PLATFORM=offscreen` with `LAUNCHER_QT_SHOT=<png>`, under the
-  same loader watch). Qt finds its platform plugin and QML modules by
-  name at run time, so without this a bundle with no QtQuick passes
-  everything and opens nothing.
+- the staged launcher **opens a real window** (`LAUNCHER_SHOT=<png>`,
+  `launcher-mitsuami/src/shot.rs`, under the same loader watch) and
+  must write the PNG and load nothing from outside the app. AppKit has
+  no offscreen mode, so the window shows for a moment on the
+  packager's screen.
+
+The script has not yet had its first run with the AppKit launcher
+(M19, 2026-10-02); everything above about the launcher is what the
+script does, not yet what a run has shown.
 
 Signing is inside-out, every nested Mach-O before the bundle that seals
 it, with `--options runtime` and `packaging/macos/2ksbox.entitlements`
@@ -339,7 +319,7 @@ retries.
 
 | | App Store | Community |
 |---|---|---|
-| macOS | 26+, Apple Silicon | Homebrew's floor (15.0 today); Intel permitted, untested ("The Intel build" below) |
+| macOS | 26+, Apple Silicon | the floor (12.0, "The floor" below); Intel permitted, untested ("The Intel build" below) |
 | Direct3D | DXVK on KosmicKrisp | the same, plus the executor on Wine below Vulkan 1.3 |
 | Distribution | App Store | Developer ID DMG (`--community`) |
 
@@ -386,13 +366,15 @@ first version of this recipe needed an Intel Homebrew, and Homebrew's
 installer refuses one ("Homebrew on macOS is only supported on Apple
 Silicon processors!", Homebrew 7.0.6's `install.sh`); that is what
 ended the app's dependence on Homebrew ("The libraries" above). The
-Intel build needs no second package manager: its libraries and Qt come
+Intel build needs no second package manager: its libraries come
 from `build-deps.sh --arch x86_64` (its meson builds get a cross file
 naming x86_64, with `subsystem`, `kernel` and the Objective-C compiler
 glib asks for), its Python from uv, its Rust from the same rustup. The
 staged app passes every packager check under Rosetta (every Mach-O
 x86_64, minimum macOS 12.0, the loader's images all inside the app, the
-offscreen window), and `scripts/test.sh` runs that as `package-x86_64`.
+window), and `scripts/test.sh` runs that as `package-x86_64`. That was
+measured with the Qt launcher; the AppKit one has not been through it
+yet.
 What is left is an Intel Mac for the reference scene; the DMG stays
 "untested" until then.
 
@@ -404,7 +386,7 @@ executor on Wine (native x86_64 Wine there, no Rosetta), and a Mac with
 no Wine has none. It is made on the Apple Silicon Mac, under Rosetta:
 
 ```sh
-scripts/build.sh --x86_64                          # deps (~an hour, Qt), qemu, rust, qt, exec; dxvk is skipped
+scripts/build.sh --x86_64                          # deps, qemu, rust, mitsuami, exec; dxvk is skipped
 scripts/package-macos.sh --x86_64 --no-notarize    # build/macos-x86_64/2ksbox-<version>-macos-x86_64.dmg
 scripts/package-macos.sh --x86_64 --no-sign --no-dmg   # the staging and its checks alone
                                                    # (scripts/test.sh's package-x86_64 check)
@@ -416,7 +398,7 @@ How it works, so it stays one build and not a second tree of scripts:
   and that is all. Under Rosetta `uname -m` and Apple's compiler answer
   x86_64 without being told, and `arch -x86_64 scripts/build.sh` is the
   same build. Build tools stay the native ones: an arm64 program runs
-  from a Rosetta shell, and meson, ninja, cmake, mingw and xorriso are
+  from a Rosetta shell, and meson, ninja, mingw and xorriso are
   arm64 programs whose output is what their flags say.
 - Every script that has a build directory recognises the translated
   process (`sysctl.proc_translated`) and keeps to `build/x86_64/`,
@@ -432,18 +414,18 @@ How it works, so it stays one build and not a second tree of scripts:
   (pixman picks its SIMD paths by `host_machine.cpu_family`), and
   `configure-qemu.sh` runs QEMU's meson on uv's x86_64 Python
   (`uv python install cpython-<version>-macos-x86_64-none`, done for
-  you). cmake takes `CMAKE_OSX_ARCHITECTURES` and needs no more.
+  you).
 - cargo is never translated (rustup's toolchain is arm64) and simply
   cross-compiles with `--target x86_64-apple-darwin`; `cc` adds
-  `-arch x86_64` for that target, and `cxx-qt-build` finds the x86_64 Qt
-  through `QMAKE`, which `build.sh` points at `build/deps/x86_64`.
+  `-arch x86_64` for that target. The launcher is built the same way,
+  into `launcher-mitsuami/target/x86_64-apple-darwin/`.
 - The packager checks the architecture of every Mach-O in the app
   beside the floor: a file that is not `x86_64` (an arm64 KosmicKrisp,
   say) fails the package. On an Intel Mac itself nothing is translated,
   and the same scripts make its native app with the same checks.
 
 What the Air can and cannot prove: the staged app's own checks run under
-Rosetta (the loader's image list, the offscreen window, `--host-check`,
+Rosetta (the loader's image list, the window, `--host-check`,
 the wizard), and the app can be opened under Rosetta for a look. TCG's
 x86-64 backend and the Voodoo 2's SSE2 rasteriser are the Linux rig's
 every day. But Rosetta translates the JIT's output and says nothing about
@@ -479,54 +461,39 @@ a recipe change for the same version wants `--clean`.
   would auto-detect from Homebrew (libpng, jpeg-turbo) is simply not
   found, and `--disable-png --disable-vnc-jpeg` say so on purpose. Not
   meson's `prefer_static`: QEMU turns it into `-static`, fatal on macOS.
-- **Qt 6.9.3** as frameworks: qtbase with its bundled zlib, png, jpeg,
-  freetype, harfbuzz, pcre2, double-conversion and libb2, the system's
-  TLS instead of OpenSSL, no ICU (CoreFoundation does its job on a Mac),
-  no dbus, glib, zstd or brotli, and without Sql, PrintSupport,
-  Concurrent, Test, Xml and Widgets; qtshadertools; qtdeclarative with
-  the macOS, Fusion and Basic styles (and the iOS style, whose
-  implementation module the macOS style's BusyIndicator imports), no
-  particles, designer support, debugger or profiler; qtimageformats for
-  its WebP plugin alone, on the libwebp it bundles (the macOS style's
-  busy indicator is an animated WebP); and qttools with every tool but
-  `macdeployqt` off. cmake is told to ignore `/opt/homebrew` and
-  `/usr/local`, which this Mac's cmake searches on its own, and Qt's
-  pkg-config lookups are off, so no system library sneaks in. The
-  frameworks keep Qt's `@rpath` install names (turning the rpath
-  feature off strips Qt's own tools of their `LC_RPATH`, and qmake
-  aborts); `cxx-qt-build` gives the launcher an rpath to the prefix, so
-  it runs unpackaged from a checkout, and the packager deletes that
-  rpath once `macdeployqt` has copied the frameworks. `build.sh`'s `qt`
-  stage and the packager name this Qt through `QMAKE`; a `qmake6` on
-  `PATH` is never used on a Mac.
+- **libtpms 0.10.2 with OpenSSL 3.5's libcrypto**, static, for the TPM
+  2.0 behind `-tpmdev libtpms` (track M20, patch 75).
+- **No toolkit.** Until 2026-10-02 the script also built Qt 6.9.3 as
+  frameworks for the Qt launcher (and carried two qtdeclarative patches
+  for the macOS style's button margins); the AppKit launcher needs
+  none of it, and that part and its patches are gone.
 - **Our patches on a package** live in `patches/deps/<name>/` and are
-  applied to the unpacked tarball (`patches/deps/README.md`). Today,
-  qtdeclarative carries two upstream 6.10.1 commits: the Quick Controls
-  macOS style's push-button title margins were 5 pt top / 9 pt bottom,
-  tuned for the pre-Tahoe bevel, and on macOS 26's symmetric capsule
-  every button label sat 2 pt high. The open-source 6.9 branch closed
-  after 6.9.3 and never got the fix; qtbase 6.9.3 already has the
-  Liquid Glass check, so the patch is the Quick style alone. Each
-  package's build stamp carries a hash of its patch set: editing one
-  rebuilds that package on the next `build.sh`, nothing else.
+  applied to the unpacked tarball (`patches/deps/README.md`; today one,
+  on libtpms). Each package's build stamp carries a hash of its patch
+  set: editing one rebuilds that package on the next `build.sh`,
+  nothing else.
 
-Linux and the Flatpak keep the distribution's libraries; the script
-refuses to run there. What the closure once was, for the record: 43 Qt
-frameworks and about 30 dylibs (ICU, dbus, OpenSSL, tiff, webp, jasper,
-lcms2, brotli and the rest) from Homebrew's bottles, swapped for the
-floor's builds by a script that is gone with them.
+On Linux, the Flatpak included, the script builds only QEMU's GLib
+(with pcre2 and libslirp) and libtpms with libcrypto
+(`docs/development.md`, "The build, stage by stage"); `QEMU_DEPS=system`
+takes the distribution's instead. What the Mac app's closure once was,
+for the record: 43 Qt frameworks and about 30 dylibs (ICU, dbus,
+OpenSSL, tiff, webp, jasper, lcms2, brotli and the rest) from
+Homebrew's bottles, swapped for the floor's builds by a script that is
+gone with them.
 
 ### The floor
 
 The app runs down to **macOS 12 (Monterey)**, the number in
-`scripts/macos-floor.sh`, set by the sources the app is built from ("The
-libraries" above): Qt 6.9 is the newest line that still runs on 12 (6.11
-needs 13; 6.5 reached 11 but its open-source line ended in 2023, before
-this Xcode), and QEMU, glib, pixman, libslirp, zstd, the LunarG loader,
-KosmicKrisp and Rust all go lower. Until 2026-09-23 the floor was
-Homebrew's (15.0), because the app carried Homebrew's bottles; it moved
-the day the libraries became ours. Changing the number and running
-`scripts/build.sh` retargets everything, Qt included.
+`scripts/macos-floor.sh`. It was set by Qt 6.9, the newest Qt line that
+still ran on 12, while the launcher was Qt. The launcher is now
+`launcher-mitsuami` on AppKit (ADR-023, 2026-10-02), and 12 stands until
+a Mac that old has run it: mitsuami's own AppKit floor is not measured
+yet. QEMU, glib, pixman, libslirp, zstd, the LunarG loader, KosmicKrisp
+and Rust all go lower. Until 2026-09-23 the floor was Homebrew's (15.0),
+because the app carried Homebrew's bottles; it moved the day the
+libraries became ours ("The libraries" above). Changing the number and
+running `scripts/build.sh` retargets everything.
 
 Three pieces make the claim true:
 
@@ -534,14 +501,11 @@ Three pieces make the claim true:
   target and the availability error flag above (a new floor recompiles
   QEMU and DXVK).
 - **The libraries are built for it too** (`scripts/build-deps.sh`
-  passes the target to meson, make and cmake alike), so no file in the
+  passes the target to meson, configure and make alike), so no file in the
   app is a build for a newer macOS.
 - **The package fails above it.** `LSMinimumSystemVersion` is the
   highest `LC_BUILD_VERSION` `minos` in the bundle, and any Mach-O above
-  the floor fails `package-macos.sh` by name. The ad-hoc signing pass
-  must see the swapped Qt framework binaries (mode 644, no extension);
-  one left unsigned kills the launcher at its first framework
-  (`SIGKILL (Code Signature Invalid)`). The "still links" check skips a
-  file's own install name, the first line `otool -L` prints, because a
-  framework keeps its absolute one. The LunarG loader and KosmicKrisp
-  are 11.0 builds and never set the minimum.
+  the floor fails `package-macos.sh` by name. The "still links" check
+  skips a file's own install name, the first line `otool -L` prints,
+  because a library built elsewhere keeps its absolute one. The LunarG
+  loader and KosmicKrisp are 11.0 builds and never set the minimum.

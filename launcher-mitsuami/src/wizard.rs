@@ -1,6 +1,6 @@
 //! The machine form, "New machine" and "Edit…", over
 //! `launcher_core::wizard::Form`: a settings window with a page per
-//! section, as `WizardWindow.qml` draws it.
+//! section.
 //!
 //! The form is one signal. Every control reads it and every edit goes
 //! through `Wizard::edit`, which is `Form`'s own method, so what a field
@@ -301,8 +301,7 @@ fn Note(text: Value<String>) -> impl View {
 }
 
 /// A note that can be a warning (a machine that will refuse to start),
-/// then in the platform's warning colour, as the Qt window's amber;
-/// otherwise in the secondary colour, as every note under a control.
+/// then in the platform's warning colour; otherwise in the secondary colour, as every note under a control.
 #[component]
 fn AccelLine(note: Value<(String, bool)>) -> impl View {
     let (n1, n2, n3) = (note.clone(), note.clone(), note);
@@ -422,8 +421,7 @@ fn SystemPage() -> impl View {
             // the emulator, and do nothing under hardware virtualization.
             <Show when=get(wiz, Form::optimizations_apply)>
                 <Column gap=Spacing::Md>
-                    // A disclosure header: Qt Quick has none either, and the Qt window
-                    // builds its own from a tool button.
+                    // A disclosure header, built from a borderless button.
                     <Row>
                         <Button button_style=ButtonStyle::Borderless @click=move || expanded.update(|e| *e = !*e)>
                             {move || format!(

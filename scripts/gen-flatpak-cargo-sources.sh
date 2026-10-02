@@ -6,9 +6,10 @@
 # what this file is (every crate + its .cargo-checksum.json + the cargo
 # config that redirects crates-io at the vendor directory).
 #
-# Two lock files, one vendor directory. `launcher-qt/` is its own cargo
-# workspace (ADR-015) and the launcher the Flatpak installs, so its crates
-# are declared too. The generator takes one lock file at a time, so it
+# Two lock files, one vendor directory. `launcher-mitsuami/` is its own
+# cargo workspace (ADR-023) and the launcher the Flatpak installs, so its
+# crates are declared too, mitsuami itself as a git source at its pinned
+# rev. The generator takes one lock file at a time, so it
 # runs once per lock and the results are merged on their `dest`. The two
 # share most crates at identical versions, and one `cargo/config` covers
 # both because `CARGO_HOME` is the same for both builds.
@@ -41,7 +42,7 @@ if ! [ -f "$TOOL" ] || ! echo "$SHA256  $TOOL" | sha256sum -c --status; then
     rm -f "$TOOL"; exit 1; }
 fi
 
-LOCKS=(Cargo.lock launcher-qt/Cargo.lock)
+LOCKS=(Cargo.lock launcher-mitsuami/Cargo.lock)
 PARTS=()
 for lock in "${LOCKS[@]}"; do
   part="$ROOT/build/flatpak-tools/$(echo "$lock" | tr / -).json"
@@ -80,9 +81,9 @@ assert all(e["url"].startswith("https://") and e.get("sha256") for e in crates),
     "a crate source has no https url or no checksum"
 cfg = [e for e in merged if e.get("dest") == "cargo" and e.get("dest-filename", "").startswith("config")]
 assert len(cfg) == 1, f"expected exactly one cargo config entry, got {len(cfg)}"
-# cxx-qt is what the second lock file is here for; a merge that lost it
+# mitsuami is what the second lock file is here for; a merge that lost it
 # would be an offline build that fails hours in.
-assert any("/cxx-qt/" in e.get("url", "") for e in crates), "no cxx-qt crate: launcher-qt's lock did not make it in"
+assert any("mitsuami" in e.get("url", "") for e in merged), "no mitsuami source: launcher-mitsuami's lock did not make it in"
 json.dump(merged, open(out, "w"), indent=4)
 open(out, "a").write("\n")
 print(f"{len(merged)} sources: {kinds}")

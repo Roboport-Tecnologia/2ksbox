@@ -1,8 +1,7 @@
 //! The headless screenshot: `LAUNCHER_SHOT=<file.png>` photographs the
 //! window once it has settled and exits. It is how a packager proves the
-//! binary opens a real window with its toolkit found (as `launcher-qt`'s
-//! `LAUNCHER_QT_SHOT` does), and how a check looks at a window without a
-//! desktop. `LAUNCHER_SHOT_DELAY_MS` (default 800) is how long it waits.
+//! binary opens a real window with its toolkit found, and how a check
+//! looks at a window without a desktop. `LAUNCHER_SHOT_DELAY_MS` (default 800) is how long it waits.
 //!
 //! On GTK a window with no desktop wants a display of its own: run it
 //! under `gtk4-broadwayd` (`GDK_BACKEND=broadway`), as mitsuami's own
