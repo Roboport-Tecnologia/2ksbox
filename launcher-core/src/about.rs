@@ -44,7 +44,7 @@ pub const GROUPS: &[Group] = &[
             c("SeaBIOS", "The PC BIOS", "LGPL-3.0", "https://www.seabios.org"),
             c("EDK II", "UEFI firmware for Windows 11", "BSD-2-Clause-Patent", "https://www.tianocore.org"),
             c("libtpms", "The TPM for Windows 11", "BSD-3-Clause", "https://github.com/stefanberger/libtpms"),
-            c("virtio-win", "Drivers for Windows 11 on Arm", "BSD-3-Clause", "https://github.com/virtio-win/kvm-guest-drivers-windows"),
+            c("virtio-win", "Drivers for Windows 11", "BSD-3-Clause", "https://github.com/virtio-win/kvm-guest-drivers-windows"),
             c("libslirp", "Guest networking", "BSD-3-Clause", "https://gitlab.freedesktop.org/slirp/libslirp"),
             c("GLib", "QEMU's support library", "LGPL-2.1", "https://gitlab.gnome.org/GNOME/glib"),
         ],
