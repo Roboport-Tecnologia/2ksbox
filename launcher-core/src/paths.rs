@@ -143,6 +143,23 @@ pub fn checkout(rel: &str) -> PathBuf {
     root.join(rel)
 }
 
+/// `std::fs::canonicalize`, minus the verbatim prefix it puts on every
+/// Windows path (`\\?\C:\...`, `\\?\UNC\server\share\...`). A path that is
+/// stored (a machine's disk, a qcow2's backing file, a disc on the shelf)
+/// or handed to QEMU takes the plain form, which every Windows program
+/// reads and the user recognises. Elsewhere it is canonicalize itself.
+pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let c = std::fs::canonicalize(path)?;
+    let Some(s) = c.to_str() else { return Ok(c) };
+    if let Some(unc) = s.strip_prefix(r"\\?\UNC\") {
+        return Ok(PathBuf::from(format!(r"\\{unc}")));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => Ok(PathBuf::from(rest)),
+        _ => Ok(c),
+    }
+}
+
 /// The user's own directory: `machines/`, `discs.toml`, `shader-profiles/`
 /// and a downloaded preset collection (`~/.local/share/2ksbox` on Linux,
 /// `~/Library/Application Support/2ksbox` on macOS, `%APPDATA%\2ksbox\data`

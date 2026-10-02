@@ -47,6 +47,73 @@ Environment: `WINXP_IMG` (`~/vms/winxp.qcow2`), `GUEST_ISO` (newest
 `WIN98_DX9_MACHINE` (`base98-br`: the launcher machine the Win98 checks
 copy).
 
+### On Windows
+
+Everything Windows is done natively on Windows (user decision,
+2026-10-02): the suite runs in MSYS2's MINGW64 shell on what
+`scripts/build-windows.sh` built, with no Linux box involved.
+
+```sh
+scripts/build-windows.sh                  # qemu rust mitsuami exec guest, as usual
+scripts/test.sh all                       # in the MINGW64 shell
+```
+
+Beyond `--msys2-deps`, the guest stage wants `mingw-w64-x86_64-mtools`
+(the scratch disks; MSYS2 has no dosfstools, and `mformat` builds them),
+the icon check `mingw-w64-x86_64-imagemagick`, and the Win98 checks the
+display driver, so Open Watcom in its default place
+(`~/.local/opt/open-watcom`, `docs/build-windows.md`). The XP image is a
+launcher machine's disk, `%APPDATA%\2ksbox\data\machines\basexp-br` by
+default (`WINXP_MACHINE` names another, `WINXP_IMG` a file); like every
+user image it is only read, through an overlay. The Win98 checks run
+on their own raw copy of the Win98 machine's disk (`build/test/w98.raw`);
+a machine set up on Cirrus has no d3dpt driver, so the first run installs
+it into that copy (`tools/win98-driver-test.sh install`, ~10 min) and
+the copy keeps it (`FRESH=1` makes a new copy).
+
+What differs from Linux, so a failure there reads right:
+
+- **Paths.** The script's own layer at its top names this platform's
+  build (`build/win/qemu`, `target/x86_64-pc-windows-gnu`, the executor
+  and `dxvk_d3d9.dll` in `build/win/d3dpt`). `build/test` is spelled
+  `C:/...`, which bash and the native programs both read, because MSYS2
+  rewrites a `/c/...` argument for a native program but never an
+  environment variable's value. On stdout `launcherx` writes paths the
+  Windows way, so the checks call it through a wrapper
+  (`build/test-bin/launcherx`) that turns its backslashes into `/`.
+- **QMP.** Python on Windows has no AF_UNIX, so QEMU listens on a free
+  loopback port (`tools/qemuhost.py`, `guestwait.sh`'s `gw_qmp_addr`).
+  QEMU there also cannot take a monitor from a pipe: a `-qmp stdio` /
+  `-monitor stdio` check goes through `tools/qmp-pipe.py` (`$QSYS_PIPE`),
+  which forwards the lines over that port as they arrive. It starts QEMU
+  by its absolute path: a shell with `NoDefaultCurrentDirectoryInExePath`
+  set (PowerShell's, for one) makes CreateProcess find no relative one.
+- **Inodes.** Windows' `stat` reports none, so the drive matches the disc
+  in its tray to a shelf entry by spelling (patch 52), and the ATAPI
+  battery passes its boot disc under the shelf's own spelling there.
+- **Line endings.** A file a native program parses (the shelf file) is
+  written with `\n`; Python on Windows writes `\r\n` by default.
+- **mtools and drive letters.** mtools reads `C:/...` as its own DOS
+  drive C: ("Drive 'C:' not supported"), so on Windows `guestwait.sh`
+  defines an `mcopy` that hands it every host-side path relative to the
+  working folder; the image (`-i`) and the `::/` paths are left alone.
+  MSYS2's own programs (`xorriso`, `bsdtar`) take no `C:/...` either and
+  get `cygpath -u` paths (`up` in test.sh).
+- **No KVM.** Every guest runs under TCG, so the guest stage is slower,
+  and the Win98 winetest run (up to an hour per test file, six in all) is
+  most of it.
+- **The native Direct3D oracle** is the scene's own source built as an
+  x64 program with DXVK's `d3d9.dll` beside it. It opens a window for the
+  length of the run. `d3dpt-dp2-system` runs the executor's host test on
+  Windows' own `d3d9.dll` as well (`D3DPT_D3D9=system`), since a host
+  below the Vulkan floor runs there.
+- SKIPs that stay: `accel-choices` (bwrap), `embed-3d` (Linux's GL path),
+  `package` (the zip is rolled and checked by `scripts/package-windows.sh`,
+  not by this check), `atapi-read-error` (an LD_PRELOAD), `mode-sweep` and the pad
+  checks (they want a display test.sh does not set up here yet),
+  `player-mitsuami` (sway), `tpm-qtest` (no libtpms in the Windows QEMU
+  until M20 step 5), `exec-wine`.
+
 ### Host-stage checks
 
 | Check | What it proves |
@@ -61,7 +128,7 @@ copy).
 | `clone` | **Clone…** gives a machine with its own disk copy and snapshots, the original untouched; refused while the machine runs (doc 07); "same hard disk" boots the original's disk, copies none of it, warns, and goes ahead while the machine runs |
 | `snapshot-tree` | the snapshot window's tree over a real qcow2 (doc 07): take, restore, take again gives siblings, not a line; a delete moves the branch up; a snapshot deleted or taken by hand is dropped from the record or shown at the top level; the clone carries the tree |
 | `shader-defaults` | the first-run shader offer without a toolkit, and the library's default profile: the first download marks CRT Aperture, a machine on "(default)" resolves to it and follows it when moved, a named profile does not, a second run of the starters never moves it, clearing it and a deleted profile both mean no default |
-| `mitsuami` | the launcher's real window, driven through its probes (`LAUNCHER_SCREEN`, `LAUNCHER_SHOT`; on a private Broadway display on Linux, for a moment on the desktop on a Mac): the machine window draws, `create:xp:Probe box` submits a fresh form and the machine lands in the library, `firstrun:no` asks with the shared model's headline and writes the marker, About draws (needs a built `launcher-mitsuami`; Linux also `gtk4-broadwayd`) |
+| `mitsuami` | the launcher's real window, driven through its probes (`LAUNCHER_SCREEN`, `LAUNCHER_SHOT`; on a private Broadway display on Linux, for a moment on the desktop on a Mac or Windows): the machine window draws, `create:xp:Probe box` submits a fresh form and the machine lands in the library, `firstrun:no` asks with the shared model's headline and writes the marker, About draws (needs a built `launcher-mitsuami`; Linux also `gtk4-broadwayd`) |
 | `host-check` | `launcherx --host-check`: no Vulkan reported unavailable, software Vulkan warned not refused, loader and floor always named (ADR-013/018) |
 | `optimizations` | the form's emulation switches land on `-cpu` / `-accel tcg` and our QEMU accepts all fourteen flipped; an untouched machine emits nothing; `pinned-regs` never reaches the command line |
 | `pointer` | "Seamless mouse": Windows gets `-usb -device usb-tablet`, DOS neither; toggling removes/restores both |

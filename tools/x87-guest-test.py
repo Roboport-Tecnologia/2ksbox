@@ -26,12 +26,13 @@ import shutil
 import struct
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 import urllib.request
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.environ.get("QEMU_BIN") or os.path.join(ROOT, "build/qemu/qemu-system-i386")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
 FLOPPY = os.path.join(ROOT, "build/images/144m/x86BOOT.img")
 FLOPPY_ZIP = os.path.join(ROOT, "build/images/FD13-FloppyEdition.zip")
 FLOPPY_URL = ("https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/"

@@ -286,7 +286,7 @@ impl CloneMachine {
         // or a copy when it should.
         let disk = if self.same_disk {
             let (original, _) = files.remove(source.disk);
-            machine.disk = std::fs::canonicalize(&original).unwrap_or(original);
+            machine.disk = crate::paths::canonical(&original).unwrap_or(original);
             None
         } else {
             machine.disk = files[source.disk].1.clone();
@@ -373,8 +373,13 @@ fn taken_names(library_dir: &Path) -> Vec<String> {
 /// its `machine.toml` (written afresh, last), plus the disk if it lives
 /// somewhere else.
 fn plan(dir: &Path, machine: &Machine) -> Result<Source, String> {
-    let disk_meta =
-        std::fs::metadata(&machine.disk).map_err(|e| format!("the disk {}: {e}", machine.disk.display()))?;
+    // Windows answers `metadata` on a device (`NUL`, `\\.\PhysicalDrive0`)
+    // with an error, though it opens: that is a disk that is not a file.
+    let disk_meta = std::fs::metadata(&machine.disk);
+    if disk_meta.is_err() && std::fs::File::open(&machine.disk).is_ok() {
+        return Err(format!("The disk {} is not a file.", machine.disk.display()));
+    }
+    let disk_meta = disk_meta.map_err(|e| format!("the disk {}: {e}", machine.disk.display()))?;
     if !disk_meta.is_file() {
         return Err(format!("The disk {} is not a file.", machine.disk.display()));
     }
@@ -491,7 +496,7 @@ fn absolute_backing(original: &Path, copy: &Path) -> Result<(), String> {
         return Ok(());
     }
     let base = original.parent().unwrap_or(Path::new(".")).join(&backing);
-    let base = std::fs::canonicalize(&base).unwrap_or(base);
+    let base = crate::paths::canonical(&base).unwrap_or(base);
     let bin = player::qemu_img_binary();
     // The backing file's format rides along when the original says what
     // it is; `rebase` without one would have to probe it.

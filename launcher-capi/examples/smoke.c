@@ -24,6 +24,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* A path that exists and is not a regular file, which qemu-img reads as an
+ * empty raw disk: the null device, whose name differs on Windows. */
+#ifdef _WIN32
+#define NULL_DEVICE "NUL"
+#else
+#define NULL_DEVICE "/dev/null"
+#endif
+
 static int failures = 0;
 
 static void check(const char *what, int ok, const char *saw) {
@@ -393,7 +401,7 @@ int main(int argc, char **argv) {
 
     lc_wizard_set(w, "name", "capi dos");
     lc_wizard_set_flag(w, "existing_disk", true);
-    lc_wizard_set(w, "disk_path", "/dev/null");
+    lc_wizard_set(w, "disk_path", NULL_DEVICE);
 
     /* Extra QEMU arguments: a plain line, where a quote left open is an
      * orange note while typing and a refusal at submit, with the form
@@ -439,7 +447,7 @@ int main(int argc, char **argv) {
         check_str("its shader", lc_machines_shader_label(m, found), "(default)");
         check("nothing is running", !lc_machines_is_running(m, found), NULL);
         check_str("Clone… offers a name", lc_machines_clone_name(m, found), "capi dos (copy)");
-        /* This machine's disk is /dev/null, which is not a file: the
+        /* This machine's disk is the null device, which is not a file: the
          * refusal has to arrive as a sentence and leave nothing behind. */
         size_t machines_before = lc_machines_count(m);
         char *why = NULL;

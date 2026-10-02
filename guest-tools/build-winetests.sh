@@ -10,6 +10,9 @@
 # file, no argument lists them. WINE_TAG overrides the pin.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# MSYS2 on Windows: the i686 toolchain and the guest runtime, as the other
+# guest-tools builds have them (nothing on Linux and macOS)
+. "$ROOT/guest-tools/msys2-i686.sh"
 WINE_TAG=${WINE_TAG:-wine-11.0}
 WT="$ROOT/build/winetest"
 SRC="$WT/$WINE_TAG"
@@ -35,7 +38,11 @@ CC=${CC:-i686-w64-mingw32-gcc}
 # DECLSPEC_EXPORT is Wine's own winnt.h's; mingw's has none.
 FLAGS=(-O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3
   -mtune=generic -I"$SRC/include" -DDECLSPEC_EXPORT=
-  -DWINETEST_NO_D3D9ON12 -DWINETEST_NO_WOW64 -DWINETEST_NULL_DEVICE_SKIP ${WINETEST_CFLAGS:-})
+  -DWINETEST_NO_D3D9ON12 -DWINETEST_NO_WOW64 -DWINETEST_NULL_DEVICE_SKIP
+  # the headers' view the Linux toolchain has by default (MSYS2's i686 one
+  # defaults lower, and winuser.h then hides CURSOR_SUPPRESSED); what the
+  # headers declare only, the binaries still run on XP and 98
+  -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 ${WINETEST_CFLAGS:-})
 mkdir -p "$OUT" "$OBJ"
 
 build() {  # $1 = d3d8 | d3d9

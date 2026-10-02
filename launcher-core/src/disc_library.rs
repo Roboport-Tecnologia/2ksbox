@@ -327,7 +327,7 @@ pub fn arm_drivers_iso() -> Option<PathBuf> {
         Ok(path) => PathBuf::from(path),
         Err(_) => crate::paths::resource("share/2ksbox/drivers", "build/virtio-win").join(ARM_DRIVERS_ISO),
     };
-    path.is_file().then(|| path.canonicalize().unwrap_or(path))
+    path.is_file().then(|| crate::paths::canonical(&path).unwrap_or(path))
 }
 
 /// The drivers disc's file name, in either place.
@@ -359,5 +359,5 @@ pub fn guest_tools_iso() -> Option<PathBuf> {
     // Canonicalized because this path is stored. The build-time anchor
     // is `<manifest>/../guest-tools/out`, and a `launcher-core/../guest-tools`
     // on the shelf would be correct but hard to read.
-    candidates.pop().map(|(_, path)| path.canonicalize().unwrap_or(path))
+    candidates.pop().map(|(_, path)| crate::paths::canonical(&path).unwrap_or(path))
 }

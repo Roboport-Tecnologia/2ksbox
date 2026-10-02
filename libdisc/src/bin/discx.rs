@@ -1584,7 +1584,11 @@ fn mktree(dir: &Path) -> Result<(), String> {
     // to the same 8.3 name.
     write(&dir.join("Program Files.txt"), b"space")?;
     write(&dir.join("caf\u{e9}.txt"), b"accent")?;
-    write(&dir.join("star*name.txt"), b"forbidden in joliet")?;
+    // A folder on Windows cannot hold a `*` at all, so there is no such
+    // name to serve from one.
+    if !cfg!(windows) {
+        write(&dir.join("star*name.txt"), b"forbidden in joliet")?;
+    }
     write(&dir.join("semi;colon.txt"), b"forbidden in joliet")?;
     write(&dir.join("collision-one.txt"), b"one")?;
     write(&dir.join("collision-two.txt"), b"two")?;
@@ -1656,7 +1660,7 @@ fn check_dirdisc(dir: &Path) -> Result<(), String> {
         return Err("joliet tree has no café.txt".into());
     }
     let starred: Vec<u8> = "star_name.txt;1".encode_utf16().flat_map(|u| u.to_be_bytes()).collect();
-    if !meta.windows(starred.len()).any(|w| w == starred) {
+    if !cfg!(windows) && !meta.windows(starred.len()).any(|w| w == starred) {
         return Err("joliet tree kept the * in star*name.txt".into());
     }
 

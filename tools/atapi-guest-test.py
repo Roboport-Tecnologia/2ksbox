@@ -47,11 +47,12 @@ import os
 import shutil
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.environ.get("QEMU_BIN") or os.path.join(ROOT, "build/qemu/qemu-system-i386")
-DISCX = os.path.join(ROOT, "target/release/discx")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
+DISCX = qemuhost.rust_bin(ROOT, "discx")
 FLOPPY = os.path.join(ROOT, "build/images/144m/x86BOOT.img")
 OUT = os.path.join(ROOT, "build/atapi-guest")
 DISC_DIR = os.path.join(ROOT, "build/test/disc")
@@ -133,6 +134,8 @@ def read10(lba, n):
 # and the first listing must still report slot 0 as the disc in the drive: the
 # drive works that out from the medium itself. It is passed under a different
 # spelling (BOOT_DISC) so that only the file's identity, not its name, can match.
+# Not on Windows: its stat reports no inode, so the drive compares the strings
+# there (patch 52), and the launcher writes one spelling on both sides.
 # Slots 1 and 2 are one file under two labels, so both are "in the drive" when
 # either is loaded.
 SHELF_VERSION = 1
@@ -143,7 +146,7 @@ SHELF_NO_SLOT = 0xFFFF
 SHELF_FLAG_LOADED = 0x01
 SHELF_FLAG_MISSING = 0x02
 LONG_LABEL = "A label longer than the protocol's sixty-four bytes, which must come back truncated"
-BOOT_DISC = os.path.join(DISC_DIR, ".", "lec.cue")
+BOOT_DISC = os.path.join(DISC_DIR, "lec.cue") if qemuhost.WINDOWS else os.path.join(DISC_DIR, ".", "lec.cue")
 SHELF_DISCS = [
     ("Selftest disc", DISC),
     ("Mixed disc", TOC_DISC),
@@ -699,7 +702,7 @@ def write_shelf():
     """The flat shelf file the drive answers CDSHELF from, the same format
     the launcher writes beside a machine's monitor socket (disc_library.rs,
     cdshelf/cdshelf_proto.h)."""
-    with open(SHELF, "w") as f:
+    with open(SHELF, "w", newline="\n") as f:   # LF as the launcher writes it, on Windows too
         for label, path in SHELF_DISCS:
             f.write("%s\t%s\n" % (label, path))
 

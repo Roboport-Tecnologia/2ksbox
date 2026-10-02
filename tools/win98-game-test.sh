@@ -143,16 +143,16 @@ IMG="${1:?usage: win98-game-test.sh <image.qcow2> <name>}"
 NAME="${2:?usage: win98-game-test.sh <image.qcow2> <name>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/tools/guestwait.sh"
-OUT="${OUT:-$ROOT/build/w98game/$NAME}"
-RAW="${RAW:-$ROOT/build/w98game/guest.raw}"
-QEMU="${QEMU_BIN:-$ROOT/build/qemu/qemu-system-i386}"
-QIMG="${QEMU_IMG:-$ROOT/build/qemu/qemu-img}"
+OUT="$(gw_path "${OUT:-$ROOT/build/w98game/$NAME}")"
+RAW="$(gw_path "${RAW:-$ROOT/build/w98game/guest.raw}")"
+QEMU="${QEMU_BIN:-$GW_QDIR/qemu-system-i386}"
+QIMG="${QEMU_IMG:-$GW_QDIR/qemu-img}"
 DRV="$ROOT/guest-tools/out/driver9x"
 # In OUT, not a fixed path. Two checkouts running this at once shared one
 # socket name, and when the other's QEMU exited it unlinked *this* run's
 # socket, so every later QMP verb failed silently and the run could not
 # even be powered off. Keep OUT short: AF_UNIX paths are 108 bytes.
-SOCK="$OUT/qmp.sock"
+SOCK="$(gw_qmp_addr "$OUT")"   # (a loopback port on Windows)
 BOOT_WAIT="${BOOT_WAIT:-150}"
 RUN_SECS="${RUN_SECS:-180}"
 SHOTS="${SHOTS:-10}"
@@ -343,7 +343,7 @@ USBARGS=(); [ "${TABLET:-0}" = 1 ] && USBARGS=(-usb -device usb-tablet)
 echo "==> booting ${VGA:-d3dpt}, discs: ${CDS:-none}, ${RUN_SECS}s of run -> $OUT${PLAYER:+ (in the player)}"
 # hpet=off is the launcher's Win98 machine too: 98 has no HPET driver.
 # The MPU-401 finds the bank relative to the cwd unless told, so tell it.
-export LIBSYNTH_SF2="${LIBSYNTH_SF2:-$ROOT/soundfonts/TimGM6mb.sf2}"
+export LIBSYNTH_SF2="${LIBSYNTH_SF2:-$(gw_path "$ROOT/soundfonts/TimGM6mb.sf2")}"
 read -ra EXTRA_ARGS <<< "${EXTRA:-}"
 # The Voodoo 2 in the launcher's slot (bundle.rs: addr=0x05). Anywhere else
 # it is a card the guest has never seen: Windows 98 installs it again and
@@ -357,7 +357,7 @@ done
 MACHINE=(-L "$ROOT/qemu/pc-bios" -machine "${BOARD:-pc-i440fx-9.2},hpet=off" -m 256 -accel "tcg${QEMU_TCG_OPTS:+,$QEMU_TCG_OPTS}"
          "${DRIVES[@]}" "${VGAARGS[@]}" "${USBARGS[@]}"
          -net none -rtc base=localtime -msg timestamp=on
-         -debugcon file:"$OUT/dbg.log" -qmp unix:"$SOCK",server,nowait
+         -debugcon file:"$OUT/dbg.log" -qmp "$(gw_qmp_opt "$SOCK")"
          -serial file:"$OUT/com1.log"
          "${EXTRA_ARGS[@]}")
 if [ "${PLAYER:-0}" = 1 ]; then

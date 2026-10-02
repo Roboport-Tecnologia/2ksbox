@@ -204,20 +204,20 @@ carries no developer content.
 
 Windows is moving to **native MSVC builds on Windows** (ADR-026: QEMU
 stays mingw clang under MSYS2, the 9x/XP guest code i686 mingw; the WDDM
-driver first, track M18). Until the host build moves, Windows is a
-**cross build from Linux** (`scripts/win-cross.sh`,
-`scripts/build-windows.sh`) into `build/win/` and
-`target/x86_64-pc-windows-gnu/`, never over native artefacts, except
-the launcher (WinUI 3, MSVC), which builds only on Windows, so the
-package (`scripts/package-windows.sh`) is rolled and checked on the PC,
-in MSYS2's MINGW64 shell, with no podman. QEMU there is built with **clang**, not mingw GCC (GCC's
+driver first, track M18). **Everything Windows is done natively on
+Windows** (user decision 2026-10-02): in MSYS2's MINGW64 shell
+`scripts/build-windows.sh` builds it, `scripts/test.sh all` tests it
+(`docs/testing.md` "On Windows") and `scripts/package-windows.sh` rolls
+and checks the package, with no Linux box and no podman involved. The
+cross build from Linux (`scripts/win-cross.sh`) still works, into the
+same `build/win/` and `target/x86_64-pc-windows-gnu/`, never over native
+artefacts; the launcher (WinUI 3, MSVC) builds only on Windows. QEMU there is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and
-must pass on both `D3DPT_D3D9=dxvk` and `system`. The same script builds natively in
-MSYS2's MINGW64 shell for debugging on the PC (`scripts/win-run.sh`,
-`GDB=1`; the guest ISO via `scripts/build-windows.sh guest`).
-`docs/build-windows.md`.
+must pass on both `D3DPT_D3D9=dxvk` and `system` (the suite's
+`d3dpt-dp2` and `d3dpt-dp2-system`). Run what was built with
+`scripts/win-run.sh` (`GDB=1` for gdb). `docs/build-windows.md`.
 
 ## The QEMU patch queue
 

@@ -34,6 +34,26 @@ for f in "$TESTS/D3DGAME9.EXE" "$DRV/DDTEST.EXE" "$ROOT/guest-tools/out/driver9x
   [ -f "$f" ] || { echo "missing $f (guest-tools/build-*.sh, scripts/test.sh host)"; exit 1; }
 done
 
+. "$ROOT/tools/guestwait.sh"
+# The copy has to have the driver. A machine set up on Cirrus never got it
+# (the PC's base98-br, 2026-10-02), and Windows then stops at the Add New
+# Hardware wizard for "Standard PCI graphics adapter". So it is installed
+# once into this copy, the way tools/win98-driver-test.sh installs it (the
+# INF staged in WINDOWS\INF, Plug and Play takes it on the next boot), and
+# the copy keeps it for every later run. The user's image is never written.
+if [ -f "$RAW" ] && [ -z "${FRESH:-}" ]; then
+  have=$(mtype -i "$(gw_path "$RAW")@@32256" ::/WINDOWS/SYSTEM.DAT 2>/dev/null | grep -a -c -i d3dpt || true)
+else
+  have=0
+fi
+if [ "${have:-0}" = 0 ]; then
+  echo "==> the copy has no d3dpt-vga driver: installing it once (tools/win98-driver-test.sh install)"
+  RAW="$RAW" OUT="$T/w98inst" "$ROOT/tools/win98-driver-test.sh" "$IMG" install > "$T/w98-install.log" 2>&1 \
+    || { echo "the driver install failed (see $T/w98-install.log)"; exit 1; }
+  grep -a -q -i d3dpt <(mtype -i "$(gw_path "$RAW")@@32256" ::/WINDOWS/SYSTEM.DAT 2>/dev/null) \
+    || { echo "the install ran but the copy's registry still has no d3dpt (see $T/w98-install.log)"; exit 1; }
+fi
+
 # The run: the desktop at 32 bpp first (d3d8 refuses the scenes' windowed
 # A8R8G8B8 device on 16 bpp), the three scenes, the probes, DDTEST; COM1's
 # W98DONE ends it

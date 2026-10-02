@@ -65,10 +65,11 @@ import socket
 import shutil
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.path.join(ROOT, "build/qemu/qemu-system-i386")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
 OUT = os.path.join(ROOT, "build/vga-dirty")
 
 spec = importlib.util.spec_from_file_location("x87gt", os.path.join(ROOT, "tools/x87-guest-test.py"))
@@ -571,8 +572,7 @@ class Qmp:
         t0 = time.time()
         while True:
             try:
-                self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                self.s.connect(path)
+                self.s = qemuhost.connect(path)
                 break
             except OSError:
                 if time.time() - t0 > timeout:
@@ -688,7 +688,7 @@ def run(tag, adapter, img, extra):
     d = os.path.join(OUT, tag)
     os.makedirs(d, exist_ok=True)
     log = os.path.join(d, "serial.log")
-    qmp_sock = os.path.join(d, "qmp.sock")
+    qmp_sock = qemuhost.addr(d)
     for f in (log, qmp_sock):
         if os.path.exists(f):
             os.unlink(f)
@@ -699,7 +699,7 @@ def run(tag, adapter, img, extra):
         "-display", "none", "-net", "none", "-audiodev", "none,id=a",
         "-fda", img, "-boot", "a",
         "-serial", "file:" + log, "-monitor", "none",
-        "-qmp", "unix:%s,server,nowait" % qmp_sock,
+        "-qmp", qemuhost.qemu_opt(qmp_sock),
     ] + extra
     print("  $ %s" % " ".join(shlex.quote(a) for a in argv))
     p = subprocess.Popen(argv)

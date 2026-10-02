@@ -26,11 +26,12 @@ import os
 import shutil
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.path.join(ROOT, "build/qemu/qemu-system-i386")
-SYNTHX = os.path.join(ROOT, "target/release/synthx")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
+SYNTHX = qemuhost.rust_bin(ROOT, "synthx")
 SOUNDFONT = os.path.join(ROOT, "soundfonts/TimGM6mb.sf2")
 OUT = os.path.join(ROOT, "build/midi-guest")
 

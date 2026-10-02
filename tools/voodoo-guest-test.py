@@ -144,10 +144,11 @@ import re
 import shutil
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.path.join(ROOT, "build/qemu/qemu-system-i386")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
 VGA = os.environ.get("VGA", "std")
 RAMFIFO = os.environ.get("RAMFIFO", "on")
 RECOMP = os.environ.get("RECOMP", "on")
@@ -1667,7 +1668,8 @@ def main():
     log = os.path.join(OUT, "serial.log")
     qlog = os.path.join(OUT, "qemu.log")
     # short: a socket path deep in a scratch tree is over AF_UNIX's limit
-    sock = "/tmp/voodoo-guest-%d.qmp" % os.getpid()
+    # (a loopback port on Windows, tools/qemuhost.py)
+    sock = qemuhost.addr("/tmp", "voodoo-guest-%d" % os.getpid())
     shot_on = os.path.join(OUT, "voodoo.ppm")
     shot_off = os.path.join(OUT, "vga.ppm")
     shot_lin = os.path.join(OUT, "linear.ppm")
@@ -1696,7 +1698,7 @@ def main():
             % (RAMFIFO, RECOMP, DITHER_SUB, UNDITHER, LFB_ORDER, FIFO_OFF_REGS, MMIO_HOLES),
             "-drive", "file=%s,if=floppy,index=0,format=raw" % img,
             "-boot", "a", "-serial", "file:" + log, "-monitor", "none",
-            "-qmp", "unix:%s,server,nowait" % sock, "-audiodev", "none,id=a0",
+            "-qmp", qemuhost.qemu_opt(sock), "-audiodev", "none,id=a0",
         ], stdout=qf, stderr=subprocess.STDOUT)
         t0 = time.time()
         try:

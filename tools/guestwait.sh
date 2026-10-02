@@ -48,10 +48,50 @@ gw_qmp() { python3 "$GW_ROOT/tools/qmpc.py" "$@" >/dev/null 2>&1; }
 # the guest is gone: nothing is ever going to answer, stop waiting
 gw_dead() { [ -n "$GW_PID" ] && ! kill -0 "$GW_PID" 2>/dev/null; }
 
+# The host. On Windows (MSYS2's MINGW64 shell) the tools run what
+# scripts/build-windows.sh built, QEMU talks QMP over loopback TCP (Python
+# there has no AF_UNIX; tools/qemuhost.py), and paths handed to a native
+# program are written C:/... (docs/testing.md "On Windows").
+GW_WIN=0; case "$(uname -s)" in MINGW64_NT*) GW_WIN=1;; esac
+if [ "$GW_WIN" = 1 ]; then GW_QDIR="$GW_ROOT/build/win/qemu"; else GW_QDIR="$GW_ROOT/build/qemu"; fi
+gw_path() { if [ "$GW_WIN" = 1 ]; then cygpath -m "$1"; else echo "$1"; fi; }
+gw_qmp_addr() { python3 "$GW_ROOT/tools/qemuhost.py" addr "$(gw_path "$1")" ${2:+"$2"}; }   # <dir> [name]
+gw_qmp_opt() { python3 "$GW_ROOT/tools/qemuhost.py" opt "$1"; }                            # <addr>
+gw_listening() {  # <addr>: QEMU listens there
+  case "$1" in tcp:*) python3 "$GW_ROOT/tools/qemuhost.py" ready "$1";; *) [ -S "$1" ];; esac
+}
+# the Direct3D executor and DXVK of this checkout's build, when the caller named none
+if [ "$GW_WIN" = 1 ]; then
+  if [ -f "$GW_ROOT/build/win/dxvk/src/d3d9/d3d9.dll" ]; then
+    cmp -s "$GW_ROOT/build/win/dxvk/src/d3d9/d3d9.dll" "$GW_ROOT/build/win/d3dpt/dxvk_d3d9.dll" \
+      || cp "$GW_ROOT/build/win/dxvk/src/d3d9/d3d9.dll" "$GW_ROOT/build/win/d3dpt/dxvk_d3d9.dll"
+  fi
+  export D3DPT_EXEC_LIB="${D3DPT_EXEC_LIB:-$(gw_path "$GW_ROOT/build/win/d3dpt/d3dpt_exec.dll")}"
+  export D3DPT_DXVK_LIB="${D3DPT_DXVK_LIB:-$(gw_path "$GW_ROOT/build/win/d3dpt/dxvk_d3d9.dll")}"
+  export PATH="$GW_QDIR:$PATH"
+  # mtools reads C:/... as its own drive C: ("Drive 'C:' not supported")
+  # and turns a destination not starting with / into ./...; a path relative
+  # to the working folder reads the same to both. Every host-side argument
+  # of every mcopy in the tools goes through this; the image (-i) and the
+  # ::/ paths are left as they are.
+  mcopy() {
+    local a prev= out=()
+    for a in "$@"; do
+      if [ "$prev" != -i ] && [[ "$a" == [A-Za-z]:[\\/]* || "$a" == /* ]]; then
+        out+=("$(realpath -m --relative-to=. "$(cygpath -u "$a")")")
+      else
+        out+=("$a")
+      fi
+      prev=$a
+    done
+    command mcopy "${out[@]}"
+  }
+fi
+
 gw_wait_sock() {  # <sock> [cap=60]: QEMU is up far enough to talk to
   local sock=$1 cap=${2:-60} t0 t
   t0=$(date +%s)
-  while [ ! -S "$sock" ]; do
+  while ! gw_listening "$sock"; do
     gw_dead && { gw_say "QEMU exited before its QMP socket appeared"; return 1; }
     t=$(( $(date +%s) - t0 ))
     [ "$t" -ge "$cap" ] && { gw_say "no QMP socket after ${t}s ($sock)"; return 1; }
@@ -100,10 +140,15 @@ gw_wait_quiet() {  # <sock> [cap=300] [still=8]: the disks stop being read
   # bursty right to the end (XP here: a last 354-operation burst at 33 s,
   # then nothing), so "quiet" means no read for `still` seconds running,
   # and the caller still has to poke and check afterwards.
-  local sock=$1 cap=${2:-300} still=${3:-8}
-  python3 - "$sock" "$cap" "$still" "${GW_PID:-0}" <<'PY'
+  local sock=$1 cap=${2:-300} still=${3:-8} pid=${GW_PID:-0}
+  # Windows: the pid is MSYS2's, not Windows', and Python's os.kill(pid, 0)
+  # there terminates the process instead of asking after it
+  [ "$GW_WIN" = 1 ] && pid=0
+  python3 - "$sock" "$cap" "$still" "$pid" "$GW_ROOT/tools" <<'PY'
 import json, os, socket, sys, time
 sock, cap, still, pid = sys.argv[1], float(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+sys.path.insert(0, sys.argv[5])
+import qemuhost
 def alive():
     if not pid:
         return True
@@ -111,8 +156,7 @@ def alive():
         os.kill(pid, 0); return True
     except OSError:
         return False
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(sock)
+s = qemuhost.connect(sock)
 f = s.makefile("rwb", buffering=0)
 json.loads(f.readline())
 def cmd(e):

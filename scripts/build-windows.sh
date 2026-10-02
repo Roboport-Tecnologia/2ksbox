@@ -71,14 +71,17 @@ esac
 # keeps meson files' mtimes with `cmp`. The second half is the guest-tools
 # ISO's: the i686 toolchain, gendef, and what qemu-3dfx's build calls
 # (make, which, xxd from vim, shasum from perl, nasm), plus
-# xorriso. Not here: Rust, which is rustup's own installer with the GNU
+# xorriso. The third is scripts/test.sh's (docs/testing.md "On Windows"):
+# mtools for the guests' scratch disks, bsdtar, and ImageMagick for the
+# icon check. Not here: Rust, which is rustup's own installer with the GNU
 # host, and Open Watcom, which is a snapshot to unpack (both in
 # docs/build-windows.md).
 MSYS2_PACKAGES=(git rsync diffutils
   mingw-w64-x86_64-{gcc,clang,lld,gdb,ninja,meson,pkgconf,python,python-distlib}
   mingw-w64-x86_64-{glib2,pixman,zlib,libepoxy,libslirp}
   mingw-w64-x86_64-glslang
-  mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd)
+  mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd
+  mingw-w64-x86_64-{mtools,imagemagick} libarchive)
 
 JOBS=(); PACKAGE=""; STAGES=(); EXPLICIT=""
 while [ $# -gt 0 ]; do

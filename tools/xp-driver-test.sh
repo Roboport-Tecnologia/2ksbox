@@ -83,10 +83,10 @@ if [ "$(uname -s)" = Darwin ]; then
   fi
 fi
 IMG="${1:?image.qcow2}"; MODE="${2:?install|ddtest|modes|vesa|d3d7|d3dgame8|d3dgame9|d3dfeat9|shtest|cktest|cubetest|probe|probes|ebtest|gamma|caps|winetest|cmd|bat}"; shift 2
-OUT="${OUT:-$ROOT/build/xp-driver-test}"; mkdir -p "$OUT"
+OUT="$(gw_path "${OUT:-$ROOT/build/xp-driver-test}")"; mkdir -p "$OUT"
 # DRIVER_ISO= another build's driver ISO: the A/B against an older driver
 # (built from `git archive <sha>` into a scratch tree, never over this one's)
-ISO="${DRIVER_ISO:-$ROOT/guest-tools/out/d3dpt-driver.iso}"
+ISO="$(gw_path "${DRIVER_ISO:-$ROOT/guest-tools/out/d3dpt-driver.iso}")"
 [ -f "$ISO" ] || { echo "no $ISO: run guest-tools/build-driver.sh"; exit 1; }
 SCRATCH="$OUT/scratch.img"
 if [ ! -f "$SCRATCH" ]; then
@@ -144,7 +144,7 @@ if [ "$MODE" = winetest ]; then
   WT="${WT_DIR:-$ROOT/build/winetest/out}"
   [ -f "$WT/wtrun.exe" ] || { echo "no $WT/wtrun.exe: run guest-tools/build-winetests.sh"; exit 1; }
   mdel -i "$SCRATCH@@1048576" '::/WT/WINETEST/*' 2>/dev/null || true
-  mmd -i "$SCRATCH@@1048576" ::/WT 2>/dev/null || true
+  mmd -D s -i "$SCRATCH@@1048576" ::/WT 2>/dev/null || true   # -D s: no clash prompt
   mcopy -o -i "$SCRATCH@@1048576" "$WT/wtrun.exe" "$WT/d3d8_test.exe" "$WT/d3d9_test.exe" ::/WT/
   { printf '%s\n' '@echo off' 'set BOXLOG=E:\WT'
     # WT_TESTS="d3d9:visual d3d8:device": a subset; the default is every file
@@ -166,7 +166,7 @@ if [ "$MODE" = probes ]; then
     printf '%s\n' 'echo PRDONE > COM1'; } > "$OUT/probes.bat"
   stage_bat "$OUT/probes.bat"
 fi
-SOCK="$OUT/qmp.sock"; rm -f "$SOCK"
+SOCK="$(gw_qmp_addr "$OUT")"; rm -f "$OUT/qmp.sock"
 ACCEL=(-cpu pentium3)
 [ -e /dev/kvm ] && [ -z "${NO_KVM:-}" ] && ACCEL=(-accel kvm -cpu "${CPU:-host}")   # CPU=pentium3: Max Payne's JPEG decoder mis-decodes on a modern family
 LOG="$OUT/qemu-$MODE.log"
@@ -184,9 +184,9 @@ CD1="$ISO"
 if [ -n "${GAME_ISO:-}" ]; then CD1="$GAME_ISO"; CD2=(-drive "file=$ISO,media=cdrom,if=ide,index=3,readonly=on"); fi
 export D3DPT_EXEC_LIB="${D3DPT_EXEC_LIB:-$ROOT/build/d3dpt/libd3dpt_exec.so}"
 export D3DPT_DXVK_LIB="${D3DPT_DXVK_LIB:-$ROOT/build/dxvk/src/d3d9/libdxvk_d3d9.so.0}"
-"$ROOT/build/qemu/qemu-system-i386" -L "$ROOT/qemu/pc-bios" "${ACCEL[@]}" -machine pc -m "${MEM:-512}" \
-  -hda "$IMG" -hdb "$SCRATCH" -cdrom "$CD1" "${CD2[@]}" "${VGA_ARGS[@]}" \
-  -net none -usb -device usb-tablet -display none -qmp "unix:$SOCK,server,nowait" \
+"$GW_QDIR/qemu-system-i386" -L "$(gw_path "$ROOT/qemu/pc-bios")" "${ACCEL[@]}" -machine pc -m "${MEM:-512}" \
+  -hda "$(gw_path "$IMG")" -hdb "$SCRATCH" -cdrom "$(gw_path "$CD1")" "${CD2[@]}" "${VGA_ARGS[@]}" \
+  -net none -usb -device usb-tablet -display none -qmp "$(gw_qmp_opt "$SOCK")" \
   -serial "file:$SER" -monitor none ${QEMU_EXTRA:-} > "$LOG" 2>&1 &
 QPID=$!
 Q() { python3 "$ROOT/tools/qmpc.py" "$SOCK" "$@"; }
@@ -333,8 +333,9 @@ case "$MODE" in
     pull d3d7.log
     mcopy -n -i "$SCRATCH@@1048576" ::/d3d7.bmp "$OUT/d3d7.bmp" 2>/dev/null || true
     # the same scene through the executor without a guest (tools/d3dpt-dp2-test.cpp): the frames must agree
-    if [ -f "$OUT/d3d7.bmp" ] && [ -x "$ROOT/build/d3dpt-dp2-test" ]; then
-      ( cd "$ROOT" && D3DPT_EXEC_LIB="${D3DPT_EXEC_LIB:-$ROOT/build/d3dpt/libd3dpt_exec.so}" build/d3dpt-dp2-test "$OUT/d3d7-host.bmp" >"$OUT/d3d7-host.log" 2>&1 ) || true
+    DP2="$ROOT/build/d3dpt-dp2-test"; [ "$GW_WIN" = 1 ] && DP2="$ROOT/build/win/d3dpt-dp2-test"
+    if [ -f "$OUT/d3d7.bmp" ] && [ -x "$DP2" ]; then
+      ( cd "$ROOT" && D3DPT_EXEC_LIB="${D3DPT_EXEC_LIB:-$ROOT/build/d3dpt/libd3dpt_exec.so}" "$DP2" "$OUT/d3d7-host.bmp" >"$OUT/d3d7-host.log" 2>&1 ) || true
       python3 "$ROOT/tools/bmpdiff.py" "$OUT/d3d7-host.bmp" "$OUT/d3d7.bmp" --tolerance 2 --max-over 0 -o "$OUT/d3d7-diff.bmp" && echo "-- d3d7: guest frame == host frame" || echo "-- d3d7: FRAMES DIFFER ($OUT/d3d7-diff.bmp)"
     fi ;;
   d3dgame8|d3dgame9|d3dfeat9)

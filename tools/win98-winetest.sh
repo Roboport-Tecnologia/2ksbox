@@ -37,7 +37,8 @@ IMG="${1:-$HOME/.local/share/2ksbox/machines/base98-br/disk.qcow2}"
 WT="${WT_DIR:-$ROOT/build/winetest/out}"
 export OUT="${OUT:-$ROOT/build/w98wt/run}"
 export RAW="${RAW:-$ROOT/build/w98wt/guest.raw}"
-QIMG="${QEMU_IMG:-$ROOT/build/qemu/qemu-img}"
+. "$ROOT/tools/guestwait.sh"
+QIMG="${QEMU_IMG:-$GW_QDIR/qemu-img}"
 export MTOOLS_SKIP_CHECK=1
 [ -f "$WT/wtrun.exe" ] || { echo "no $WT/wtrun.exe: run guest-tools/build-winetests.sh"; exit 1; }
 
@@ -56,7 +57,7 @@ for i in range(4):
     if e[4]: print(struct.unpack_from('<I',e,8)[0]*512); break")
 M="$RAW@@$OFF"
 
-mmd -i "$M" ::/WT 2>/dev/null || true
+mmd -D s -i "$M" ::/WT 2>/dev/null || true   # -D s: an existing folder is no prompt (mtools asks, and nothing answers)
 mcopy -o -i "$M" "$WT/wtrun.exe" ::/WT/WTRUN.EXE
 mcopy -o -i "$M" "$WT/d3d8_test.exe" ::/WT/D3D8_TEST.EXE
 mcopy -o -i "$M" "$WT/d3d9_test.exe" ::/WT/D3D9_TEST.EXE

@@ -71,11 +71,14 @@ IMG="${1:?usage: win98-driver-test.sh <win98.qcow2> [boot|install]}"
 WHAT="${2:-boot}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/tools/guestwait.sh"
-OUT="${OUT:-$ROOT/build/w98}"
+OUT="$(gw_path "${OUT:-$ROOT/build/w98}")"
 DRV="$ROOT/guest-tools/out/driver9x"
-QEMU="${QEMU_BIN:-$ROOT/build/qemu/qemu-system-i386}"
-RAW="$OUT/win98-m10.raw"
+QEMU="${QEMU_BIN:-$GW_QDIR/qemu-system-i386}"
+# RAW= another copy: tools/win98-dx9-test.sh installs into the copy the
+# suite's Win98 checks then keep using
+RAW="$(gw_path "${RAW:-$OUT/win98-m10.raw}")"
 SOCK="/tmp/claude-$(id -u)/w98m10.sock"
+[ "$GW_WIN" = 1 ] && SOCK="$(gw_qmp_addr "$OUT")"   # a loopback port on Windows
 BOOT_WAIT="${BOOT_WAIT:-150}"
 
 # What a PROG may leave behind, deleted before the run and read back after,
@@ -143,12 +146,12 @@ PYWIN
 
 [ -x "$QEMU" ] || { echo "no QEMU at $QEMU (QEMU_BIN= to point elsewhere)"; exit 1; }
 [ -f "$DRV/d3dpt9x.drv" ] || { echo "run guest-tools/build-driver9x.sh first"; exit 1; }
-mkdir -p "$OUT/out" "$(dirname "$SOCK")"
+mkdir -p "$OUT/out"; [ "$GW_WIN" = 1 ] || mkdir -p "$(dirname "$SOCK")"
 
 if [ ! -f "$RAW" ] || [ "$WHAT" = install ]; then
   echo "==> raw copy of $IMG (the user's image is never written)"
   rm -f "$RAW"
-  "${QEMU_IMG:-$ROOT/build/qemu/qemu-img}" convert -O raw "$IMG" "$RAW"
+  "${QEMU_IMG:-$GW_QDIR/qemu-img}" convert -O raw "$(gw_path "$IMG")" "$RAW"
 fi
 
 # the FAT16/32 partition, from the MBR
@@ -297,11 +300,11 @@ done
 
 rm -f "$OUT/out/dbg.log" "$OUT/out/stderr.log" "$OUT/out"/t*.ppm* "$OUT/out"/t*.png
 echo "==> booting on -vga none -device d3dpt-vga"
-"$QEMU" -L "$ROOT/qemu/pc-bios" -machine pc -m 256 -accel tcg \
+"$QEMU" -L "$(gw_path "$ROOT/qemu/pc-bios")" -machine pc -m 256 -accel tcg \
   -drive file="$RAW",format=raw,if=ide,index=0 -vga none \
   -device d3dpt-vga${DDFLAGS:+,ddflags=$DDFLAGS}${NO_EXEC:+,no-exec=on} \
   -net none -display none -rtc base=localtime \
-  -debugcon file:"$OUT/out/dbg.log" -qmp unix:"$SOCK",server,nowait \
+  -debugcon file:"$OUT/out/dbg.log" -qmp "$(gw_qmp_opt "$SOCK")" \
   > "$OUT/out/stderr.log" 2>&1 &
 VM=$!
 trap 'kill $VM 2>/dev/null || true' EXIT

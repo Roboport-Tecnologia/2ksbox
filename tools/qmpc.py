@@ -9,10 +9,12 @@
   json <json>                  -> raw request
 """
 import json, os, socket, struct, sys, time, zlib
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import qemuhost
 
 def connect(path):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(path)
+    # a Unix socket's path, or tcp:127.0.0.1:<port> on Windows (qemuhost.py)
+    s = qemuhost.connect(path)
     f = s.makefile("rwb", buffering=0)
     greet = json.loads(f.readline())
     assert "QMP" in greet

@@ -45,10 +45,11 @@ import re
 import shutil
 import subprocess
 import sys
+import qemuhost  # tools/qemuhost.py: the platform's QEMU and QMP address
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-QEMU = os.path.join(ROOT, "build/qemu/qemu-system-i386")
+QEMU = qemuhost.qemu(ROOT)   # this checkout's build, or $QEMU_BIN
 SRC = os.path.join(ROOT, "guest-tools/src/qclock.asm")
 OUT = os.path.join(ROOT, "build/pit-guest")
 SECS = int(os.environ.get("PIT_SECS", "10"))

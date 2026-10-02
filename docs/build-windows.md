@@ -529,10 +529,15 @@ cd 2ksbox && scripts/build-windows.sh --msys2-deps
 ./rustup-init.exe -y --default-host x86_64-pc-windows-gnu
 echo 'export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"' >> ~/.bashrc && . ~/.bashrc
 
-# 3. Open Watcom: the same ow-snapshot.tar.xz as on Linux (binaries in binnt64):
-mkdir -p /c/WATCOM && tar -C /c/WATCOM -xf ow-snapshot.tar.xz
-echo 'export WATCOM=/c/WATCOM' >> ~/.bashrc && . ~/.bashrc
+# 3. Open Watcom: the same ow-snapshot.tar.xz as on Linux (binaries in binnt64),
+#    open-watcom-v2's Last-CI-build release, unpacked where build-driver9x.sh
+#    looks by default (or anywhere, with WATCOM= naming it):
+curl -LO https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz
+mkdir -p ~/.local/opt/open-watcom && tar -C ~/.local/opt/open-watcom -xf ow-snapshot.tar.xz
 ```
+
+`--msys2-deps` also installs what `scripts/test.sh` needs here
+(`docs/testing.md` "On Windows"), and the suite runs in this same shell.
 
 Line endings: Git for Windows (the `git` outside MSYS2, which Visual
 Studio and most editors use) sets `core.autocrlf=true` system-wide, and a

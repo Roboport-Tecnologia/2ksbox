@@ -18,9 +18,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMG="${1:?image.qcow2}"; ISO="${2:?guest-tools.iso}"
-OUT="$(realpath -m "${OUT:-$ROOT/build/test/xpdx9}")"; ISO="$(realpath "$ISO")"
+. "$ROOT/tools/guestwait.sh"
+OUT="$(gw_path "$(realpath -m "${OUT:-$ROOT/build/test/xpdx9}")")"; ISO="$(gw_path "$(realpath "$ISO")")"
 rm -rf "$OUT"; mkdir -p "$OUT"
-"$ROOT/build/qemu/qemu-img" create -q -f qcow2 -b "$(realpath "$IMG")" -F qcow2 "$OUT/xp.qcow2" || exit 1
+"$GW_QDIR/qemu-img" create -q -f qcow2 -b "$(gw_path "$(realpath "$IMG")")" -F qcow2 "$OUT/xp.qcow2" || exit 1
 # xp-driver-test.sh is run from a copy beside it (it finds the tree from its
 # own folder), so editing it meanwhile cannot break this run
 XDT="$ROOT/tools/.xdt-$$.sh"; cp "$ROOT/tools/xp-driver-test.sh" "$XDT"; trap 'rm -f "$XDT"' EXIT

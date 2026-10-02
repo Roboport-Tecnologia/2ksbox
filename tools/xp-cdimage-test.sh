@@ -26,6 +26,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 . "$ROOT/tools/guestwait.sh"
 IMG="${1:?xp image}"; DISC="${2:?disc image}"; REF="${3:?reference dir}"; OUT="${4:-$ROOT/build/test/cdimage-xp}"
+# the paths QEMU reads inside its own arguments, as Windows writes them
+# there (tools/guestwait.sh); `isodir:<folder>` keeps its prefix
+IMG="$(gw_path "$IMG")"; OUT="$(gw_path "$OUT")"
+case "$DISC" in isodir:*) DISC="isodir:$(gw_path "${DISC#isodir:}")";; *) DISC="$(gw_path "$DISC")";; esac
 mkdir -p "$OUT"
 for t in mcopy mmd; do command -v $t >/dev/null || { echo "needs $t"; exit 2; }; done
 # The scratch disk is built with sfdisk + mkfs.fat where they exist (the
@@ -66,7 +70,7 @@ MBR
     mformat -i "$path@@1048576" -F -H 2048 -T $((mb * 2048 - 2048)) :: || return 1
   fi
 }
-[ -x build/qemu/qemu-system-i386 ] || { echo "no build/qemu/qemu-system-i386"; exit 2; }
+[ -x "$GW_QDIR/qemu-system-i386" ] || { echo "no $GW_QDIR/qemu-system-i386"; exit 2; }
 accel="${TEST_ACCEL:-}"; if [ -z "$accel" ]; then if [ -w /dev/kvm ]; then accel=kvm; else accel=tcg; fi; fi
 cpu=(-cpu pentium3); [ "$accel" = kvm ] && cpu=(-cpu host)
 
@@ -87,7 +91,7 @@ if [ -n "${CDTEST:-}" ]; then
   cdargs=(-audiodev "wav,id=cd0,path=$OUT/cd.wav" -drive "if=none,id=cd0,media=cdrom,file=$DISC" -device "ide-cd,bus=ide.1,drive=cd0,audiodev=cd0")
 fi
 
-SOCK="$OUT/qmp.sock"; rm -f "$SOCK"; qlog="$OUT/qemu.log"; slog="$OUT/serial.log"; rm -f "$slog"
+SOCK="$(gw_qmp_addr "$OUT")"; rm -f "$OUT/qmp.sock"; qlog="$OUT/qemu.log"; slog="$OUT/serial.log"; rm -f "$slog"
 # RUN.BAT says where it is over COM1 as well as on the scratch disk,
 # because the two are not equally visible: XP's lazy writer can hold a
 # small file for minutes, so the host sees E:\OUT appear and stay empty
@@ -99,10 +103,10 @@ started() { grep -q started "$slog" 2>/dev/null || mcopy -n -o -i "$fat" ::/OUT/
 finished() { grep -q done "$slog" 2>/dev/null || mcopy -n -o -i "$fat" ::/OUT/DONE.TXT "$OUT/DONE.TXT" 2>/dev/null; }
 qmp() { python3 tools/qmpc.py "$SOCK" "$@" >/dev/null; }
 echo "XP: $IMG (snapshot), disc: $DISC, accel: $accel"
-build/qemu/qemu-system-i386 -L qemu/pc-bios -accel "$accel" "${cpu[@]}" -machine pc -m 512 \
+"$GW_QDIR/qemu-system-i386" -L qemu/pc-bios -accel "$accel" "${cpu[@]}" -machine pc -m 512 \
   -drive "file=$IMG,if=ide,index=0,media=disk,snapshot=on" -drive "file=$scratch,format=raw,if=ide,index=1,media=disk" \
   "${cdargs[@]}" -vga cirrus -net none -usb -device usb-tablet -display none -serial "file:$slog" -monitor none \
-  -qmp "unix:$SOCK,server,nowait" >"$qlog" 2>&1 &
+  -qmp "$(gw_qmp_opt "$SOCK")" >"$qlog" 2>&1 &
 QEMU_PID=$!
 teardown() {
   kill -0 "$QEMU_PID" 2>/dev/null || return 0
@@ -112,8 +116,8 @@ teardown() {
   echo "XP did not power down, killing"; kill "$QEMU_PID" 2>/dev/null
 }
 fail() { echo "FAIL: $*"; teardown fail; exit 1; }
-for _ in $(seq 50); do [ -S "$SOCK" ] && break; sleep 0.2; done
-[ -S "$SOCK" ] || { tail -5 "$qlog"; fail "no QMP socket"; }
+for _ in $(seq 50); do gw_listening "$SOCK" && break; sleep 0.2; done
+gw_listening "$SOCK" || { tail -5 "$qlog"; fail "no QMP socket"; }
 t0=$(date +%s); GW_PID=$QEMU_PID
 # no head start: the knocking begins at once and stops the moment the guest
 # answers (tools/guestwait.sh), which on this image is around half a minute
