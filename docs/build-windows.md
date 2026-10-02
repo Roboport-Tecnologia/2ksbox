@@ -119,7 +119,10 @@ double-click opens a black terminal. So the package provides:
 
 Every Play writes the player command line, quoted for a shell, into
 `launcher.log` as `[player] …`, into the head of `player.log`, and to a
-terminal if there is one.
+terminal if there is one. DXVK's own log, `2ksbox-player_d3d9.log`, goes
+beside them too: the launcher sets `DXVK_LOG_PATH` to the data directory
+unless the caller set one, because DXVK otherwise writes into the working
+directory, which for a double-clicked launcher is the package's folder.
 
 **`2ksbox-debug.bat`** runs the launcher through `start "" /b /wait`
 (cmd does not wait for a windowed program, and that form does not pass
@@ -178,7 +181,12 @@ fails here instead of being found in MSYS2. `LAUNCHER_DATA_DIR` points
 the launcher's data (library, `launcher.log`, the check's machine) at a
 scratch directory, because Windows' known folders, not the environment,
 place `%APPDATA%`. The `LAUNCHER_PACKAGED=1` check has to see the real
-`%USERPROFILE%\2ksbox`; a run leaves it as it found it.
+`%USERPROFILE%\2ksbox`; a run leaves it as it found it. Since the
+checks run from the package's folder, anything written into the working
+directory would ship: `DXVK_LOG_PATH`, `%ProgramData%` (without which
+NVIDIA's driver makes `NVIDIA Corporation\umdlogs` there) and
+`%LOCALAPPDATA%` point at the scratch directory, and the staged tree is listed before and after; a new
+entry is removed and fails the package.
 
 This is the target, so two reports become verdicts: the launcher must
 draw its window (`LAUNCHER_SHOT`, which starts WinUI 3 and the Windows

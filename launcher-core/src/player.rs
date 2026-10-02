@@ -376,6 +376,15 @@ pub fn spawn(
     }
     let mut cmd = crate::console::command(&bin);
     cmd.args(&argv);
+    // DXVK writes `<exe>_d3d9.log` into the working directory unless told
+    // otherwise, which for a double-clicked launcher is the package's own
+    // folder (read-only in an MSIX). Beside `player.log` instead; a
+    // caller's own DXVK_LOG_PATH wins.
+    if std::env::var_os("DXVK_LOG_PATH").is_none() {
+        if let Some(dir) = crate::paths::data_dir() {
+            cmd.env("DXVK_LOG_PATH", dir);
+        }
+    }
     if !crate::console::inherits_output() {
         if let Some(log) = open_log(&machine.name, &line) {
             let dup = log.try_clone();

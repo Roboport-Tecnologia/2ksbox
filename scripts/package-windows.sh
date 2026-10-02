@@ -382,6 +382,13 @@ if [ -n "$RUN" ]; then
     WINPATH="$sysroot_u/System32:$sysroot_u:$sysroot_u/System32/Wbem"
   fi
 
+  # The checks run *in* the package folder, and whatever a program there
+  # writes into its working directory would ship: a DXVK log, and with no
+  # %ProgramData% NVIDIA's driver's `NVIDIA Corporation\umdlogs`. Both go
+  # to the scratch directory (with %LOCALAPPDATA%, DXVK's shader cache),
+  # and the tree is compared afterwards.
+  find "$STAGE" | sort > "$scratch/stage-before"
+
   # runpkg [VAR=value ...] program [args ...]: run a staged program from
   # the package folder with an empty environment, so no LAUNCHER_* or
   # PLAYER_* knob from this shell can make it work and nothing may resolve
@@ -395,13 +402,16 @@ if [ -n "$RUN" ]; then
       case "$1" in /*) prog=$1 ;; *) prog=./$1 ;; esac
       (cd "$STAGE" && timeout "${T:-300}" env -i SYSTEMROOT="$WINDOWS" WINDIR="$WINDOWS" \
           PATH="$WINPATH" TEMP="$(winpath "$scratch")" TMP="$(winpath "$scratch")" \
+          LOCALAPPDATA="$(winpath "$scratch")" PROGRAMDATA="$(winpath "$scratch")" \
+          DXVK_LOG_PATH="$(winpath "$scratch")" \
           LAUNCHER_DATA_DIR="$(winpath "$DATA")" "${vars[@]}" "$prog" "${@:2}")
     else
       local disp=()
       [ -z "${D:-}" ] || disp=(DISPLAY="${DISPLAY:-}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
                                XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}")
       (cd "$STAGE" && timeout "${T:-300}" env -i HOME="$scratch" WINEPREFIX="$WINEPREFIX" \
-          WINEDEBUG=-all PATH="$PATH" "${disp[@]}" "${vars[@]}" wine "$@")
+          WINEDEBUG=-all DXVK_LOG_PATH="$(winpath "$scratch")" PATH="$PATH" \
+          "${disp[@]}" "${vars[@]}" wine "$@")
     fi
   }
 
@@ -595,6 +605,12 @@ EOF
     else
       echo "wgl-probe      no offscreen GL$([ "$RUN" = wine ] && echo ' under wine'): $(printf '%s\n' "$out" | tail -1)"
     fi
+  fi
+  if ! find "$STAGE" | sort | diff "$scratch/stage-before" - > "$scratch/stage-diff"; then
+    echo "package-windows.sh: the checks changed the staged tree (new entries removed):" >&2
+    grep '^[<>]' "$scratch/stage-diff" | head -20 >&2
+    sed -n 's/^> //p' "$scratch/stage-diff" | sort -r | while IFS= read -r f; do rm -rf "$f"; done
+    fail=1
   fi
 else
   echo "checks         (no wine on this host; the package was not run)"
