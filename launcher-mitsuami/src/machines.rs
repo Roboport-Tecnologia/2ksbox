@@ -308,11 +308,20 @@ pub fn MachinesWindow() -> impl View {
 #[component]
 fn MachineLibrary() -> impl View {
     let library = use_store::<Library>();
+    // On macOS the list a shade darker than the details beside it (user),
+    // in light and dark alike: a colour AppKit asks for each appearance.
+    let darker = platform! {
+        macos => mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
+            table.setBackgroundColor(&darker_list_background())
+        }),
+        _ => Tweak::none(),
+    };
     view! {
         <Row grow=1.0 min_height=0>
             <List
                 each=move || library.dirs()
                 key=|d: &PathBuf| d.clone()
+                native=darker
                 selection_mode=SelectionMode::Single
                 selected=library.selected
                 list_style=ListStyle::Plain
@@ -333,6 +342,28 @@ fn MachineLibrary() -> impl View {
             </Show>
         </Row>
     }
+}
+
+/// The machine list's background on macOS: the details' (control
+/// background, 0x1E in dark, white in light) a few steps darker.
+#[cfg(target_os = "macos")]
+fn darker_list_background() -> mitsuami::appkit::objc2::rc::Retained<mitsuami::appkit::objc2_app_kit::NSColor> {
+    use mitsuami::appkit::objc2_app_kit::{NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor};
+    use mitsuami::appkit::objc2_foundation::NSArray;
+    use std::ptr::NonNull;
+    let (light, dark) = (
+        NSColor::colorWithSRGBRed_green_blue_alpha(0.949, 0.949, 0.949, 1.0),
+        NSColor::colorWithSRGBRed_green_blue_alpha(0.090, 0.090, 0.090, 1.0),
+    );
+    let provider = block2::RcBlock::new(move |appearance: NonNull<NSAppearance>| -> NonNull<NSColor> {
+        let names = unsafe { NSArray::from_slice(&[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]) };
+        let is_dark = unsafe { appearance.as_ref() }
+            .bestMatchFromAppearancesWithNames(&names)
+            .is_some_and(|name| unsafe { &*name == NSAppearanceNameDarkAqua });
+        // The block keeps both colours, and the colour keeps the block.
+        NonNull::from(&**if is_dark { &dark } else { &light })
+    });
+    unsafe { NSColor::colorWithName_dynamicProvider(None, &provider) }
 }
 
 /// What can be done to a machine besides starting it, each opening its

@@ -1234,6 +1234,7 @@ dependencies = [
 name = "launcher-mitsuami"
 version = "0.0.1"
 dependencies = [
+ "block2",
  "launcher-core",
  "mitsuami",
  "png",

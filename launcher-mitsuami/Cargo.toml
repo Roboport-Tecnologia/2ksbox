@@ -32,3 +32,7 @@ mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "608
 # The headless screenshot (`LAUNCHER_SHOT`), the one image encoding this
 # crate does itself.
 png = "0.18"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The machine list's colour for each appearance, a block AppKit calls.
+block2 = "0.6"
