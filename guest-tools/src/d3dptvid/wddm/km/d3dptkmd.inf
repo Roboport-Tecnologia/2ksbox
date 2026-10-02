@@ -1,0 +1,49 @@
+; d3dptkmd.inf - 2ksbox paravirtual display adapter (d3dpt-vga), WDDM,
+; Windows 7 32-bit (M18 step 2, ADR-022). Kernel-mode driver d3dptkmd.sys;
+; no user-mode driver yet (plan step 6). The XP-model driver
+; (../../nt/d3dptvid.inf) matches the same device and stays the fallback:
+; Device Manager > Update Driver > "Let me pick" brings it back.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Display
+ClassGUID={4d36e968-e325-11ce-bfc1-08002be10318}
+Provider=%Provider%
+DriverVer=10/02/2026,0.1.0.0
+
+[DestinationDirs]
+DefaultDestDir=12
+
+[SourceDisksNames]
+1=%DiskId%,,,
+
+[SourceDisksFiles]
+d3dptkmd.sys=1
+
+[Manufacturer]
+%Mfg%=d3dpt.Mfg,NTx86
+
+[d3dpt.Mfg.NTx86]
+%d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
+
+[d3dpt_Install]
+CopyFiles=d3dpt.Miniport
+
+[d3dpt.Miniport]
+d3dptkmd.sys
+
+[d3dpt_Install.Services]
+AddService=d3dptkmd, 0x00000002, d3dpt_Service_Inst
+
+[d3dpt_Service_Inst]
+ServiceType=1
+StartType=3
+ErrorControl=0
+LoadOrderGroup=Video
+ServiceBinary=%12%\d3dptkmd.sys
+
+[Strings]
+Provider="2ksbox"
+Mfg="2ksbox"
+DiskId="2ksbox guest tools"
+d3dpt.DeviceDesc="2ksbox paravirtual display adapter (d3dpt-vga, WDDM)"

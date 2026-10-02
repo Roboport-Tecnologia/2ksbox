@@ -11,8 +11,8 @@ container, checked by Windows itself rather than wine.
 **This is changing (ADR-026, 2026-10-02):** Windows builds move to MSVC,
 natively on Windows; QEMU stays on mingw clang under MSYS2, and the
 Windows 98 / XP guest programs on i686 mingw. The WDDM driver goes first
-(track M18). Until the host build moves, this doc is the build that
-ships.
+(track M18; "The WDDM driver" below). Until the host build moves, this
+doc is the build that ships.
 
 The package runs on the user's PC (Ryzen 9 5900X, RTX 3090), 3D guests
 included; what has run there is in `docs/tracks/m11-windows-host.md`.
@@ -610,6 +610,45 @@ which first sources `guest-tools/msys2-i686.sh`, the whole port:
   Watcom's `@file` gets `cygpath -m`.
 - QEMU's seven symbolic links are in Linux-only subprojects that are
   never built, so a checkout without symlink support is fine.
+
+## The WDDM driver
+
+Windows 7's WDDM display driver (track M18 step 2, ADR-022) builds on
+the PC with Microsoft's toolchain and the WDK's own headers, read from
+the kit and never committed. It is not part of `build-windows.sh`.
+
+**The kit: the Enterprise WDK for Windows 10, version 2004**
+(10.0.19041, with VS 2019 Build Tools 16.7). It is the last WDK that
+targets Windows 7 (Microsoft lists the 2004 kit as "supported for Windows
+7/Windows 8/Windows 8.1 driver development only"), and the 22000 kits
+also dropped 32-bit kernel drivers. Newer Visual Studio versions do not
+replace it. The EWDK is one self-contained ISO, mounted rather than
+installed, so it sits beside any other Visual Studio without touching
+it: `EWDK_vb_release_svc_prod1_19041_201201-2105.iso`, 13.2 GB, from
+Microsoft's "Supported and other WDK download versions" page (the EWDK
+link under Windows 10 2004, accepting the license). On the user's PC it
+lives in `D:\stuff\downloads\`.
+
+```sh
+cmd //c guest-tools\\build-wddm.cmd     # from MSYS2 or Git Bash; plain cmd works too
+```
+
+The script finds a mounted EWDK on any drive (or `EWDK=E:`; or
+`EWDK_ISO=<path>` mounts it first), sets up its x86 environment and runs
+MSBuild on `guest-tools/src/d3dptvid/wddm/km/d3dptkmd.vcxproj`
+(`WindowsKernelModeDriver10.0`, `TargetVersion=Windows7`, Win32, `/W4
+/WX`, `displib.lib` for `DxgkInitialize`), into `build/wddm/x86/`:
+`d3dptkmd.sys` and `d3dptkmd.inf`. The driver is unsigned; 32-bit Windows
+7 loads it after a prompt. Notes:
+
+- The kernel-mode include path has no `<stdint.h>`, which
+  `d3dpt/d3dpt_fb.h` includes, and MSVC's own pulls in the user-mode CRT:
+  `wddm/km/kinc/stdint.h` is the typedefs alone.
+- `dumpbin -headers -imports` (from the EWDK's MSVC `bin\Hostx86\x86`)
+  is the check that a build still loads on Windows 7: machine `x86`,
+  subsystem version 6.01, imports from `ntoskrnl.exe` only.
+- MSBuild's "'pwsh.exe' is not recognized" after the link is a WDK
+  post-build step looking for PowerShell 7; it changes nothing.
 
 ## Running it there
 

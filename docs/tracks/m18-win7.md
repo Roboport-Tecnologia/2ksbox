@@ -82,6 +82,11 @@ device's half is plain QEMU C and builds anywhere.
    "The WDDM driver" section of `docs/build-windows.md`. If no WDK fits,
    stop and ask: the choices are an older WDK, Windows 7 x64 in test
    mode, or Windows 10 as the first target.
+   **Done 2026-10-02:** the EWDK for Windows 10 2004 (10.0.19041, VS 2019
+   Build Tools 16.7), one ISO mounted, nothing installed (user's choice
+   over VS 2019 + the WDK installers). Its kernel-mode toolset still takes
+   `TargetVersion=Windows7` on Win32; `guest-tools/build-wddm.cmd` builds.
+   `docs/build-windows.md` "The WDDM driver".
 2. **An empty kernel driver that loads.** `guest-tools/src/d3dptvid/wddm/`
    (`km/` the kernel driver, `um/` the user-mode one later), an MSBuild
    project on the WDK's kernel-mode toolset, an INF for `d3dpt-vga`'s PCI
@@ -90,6 +95,15 @@ device's half is plain QEMU C and builds anywhere.
    rule: the QEMU log, never a debugger). Proved when Windows 7's Device
    Manager shows our adapter started, with the XP-model driver as the
    fallback a reinstall brings back.
+   **Built 2026-10-02, not yet booted:** `wddm/km/d3dptkmd.c` registers
+   every WDDM 1.1 callback (each stub declared with the WDK's own
+   `DXGKDDI_*` type, so the header checks it); add/start/stop/remove are
+   real, start maps the register BAR and logs the magic, version and VRAM
+   size, and every stub names itself in the QEMU log, so the first boot
+   shows what dxgkrnl asks for after StartDevice (QueryAdapterInfo's
+   driver caps, segments, child relations, a VidPN): those answers are
+   the rest of this step. `d3dptkmd.inf` (NTx86, no user-mode driver yet).
+   Waits for the `win7` bundle on the PC (the Linux box was unreachable).
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the
