@@ -178,7 +178,7 @@ x86-64-v2 wrappers. Win9x wants at most 512 MB (VCache).
 
 The macOS embed backend (`embed/mglcntx_embed.c`) is a drawable-less
 CGL context handing frames to the player through an IOSurface ring
-(`player/src/iosurface.rs`); doc 12 has the design. On a GL guest
+(`player-core/src/iosurface.rs`); doc 12 has the design. On a GL guest
 (wglgears) expect:
 
 ```
@@ -302,7 +302,7 @@ app carries the LunarG loader and KosmicKrisp with its own ICD manifest,
 found through DXVK patch 06 (`@loader_path` ahead of bare leaf names).
 An installed player sets `D3DPT_EXEC_LIB`, `D3DPT_DXVK_LIB` and
 `VK_DRIVER_FILES` when unset
-(`player/src/companions.rs`); each `dlopen` search otherwise starts in a
+(`player-core/src/companions.rs`); each `dlopen` search otherwise starts in a
 `build/` directory. The launcher's probe (`--host-check`) opens the
 app's `lib/2ksbox/libvulkan.1.dylib` by full path
 (`host_gpu::shipped_loader`) and names the app's ICD to it at `main`

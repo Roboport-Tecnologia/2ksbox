@@ -1266,7 +1266,7 @@ pub struct Machine {
 
     /// A SoundFont bank of the user's own, for `Music::Gm`. Absent =
     /// the one the package ships, which the player names to QEMU
-    /// (`LIBSYNTH_SF2`, `player/src/companions.rs`) rather than the
+    /// (`LIBSYNTH_SF2`, `player-core/src/companions.rs`) rather than the
     /// bundle, so where an installed tree keeps its resources is never
     /// frozen into a machine's file.
     #[serde(default, skip_serializing_if = "Option::is_none")]

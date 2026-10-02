@@ -15,9 +15,9 @@ and geometry, latency and input. How 3D frames reach the player is doc
 guest VGA/SVGA device (or a 3D frame: doc 12, doc 14)
   → QEMU DisplaySurface (raw framebuffer + dirty rects, in-process)
   → [render thread] texture upload (dirty-rect aware)
-  → mode analysis (display aspect, scanline count)       player/src/mode.rs
+  → mode analysis (display aspect, scanline count)       player-core/src/mode.rs
   → librashader filter chain (slang preset)              shader-chain/src/lib.rs
-  → geometry stage (aspect, integer scaling)
+  → geometry stage (aspect, integer scaling)            player-core/src/gpu.rs
   → wgpu present (Metal / Vulkan / D3D12)
 ```
 
@@ -57,7 +57,7 @@ Open (M2): an answer for presets with no scanline-count parameter
 
 ## Mode analysis
 
-`player/src/mode.rs` turns a framebuffer size into what it meant on a
+`player-core/src/mode.rs` turns a framebuffer size into what it meant on a
 monitor of the era: the display aspect, the number of lines the CRT
 scanned, and whether the CRTC double-scanned. It prints one line per mode
 change:
@@ -263,8 +263,8 @@ the keys a host keymap option moves (xkb's `ctrl:swapcaps`, `ctrl:nocaps`,
 Caps Lock and Escape go as the host reads them (`keymap::as_host_reads`),
 so a Caps Lock the host made Control is Control in the guest. The press's
 answer is kept for the release. When the window loses focus the player
-releases every key the guest still holds (`lift_all_keys`,
-`player/src/main.rs`); otherwise Cmd+Tab sends the Windows-key press to
+releases every key the guest still holds (`Input::lift_all`,
+`player-core/src/input.rs`); otherwise Cmd+Tab sends the Windows-key press to
 the guest and its release to the next app, and the guest keeps Win down.
 
 **Host shortcuts go to the guest while the window has focus**, grabbed or

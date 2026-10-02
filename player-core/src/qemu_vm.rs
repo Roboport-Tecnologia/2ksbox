@@ -707,7 +707,7 @@ pub fn start(
         // (embed/embedaudio.c). f32, because QEMU's s16 output saturates
         // a mix of voices that sums past full scale and its float output
         // does not: the player's limiter turns it down instead
-        // (player/src/audio.rs)
+        // (player-core/src/audio.rs)
         let cushion = crate::audio::cushion_ms() * 1000;
         args.push(format!(
             "embed,id=embed0,timer-period=5000,out.frequency={rate},out.channels=2,\

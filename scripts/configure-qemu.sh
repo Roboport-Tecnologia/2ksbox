@@ -226,7 +226,7 @@ elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
   # which scripts/build.sh runs). QEMU's main loop iterates glib's global
   # default GMainContext on QEMU's thread; sharing the process's glib, a
   # toolkit that runs on that context (GTK; Qt's glib event dispatcher)
-  # would have its sources dispatched there (spikes/player-gtk/README.md).
+  # would have its sources dispatched there (docs/tracks/m22-mitsuami-player.md, "Why QEMU links a GLib of its own").
   # glib and libslirp, the one other library QEMU links that links glib,
   # come static from build/deps/<arch> ahead of the distribution's .pc
   # files; the rest stays the distribution's. Their symbols are hidden, so

@@ -32,6 +32,7 @@ The roadmap is doc 08.
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
 | 023 | The launcher moves to mitsuami | accepted, work in M19 |
 | 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
+| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22 |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -284,7 +285,7 @@ That is 0.1 % of a frame typically and ~1.4 % at p99, so **latency is
 not what stops it**. The work does: the VGA surface through shared
 memory, IOSurface handles over a mach port on macOS, and the lifecycle
 rules, headless dumps and guest harnesses that assume one process.
-`player/src/qemu_vm.rs` is the only module touching the embed API, so
+`player-core/src/qemu_vm.rs` is the only module touching the embed API, so
 it would be a track, not a rewrite. Re-run the spike on the Air first.
 A distribution refusing the player is the signal to open that track.
 
@@ -780,7 +781,7 @@ it is packaged.
 **Unchanged.** ADR-014: every rule and every sentence stays in
 `launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami
 takes its pixels in an `Image`); the player keeps winit (a mitsuami player
-is a separate question, `spikes/player-gtk`).
+was a separate question, answered by ADR-025).
 
 ## ADR-024: A general-purpose VM manager, best at vintage boxes (2026-10-01)
 
@@ -824,3 +825,38 @@ Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
 - Doc 01's integration features (clipboard, shared folders, the guest
   resizing its screen to the window) stay later work, but a modern
   guest's users will expect them sooner than a game player does.
+
+## ADR-025: The player moves to mitsuami, over a shared `player-core` (2026-10-01)
+
+**Status.** Accepted (user decision: "now lets make the mitsuami
+player"). Work in track M22. Until it runs on every host, `player/` (winit)
+ships.
+
+**Decision.** The player gets a mitsuami front end, `player-mitsuami/`,
+its picture on mitsuami's `GpuSurface` (a desync Wayland subsurface or an
+X11 child window on Linux, a `CAMetalLayer` view on macOS, a child HWND on
+Windows) and the platform's menus over it. Everything but the window moves
+into `player-core/`, which both front ends drive, as `launcher-core` holds
+the launcher's rules (ADR-014): the QEMU thread, the picture and its CRT
+chain, audio, gamepads, what the guest holds, the command line. The user
+chose this shape over a copy of the modules or a rewrite of `player/` in
+place, GTK on Wayland as the first host, and a menu bar over a window that
+is otherwise only the picture.
+
+**Why.** The player's window then has the platform's menus, alerts and
+full screen, and what the winit player built by hand per windowing system
+(the pointer lock's raw motion, the guest's cursor, keys a keymap moved)
+is the toolkit's. The latency question was measured first (2026-09-27,
+the spike in `tracks/m22-mitsuami-player.md`): a desync subsurface
+presented to in Mailbox matched the winit window at the median, where
+GTK's own offload waited a refresh for its frame clock. Its other
+precondition, QEMU's main loop off the toolkit's `GMainContext`, is the
+private GLib `libqemu-embed` links on Linux since 2026-09-27.
+
+**Costs.** The player is still linked to QEMU, never opened at run time
+(patch 63), so it stays one binary per embed target, now per toolkit too
+while both front ends exist. On Windows it needs the native MSVC build
+mitsuami needs (ADR-023). The keyboard grab mitsuami gives is weaker on
+Windows and macOS than the winit player's capture (doc 03 "Input path"),
+so those hosts wait for it to match.
+

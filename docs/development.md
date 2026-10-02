@@ -131,7 +131,7 @@ What each stage needs to know:
   main loop: it iterates GLib's global default `GMainContext` on QEMU's
   thread, and with a GLib shared with its process, a toolkit that runs
   on that context (GTK; Qt's GLib event dispatcher) would have its
-  sources dispatched there (`spikes/player-gtk/README.md`). GLib 2.90
+  sources dispatched there (`tracks/m22-mitsuami-player.md`, "Why QEMU links a GLib of its own"). GLib 2.90
   wants meson 1.4. **`QEMU_DEPS=system`** links the distribution's GLib
   and libslirp instead, and libtpms if it has one (`build.sh` and
   `configure-qemu.sh` both read it;
@@ -272,6 +272,20 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   drain latency, zero-length presses and drops, only when something is
   off.
 
+### The mitsuami player (M22)
+
+`player-mitsuami/` takes the same command line and every `PLAYER_*`
+knob, which are `player-core`'s. It is its own cargo workspace: `cd
+player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
+--features kde,gilrs` for Kirigami), and `LAUNCHER_PLAYER_BIN` points a
+launcher at it. Its chords are the winit player's, as menu shortcuts
+(Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
+Screen, Release Mouse, Send Shortcuts to Guest, the two screenshots), and
+a keyboard close asks in the platform's alert. Two knobs of its own:
+`PLAYER_INPUT_LOG=1` prints every input the surface reports, with the lock
+and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
+`tracks/m22-mitsuami-player.md` has what is checked and what is not.
+
 ### Audio and music
 
 - `PLAYER_AUDIO_MS=40` (default) is the cushion QEMU keeps in the ring
@@ -381,7 +395,7 @@ Diagnostics:
 - While a 3D device is active, the player shows the VGA surface again
   after 1 s without a presented frame if the guest drew on it (an error
   box, a movie, a crashed game): `[display] no 3D frame for …`.
-- `player --companions` prints what `player/src/companions.rs` resolved
+- `player --companions` prints what `player-core/src/companions.rs` resolved
   for the executor, DXVK and the Wine pair; it is the packagers' check.
 
 ### OpenGL pass-through (doc 12)

@@ -181,7 +181,7 @@ fi
 
 # The three optional companions. QEMU dlopens each of them by a search
 # that begins in a checkout's build/ directory, so the packaged player
-# names them through the environment instead (player/src/companions.rs);
+# names them through the environment instead (player-core/src/companions.rs);
 # all this has to do is put them where that expects.
 
 D3D=1

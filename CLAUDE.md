@@ -42,7 +42,10 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
 - **QEMU runs in-process** (`libqemu-embed-<target>`, `embed/`) for
   latency (ADR-002).
 - **Standalone Rust player + launcher** (ADR-005). RetroArch/libretro was
-  tried and rejected; never propose it again.
+  tried and rejected; never propose it again. The player is
+  `player-core/` (everything but the window) under two front ends:
+  `player/` on winit, which ships, and `player-mitsuami/` (ADR-025,
+  track M22), its own workspace like `launcher-mitsuami`.
 - **One launcher library, thin front ends** (ADR-014, doc 07).
   `launcher-core/` decides everything: bundle format, library, disc
   shelf, snapshots, shader profiles, preview, **every window's state
