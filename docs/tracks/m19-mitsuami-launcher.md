@@ -32,6 +32,33 @@ mitsuami = { path = "/path/to/mitsuami/crates/mitsuami" }
 
 and bump `rev` to the pushed mitsuami commit before committing here.
 Windows builds natively with MSVC and needs the Windows App Runtime 2.4.
+The root `rust-toolchain.toml` says `stable`, which on a PC whose rustup
+host is `x86_64-pc-windows-gnu` (the MSYS2 setup, `docs/build-windows.md`)
+is the GNU toolchain, so name the MSVC one (Visual Studio's C++ tools
+must be installed; no developer prompt needed):
+
+```powershell
+cd launcher-mitsuami; cargo +stable-x86_64-pc-windows-msvc build
+```
+
+On Windows the toolbar sits in the title bar beside the caption buttons,
+as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
+`winui::set_toolbar_place(ToolbarPlace::InTitleBar(ToolbarAlign::End))`,
+a WinUI-only choice (`Start` and `Center` are the others), before the app
+runs. The machine window's details are a shade darker there than the
+list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a
+tweak on the details' `ScrollView`, user), and the machine form's
+sidebar is half WinUI's default width (160, user), open from an 800-wide
+window rather than 1008, by a tweak in `Sections`. `LAUNCHER_SHOT` doesn't show the title bar; `PrintWindow`
+with `PW_RENDERFULLCONTENT` on the window's handle does, even behind
+other windows.
+
+Two more found on Windows the same day, each fixed where it belongs:
+`PathField`'s input needs `min_width=0` (WinUI's text box asks for its
+whole text, so a long path pushed Browse… out of the window), and the
+shelf's rows no longer stat a disc image to tell it from a folder
+(`disc_library::is_folder`: its extension says so). A stat on an idle
+network share blocks for seconds, so the shelf was slow to appear.
 
 ## Test loop
 

@@ -406,9 +406,22 @@ fn Details() -> impl View {
     let current = move || library.current().unwrap_or_default();
     let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
     let running = move || library.is_running(&current());
+    // On Windows the details are a shade darker than the list beside them
+    // (user): Fluent's secondary background, which follows the theme as the
+    // window's base one does, set as a style so it switches with it.
+    let background = platform! {
+        windows => mitsuami::winui::tweak(|view: &mitsuami::winui::bindings::ScrollViewer| {
+            use mitsuami::winui::bindings as w;
+            use mitsuami::winui::windows_core::Interface;
+            let markup = r#"<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ScrollViewer"><Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"/></Style>"#;
+            view.cast::<w::IFrameworkElement>()?.SetStyle(&w::XamlReader::Load(markup)?.cast::<w::Style>()?)
+        }),
+        _ => Tweak::none(),
+    };
     view! {
-        <ScrollView grow=1.0 min_width=0>
-            <Column padding=Spacing::Xl gap=Spacing::Lg>
+        <ScrollView grow=1.0 min_width=0 native=background>
+            // Half the room above the name as at the other edges (user).
+            <Column padding_x=Spacing::Xl padding_bottom=Spacing::Xl padding_top=Spacing::Md gap=Spacing::Lg>
                 <Row gap=Spacing::Md align=Align::Center>
                     <Column gap=Spacing::Xs grow=1.0 min_width=0>
                         <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>

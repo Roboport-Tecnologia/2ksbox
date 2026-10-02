@@ -99,8 +99,12 @@ pub fn PathField(
     view! {
         <Row gap=Spacing::Sm align=Align::Center shrink=0.0>
             <Text width=label_width shrink=0.0>{label.clone()}</Text>
+            // `min_width=0`: a flex item is at least as wide as its content
+            // (as in CSS), and WinUI's text box asks for its whole text, so
+            // a long path pushed Browse… out of the window.
             <TextInput
                 grow=1.0
+                min_width=0
                 a11y_label=label
                 value=value
                 placeholder=placeholder

@@ -236,11 +236,21 @@ fn Sections() -> impl View {
         Section::ALL.iter().map(|&s| SidebarItem::new(s.label(), s).icon(section_icon(s))).collect();
     // Kirigami gives every column of a wide page row its default width (20
     // grid units), far more than these names need; KDE's apps narrow it.
+    // WinUI's pane is 320 wide by default; half of it (user) still fits
+    // "Storage" beside its icon. The view opens it only from a window width
+    // (1008 by default, past this window's 650 and the pane), so that comes
+    // down too: open at the window's size, icons only when it's narrowed.
     let narrow = platform! {
         kde => mitsuami::kirigami::tweak(|page: &mitsuami::kirigami::QmlObject| {
             if let Some(row) = page.object("mitsuamiStack") {
                 row.set_int("defaultColumnWidth", (mitsuami::kirigami::grid_unit() * 10.0).round() as i32);
             }
+        }),
+        windows => mitsuami::winui::tweak(|view: &mitsuami::winui::bindings::NavigationView| {
+            use mitsuami::winui::windows_core::Interface;
+            let view = view.cast::<mitsuami::winui::bindings::INavigationView>()?;
+            view.SetOpenPaneLength(160.0)?;
+            view.SetExpandedModeThresholdWidth(800.0)
         }),
         _ => Tweak::none(),
     };
@@ -549,7 +559,6 @@ fn AudioPage() -> impl View {
             </Show>
             <Show when=get(wiz, Form::soundfont_applies)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="SoundFont (optional)"
                     filter=SOUNDFONT_FILTER
@@ -559,7 +568,6 @@ fn AudioPage() -> impl View {
             </Show>
             <Show when=get(wiz, Form::mt32_roms_applies)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="MT-32 ROMs"
                     folder=true
@@ -624,7 +632,6 @@ fn StoragePage() -> impl View {
             </Show>
             <Show when=move || wiz.read(|f| f.is_editing() || f.existing_disk)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="Disk path"
                     filter=DISK_FILTER

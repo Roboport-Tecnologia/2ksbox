@@ -82,8 +82,22 @@ pub fn default_path() -> PathBuf {
 /// keeps its whole name, extension and all (`Patch 1.3` is a name,
 /// `Patch 1` a mangling of one).
 pub fn default_label(path: &Path) -> String {
-    let name = if path.is_dir() { path.file_name() } else { path.file_stem() };
+    let name = if is_folder(path) { path.file_name() } else { path.file_stem() };
     name.map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
+}
+
+/// Whether a shelf entry is a shared folder, for its icon and label. A
+/// disc image's extension answers without asking the filesystem: a disc
+/// on a network share that has gone idle (or a mapped drive whose server
+/// is off) blocks every `is_dir` for seconds while Windows reconnects,
+/// and the windows ask once per row each time the shelf changes.
+/// `qemu_medium` still asks, once, when the disc is handed to QEMU.
+fn is_folder(path: &Path) -> bool {
+    let image = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| DISC_FILTER.1.iter().any(|x| x.eq_ignore_ascii_case(e)));
+    !image && path.is_dir()
 }
 
 /// What a shelf entry is, for its icon and the word under its label.
@@ -99,10 +113,10 @@ pub enum DiscKind {
 }
 
 impl DiscKind {
-    /// Decided from the path each time, like `qemu_medium`.
+    /// Decided from the path each time, like `qemu_medium` (`is_folder`).
     pub fn of(path: &Path) -> DiscKind {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        if path.is_dir() {
+        if is_folder(path) {
             DiscKind::Folder
         } else if name.starts_with("guest-tools-") && name.ends_with(".iso") {
             DiscKind::GuestTools
