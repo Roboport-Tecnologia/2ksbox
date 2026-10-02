@@ -534,10 +534,10 @@ pub(crate) mod icons {
     pub const SNAPSHOTS: &str = platform! {
         macos => "camera", gtk => "camera-photo-symbolic", kde => "camera-photo", windows => "\u{E722}",
     };
-    // The shader list's No default; on macOS a slashed star, not a clear
-    // mark (user).
+    // The shader list's No default; on macOS and Windows a slashed star,
+    // not a clear mark (user): Segoe's Unfavorite on Windows.
     pub const CLEAR: &str = platform! {
-        macos => "star.slash", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E894}",
+        macos => "star.slash", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E8D9}",
     };
     pub const FOLDER: &str = platform! {
         macos => "folder", gtk => "folder-symbolic", kde => "folder", windows => "\u{E8B7}",
