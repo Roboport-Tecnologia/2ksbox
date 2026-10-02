@@ -70,10 +70,14 @@ fn main() {
         .name("2ksbox")
         .icon(AppIcon::bytes(icon.as_slice()))
         // The machine list and its details, with room for a long path; 50
-        // wider and taller on Windows (user).
+        // wider and taller on Windows and GTK (user).
         .window(
             "2ksbox",
-            if cfg!(windows) { Size::new(820.0, 610.0) } else { Size::new(770.0, 560.0) },
+            if cfg!(any(windows, all(target_os = "linux", feature = "gtk", not(feature = "kde")))) {
+                Size::new(820.0, 610.0)
+            } else {
+                Size::new(770.0, 560.0)
+            },
             || view! { <machines::MachinesWindow/> },
         )
         .run();
