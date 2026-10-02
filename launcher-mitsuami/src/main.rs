@@ -70,6 +70,6 @@ fn main() {
         .name("2ksbox")
         .icon(AppIcon::bytes(icon.as_slice()))
         // The machine list and its details, with room for a long path.
-        .window("2ksbox", Size::new(920.0, 560.0), || view! { <machines::MachinesWindow/> })
+        .window("2ksbox", Size::new(820.0, 560.0), || view! { <machines::MachinesWindow/> })
         .run();
 }
