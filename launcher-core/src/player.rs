@@ -43,12 +43,12 @@ pub fn player_binary() -> PathBuf {
     if beside.exists() {
         return beside;
     }
-    // The same profile, not a baked-in `release`: a debug launcher must
-    // find the debug player. A cross-built tree
+    // The same profile first, not a baked-in `release`: a debug launcher
+    // finds the debug player, and the release one when that is all
+    // `scripts/build.sh` made. A cross-built tree
     // (`target/x86_64-pc-windows-gnu/release`) keeps its player beside
     // the launcher and so never reaches here.
-    let profile = dir.file_name().unwrap_or_else(|| "release".as_ref());
-    crate::paths::checkout("target").join(profile).join(name)
+    in_profile(crate::paths::checkout("target"), name)
 }
 
 /// What this host's hardware virtualization is called, for the hint
@@ -231,29 +231,35 @@ pub fn target_player_binary(target: &str) -> PathBuf {
     if let Some(m) = mitsuami_player(&format!("qemu-{target}")) {
         return m;
     }
-    crate::paths::checkout("target").join(format!("qemu-{target}")).join(launcher_profile()).join(format!("player{exe}"))
+    in_profile(crate::paths::checkout("target").join(format!("qemu-{target}")), &format!("player{exe}"))
 }
 
-/// The mitsuami player in a checkout, if it is built for the launcher's
-/// own profile: `player-mitsuami/target/<sub>/<profile>/player-mitsuami`,
-/// `sub` empty for the era's player and `qemu-<target>` for another
-/// target's (the winit player's layout, in mitsuami's own workspace).
+/// The mitsuami player in a checkout, if it is built:
+/// `player-mitsuami/target/<sub>/<profile>/player-mitsuami`, `sub` empty
+/// for the era's player and `qemu-<target>` for another target's (the
+/// winit player's layout, in mitsuami's own workspace), the profile as in
+/// [`in_profile`].
 fn mitsuami_player(sub: &str) -> Option<PathBuf> {
     let exe = if cfg!(windows) { "player-mitsuami.exe" } else { "player-mitsuami" };
     let mut p = crate::paths::checkout("player-mitsuami/target");
     if !sub.is_empty() {
         p.push(sub);
     }
-    let p = p.join(launcher_profile()).join(exe);
+    let p = in_profile(p, exe);
     p.exists().then_some(p)
 }
 
-/// The cargo profile the launcher was built with, its executable's
-/// directory name (`release`, `debug`): a debug launcher finds the debug
-/// player.
-fn launcher_profile() -> std::ffi::OsString {
+/// `dir/<profile>/name` for the cargo profile the launcher was built with
+/// (its executable's directory name, `release` or `debug`), so a debug
+/// launcher finds the debug player; failing that the release one, which
+/// is what `scripts/build.sh` makes; failing both, the launcher's own
+/// profile, for the error to name.
+fn in_profile(dir: PathBuf, name: &str) -> PathBuf {
     let current = std::env::current_exe().expect("current_exe");
-    current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned()
+    let own = current.parent().and_then(|d| d.file_name()).unwrap_or_else(|| "release".as_ref()).to_owned();
+    let path = |profile: &std::ffi::OsStr| dir.join(profile).join(name);
+    let found = [own.as_os_str(), "release".as_ref()].into_iter().map(path).find(|p| p.exists());
+    found.unwrap_or_else(|| path(&own))
 }
 
 /// What has to exist on disk before `machine` can start, made if it does

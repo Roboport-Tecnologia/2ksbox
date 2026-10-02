@@ -84,6 +84,8 @@ player line runs a machine with nothing else.
   it, else the winit player beside the launcher, else the root
   workspace's `target/<same profile>/player` (`launcher-mitsuami` and
   `launcher-qt` build into their own `target/`, where no player sits).
+  "Same profile" falls back to `release`: a debug launcher runs the
+  release player `scripts/build.sh` made when no debug one is built.
   Another target's player follows the same order under
   `qemu-<target>/`. `--paths` prints the players it will use.
 - **Clone…** (`launcher-core/src/clone_machine.rs`) makes a new machine
