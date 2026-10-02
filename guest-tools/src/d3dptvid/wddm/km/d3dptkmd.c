@@ -40,15 +40,22 @@ static volatile ULONG *g_regs;
 
 /* -------------------------------------------------------------- debug */
 
+/* Before StartDevice has mapped the register BAR (DriverEntry, AddDevice,
+ * a start that fails finding it) lines go to QEMU's debug console port,
+ * 0xE9, which `-debugcon file:<log>` captures (its default port); with no
+ * debugcon on the board the writes go nowhere. */
+#define DEBUGCON_PORT ((PUCHAR)0xe9)
+
 static void dbg_puts(const char *s)
 {
     volatile ULONG *r = g_regs;
 
-    if (!r) {
-        return;
-    }
     while (*s) {
-        r[D3DPT_FB_REG_DEBUG / 4] = (ULONG)(unsigned char)*s++;
+        if (r) {
+            r[D3DPT_FB_REG_DEBUG / 4] = (ULONG)(unsigned char)*s++;
+        } else {
+            WRITE_PORT_UCHAR(DEBUGCON_PORT, (UCHAR)*s++);
+        }
     }
 }
 
@@ -92,40 +99,53 @@ static NTSTATUS d3dpt_add_device(IN_CONST_PDEVICE_OBJECT pdo, OUT_PPVOID ctx)
     RtlZeroMemory(a, sizeof(*a));
     a->pdo = pdo;
     *ctx = a;
+    dbg_line("AddDevice");
     return STATUS_SUCCESS;
 }
 
-/* BAR 0 is the first memory resource, BAR 1 (the registers) the second,
- * in the order the PCI bus driver lists them, as the XP miniport's
- * VideoPortGetAccessRanges hands them over. */
+/* BAR 0 (VRAM) and BAR 1 (the registers), found by address. A VGA-class
+ * device's resource list also carries the legacy window at 0xA0000 and
+ * the VGA ports, ahead of the BARs, so counting memory resources (what
+ * the XP miniport's VideoPortGetAccessRanges, BARs only, allowed) maps
+ * the wrong range: the BARs' addresses come from PCI config space and
+ * the translated resources are matched against them. */
 static NTSTATUS find_bars(D3DPT_ADAPTER *a)
 {
     PCM_RESOURCE_LIST list = a->info.TranslatedResourceList;
-    ULONG f, i, mem = 0;
+    ULONG bar[2], got = 0, f, i, found = 0;
+    NTSTATUS st;
 
     if (!list) {
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
+    st = a->dxgk.DxgkCbReadDeviceSpace(a->dxgk.DeviceHandle, DXGK_WHICHSPACE_CONFIG,
+                                       bar, 0x10, sizeof(bar), &got);
+    if (!NT_SUCCESS(st) || got != sizeof(bar)) {
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
+    }
+    bar[0] &= ~0xfu;
+    bar[1] &= ~0xfu;
     for (f = 0; f < list->Count; f++) {
         PCM_PARTIAL_RESOURCE_LIST pl = &list->List[f].PartialResourceList;
 
         for (i = 0; i < pl->Count; i++) {
             PCM_PARTIAL_RESOURCE_DESCRIPTOR d = &pl->PartialDescriptors[i];
 
-            if (d->Type != CmResourceTypeMemory) {
+            if (d->Type != CmResourceTypeMemory || d->u.Memory.Start.HighPart) {
                 continue;
             }
-            if (mem == 0) {
+            if (d->u.Memory.Start.LowPart == bar[0]) {
                 a->vram_phys = d->u.Memory.Start;
                 a->vram_len = d->u.Memory.Length;
-            } else if (mem == 1) {
+                found |= 1;
+            } else if (d->u.Memory.Start.LowPart == bar[1]) {
                 a->regs_phys = d->u.Memory.Start;
                 a->regs_len = d->u.Memory.Length;
+                found |= 2;
             }
-            mem++;
         }
     }
-    return mem >= 2 ? STATUS_SUCCESS : STATUS_DEVICE_CONFIGURATION_ERROR;
+    return found == 3 ? STATUS_SUCCESS : STATUS_DEVICE_CONFIGURATION_ERROR;
 }
 
 static DXGKDDI_START_DEVICE d3dpt_start_device;
@@ -148,6 +168,8 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     }
     st = find_bars(a);
     if (!NT_SUCCESS(st)) {
+        dbg_hex("d3dptkmd: StartDevice: no BAR 0 / BAR 1 in the resources ", st);
+        dbg_puts("\n");
         return st;
     }
     if (a->regs_len < D3DPT_FB_REGS_SIZE) {
@@ -217,6 +239,7 @@ static NTSTATUS d3dpt_remove_device(IN_CONST_PVOID ctx)
 static DXGKDDI_UNLOAD d3dpt_unload;
 static VOID d3dpt_unload(VOID)
 {
+    dbg_line("Unload");
 }
 
 /* ---------------------------------------------- what dxgkrnl asks next */
@@ -249,9 +272,10 @@ static VOID d3dpt_dpc(IN_CONST_PVOID ctx)
 static DXGKDDI_CONTROL_ETW_LOGGING d3dpt_control_etw_logging;
 static VOID d3dpt_control_etw_logging(IN_BOOLEAN enable, IN_ULONG flags, IN_UCHAR level)
 {
-    UNREFERENCED_PARAMETER(enable);
     UNREFERENCED_PARAMETER(flags);
     UNREFERENCED_PARAMETER(level);
+    dbg_hex("d3dptkmd: ControlEtwLogging enable=", (ULONG)enable);
+    dbg_puts("\n");
 }
 
 /*
@@ -352,6 +376,7 @@ static VOID d3dpt_reset_device(IN_CONST_PVOID ctx)
 {
     D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
 
+    dbg_line("ResetDevice");
     /* bugcheck or reboot: hand the screen back to the VGA core, as the
      * XP miniport's reset does */
     if (a && a->regs) {
@@ -363,18 +388,9 @@ static DXGKDDI_QUERY_INTERFACE d3dpt_query_interface;
 static NTSTATUS d3dpt_query_interface(IN_CONST_PVOID ctx, IN_PQUERY_INTERFACE qi)
 {
     UNREFERENCED_PARAMETER(ctx);
-    UNREFERENCED_PARAMETER(qi);
-    return STATUS_NOT_SUPPORTED;
-}
-
-static DXGKDDI_LINK_DEVICE d3dpt_link_device;
-static NTSTATUS d3dpt_link_device(IN_CONST_PDEVICE_OBJECT pdo, IN_CONST_PVOID ctx,
-                                  INOUT_PLINKED_DEVICE linked)
-{
-    UNREFERENCED_PARAMETER(pdo);
-    UNREFERENCED_PARAMETER(ctx);
-    UNREFERENCED_PARAMETER(linked);
-    dbg_line("LinkDevice");
+    dbg_hex("d3dptkmd: QueryInterface guid=", qi->InterfaceType ? qi->InterfaceType->Data1 : 0);
+    dbg_hex(" version=", (ULONG)qi->Version);
+    dbg_puts("\n");
     return STATUS_NOT_SUPPORTED;
 }
 
@@ -442,6 +458,7 @@ DRIVER_INITIALIZE DriverEntry;
 NTSTATUS DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)
 {
     DRIVER_INITIALIZATION_DATA init;
+    NTSTATUS st;
 
     RtlZeroMemory(&init, sizeof(init));
     init.Version = DXGKDDI_INTERFACE_VERSION_WIN7;
@@ -510,10 +527,15 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)
     init.DxgkDdiCreateContext = d3dpt_create_context;
     init.DxgkDdiDestroyContext = d3dpt_destroy_context;
 
-    init.DxgkDdiLinkDevice = d3dpt_link_device;
+    /* LinkDevice stays NULL: it is for linked adapters (an SLI-style
+     * chain), and dxgkrnl calls it right after AddDevice when it is set,
+     * dropping the device when it fails */
     init.DxgkDdiSetDisplayPrivateDriverFormat = d3dpt_set_display_private_driver_format;
 
     init.DxgkDdiQueryVidPnHWCapability = d3dpt_query_vidpn_hw_capability;
 
-    return DxgkInitialize(drv, reg, &init);
+    st = DxgkInitialize(drv, reg, &init);
+    dbg_hex("d3dptkmd: DriverEntry: DxgkInitialize ", st);
+    dbg_puts("\n");
+    return st;
 }

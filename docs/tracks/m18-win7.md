@@ -103,7 +103,33 @@ device's half is plain QEMU C and builds anywhere.
    shows what dxgkrnl asks for after StartDevice (QueryAdapterInfo's
    driver caps, segments, child relations, a VidPN): those answers are
    the rest of this step. `d3dptkmd.inf` (NTx86, no user-mode driver yet).
-   Waits for the `win7` bundle on the PC (the Linux box was unreachable).
+   **First boots, 2026-10-02** (the user's `win7` image through an
+   overlay on the PC, TCG, `DRVINST.EXE D:\WDDM\D3DPTKMD.INF`; the INF
+   installs and binds, the unsigned prompt clicked). What each boot taught:
+   - Lines before StartDevice maps the BAR go to QEMU's debug console,
+     port 0xE9 (`-debugcon file:<log>`); without it the first boots looked
+     as if the driver never loaded (`sc query` said "never started", and
+     `driverquery` showed `VgaSave` running), when dxgkrnl had loaded it
+     and dropped the device.
+   - **LinkDevice stays NULL.** dxgkrnl calls it right after AddDevice
+     when set (linked adapters), and a stub that fails drops the device.
+   - **The adapter needs an interrupt.** With no interrupt pin dxgkrnl
+     queries the I2C and OPM interfaces (optional; NOT_SUPPORTED is right)
+     and removes the device without calling StartDevice. `-device
+     d3dpt-vga,irq=on` (new, off by default: XP, 9x and snapshots see no
+     change; nothing raises it yet) gives the pin, and StartDevice runs.
+     Part of step 4 brought forward; the launcher has to pass it for a
+     Windows 7 machine on the WDDM driver. The property is in the
+     worktree but not committed until `scripts/test.sh all` has run on
+     Linux (it touches the device).
+   - **The BARs by address.** A VGA-class device's resources carry the
+     legacy 0xA0000 window ahead of the BARs; StartDevice reads BAR 0 and
+     BAR 1 from config space (`DxgkCbReadDeviceSpace`) and matches them.
+     It now logs `magic=0x42463344 version=5 vram=0x08000000`.
+   - Not the cause: `UserModeDriverName` / `InstalledDisplayDrivers` in
+     the software key (tried, no change).
+   Next: QueryChildRelations (one video output), the child status, then
+   QueryAdapterInfo's caps and segment and the VidPN calls.
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the
