@@ -74,29 +74,34 @@ pub fn AboutWindow() -> impl View {
             open=move || about.open.get()
             @close_request=move || about.open.set(false)
         >
-            <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
+            // The credits scroll edge to edge, between separators, with
+            // their own padding inside so the scroll bar never covers them.
+            <Column grow=1.0 min_height=0>
                 {crate::shot::arm(&["about"])}
-                <Row gap=Spacing::Lg align=Align::Center>
-                    {icon().map(|p| view! { <Image source=ImageSource::Pixels(p) width=64 height=64/> })}
-                    <Column gap=Spacing::Xs grow=1.0>
-                        <Text text_style=TextStyle::Title>{format!("{} {}", about::NAME, about::VERSION)}</Text>
-                        <Text>{about::TAGLINE}</Text>
-                        <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{about::LICENSE}</Text>
-                        <Row>
-                            <Button button_style=ButtonStyle::Borderless @click=|| open_url(about::URL)>
-                                {about::URL}
-                            </Button>
-                        </Row>
-                    </Column>
-                </Row>
+                <Column padding=Spacing::Lg gap=Spacing::Md>
+                    <Row gap=Spacing::Lg align=Align::Center>
+                        {icon().map(|p| view! { <Image source=ImageSource::Pixels(p) width=64 height=64/> })}
+                        <Column gap=Spacing::Xs grow=1.0>
+                            <Text text_style=TextStyle::Title>{format!("{} {}", about::NAME, about::VERSION)}</Text>
+                            <Text>{about::TAGLINE}</Text>
+                            <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{about::LICENSE}</Text>
+                            <Row>
+                                <Button button_style=ButtonStyle::Borderless @click=|| open_url(about::URL)>
+                                    {about::URL}
+                                </Button>
+                            </Row>
+                        </Column>
+                    </Row>
+                    <Text weight=FontWeight::Semibold>{about::THANKS}</Text>
+                </Column>
                 <Separator/>
-                <Text weight=FontWeight::Semibold>{about::THANKS}</Text>
                 <ScrollView grow=1.0 min_height=0>
-                    <Column gap=Spacing::Lg padding_x=Spacing::Xs>
+                    <Column gap=Spacing::Lg padding_x=Spacing::Xl padding_y=Spacing::Md>
                         {credit_groups()}
                     </Column>
                 </ScrollView>
-                <Row justify=Justify::End>
+                <Separator/>
+                <Row padding=Spacing::Lg justify=Justify::End>
                     <Button role=ButtonRole::Default @click=move || about.open.set(false)>"Close"</Button>
                 </Row>
             </Column>
