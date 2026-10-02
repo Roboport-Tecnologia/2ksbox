@@ -767,7 +767,9 @@ there.
 ## ADR-023: The launcher moves to mitsuami, native widgets on every platform (2026-09-27)
 
 **Status.** Accepted; supersedes ADR-015 once track M19 flips what the
-packages ship. Until then `launcher-qt` ships and ADR-015 holds.
+packages ship. Since 2026-10-02 (user) `launcher-mitsuami` is the
+official launcher and `launcher-qt` is deprecated: no more changes go
+into it, though the packages still build it until M19 moves them over.
 
 **Decision** (user decision). The launcher's next front end is
 `launcher-mitsuami/`, on mitsuami (`github.com/Roboport-Tecnologia/mitsuami`,

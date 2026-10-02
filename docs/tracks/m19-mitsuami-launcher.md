@@ -108,6 +108,7 @@ and photograph the screen it is on:
 | `shelf[:<disc>]` | the shared shelf, with a disc added as the Add menu would (writes the shelf) |
 | `discs:<machine.toml>[:insert=<disc>]` | the shelf for a machine, with a disc's ▶ pressed (writes the bundle) |
 | `profiles` | the shader profile list |
+| `about` | About 2ksbox, with the credits |
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
 | `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |

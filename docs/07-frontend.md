@@ -64,12 +64,13 @@ player line runs a machine with nothing else.
   the projects 2ksbox is built on, grouped by what they do for it, each
   a link with its licence. The list is `launcher_core::about` (the
   projects the app runs or ships, plus Wine; a library one of them pulls
-  in is theirs to credit), and `launcherx --about` prints it. Qt opens
-  it from a "?" at the end of the toolbar and, on macOS, from the
-  application menu: `MacMenu.qml` is a `Qt.labs.platform` menu bar whose
-  item carries `AboutRole` (Quick Controls' own `MenuBar` has no roles),
-  created from `Main.qml` only on macOS so no other platform resolves
-  that import. `qt-about` checks the window lists every credit.
+  in is theirs to credit), and `launcherx --about` prints it. mitsuami
+  (`launcher-mitsuami/src/about.rs`) opens it from a "?" at the end of
+  the toolbar, except on macOS (user), where it is the application
+  menu's About item: the app's menu bar is set on macOS only, one item
+  with `MenuRole::About`, which AppKit moves into the application menu.
+  The deprecated Qt launcher got the same window first (a "?" and a
+  `Qt.labs.platform` menu), checked by `qt-about`.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Play is logged with the line it ran**, quoted to paste back

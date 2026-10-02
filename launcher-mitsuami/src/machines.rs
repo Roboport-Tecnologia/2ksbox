@@ -16,6 +16,7 @@
 //! row's state line. Beside the list, the chosen machine's details (the
 //! core's `details`), as UTM and VirtualBox show theirs.
 
+use crate::about::{About, AboutWindow};
 use crate::clone::{CloneWindow, Cloner};
 use crate::firstrun::Offer;
 use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
@@ -159,6 +160,8 @@ pub fn MachinesWindow() -> impl View {
     let discs = use_store::<Discs>();
     let shaders = use_store::<Shaders>();
     let offer = use_store::<Offer>();
+    let about = use_store::<About>();
+    crate::about::app_menu(about);
     // The window's task, which ends with it.
     spawn_local(library.poll());
     crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
@@ -170,6 +173,9 @@ pub fn MachinesWindow() -> impl View {
     }
     if let Some(answers) = crate::shot::screen("firstrun") {
         offer.start(library, shaders, Some(&answers));
+    }
+    if crate::shot::screen("about").is_some() {
+        about.show();
     }
     if let Some(arg) = crate::shot::screen("wizard") {
         wizard.open_for_screen(&arg);
@@ -270,6 +276,16 @@ pub fn MachinesWindow() -> impl View {
         macos => view! { <Row>{shelf()}{shaders_button()}</Row> },
         _ => (shelf(), shaders_button()),
     };
+    // About, at the toolbar's end. Not on macOS (user): there it is the
+    // application menu's (`about::app_menu`).
+    let about_button = platform! {
+        macos => (),
+        _ => view! {
+            <Button icon=icons::ABOUT icon_only=true tooltip="About 2ksbox" @click=move || about.show()>
+                "About 2ksbox"
+            </Button>
+        },
+    };
     view! {
         <Column grow=1.0 min_height=0>
             <Toolbar>
@@ -285,6 +301,7 @@ pub fn MachinesWindow() -> impl View {
                 </Show>
                 <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
                 {shelf_and_shaders}
+                {about_button}
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
                 <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
@@ -299,6 +316,7 @@ pub fn MachinesWindow() -> impl View {
             <DiscShelfWindow/>
             <ShaderProfilesWindow/>
             <ShaderEditorWindow/>
+            <AboutWindow/>
         </Column>
     }
 }
@@ -560,5 +578,10 @@ pub(crate) mod icons {
     };
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+    };
+    // A question mark; macOS has no toolbar button for it, so no symbol.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub const ABOUT: &str = platform! {
+        macos => "", gtk => "dialog-question-symbolic", kde => "dialog-question", windows => "\u{E897}",
     };
 }

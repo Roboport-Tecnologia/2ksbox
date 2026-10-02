@@ -58,9 +58,12 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   `cargo check --release --workspace`). `launcher-qt` is outside the root
   workspace, so `cargo build` never needs Qt. **The egui front end was
   deleted** (ADR-017, user decision); don't bring it back.
-- **The Qt front end is the one that ships** (ADR-015) as `2ksbox` in
-  every package, until `launcher-mitsuami/` (ADR-023, track M19: native
-  widgets through mitsuami, pinned by git rev) reaches parity and replaces it; `scripts/build.sh` has a `qt` stage. Every packager opens
+- **`launcher-mitsuami/` is the official launcher** (ADR-023, track M19:
+  native widgets through mitsuami, pinned by git rev; user, 2026-10-02).
+  New launcher work goes there. **`launcher-qt/` is deprecated: make no
+  changes to it** (user). It is still what the packages build as
+  `2ksbox` (ADR-015) until M19 moves packaging over; `scripts/build.sh`
+  has a `qt` stage. Every Qt packager opens
   a **real window offscreen** (`QT_QPA_PLATFORM=offscreen` +
   `LAUNCHER_QT_SHOT`) and requires a PNG, because a missing Qt platform
   plugin or QML module is invisible to every other check.

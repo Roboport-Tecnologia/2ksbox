@@ -7,8 +7,9 @@
 //!
 //! So this crate is only view code: signals that mirror a core model, and
 //! a `view!` per window. Nothing here decides anything about machines,
-//! discs or shaders. It runs beside `launcher-qt` until it reaches parity,
-//! and then replaces it in the packages (ADR-023, track M19).
+//! discs or shaders. It is the official launcher, and replaces the
+//! deprecated `launcher-qt` in the packages when M19 moves them over
+//! (ADR-023).
 //!
 //! It is **not** in the root workspace, like `launcher-qt`: build it from
 //! this directory, so the root `cargo build` never needs GTK.
@@ -18,6 +19,7 @@
 // `main` borrows the console it was launched from when there is one.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod about;
 mod clone;
 mod discs;
 mod firstrun;
