@@ -25,7 +25,7 @@ pub struct Group {
 
 pub const NAME: &str = "2ksbox";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const TAGLINE: &str = "Old Windows and DOS machines that play like native apps.";
+pub const TAGLINE: &str = "Run new and vintage OSes with a good looking CRT filter.";
 pub const LICENSE: &str = "Free software under the GNU GPL, version 2.";
 pub const URL: &str = "https://github.com/davidrios/2ksbox";
 pub const THANKS: &str = "Built on the work of these projects. Thank you.";
