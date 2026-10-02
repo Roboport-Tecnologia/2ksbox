@@ -9,7 +9,7 @@
  * shows the backend alone writing through to every slot, so it takes the
  * import to go wrong; but that test has no Vulkan in it and the player has
  * a whole guest behind it. This is the middle: the same ring the backend
- * drives, imported exactly the way `player/src/dmabuf.rs` imports it, and
+ * drives, imported exactly the way `player-core/src/dmabuf.rs` imports it, and
  * the buffer's memory read straight back with the CPU after every frame.
  *
  * It is also the thing to bisect. `--stage` picks how much of the import to
@@ -55,7 +55,7 @@ enum {
     ST_IMAGE,       /* create the image, import nothing                    */
     ST_NODEDICATED, /* the full import without the dedicated allocation    */
     ST_LINEAR,      /* ... with VK_IMAGE_TILING_LINEAR, no modifier struct */
-    ST_FULL,        /* exactly what player/src/dmabuf.rs does              */
+    ST_FULL,        /* exactly what player-core/src/dmabuf.rs does              */
 };
 static const char *const stage_name[] = {
     "none", "mem", "image", "nodedicated", "linear", "full",
@@ -313,7 +313,7 @@ static uint32_t vk_read(int slot)
                                + (slots[slot].w / 2) * 4);
 }
 
-/* The frontend's import, as player/src/dmabuf.rs performs it. */
+/* The frontend's import, as player-core/src/dmabuf.rs performs it. */
 static int vk_import(int slot, int fd, int w, int h, uint32_t stride, uint64_t modifier)
 {
     VkExternalMemoryImageCreateInfo extmem = {

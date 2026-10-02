@@ -110,7 +110,7 @@ smoke() {
   # The companions QEMU dlopens by name: the Direct3D executor, the DXVK
   # it runs on and the remote library. They are in no import table,
   # so nothing above would notice their absence. The packaged *player*
-  # knows where they should be (`player/src/companions.rs`), and
+  # knows where they should be (`player-core/src/companions.rs`), and
   # `--companions` prints what it resolved. Inside the sandbox the answer
   # has to be under /app. "(not shipped)" means the build made one and did
   # not stage it, or did not make it at all.

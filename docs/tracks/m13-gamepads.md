@@ -22,7 +22,7 @@ defaults), `patches/qemu/README.md` (patches 26 and 27).
   overlaid into `hw/usb/`, built by patch 26 under `CONFIG_USB_HID`.
 - `gamepad/qemu/gameport.{c,h}`: `gameport`, overlaid into `hw/input/`,
   built by patch 27 under `CONFIG_GAMEPORT`.
-- `player/src/pad.rs`: the host end (`gilrs` and the scripted source,
+- `player-core/src/pad.rs`: the host end (`gilrs` and the scripted source,
   shaping, the key map, `--pads`, `--pad-sweep`).
 - `embed/libqemu_embed.h`: `qemu_embed_pad_state` /
   `qemu_embed_pad_present` (embed API v8).
@@ -125,7 +125,7 @@ enumerates a non-PnP port there).
 
 ### Path C, keys
 
-`KeyMap` in `player/src/pad.rs` turns the pad into the key presses the
+`KeyMap` in `player-core/src/pad.rs` turns the pad into the key presses the
 player already sends (d-pad and left stick are the arrows by default).
 Every poll it recomputes the wanted scancode set and diffs it against
 what is held, so no key can stick down in the guest, and a set union

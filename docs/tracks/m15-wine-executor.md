@@ -24,7 +24,7 @@ instead (ADR-007's second amendment).
   `package-macos.sh --community`, the Flatpak manifest.
 - Launcher: `launcher-core/src/host_gpu.rs` (`D3dBackend::Wine`, the
   third verdict), `wizard::Form::d3d9_note()`, and
-  `player/src/companions.rs` (`wine`, `wine-host`, `d3dpt-remote`).
+  `player-core/src/companions.rs` (`wine`, `wine-host`, `d3dpt-remote`).
 - Tests: the `exec-wine` check, the `EXEC=` knob of
   `tools/xp-driver-test.sh`, `tools/xp-fifa-match.sh` and
   `tools/tcg-profile.sh`, and `tools/macvm-wine-spike.sh` /

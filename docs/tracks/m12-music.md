@@ -21,7 +21,7 @@ work (doc 20 §8).
   `launcher-core`, the Qt form, the C API (`lc_wizard_sound_*`,
   `lc_wizard_music_*`) and `launcherx --music`.
 - **Packaging.** Every package carries `soundfonts/TimGM6mb.sf2`, passed as
-  `LIBSYNTH_SF2` by `player/src/companions.rs`.
+  `LIBSYNTH_SF2` by `player-core/src/companions.rs`.
 - **QEMU's own SB16.** An interrupt line a driver can acknowledge (patch
   25, §5.2), mixer volumes applied (patch 61), wave-device names DirectX 9
   can take (`SETUP /I 5`, §5.3).

@@ -21,7 +21,7 @@
 #   lib/2ksbox/wine/d3dpt-exec-host.exe   the program that loads it under Wine
 #
 # The launcher and the player find `bin/wine` by that fixed path
-# (`launcher-core/src/host_gpu.rs`, `player/src/companions.rs`); QEMU's
+# (`launcher-core/src/host_gpu.rs`, `player-core/src/companions.rs`); QEMU's
 # remote library looks beside itself for the pair, as in the tarball.
 id: com._2ksbox.Launcher.Wine
 branch: stable

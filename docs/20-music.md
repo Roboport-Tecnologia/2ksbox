@@ -93,7 +93,7 @@ lets the user pick any `.sf2` instead.
 machine says `synth=gm`, and the device finds the file by the rule every
 companion of ours uses (the Direct3D executor's, doc 14): the `soundfont=`
 property, then `LIBSYNTH_SF2` (a packaged player sets it in
-`player/src/companions.rs`), then `soundfonts/TimGM6mb.sf2` in a
+`player-core/src/companions.rs`), then `soundfonts/TimGM6mb.sf2` in a
 checkout. One machine file works in a checkout and in any package.
 
 **The MT-32 ROMs are the user's own**, and nothing of Roland's is ever

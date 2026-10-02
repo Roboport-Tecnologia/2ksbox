@@ -6,7 +6,7 @@
 //! `-qmp unix:<path>,server,nowait` to the arguments it spawns the
 //! player with and talks QMP to that socket itself, as `tools/qmpc.py`
 //! does to drive a guest. QEMU allows several monitors, so the player's
-//! own in-process one (`player/src/qmp.rs`, on a socketpair with no
+//! own in-process one (`player-core/src/qmp.rs`, on a socketpair with no
 //! filesystem path) is untouched and neither binary needs IPC of its
 //! own. A hand-written bundle run straight through `player` has no
 //! launcher socket, which is the documented "the launcher is optional"

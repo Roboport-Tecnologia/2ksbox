@@ -239,7 +239,7 @@ esac
 # The companions QEMU dlopens late by name: the Direct3D executor, its
 # DXVK and the Wine executor, where built. They are
 # in no import table, so `ldd` above says nothing about them. The staged
-# player's own rule (`player/src/companions.rs`) does, and `--companions`
+# player's own rule (`player-core/src/companions.rs`) does, and `--companions`
 # prints what it resolved. Ask the binary rather than restate the layout:
 # a package that stages a file the player looks for somewhere else passes
 # every other check in this script.

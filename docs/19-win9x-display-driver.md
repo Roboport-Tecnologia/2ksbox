@@ -1176,7 +1176,7 @@ scheme and proved nothing in 12 minutes.
 **Still open**: an ACPI **standby** suspends the whole VM (QEMU
 `SUSPEND`), and on wake nothing reprograms the adapter: a blank 720×400
 text page, and the machine idles back into standby. The player does not
-report `SUSPEND`/`WAKEUP` (`player/src/qmp.rs::is_notable`).
+report `SUSPEND`/`WAKEUP` (`player-core/src/qmp.rs::is_notable`).
 
 ### 42. On 9x a DLL beside a game reaches only the session's first DirectDraw program
 

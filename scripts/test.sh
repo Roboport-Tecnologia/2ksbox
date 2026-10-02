@@ -2841,6 +2841,16 @@ host_stage() {
     skip mode-sweep "needs a display and the slang-shaders submodule"
   fi
 
+  # the mitsuami player (M22) on a private headless sway: the mode sweep
+  # through it, the test pattern on its GpuSurface, a key reaching it.
+  # Its own workspace, built by hand until it has a build stage.
+  if [ -x player-mitsuami/target/release/player-mitsuami ] \
+      && command -v sway >/dev/null && command -v grim >/dev/null && command -v wtype >/dev/null; then
+    run_check player-mitsuami player-mitsuami.log tools/player-mitsuami-test.sh "$OUT/player-mitsuami" || true
+  else
+    skip player-mitsuami "needs player-mitsuami built (cd player-mitsuami && cargo build --release), sway, grim and wtype"
+  fi
+
   # the launcher's shader preview, which unlike the player renders only
   # when asked: that it knows which presets it must keep asking about,
   # and that a frame number really does change their picture (doc 07)

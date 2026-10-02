@@ -892,7 +892,7 @@ Three rules hold it together:
   `$ORIGIN/../lib/2ksbox` rpath (`@loader_path` on macOS) ordered
   *before* the build-directory one, so a packaged binary never loads a
   developer's library. The packaged player names the dlopened
-  companions to QEMU itself (`player/src/companions.rs`,
+  companions to QEMU itself (`player-core/src/companions.rs`,
   `player --companions`).
 - **One layout or the other, never a mixture.** An installed launcher
   answers only with its own prefix, even for a file the package left

@@ -104,7 +104,7 @@ Windows has no zero-copy slot; its 3D frames arrive through
 
 ### QMP
 
-The player (`player/src/qmp.rs`) makes a `socketpair(AF_UNIX)` and passes
+The player (`player-core/src/qmp.rs`) makes a `socketpair(AF_UNIX)` and passes
 one end as `-chardev socket,id=qmp0,fd=N -mon chardev=qmp0,mode=control`:
 full QMP with events, the monitor on its own iothread, no filesystem path
 and no network. The player logs notable events and runs
@@ -186,7 +186,7 @@ including the two earlier designs that failed. The rules:
 
 ## Player side
 
-`player/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
+`player-core/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
 a shared staging frame under the callback and publishes it on
 `on_refresh_done`. While 3D is active, the VGA surface is shown only
 once 3D frames stop and the guest has drawn on it. 3D frames arrive as a

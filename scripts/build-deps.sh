@@ -40,7 +40,7 @@
 # build/deps/<arch>, which scripts/configure-qemu.sh links by default
 # there. QEMU's main loop iterates glib's global default GMainContext on
 # QEMU's thread; with one glib shared with its process, that is the
-# context a toolkit's own loop runs on (spikes/player-gtk/README.md).
+# context a toolkit's own loop runs on (docs/tracks/m22-mitsuami-player.md, "Why QEMU links a GLib of its own").
 # Everything else stays the distribution's. The Flatpak runs this script
 # in its SDK, offline, with the tarballs as declared sources.
 set -euo pipefail

@@ -2264,15 +2264,29 @@ dependencies = [
 name = "player"
 version = "0.0.1"
 dependencies = [
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "player-core",
+ "qemu-embed",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "windows-sys 0.52.0",
+ "winit",
+ "x11-dl",
+]
+
+[[package]]
+name = "player-core"
+version = "0.0.1"
+dependencies = [
  "ash",
  "bytemuck",
  "cpal",
  "gamepad",
  "gilrs",
  "libc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "objc2-io-surface",
  "objc2-metal 0.3.2",
  "png",
@@ -2280,13 +2294,8 @@ dependencies = [
  "qemu-embed",
  "serde_json",
  "shader-chain",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
  "wgpu",
  "windows-sys 0.52.0",
- "winit",
- "x11-dl",
 ]
 
 [[package]]

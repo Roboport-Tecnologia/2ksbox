@@ -43,7 +43,7 @@ A libretro core was built on the way and dropped (ADR-005).
 QEMU in-process through `libqemu-embed-<target>` and the `qemu-embed`
 crate (doc 11): display, input (keyboard, USB tablet, PS/2 grab),
 audio (the `embed` audiodev into cpal), QMP over a socketpair
-(`player/src/qmp.rs`) and the librashader CRT chain. FreeDOS, Win98 and
+(`player-core/src/qmp.rs`) and the librashader CRT chain. FreeDOS, Win98 and
 XP run in the player on Linux and the Air.
 
 - **Latency** on the Air (Win98, crt-lottes, `PLAYER_LATENCY=1`):
@@ -55,7 +55,7 @@ XP run in the player on Linux and the Air.
 
 ## M2: Pixel accuracy and input
 
-Mode analysis (`player/src/mode.rs`, checked by `player
+Mode analysis (`player-core/src/mode.rs`, checked by `player
 --mode-sweep`), whole-pixel geometry recomputed only on surface
 changes, native screenshots (Ctrl+Alt+S). Design in doc 03.
 

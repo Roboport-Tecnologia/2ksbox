@@ -3,7 +3,7 @@ name = "player"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Standalone player: in-process QEMU + wgpu/librashader display (doc 02/03). M0: native window + test pattern."
+description = "Standalone player (doc 02/03) in a winit window: player-core's machine and picture, with winit's window, keys and cursors."
 
 # On by default, so what a build reads a gamepad with is decided here
 # and not by what the machine happened to have, the same rule
@@ -14,33 +14,26 @@ description = "Standalone player: in-process QEMU + wgpu/librashader display (do
 # `PLAYER_PAD_SCRIPT`.
 [features]
 default = ["gilrs"]
-gilrs = ["dep:gilrs"]
+gilrs = ["player-core/gilrs"]
 # The player for Windows 11 (track M20): links libqemu-embed-x86_64
 # instead of the era's i386. A second binary, built on its own
 # (`scripts/build.sh`: `--features qemu-x86_64 --target-dir
 # target/qemu-x86_64`), because QEMU has to be linked, not opened at run
 # time: patch 63 reserves TCG's code buffer next to the helpers when the
 # image loads, before main(), and a later dlopen loses that (doc 22 §5.0).
-qemu-x86_64 = ["qemu-embed/qemu-x86_64"]
+qemu-x86_64 = ["qemu-embed/qemu-x86_64", "player-core/qemu-x86_64"]
 # The player for Windows 11 on Arm (M20 step 4), on an Arm host: links
 # libqemu-embed-aarch64, the same way (`target/qemu-aarch64`).
-qemu-aarch64 = ["qemu-embed/qemu-aarch64"]
+qemu-aarch64 = ["qemu-embed/qemu-aarch64", "player-core/qemu-aarch64"]
 
 [dependencies]
+# The machine and its picture: everything but the window (track M22).
+player-core = { path = "../player-core", default-features = false }
+# Linked here as well as through player-core so build.rs gets its
+# DEP_QEMU_EMBED_LIBDIR (the rpath), which cargo gives only to a crate
+# that depends on the `links` crate directly.
 qemu-embed = { path = "../qemu-embed" }
-gamepad = { path = "../gamepad" }
-gilrs = { version = "0.11", optional = true }
 winit = "0.30"
-libc = "0.2"
-serde_json = "1"
-ash = "0.38"
-
-wgpu = "30"
-pollster = "1"
-bytemuck = "1"
-png = "0.18"
-cpal = "0.18.2"
-shader-chain = { path = "../shader-chain" }
 
 # The host's shortcuts to the guest while focused (src/kbcapture.rs). All
 # of them are what winit already links; the versions follow its own (the
@@ -54,7 +47,6 @@ x11-dl = "2.21"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
-    "Win32_Media",
     "Win32_UI_Input",
     "Win32_UI_WindowsAndMessaging",
 ] }
@@ -63,5 +55,3 @@ windows-sys = { version = "0.52", features = [
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSArray"] }
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSWindow"] }
-objc2-metal = { version = "0.3", features = ["MTLDevice", "MTLTexture", "MTLPixelFormat", "objc2-io-surface"] }
-objc2-io-surface = { version = "0.3", features = ["IOSurfaceRef"] }
