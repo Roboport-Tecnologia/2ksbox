@@ -875,3 +875,15 @@ every capture had both lengths 0, which readers take as empty (the
 `adlib` shows it too. **Test:** the `music` and `sb-mixer` checks.
 **Drop:** upstream finalizes audio backends at exit, or patches the
 header as it goes.
+
+### 79-guestfwd-unix
+`guestfwd=tcp:<addr>:<port>-unix:<path>`: each TCP connection the guest
+opens to addr:port becomes a new connection to the host's Unix socket,
+through libslirp's `slirp_add_unix()` (track M23, doc 24 §2.1). It is how
+the player's SMB server, libsmb, sees a Windows guest's `\\10.0.2.4\…`
+as ordinary per-connection streams; a chardev target carries one
+connection for the machine's life, and `cmd:` spawns a process per
+connection. libslirp 4.9.5 has it on Unix only, so on Windows the rule
+is refused until a `patches/deps/libslirp` patch turns on `AF_UNIX` there.
+**Test:** `tools/win11-spike.py` with `SMB=` (docs/testing.md).
+**Drop:** upstream QEMU gains a Unix target for `guestfwd`.

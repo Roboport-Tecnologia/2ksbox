@@ -140,6 +140,7 @@ What differs from Linux, so a failure there reads right:
 | `display-adapter` | each family's adapter choices and default; a foreign adapter refused; our adapter replaced, not added beside |
 | `d3d9` | the Direct3D picker: a new machine writes nothing (`auto`); `dxvk`/`system` reach only `d3dpt-vga`, whose `info qtree` shows the property |
 | `libsynth` | `synthx selftest`: AdLib detection, a 440 Hz FM note, the shipped bank through the MPU-401 path, running status; `--roms` adds the CM-32L (doc 20 §7) |
+| `smb` | `tools/smb-host-test.sh`: libsmb's `smbserve` against the host's own SMB client (macOS `mount_smbfs`, else Samba's `smbclient`) on localhost, at 2.1 and at 3.1.1 with signing required: read, a 3 MB write and read-back, rename, delete, mkdir / rmdir, and the server's log with the login and no signature it could not verify (M23, doc 24); skipped with no client or no `target/release/smbserve` |
 | `music` | the sound-card and music pickers into a real QEMU; the monitor writes the ports and the note must be in QEMU's own `wav` |
 | `companions-env` | the bank the player names (`LIBSYNTH_SF2`, `companions.rs`) reaches QEMU's own `getenv()`: the real player, run from a folder with no `soundfonts/` and nothing in the environment, takes a General MIDI machine to the BIOS and quits. On Windows `set_var` never reached QEMU's C runtime (doc 11, "The C runtime boundary"). Needs the player and a display |
 | `sb-mixer` | the SB16's FM, master and SB Pro FM volumes at −12 dB come out 12 dB down (patch 61) |
@@ -432,6 +433,16 @@ trip (PCR and index come back, and a third QEMU reads the snapshot's
 index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
+
+`tools/win11-spike.py boot` with `SMB=<socket> PROBE=1
+PROBE_PS1=tools/win11-spike/smb.ps1 NET=1 ARCH=aarch64` (M23 step 2): the
+guest's `10.0.2.4:445` reaches `smbserve --unix <socket>` through QEMU
+patch 79, and `smb.ps1`, elevated on the desktop, maps
+`\\10.0.2.4\host` as `smb` / `smb`, reports `Get-SmbConnection`'s
+dialect and signing, lists, reads, writes, copies `notepad.exe` and
+compares hashes, then makes, renames and removes a folder. Run it on a
+scratch overlay of an installed machine (`OUT=build/w11s`, a qcow2 on
+`build/w11d`'s disk with copies of its `vars.fd` and `tpm.permall`).
 
 `tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
 Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a

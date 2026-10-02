@@ -37,9 +37,9 @@ player process and reached through slirp. These were rejected:
   host and guest both writing to it can conflict.
 
 No Rust SMB *server* crate exists. The `smb` and `smb2` crates are
-clients, and become our test peers. So the server is ours: `libsmb/`, a
-library with no QEMU dependency, so it can be tested against real
-clients on its own.
+clients. So the server is ours: `libsmb/`, a library with no QEMU
+dependency, kept independent of 2ksbox so it can be published on its own
+(user, 2026-10-02), and tested against real clients by itself.
 
 ### 2.1 The path from the guest
 
@@ -69,10 +69,11 @@ Windows 11 24H2 requires **signing** on its client by default (Pro and
 up), and with signing required it does not fall back to a guest logon.
 So the first server needs:
 
-- NEGOTIATE with one dialect. 2.1 first: HMAC-SHA256 signing and no
-  preauthentication integrity. 3.1.1 (AES-CMAC signing and the SHA-512
-  preauthentication hash) only if the client turns 2.1 down. **Step 2
-  measures which one 24H2 accepts.**
+- NEGOTIATE, 2.0.2 through 3.1.1: HMAC-SHA256 signing for 2.x, and
+  AES-CMAC for 3.x, with 3.1.1's SHA-512 preauthentication hash. Windows
+  11 picks 3.1.1, and takes 2.1 too when that is the server's highest
+  (step 2). An SMB1 NEGOTIATE that offers `SMB 2.???` is answered with
+  0x02FF; Windows and macOS still open that way.
 - SESSION_SETUP over SPNEGO / NTLMSSP with NTLMv2 checked against the
   fixed password. The session key comes from it and signs every message.
 - TREE_CONNECT (`IPC$` and the one share), CREATE, CLOSE, READ, WRITE,

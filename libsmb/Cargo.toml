@@ -1,0 +1,19 @@
+[package]
+name = "libsmb"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A small embeddable SMB2/3 file server: NTLMv2 logins, signing, a host folder per share"
+keywords = ["smb", "cifs", "file-server", "ntlm"]
+categories = ["network-programming", "filesystem"]
+
+[dependencies]
+aes = "0.8"
+cmac = "0.7"
+filetime = "0.2"
+getrandom = "0.3"
+hmac = "0.12"
+libc = "0.2"
+md-5 = "0.10"
+md4 = "0.10"
+sha2 = "0.10"

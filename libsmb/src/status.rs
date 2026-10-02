@@ -1,0 +1,47 @@
+//! NTSTATUS values this server answers with (MS-ERREF 2.3).
+
+pub const STATUS_SUCCESS: u32 = 0;
+pub const STATUS_NO_MORE_FILES: u32 = 0x8000_0006;
+pub const STATUS_BUFFER_OVERFLOW: u32 = 0x8000_0005;
+pub const STATUS_INVALID_INFO_CLASS: u32 = 0xC000_0003;
+pub const STATUS_INFO_LENGTH_MISMATCH: u32 = 0xC000_0004;
+pub const STATUS_INVALID_PARAMETER: u32 = 0xC000_000D;
+pub const STATUS_NO_SUCH_FILE: u32 = 0xC000_000F;
+pub const STATUS_INVALID_DEVICE_REQUEST: u32 = 0xC000_0010;
+pub const STATUS_END_OF_FILE: u32 = 0xC000_0011;
+pub const STATUS_MORE_PROCESSING_REQUIRED: u32 = 0xC000_0016;
+pub const STATUS_ACCESS_DENIED: u32 = 0xC000_0022;
+pub const STATUS_BUFFER_TOO_SMALL: u32 = 0xC000_0023;
+pub const STATUS_OBJECT_NAME_INVALID: u32 = 0xC000_0033;
+pub const STATUS_OBJECT_NAME_NOT_FOUND: u32 = 0xC000_0034;
+pub const STATUS_OBJECT_NAME_COLLISION: u32 = 0xC000_0035;
+pub const STATUS_OBJECT_PATH_NOT_FOUND: u32 = 0xC000_003A;
+pub const STATUS_LOGON_FAILURE: u32 = 0xC000_006D;
+pub const STATUS_DISK_FULL: u32 = 0xC000_007F;
+pub const STATUS_FILE_IS_A_DIRECTORY: u32 = 0xC000_00BA;
+pub const STATUS_NOT_SUPPORTED: u32 = 0xC000_00BB;
+pub const STATUS_BAD_NETWORK_NAME: u32 = 0xC000_00CC;
+pub const STATUS_DIRECTORY_NOT_EMPTY: u32 = 0xC000_0101;
+pub const STATUS_NOT_A_DIRECTORY: u32 = 0xC000_0103;
+pub const STATUS_FILE_CLOSED: u32 = 0xC000_0128;
+pub const STATUS_FS_DRIVER_REQUIRED: u32 = 0xC000_019C;
+pub const STATUS_USER_SESSION_DELETED: u32 = 0xC000_0203;
+pub const STATUS_NOT_A_REPARSE_POINT: u32 = 0xC000_0275;
+pub const STATUS_MEDIA_WRITE_PROTECTED: u32 = 0xC000_00A2;
+pub const STATUS_NETWORK_NAME_DELETED: u32 = 0xC000_00C9;
+
+/// An io::Error as the NTSTATUS a Windows client expects for it.
+pub fn from_io(e: &std::io::Error) -> u32 {
+    use std::io::ErrorKind::*;
+    match e.kind() {
+        NotFound => STATUS_OBJECT_NAME_NOT_FOUND,
+        PermissionDenied | ReadOnlyFilesystem => STATUS_ACCESS_DENIED,
+        AlreadyExists => STATUS_OBJECT_NAME_COLLISION,
+        DirectoryNotEmpty => STATUS_DIRECTORY_NOT_EMPTY,
+        NotADirectory => STATUS_NOT_A_DIRECTORY,
+        IsADirectory => STATUS_FILE_IS_A_DIRECTORY,
+        StorageFull => STATUS_DISK_FULL,
+        InvalidInput | InvalidFilename => STATUS_OBJECT_NAME_INVALID,
+        _ => STATUS_ACCESS_DENIED,
+    }
+}

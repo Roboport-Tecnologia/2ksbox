@@ -54,6 +54,14 @@ Environment:
   PROBE=1              boot, ARCH=aarch64: on the desktop, tools/win11-spike/
                        probe.ps1 from the REPORT disk, elevated the same way
                        (UAC's Yes at UAC_YES_ARM), appends W11-PROBE lines
+  PROBE_PS1=<file>     the script PROBE=1 runs instead of probe.ps1
+                       (tools/win11-spike/smb.ps1: the shared folder, M23)
+  SMB=<socket>         NET=1: the guest's 10.0.2.4:445 forwarded to the Unix
+                       socket an SMB server listens on (smbserve --unix,
+                       track M23; QEMU patch 79)
+  TPM_PPI=off          aarch64: the TPM without its 1 KiB PPI RAM region, which
+                       11.1's HVF aborts on (HV_BAD_ARGUMENT unmapping a range
+                       smaller than a 16 KiB page; M21's Mac item)
   REPORT=1             boot: on the desktop, an elevated PowerShell (Win+R,
                        Ctrl+Shift+Enter, UAC's Yes clicked on the tablet;
                        Windows 11's UAC has no Alt+Y) writes Get-Tpm and the
@@ -88,7 +96,10 @@ SETTLE = int(os.environ.get("SETTLE", "60"))
 TPM = os.environ.get("TPM", "libtpms" if ARM else "swtpm")
 REPORT = os.environ.get("REPORT", "") == "1"
 PROBE = os.environ.get("PROBE", "") == "1"
+SMB = os.environ.get("SMB", "")
+TPM_PPI = os.environ.get("TPM_PPI", "on") != "off"
 SPIKE = os.path.join(ROOT, "tools/win11-spike")
+PROBE_PS1 = os.environ.get("PROBE_PS1", os.path.join(SPIKE, "probe.ps1"))
 ARM_CODE = "2ksbox-aarch64-code.fd" if OURS else "edk2-aarch64-code.fd"
 ARM_VARS = "2ksbox-aarch64-vars.fd" if OURS else "edk2-arm-vars.fd"
 ARM_FW = FW          # where the two above are
@@ -320,7 +331,10 @@ def run_qemu(cds):
                  "-device", "ide-cd,drive=drv,bus=ide.%d" % n]
     if NET:
         nic = "virtio-net-pci" if ARM else "e1000e"
-        args += ["-netdev", "user,id=n0", "-device", nic + ",netdev=n0"]
+        netdev = "user,id=n0"
+        if SMB:
+            netdev += ",guestfwd=tcp:10.0.2.4:445-unix:" + SMB
+        args += ["-netdev", netdev, "-device", nic + ",netdev=n0"]
     if ARM:
         # after the CDs: plugged first, the firmware made its one USB
         # boot entry for this disk and never tried the ISO
@@ -343,7 +357,7 @@ def arm_args(tpmdev):
             "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=%s/%s" % (ARM_FW, ARM_CODE),
             "-drive", "if=pflash,format=raw,unit=1,file=" + VARS,
             *tpmdev,
-            "-device", "tpm-tis-device,tpmdev=tpm0",
+            "-device", "tpm-tis-device,tpmdev=tpm0" + ("" if TPM_PPI else ",ppi=off"),
             "-drive", "if=none,id=d0,format=qcow2,file=" + DISK,
             *disk,
             *[a for g in GPU.split(",") for a in ("-device", g)],
@@ -578,7 +592,8 @@ def boot():
     if not os.path.exists(DISK):
         die("no %s; run install first" % DISK)
     if ARM:
-        subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, os.path.join(SPIKE, "probe.ps1"), "::probe.ps1"], check=True)
+        report_disk()       # makes it in a fresh OUT
+        subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, PROBE_PS1, "::probe.ps1"], check=True)
     q, swtpm, qmp, serial, t0 = run_qemu([])
     shots = Shots(qmp, t0)
     timeout = 900 if ACCEL == "kvm" else 3 * 3600

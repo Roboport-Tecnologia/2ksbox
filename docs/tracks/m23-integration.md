@@ -23,17 +23,16 @@ filesystem driver or a virtual disk).
 ## Steps
 
 1. **Open the track** (2026-10-02): doc 24, ADR-027, this doc.
-2. **The SMB spike.** `libsmb` with NEGOTIATE (2.1), NTLMv2 session
-   setup and signing, tree connect, and enough of CREATE /
-   QUERY_DIRECTORY / READ / CLOSE to list and read a folder. It is
-   checked first against `smbclient` / the `smb` crate over TCP on
-   localhost, then against Windows 11 on Arm on the Air through the
-   `unix:` guestfwd. **The question to answer: does 24H2 accept 2.1 with
-   signing, or does it need 3.1.1?**
-3. **Read-write.** WRITE, SET_INFO (rename, delete, size, times),
-   create and overwrite dispositions, directories, and Explorer copying
-   a tree both ways. A tool goes into `scripts/test.sh`, driving a
-   client against the server on the host.
+2. **The SMB spike** (done 2026-10-02). `libsmb`, a crate kept
+   independent of 2ksbox (its own metadata, a generic API, `MIT OR
+   Apache-2.0`; the user will publish it separately), and `smbserve`, its
+   command-line wrapper. It already reads and writes (step 3's list),
+   so step 3 is hardening. QEMU patch 79 adds `guestfwd=…-unix:<path>`.
+   **The answer: Windows 11 accepts both 2.1 and 3.1.1 with signing.**
+   Results below.
+3. **Hardening.** Explorer by hand (copying a tree both ways, opening
+   files in place, a large file), CHANGE_NOTIFY, and Linux's
+   `smbclient` in the host check.
 4. **The clipboard's host side.** spice-protocol headers, `qemu-vdagent`
    built, an embed clipboard peer, and the player bridge.
 5. **The guest agent.** The clipboard, mapping the share, the drivers
@@ -46,14 +45,44 @@ filesystem driver or a virtual disk).
 
 ## Test loop
 
-To be written in step 2: a host-only check (server plus client, no
-guest) and the Windows 11 on Arm check on the Air. Neither touches the
-user's machines: the guest runs on a qcow2 overlay of an installed
-Windows 11.
+- `tools/smb-host-test.sh` (`smb` in `scripts/test.sh`, host stage):
+  `smbserve` against the host's own client, at 2.1 and 3.1.1, signing
+  required (docs/testing.md).
+- Windows 11 on Arm on the Air, through `tools/win11-spike.py`'s `SMB=`
+  and `PROBE_PS1=tools/win11-spike/smb.ps1` on a scratch overlay of
+  `build/w11d` (`OUT=build/w11s`). The user's machines are never booted.
+
+## Step 2's results (2026-10-02)
+
+| Client | Dialect | Signing | Read, write, copy, rename, delete |
+|---|---|---|---|
+| macOS 26 `mount_smbfs` | 3.1.1 (its pick) | AES-CMAC | pass |
+| macOS 26 `mount_smbfs` | 2.1 (server's cap) | HMAC-SHA256 | pass |
+| Windows 11 on Arm, build 26300 | 3.1.1 (its pick) | AES-CMAC | pass |
+| Windows 11 on Arm, build 26300 | 2.1 (server's cap) | HMAC-SHA256 | pass |
+
+On Windows: `net use Z: \\10.0.2.4\host /user:smb smb`, then
+`Get-SmbConnection` (signed, not encrypted), a recursive listing, a read,
+a write, `notepad.exe` copied and hashed identically, and a folder made,
+renamed and removed. About 350 requests per run, and no client signature
+failed to verify. Notes:
+
+- Windows (and macOS) open with an SMB1 multi-protocol NEGOTIATE that
+  offers `SMB 2.???`; the server answers 0x02FF and the client sends
+  SMB2's. Windows 11 still does this.
+- After the login, Windows also tries the logged-on user's own
+  credentials once (`login refused: UnknownUser("spike")` in the log). It
+  does no harm.
+- **Not ours, found on the way:** QEMU 11.1's HVF on the Mac aborts on
+  `tpm-tis-device` (`HV_BAD_ARGUMENT`, `accel/hvf/hvf-all.c:123`). Its
+  `tpm-ppi` RAM region is 1 KiB, smaller than a 16 KiB page, so HVF
+  unmaps a range it never mapped. Windows 11 on Arm then does not start
+  on the Mac at all, through the launcher too. It belongs to M21's Mac
+  item. The spike ran with `TPM_PPI=off` (`ppi=off`, a `win11-spike.py`
+  knob).
 
 ## Open items
 
-- Which dialect 24H2 needs (step 2).
 - Case-insensitive lookup on Linux hosts, and names Windows forbids
   (`:` and the like) that a host folder may hold.
 - CHANGE_NOTIFY through a host watcher, so Explorer refreshes by itself.

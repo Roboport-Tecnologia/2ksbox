@@ -2316,6 +2316,10 @@ host_stage() {
     skip libsynth "needs $SYNTHX (cargo build --release -p libsynth)"
   fi
 
+  # the shared folder's SMB server (M23, doc 24) against the host's own
+  # client, both dialects, signing required. No guest, ~5 s.
+  run_check smb smb.log tools/smb-host-test.sh "$OUT/smb" || true
+
   # the sound-card and MIDI-port pickers (doc 20 §6), and then the two
   # devices sounding into a wav QEMU recorded itself.
   if [ -x $LAUNCHERX ] && [ -x $SYNTHX ]; then
