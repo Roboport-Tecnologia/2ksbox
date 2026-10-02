@@ -196,8 +196,21 @@ device's half is plain QEMU C and builds anywhere.
      image's corner, not the hot spot: with the pointer clicked at
      (700, 300) the device read CURSOR_X / Y = 700 / 300 with HOT 3 / 3
      (`xp /9wx <BAR 1>+0x90` in the monitor).
-   Next: the vertical-blank interrupt (ControlInterrupt, flips), then
-   step 6, the user-mode driver that DWM needs.
+   - **Every mode, proved as step 5 asked** (2026-10-02): SETMODE from a
+     console to 640x480, 800x600, 1024x768, 1152x864, 1280x960,
+     1280x1024 and 1600x1200 at 60 Hz, 1024x768 at 75 and 1280x1024 at
+     85: each a CommitVidPn of that size and pitch and a screendump of
+     that size showing the desktop. 32 bpp only: Windows 7's desktop
+     under WDDM has no 8 / 16 bpp primaries.
+   - **The vertical blank** stands in for the interrupt the device does
+     not raise yet: ControlInterrupt(CRTC_VSYNC) starts a periodic timer
+     at the committed refresh whose DPC reports `CRTC_VSYNC` with the
+     address being scanned out (OFFSET, which a flip packet moves), under
+     the interrupt's lock, as an ISR would. Nothing enables it while there
+     is no DWM, so it is untested.
+   Left of step 5: timeout recovery (ResetFromTimeout / RestartFromTimeout
+   answer success, never triggered). Next: step 6, the user-mode driver
+   that DWM needs, and step 4's device interrupt to replace the timer.
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the

@@ -65,6 +65,14 @@ typedef struct D3DPT_ADAPTER {
     volatile LONG fence_done;         /* the last submission fence executed */
     volatile LONG fence_notify;       /* the fence the next DPC reports */
     volatile LONG preempt_fence;      /* a preemption request to answer, 0 for none */
+    /* the vertical blank, from a periodic timer at the mode's refresh while
+     * dxgkrnl has it enabled (ControlInterrupt): the device raises no
+     * interrupt yet (plan step 4) */
+    KTIMER vsync_timer;
+    KDPC vsync_dpc;
+    volatile LONG vsync_on;
+    BOOLEAN vsync_ready;              /* the timer and its DPC initialized (StartDevice) */
+    volatile ULONG scan_addr;         /* what the scanout shows (OFFSET), as the vsync reports it */
 } D3DPT_ADAPTER;
 
 /* A device and a context are only names here: everything they would hold
@@ -243,6 +251,8 @@ static void read_modes(D3DPT_ADAPTER *a)
 }
 
 static void unmap(D3DPT_ADAPTER *a);
+static KDEFERRED_ROUTINE vsync_tick;
+static void vsync_stop(D3DPT_ADAPTER *a);
 
 static DXGKDDI_START_DEVICE d3dpt_start_device;
 static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start,
@@ -328,6 +338,11 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     RtlZeroMemory(a->ap_va, D3DPT_AP_PAGES * sizeof(*a->ap_va));
     RtlZeroMemory(a->ap_map, D3DPT_AP_PAGES * sizeof(*a->ap_map));
     a->fence_done = a->fence_notify = a->preempt_fence = 0;
+    a->vsync_on = 0;
+    a->scan_addr = 0;
+    KeInitializeTimer(&a->vsync_timer);
+    KeInitializeDpc(&a->vsync_dpc, vsync_tick, a);
+    a->vsync_ready = TRUE;
 
     /* one scanout, one monitor */
     *sources = 1;
@@ -339,6 +354,11 @@ static void unmap(D3DPT_ADAPTER *a)
 {
     ULONG i;
 
+    if (a->vsync_ready) {           /* no tick may run past this */
+        vsync_stop(a);
+        KeFlushQueuedDpcs();
+        a->vsync_ready = FALSE;
+    }
     if (a->ap_map) {
         for (i = 0; i < D3DPT_AP_PAGES; i++) {
             if (a->ap_map[i].base && a->ap_map[i].mine) {
@@ -1315,6 +1335,7 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
         case PKT_FLIP:
             if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
                 a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
+                a->scan_addr = ((const PKT_FLIP_T *)hd)->src.addr;
             }
             break;
         case PKT_MAP:
@@ -2070,6 +2091,7 @@ static NTSTATUS APIENTRY d3dpt_set_vidpn_source_address(IN_CONST_HANDLE h,
 
     if (s->PrimarySegment == 1) {
         a->regs[D3DPT_FB_REG_OFFSET / 4] = s->PrimaryAddress.LowPart;
+        a->scan_addr = s->PrimaryAddress.LowPart;
     }
     dbg_hex("d3dptkmd: SetVidPnSourceAddress segment ", s->PrimarySegment);
     dbg_hex(" at ", s->PrimaryAddress.LowPart);
@@ -2118,17 +2140,72 @@ STUB1(DXGKDDI_DESTROYOVERLAY, d3dpt_destroy_overlay, IN_CONST_HANDLE)
 STUB2(DXGKDDI_SETDISPLAYPRIVATEDRIVERFORMAT, d3dpt_set_display_private_driver_format, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETDISPLAYPRIVATEDRIVERFORMAT)
 STUB2(DXGKDDI_QUERYVIDPNHWCAPABILITY, d3dpt_query_vidpn_hw_capability, IN_CONST_HANDLE, INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY)
 
-/* CONTROLINTERRUPT takes two values, not a structure */
+/* ------------------------------------------------------ vertical blank */
+
+static KSYNCHRONIZE_ROUTINE notify_vsync;
+static BOOLEAN notify_vsync(PVOID ctx)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
+
+    RtlZeroMemory(&n, sizeof(n));
+    n.InterruptType = DXGK_INTERRUPT_CRTC_VSYNC;
+    n.CrtcVsync.VidPnTargetId = 0;
+    n.CrtcVsync.PhysicalAddress.LowPart = a->scan_addr;
+    a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
+    a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+    return TRUE;
+}
+
+/* Every refresh while enabled: what the scanout shows now, which also
+ * retires a flip queued on the vertical blank. */
+static KDEFERRED_ROUTINE vsync_tick;
+static VOID vsync_tick(PKDPC dpc, PVOID ctx, PVOID a1, PVOID a2)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    BOOLEAN ret;
+
+    UNREFERENCED_PARAMETER(dpc);
+    UNREFERENCED_PARAMETER(a1);
+    UNREFERENCED_PARAMETER(a2);
+    if (a->vsync_on && a->regs) {
+        a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_vsync, a, 0, &ret);
+    }
+}
+
+static void vsync_stop(D3DPT_ADAPTER *a)
+{
+    InterlockedExchange(&a->vsync_on, 0);
+    KeCancelTimer(&a->vsync_timer);
+}
+
+/* CONTROLINTERRUPT takes two values, not a structure. The vertical blank
+ * is the only interrupt dxgkrnl switches; the timer runs at the committed
+ * mode's refresh (the system clock's granularity, ~15.6 ms, rounds it). */
 static DXGKDDI_CONTROLINTERRUPT d3dpt_control_interrupt;
 static NTSTATUS APIENTRY d3dpt_control_interrupt(IN_CONST_HANDLE h,
                                                  IN_CONST_DXGK_INTERRUPT_TYPE type,
                                                  IN_BOOLEAN enable)
 {
-    UNREFERENCED_PARAMETER(h);
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    LARGE_INTEGER due;
+    ULONG hz = a->cur_hz ? a->cur_hz : 60, period_ms = 1000 / hz;
+
     dbg_hex("d3dptkmd: ControlInterrupt type=", (ULONG)type);
     dbg_hex(" enable=", (ULONG)enable);
     dbg_puts("\n");
-    return STATUS_NOT_SUPPORTED;
+    if (type != DXGK_INTERRUPT_CRTC_VSYNC) {
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (!enable) {
+        vsync_stop(a);
+        return STATUS_SUCCESS;
+    }
+    if (!InterlockedExchange(&a->vsync_on, 1)) {
+        due.QuadPart = -(LONGLONG)period_ms * 10000;
+        KeSetTimerEx(&a->vsync_timer, due, period_ms ? period_ms : 1, &a->vsync_dpc);
+    }
+    return STATUS_SUCCESS;
 }
 
 /* ------------------------------------------------------------- entry */
