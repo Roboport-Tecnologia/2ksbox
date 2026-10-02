@@ -192,14 +192,6 @@ fn content(w: Window_) -> impl View {
             loop {
                 wake.next().await;
                 on_wake(w);
-                // Let the input in. mitsuami's executor polls until no task
-                // is ready, and QEMU's next wake comes while a draw waits
-                // for its drawable (16 ms on macOS, whose surface has no
-                // Mailbox), so without a turn here the redraws ran back to
-                // back and the mouse reached the guest every 300 ms in a
-                // burst. A timer wakes the task only on the run loop's next
-                // turn, after the queued input.
-                sleep(Duration::from_millis(1)).await;
             }
         });
     }
