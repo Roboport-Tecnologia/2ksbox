@@ -134,7 +134,7 @@ if [ -n "$NATIVE" ]; then
   export QMAKE="${QMAKE:-qmake6}"
 fi
 
-if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/00-qemu92x-mesa-glide.patch ]; then
+if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/qemu-1/hw/mesa/meson.build ]; then
   say "git submodule update --init (qemu, qemu-3dfx)"
   git submodule update --init --depth 1 qemu third_party/qemu-3dfx
 fi
@@ -155,10 +155,33 @@ if want qemu; then
     echo "    build/win/qemu was built with $(cat build/win/qemu/.2ksbox-cc 2>/dev/null || echo gcc), wanted $want_cc - configuring afresh"
     rm -rf build/win/qemu
   fi
-  if [ ! -f build/win/qemu/build.ninja ]; then
+  # Nor a directory built from another QEMU release (9.2 to 11.1, M21):
+  # ninja's regeneration replays the old command line, which names options
+  # the new release removed ("Unknown options: glusterfs"), and the old
+  # release's thin archives are updated in place, which MSYS2's ar cannot
+  # open ("ar: libqemuutil.a: No such file or directory"). A directory with
+  # no record is from before the record, so 9.2's.
+  want_qemu="$(cat qemu/VERSION)"
+  if [ -f build/win/qemu/build.ninja ] && [ "$(cat build/win/qemu/.2ksbox-qemu 2>/dev/null || echo 9.2.4)" != "$want_qemu" ]; then
+    echo "    build/win/qemu was built from QEMU $(cat build/win/qemu/.2ksbox-qemu 2>/dev/null || echo 9.2.4), the tree is $want_qemu - configuring afresh"
+    rm -rf build/win/qemu
+  fi
+  # Configure again when the tree or the configure script changed since the
+  # last configure, as scripts/build.sh does (a flag configure-qemu.sh
+  # gained is otherwise not applied). configure starts from a clean
+  # meson-private, so the objects stay.
+  needs_configure=""
+  [ -f build/win/qemu/build.ninja ] || needs_configure=1
+  for f in qemu/meson.build qemu/hw/mesa/meson.build scripts/configure-qemu.sh; do
+    if [ -f build/win/qemu/build.ninja ] && [ "$f" -nt build/win/qemu/build.ninja ]; then
+      needs_configure=1
+    fi
+  done
+  if [ -n "$needs_configure" ]; then
     say "qemu: configure (mingw-w64 $HOW, $want_cc)"
     inw scripts/configure-qemu.sh --windows
     echo "$want_cc" > build/win/qemu/.2ksbox-cc
+    echo "$want_qemu" > build/win/qemu/.2ksbox-qemu
   else
     echo "    build/win/qemu is configured - skipping configure"
     # prepare re-applied the queue, so meson may need to regenerate; ninja

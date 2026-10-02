@@ -36,8 +36,8 @@ QEMU's own Windows CI base
 
 - **rustup with `x86_64-pc-windows-gnu`.** The player links the embed
   DLL and `libdisc` links into QEMU, so Rust must share the mingw ABI.
-- **Python 3.13.** Fedora's default 3.14 is past QEMU 9.2's `mkvenv`
-  (3.8–3.13). The real `distlib` goes in at image build, the last moment
+- **Python 3.13.** Fedora's default 3.14 is past QEMU 11.1's `mkvenv`
+  (3.9–3.13). The real `distlib` goes in at image build, the last moment
   with a network, because pip ≥ 26's copy is incomplete ("found no
   usable distlib").
 - **libslirp from source.** There is no `mingw64-libslirp`, and every
@@ -71,7 +71,7 @@ Three things that look like the build ignoring you:
 
 | Stage | Output | Notes |
 |---|---|---|
-| `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; WHPX built in; clang |
+| `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
 | `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu` |
 | `qt` | `launcher-qt/target/x86_64-pc-windows-gnu/release/launcher-qt.exe` | the package's `2ksbox.exe` (ADR-015); its own workspace |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its host test, the offscreen-GL probe |
@@ -409,7 +409,11 @@ under Store terms is the same question ADR-019 leaves to the user.
 ## Acceleration
 
 Windows' hardware acceleration is **WHPX** (Windows Hypervisor
-Platform), built in. `Accel::Auto` is `whpx:tcg`, "hardware
+Platform). **Since QEMU 11.1 it is not in `qemu-system-i386`**, the
+target the package ships: upstream builds it for x86_64 only, and put
+back for i386 it dies in SeaBIOS (track M21, step 4). So every era
+machine runs TCG on Windows for now; what follows is the launcher's
+side, unchanged. `Accel::Auto` is `whpx:tcg`, "hardware
 acceleration required" is `whpx`, and the wizard's hint asks
 `WHvGetCapability`, because the feature can be installed and still off
 (Hyper-V or WSL2 may hold the root partition). Turn it on with:
@@ -499,9 +503,10 @@ What differs from the cross build, and why:
 
 - **Python is MSYS2's own 3.14**, with `python-distlib`. MSYS2 has no
   older one, and a python.org venv has `Scripts\` where configure looks
-  for `bin/`. QEMU 9.2 builds on 3.14 with the real `distlib`, and
-  `configure-qemu.sh` accepts 3.14 only then. Patch 69 fixes the
-  `file://C:/…` wheels URL mkvenv gives pip (a host named `C:`).
+  for `bin/`. QEMU 11.1 builds on 3.14 with the real `distlib`, and
+  `configure-qemu.sh` accepts 3.14 only then. (9.2's mkvenv gave pip a
+  `file://C:/…` wheels URL, a host named `C:`; patch 69 fixed that
+  until 11.0 passed a plain path.)
 - **Optional libraries are pinned off.** QEMU links what it detects, and
   MSYS2 with Qt has zstd, gnutls and others the cross image lacks, so
   native `configure-qemu.sh` disables each one the cross build lacks.

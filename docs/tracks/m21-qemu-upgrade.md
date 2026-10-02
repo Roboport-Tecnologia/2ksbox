@@ -492,6 +492,42 @@ the Intel build under Rosetta), the Windows cross build
 `build/win/d3dpt-dp2-test.exe` on both `D3DPT_D3D9` values, the Linux
 package and the Flatpak. Each packager's own checks must pass.
 
+#### The native Windows build (2026-10-02, the PC, MSYS2 MINGW64)
+
+`scripts/build-windows.sh qemu rust` builds on 11.1.2 with clang:
+`qemu-system-i386.exe`, `qemu-img`, `qemu-io`, `libqemu-embed-i386.dll`
+and the Rust stage, with patches 68 (clang) and 69 (mkvenv's `file://C:/`
+URL) gone: mkvenv installed its wheels from MSYS2's Python 3.14 as is.
+What the scripts needed:
+- `build-windows.sh` configured only a directory with no `build.ninja`,
+  so a 9.2 directory was kept and ninja's regeneration replayed 9.2's
+  command line ("Unknown options: glusterfs"). It now configures afresh
+  when the directory's QEMU version (`build/win/qemu/.2ksbox-qemu`; none
+  means 9.2) differs from `qemu/VERSION`. Reconfiguring in place is not
+  enough: 9.2's thin archives are updated in place and MSYS2's `ar`
+  cannot open them ("ar: libqemuutil.a: No such file or directory"). It
+  also configures again when `qemu/meson.build`, `hw/mesa/meson.build`
+  or `configure-qemu.sh` is newer than `build.ninja`, as `build.sh`
+  does.
+- `build.sh` and `build-windows.sh` looked for qemu-3dfx's
+  `00-qemu92x-mesa-glide.patch` to tell an uninitialised submodule, and
+  `build.sh` stamped prepare on it rather than `patches/qemu-3dfx`, so an
+  edit to the port did not re-run prepare.
+- `player-core`'s macOS-only `dlopen` was behind `cfg!()`, which still
+  compiles on Windows, whose `libc` has none (M22, not 11.1).
+
+**WHPX is gone from `qemu-system-i386`.** 11.1 builds it for
+`x86_64-softmmu` only (9.2: both). Put back for i386 (a one-line
+`meson.build` patch), a diskless machine dies in SeaBIOS under WHPX
+("WHPX: Unexpected VP exit code 4", EIP 0x6f0c, flat 32-bit code in low
+RAM) with every CPU model, while `qemu-system-x86_64` under WHPX reaches
+SeaBIOS's idle loop as TCG does, on `pc-i440fx-11.1` and `q35`. So the
+patch was withdrawn: the i386 target is TCG only on Windows. Auto's
+`whpx:tcg` prints "invalid accelerator whpx" and runs TCG; "hardware
+acceleration required" does not start. User's call: XP on the x86_64
+target on Windows, the launcher stops offering WHPX for i386 machines,
+or a fix to i386 WHPX.
+
 ### 5. Merge
 
 `scripts/test.sh all` green (or at the known failures in
@@ -518,9 +554,11 @@ disk through an overlay, KVM, the libtpms TPM, EDK2 from `qemu/pc-bios`)
 reaches the desktop in 25.3 s and powers off clean.
 
 Still open after the merge:
-- Step 4 entire: the Air (App Store, community, the Intel build), where
-  76 has never compiled, the Windows cross build, the Linux package and
-  the Flatpak.
+- Step 4: the Air (App Store, community, the Intel build), where 76 has
+  never compiled, the Windows cross build and package (the native
+  `qemu` and `rust` stages build, above), the Linux package and the
+  Flatpak.
+- WHPX for the i386 target on Windows (step 4 above). User's call.
 - A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
   so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
   (`Machine::board`) does not cover it. User's call.

@@ -213,7 +213,7 @@ fi
 
 # --- submodules -------------------------------------------------------
 # Cloning without --recurse-submodules is the most common first failure.
-if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/00-qemu92x-mesa-glide.patch ]; then
+if [ ! -f qemu/VERSION ] || [ ! -f third_party/qemu-3dfx/qemu-1/hw/mesa/meson.build ]; then
   say "git submodule update --init (qemu, qemu-3dfx)"
   git submodule update --init --depth 1 qemu third_party/qemu-3dfx
 fi
@@ -276,7 +276,7 @@ if want qemu; then
        stamp_stale qemu-prepare patches/qemu embed d3dpt/hw d3dpt/d3dpt_proto.h \
          d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h libdisc/qemu libdisc/libdisc.h \
          libsynth/qemu libsynth/libsynth.h gamepad/qemu tpm/qemu voodoo firmware \
-         scripts/prepare-qemu.sh third_party/qemu-3dfx/00-qemu92x-mesa-glide.patch; then
+         scripts/prepare-qemu.sh patches/qemu-3dfx; then
       scripts/prepare-qemu.sh
       stamp_save
     else
