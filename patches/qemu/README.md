@@ -179,7 +179,9 @@ from the existing static library plus `embed/libqemu_embed.c`,
 found), with an ld64 export list (`embed/libqemu_embed.symbols`) because
 QEMU's plugin `-exported_symbols_list` hides everything else on macOS. On
 Windows it also compiles `mglcntx_mingw.c`'s WGL half into the emulators
-alone (patch 31). The API is doc 11. **Drop:** an upstream embed API.
+alone (patch 31). It links the target's stubs archive (`target_stubs`)
+as the emulators do; without it the aarch64 library on macOS leaves
+KVM's symbols undefined. The API is doc 11. **Drop:** an upstream embed API.
 
 ### 11-sse-inline-tcg
 SSE/SSE2 float arithmetic inline on the host FPU (doc 16) when MXCSR is

@@ -4,6 +4,10 @@ embed/libqemu_embed.c (overlaid by scripts/prepare-qemu.sh). Objects are
 linked directly so type_init constructors survive. Needs -fPIC
 (scripts/configure-qemu.sh). Design: docs/11-m1-embed-api.md
 
+It links the target's stubs archive (`target_stubs`, QEMU 11) as the
+emulators do: without it the aarch64 library on a host with no KVM is
+left with KVM's symbols undefined (`_kvm_arm_pmu_init`, ...).
+
 On Windows (2026-09-06, M11) it also compiles hw/mesa/mglcntx_mingw.c a
 second time, with MESAGL_WGL_BACKEND, into the emulators alone: that file
 holds both the WGL backend and the helpers every backend needs, the
@@ -25,7 +29,7 @@ index cf78c54596..2a5da02834 100644
 +                   files('embed/libqemu_embed.c', 'embed/embedaudio.c', 'embed/embedfx.c', 'embed/mglcntx_embed.c'),
 +                   c_args: c_args,
 +                   include_directories: target_inc,
-+                   dependencies: arch_deps + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),
++                   dependencies: arch_deps + [target_stubs] + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),
 +                   objects: lib.extract_all_objects(recursive: true),
 +                   link_depends: [block_syms, qemu_syms],
 +                   # macOS: emulator_link_args carries -exported_symbols_list for the

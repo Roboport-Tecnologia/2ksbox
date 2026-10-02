@@ -42,4 +42,4 @@ index 1fef327717..bd88a04943 100644
 +                      files('embed/embedfx.c', 'embed/mglcntx_embed.c') : []),
                     c_args: c_args,
                     include_directories: target_inc,
-                    dependencies: arch_deps + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),
+                    dependencies: arch_deps + [target_stubs] + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),
