@@ -94,7 +94,9 @@ embed library, as for the winit player, into a target dir of its own.
    moving in it. Not checked: anything with the pointer (no pointer on the
    headless seat), the menus and the alert by hand, the grab under a real
    compositor, latency against the winit player on a real display.
-2. **The pointer and the window on a real desktop.** Clicks, the lock and
+2. **The pointer and the window on a real desktop.** The user ran it by
+   hand on 2026-10-01 ("seems like it's working"); what it covered is
+   not recorded yet. Clicks, the lock and
    raw motion on a PS/2 guest, the tablet with the guest's cursor image,
    the menus, the close alert, Ctrl+Alt+K, full screen; then
    publish→presented against the winit player (the spike's numbers below
