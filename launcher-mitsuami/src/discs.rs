@@ -280,18 +280,23 @@ fn DiscList() -> impl View {
     let discs = use_store::<Discs>();
     view! {
         // A plain column on the window's own background, not a `List`,
-        // which every platform draws as a framed box (user).
-        <ScrollView grow=1.0 min_height=0>
-            <Column padding_x=Spacing::Xl gap=Spacing::Sm>
-                <For
-                    each=move || discs.read(|s| s.discs().iter().map(|d| d.path.clone()).collect::<Vec<_>>())
-                    key=|p: &PathBuf| p.clone()
-                    let:path
-                >
-                    <DiscRow path=path/>
-                </For>
-            </Column>
-        </ScrollView>
+        // which every platform draws as a framed box (user), between
+        // separators across the window (user).
+        <Column grow=1.0 min_height=0>
+            <Separator/>
+            <ScrollView grow=1.0 min_height=0>
+                <Column padding_x=Spacing::Xl padding_y=Spacing::Sm gap=Spacing::Sm>
+                    <For
+                        each=move || discs.read(|s| s.discs().iter().map(|d| d.path.clone()).collect::<Vec<_>>())
+                        key=|p: &PathBuf| p.clone()
+                        let:path
+                    >
+                        <DiscRow path=path/>
+                    </For>
+                </Column>
+            </ScrollView>
+            <Separator/>
+        </Column>
     }
 }
 
