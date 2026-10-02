@@ -365,7 +365,7 @@ pub enum LoaderFrom {
 /// `DYLD_LIBRARY_PATH` found no loader and said Direct3D goes through
 /// Wine, which is what its player then did (user: "make both fall back
 /// to the SDK"). `None` in a package, which ships its own, and off macOS.
-/// The player has the same rule (`player/src/companions.rs`).
+/// The player has the same rule (`player-core/src/companions.rs`).
 fn sdk_dir() -> Option<PathBuf> {
     if !cfg!(target_os = "macos") || shipped_loader().is_some() {
         return None;
