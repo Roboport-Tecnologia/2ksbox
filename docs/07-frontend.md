@@ -252,7 +252,9 @@ The fields, and why each is what it is:
   A bundle saying `system` opened on another host shows Automatic and
   keeps its value, and so does a machine moved to another adapter.
 - **What this host gives the guest's Direct3D is stated, not chosen**
-  (ADR-013), in the note under that picker (`d3d9_note()`;
+  (ADR-013), in the note under that picker (`d3d9_note()`, which on
+  Automatic is only this host's answer, not the paths it takes
+  elsewhere, user 2026-10-01;
   `graphics_note()` for a front end with no picker, the C smoke among
   them), so nobody finds out after the machine exists. `launcher-core/src/host_gpu.rs` loads the Vulkan
   loader dynamically (no libvulkan is a report, not a crash), creates

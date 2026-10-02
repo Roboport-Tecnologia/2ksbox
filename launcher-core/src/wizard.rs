@@ -1035,18 +1035,19 @@ impl Form {
     }
 
     /// The line under the picker: what the entry in the field means.
-    /// For `Auto`, the only entry that asks the host anything, it adds
-    /// what this host will do with it, the host's own headline and advice
-    /// (`host_gpu`). That line belongs beside this picker, the one it
+    /// For `Auto`, the only entry that asks the host anything, it is
+    /// only what this host will do with it, the host's own headline and
+    /// advice (`host_gpu`), not the paths it might take elsewhere. That line belongs beside this picker, the one it
     /// answers; `graphics_note()` carries it for a front end with no
     /// Direct3D picker. A warning only for the software Vulkan driver,
     /// the case that runs and disappoints.
     pub fn d3d9_note(&self) -> AccelNote {
         let mut text = self.d3d9.note().to_string();
         let mut warning = false;
+        // Automatic is whatever this host runs, so its note is that, not
+        // every path it could take (user).
         if self.d3d9 == D3d9::Auto {
-            text.push_str("\nHere: ");
-            text.push_str(&self.host_gpu.d3d_headline());
+            text = self.host_gpu.d3d_headline();
             if self.host_gpu.backend() == host_gpu::D3dBackend::None {
                 text.push_str("\nKeep the 2ksbox adapter anyway. Only its Direct3D needs Vulkan.");
             }
