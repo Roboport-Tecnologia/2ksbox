@@ -395,6 +395,7 @@ fn DiscRow(path: PathBuf) -> impl View {
                     <TextInput
                         a11y_label="Label"
                         node_ref=field_ref
+                        native=inline_field()
                         value=move || discs.editing.with(|e| e.as_ref().map(|(_, t)| t.clone()).unwrap_or_default())
                         @input=move |text| discs.editing.update(|e| {
                             if let Some((_, typed)) = e {
@@ -432,5 +433,14 @@ fn DiscRow(path: PathBuf) -> impl View {
                 @click=move || discs.remove(&p7)
             >"Remove"</Button>
         </Row>
+    }
+}
+
+/// The label's field drawn in place on macOS, with no border round it, as
+/// Finder's names are renamed (user).
+fn inline_field() -> Tweak<TextInput> {
+    platform! {
+        macos => mitsuami::appkit::tweak(|f: &mitsuami::appkit::objc2_app_kit::NSTextField| f.setBezeled(false)),
+        _ => Tweak::none(),
     }
 }
