@@ -14,7 +14,10 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 const NEGOTIATE: u16 = 0x00;
 const SESSION_SETUP: u16 = 0x01;
@@ -36,6 +39,7 @@ const QUERY_INFO: u16 = 0x10;
 const SET_INFO: u16 = 0x11;
 
 const FLAG_RESPONSE: u32 = 0x01;
+const FLAG_ASYNC: u32 = 0x02;
 const FLAG_RELATED: u32 = 0x04;
 const FLAG_SIGNED: u32 = 0x08;
 
@@ -72,6 +76,7 @@ struct Hdr {
     pid: u32,
     tree_id: u32,
     session_id: u64,
+    async_id: u64,
 }
 
 fn parse_hdr(m: &[u8]) -> Option<Hdr> {
@@ -88,30 +93,35 @@ fn parse_hdr(m: &[u8]) -> Option<Hdr> {
         pid: u32_at(m, 32),
         tree_id: u32_at(m, 36),
         session_id: u64_at(m, 40),
+        async_id: u64_at(m, 32),
     })
 }
 
 /// A handler's answer: a status and the body after the header, plus the
-/// session or tree a SESSION_SETUP or TREE_CONNECT created.
+/// session or tree a SESSION_SETUP or TREE_CONNECT created, or the async
+/// id of an interim STATUS_PENDING.
+#[derive(Default)]
 struct Reply {
     status: u32,
     body: Vec<u8>,
     session_id: Option<u64>,
     tree_id: Option<u32>,
+    async_id: Option<u64>,
 }
 
 fn ok(body: Vec<u8>) -> Result<Reply, u32> {
-    Ok(Reply { status: STATUS_SUCCESS, body, session_id: None, tree_id: None })
+    Ok(Reply { status: STATUS_SUCCESS, body, ..Default::default() })
 }
 
 fn with(status: u32, body: Vec<u8>) -> Result<Reply, u32> {
-    Ok(Reply { status, body, session_id: None, tree_id: None })
+    Ok(Reply { status, body, ..Default::default() })
 }
 
 fn error_body() -> Vec<u8> {
     vec![9, 0, 0, 0, 0, 0, 0, 0, 0]
 }
 
+#[derive(Clone)]
 enum SignKey {
     Hmac([u8; 16]),
     Cmac([u8; 16]),
@@ -192,6 +202,133 @@ pub struct Conn {
     next_tree: u32,
     opens: HashMap<u64, Open>,
     next_file: u64,
+    out: Option<Out>,
+    watches: Arc<Mutex<Vec<Watch>>>,
+    next_async: u64,
+    watcher: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+}
+
+/// The connection's writing half, shared with the watcher thread.
+type Out = Arc<Mutex<Box<dyn Write + Send>>>;
+
+/// A CHANGE_NOTIFY waiting for its directory to change. One folder's
+/// watch completes with the names added, removed and modified (what
+/// FileSystemWatcher reports as Created / Deleted / Changed); a whole
+/// tree's, or more than fits, with NOTIFY_ENUM_DIR ("enumerate again").
+struct Watch {
+    async_id: u64,
+    message_id: u64,
+    credit_charge: u16,
+    session_id: u64,
+    file_id: u64,
+    key: SignKey,
+    path: PathBuf,
+    tree: bool,
+    snap: Snap,
+    /// The client's OutputBufferLength: records that do not fit become
+    /// "enumerate again".
+    max_out: usize,
+    /// Set once the interim response is out, so the final one follows it.
+    armed: bool,
+}
+
+/// What a watched folder holds: one folder's entries by name, or a whole
+/// tree's hash.
+#[derive(PartialEq)]
+enum Snap {
+    Dir(std::collections::BTreeMap<String, (u64, bool, Option<std::time::SystemTime>)>),
+    Tree(u64),
+}
+
+/// Names, sizes and times under `path`; with `tree` everything below it,
+/// hashed. Capped, so a huge tree costs a bounded walk.
+fn snapshot(path: &std::path::Path, tree: bool) -> Snap {
+    use std::hash::{Hash, Hasher};
+    if !tree {
+        let mut m = std::collections::BTreeMap::new();
+        if let Ok(rd) = fs::read_dir(path) {
+            for e in rd.flatten().take(20_000) {
+                if let Ok(md) = e.metadata() {
+                    m.insert(e.file_name().to_string_lossy().into_owned(), (md.len(), md.is_dir(), md.modified().ok()));
+                }
+            }
+        }
+        return Snap::Dir(m);
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut todo = vec![path.to_path_buf()];
+    let mut n = 0usize;
+    while let Some(dir) = todo.pop() {
+        let Ok(rd) = fs::read_dir(&dir) else { continue };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            n += 1;
+            if n > 20_000 {
+                return Snap::Tree(h.finish());
+            }
+            e.file_name().hash(&mut h);
+            if let Ok(m) = e.metadata() {
+                (m.len(), m.is_dir(), m.modified().ok()).hash(&mut h);
+                if tree && m.is_dir() {
+                    todo.push(e.path());
+                }
+            }
+        }
+    }
+    Snap::Tree(h.finish())
+}
+
+/// FILE_NOTIFY_INFORMATION records for what changed between two
+/// snapshots of one folder: added 1, removed 2, modified 3.
+fn changes(old: &Snap, new: &Snap) -> Vec<u8> {
+    let (Snap::Dir(a), Snap::Dir(b)) = (old, new) else { return Vec::new() };
+    let mut recs: Vec<(u32, &str)> = Vec::new();
+    for (k, v) in b {
+        match a.get(k) {
+            None => recs.push((1, k)),
+            Some(o) if o != v => recs.push((3, k)),
+            _ => {}
+        }
+    }
+    for k in a.keys() {
+        if !b.contains_key(k) {
+            recs.push((2, k));
+        }
+    }
+    let mut w = W::new();
+    let mut prev: Option<usize> = None;
+    for (action, name) in recs {
+        let n = utf16(name);
+        w.align(4);
+        let at = w.len();
+        if let Some(p) = prev {
+            w.put_u32(p, (at - p) as u32);
+        }
+        prev = Some(at);
+        w.u32(0).u32(action).u32(n.len() as u32).bytes(&n);
+    }
+    w.0
+}
+
+/// The final response of a CHANGE_NOTIFY, signed.
+fn notify_done(out: &Out, w: &Watch, status: u32, data: &[u8]) -> io::Result<()> {
+    let mut b = W::new();
+    if status == STATUS_SUCCESS {
+        b.u16(9).u16((HDR + 8) as u16).u32(data.len() as u32).bytes(data);
+    } else if status == STATUS_NOTIFY_ENUM_DIR {
+        b.u16(9).u16((HDR + 8) as u16).u32(0).u8(0);
+    } else {
+        b.bytes(&error_body());
+    }
+    let body = &b.0;
+    let mut m = W::new();
+    m.bytes(b"\xfeSMB").u16(64).u16(w.credit_charge).u32(status).u16(CHANGE_NOTIFY).u16(0);
+    m.u32(FLAG_RESPONSE | FLAG_ASYNC | FLAG_SIGNED).u32(0).u64(w.message_id).u64(w.async_id).u64(w.session_id).zeros(16);
+    m.bytes(body);
+    let sig = w.key.sign(&m.0);
+    m.0[48..64].copy_from_slice(&sig);
+    write_frame(&mut **out.lock().unwrap(), &m.0)
 }
 
 fn sha512(parts: &[&[u8]]) -> [u8; 64] {
@@ -218,7 +355,7 @@ fn read_frame<S: Read>(s: &mut S) -> io::Result<Option<Vec<u8>>> {
     Ok(Some(buf))
 }
 
-fn write_frame<S: Write>(s: &mut S, msg: &[u8]) -> io::Result<()> {
+fn write_frame<S: Write + ?Sized>(s: &mut S, msg: &[u8]) -> io::Result<()> {
     let n = msg.len();
     let mut out = Vec::with_capacity(n + 4);
     out.extend_from_slice(&[0, (n >> 16) as u8, (n >> 8) as u8, n as u8]);
@@ -243,6 +380,10 @@ impl Conn {
             next_tree: 1,
             opens: HashMap::new(),
             next_file: 1,
+            out: None,
+            watches: Arc::new(Mutex::new(Vec::new())),
+            next_async: 1,
+            watcher: None,
         }
     }
 
@@ -250,18 +391,80 @@ impl Conn {
         self.cfg.log(verbose, &format!("[{}] {}", self.peer, msg));
     }
 
-    pub fn run<S: Read + Write>(&mut self, mut s: S) -> io::Result<()> {
+    pub fn run<R: Read, S: Write + Send + 'static>(&mut self, mut r: R, w: S) -> io::Result<()> {
         self.log(false, "connected");
-        while let Some(msg) = read_frame(&mut s)? {
-            if let Some(out) = self.message(&msg) {
-                write_frame(&mut s, &out)?;
+        let out: Out = Arc::new(Mutex::new(Box::new(w)));
+        self.out = Some(out.clone());
+        let res = (|| {
+            while let Some(msg) = read_frame(&mut r)? {
+                if let Some(reply) = self.message(&msg) {
+                    write_frame(&mut **out.lock().unwrap(), &reply)?;
+                }
+                for w in self.watches.lock().unwrap().iter_mut() {
+                    w.armed = true;
+                }
             }
-        }
+            Ok(())
+        })();
         self.log(false, "disconnected");
+        if let Some((stop, t)) = self.watcher.take() {
+            stop.store(true, Ordering::Relaxed);
+            let _ = t.join();
+        }
         for (_, o) in self.opens.drain() {
             finish(&self.cfg, o);
         }
-        Ok(())
+        res
+    }
+
+    /// The watcher thread, started with the first CHANGE_NOTIFY: once a
+    /// second it compares each armed watch's directory with its snapshot.
+    fn start_watcher(&mut self) {
+        if self.watcher.is_some() {
+            return;
+        }
+        let (stop, watches, out) = (Arc::new(AtomicBool::new(false)), self.watches.clone(), self.out.clone().unwrap());
+        let s2 = stop.clone();
+        let t = thread::spawn(move || {
+            while !s2.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(1000));
+                let mut ws = watches.lock().unwrap();
+                let mut i = 0;
+                while i < ws.len() {
+                    let now = if ws[i].armed { Some(snapshot(&ws[i].path, ws[i].tree)) } else { None };
+                    if let Some(now) = now.filter(|n| *n != ws[i].snap) {
+                        let w = ws.remove(i);
+                        let recs = changes(&w.snap, &now);
+                        let r = if recs.is_empty() || recs.len() > w.max_out {
+                            notify_done(&out, &w, STATUS_NOTIFY_ENUM_DIR, &[])
+                        } else {
+                            notify_done(&out, &w, STATUS_SUCCESS, &recs)
+                        };
+                        if r.is_err() {
+                            return;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        });
+        self.watcher = Some((stop, t));
+    }
+
+    /// Ends the watches `pick` selects with `status` (CANCEL, CLOSE).
+    fn end_watches(&self, status: u32, pick: impl Fn(&Watch) -> bool) {
+        let Some(out) = &self.out else { return };
+        let mut ws = self.watches.lock().unwrap();
+        let mut i = 0;
+        while i < ws.len() {
+            if pick(&ws[i]) {
+                let w = ws.remove(i);
+                let _ = notify_done(out, &w, status, &[]);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// One frame in, the frame to answer it (none for a lone CANCEL).
@@ -296,6 +499,11 @@ impl Conn {
             }
 
             let reply = if h.command == CANCEL {
+                let (async_id, mid, sid) = (h.async_id, h.message_id, session_id);
+                let by_async = h.flags & FLAG_ASYNC != 0;
+                self.end_watches(STATUS_CANCELLED, |w| {
+                    if by_async { w.async_id == async_id } else { w.message_id == mid && w.session_id == sid }
+                });
                 None
             } else if related && last_status != STATUS_SUCCESS && last_status != STATUS_BUFFER_OVERFLOW {
                 Some(Err(last_status))
@@ -305,9 +513,9 @@ impl Conn {
             };
 
             if let Some(reply) = reply {
-                let (status, body, sid, tid) = match reply {
-                    Ok(r) => (r.status, r.body, r.session_id, r.tree_id),
-                    Err(st) => (st, error_body(), None, None),
+                let (status, body, sid, tid, async_id) = match reply {
+                    Ok(r) => (r.status, r.body, r.session_id, r.tree_id, r.async_id),
+                    Err(st) => (st, error_body(), None, None, None),
                 };
                 let sid = sid.unwrap_or(session_id);
                 let tid = tid.unwrap_or(tree_id);
@@ -338,13 +546,17 @@ impl Conn {
                 }
                 let credits = h.credits.max(1).min(512);
                 let mut flags = FLAG_RESPONSE | (h.flags & FLAG_RELATED);
-                let sign = self.signs(sid, h.command, status);
+                // an interim response is never signed
+                let sign = async_id.is_none() && self.signs(sid, h.command, status);
                 if sign {
                     flags |= FLAG_SIGNED;
                 }
                 let mut w = W::new();
                 w.bytes(b"\xfeSMB").u16(64).u16(h.credit_charge).u32(status).u16(h.command).u16(credits);
-                w.u32(flags).u32(0).u64(h.message_id).u32(h.pid).u32(tid).u64(sid).zeros(16);
+                match async_id {
+                    Some(a) => w.u32(flags | FLAG_ASYNC).u32(0).u64(h.message_id).u64(a).u64(sid).zeros(16),
+                    None => w.u32(flags).u32(0).u64(h.message_id).u32(h.pid).u32(tid).u64(sid).zeros(16),
+                };
                 w.bytes(&body);
                 out.extend_from_slice(&w.0);
                 pieces.push((at, if sign { Some(sid) } else { None }));
@@ -447,7 +659,7 @@ impl Conn {
                             }
                             IOCTL => self.ioctl(c),
                             QUERY_DIRECTORY => self.query_directory(c),
-                            CHANGE_NOTIFY => Err(STATUS_NOT_SUPPORTED),
+                            CHANGE_NOTIFY => self.change_notify(h, c),
                             QUERY_INFO => self.query_info(c),
                             SET_INFO => self.set_info(c),
                             _ => Err(STATUS_NOT_SUPPORTED),
@@ -607,7 +819,7 @@ impl Conn {
         let reply = |status: u32, buf: Vec<u8>| -> Result<Reply, u32> {
             let mut w = W::new();
             w.u16(9).u16(0).u16((HDR + 8) as u16).u16(buf.len() as u16).bytes(&buf);
-            Ok(Reply { status, body: w.0, session_id: Some(sid), tree_id: None })
+            Ok(Reply { status, body: w.0, session_id: Some(sid), ..Default::default() })
         };
         let state = std::mem::replace(&mut sess.state, SessionState::Pending { acceptor: None, mech_types: None, raw });
         match state {
@@ -690,7 +902,7 @@ impl Conn {
         let mut w = W::new();
         // no client-side caching (Offline Files) of a host folder
         w.u16(16).u8(ty).u8(0).u32(0x30).u32(0).u32(access);
-        Ok(Reply { status: STATUS_SUCCESS, body: w.0, session_id: None, tree_id: Some(tid) })
+        Ok(Reply { status: STATUS_SUCCESS, body: w.0, tree_id: Some(tid), ..Default::default() })
     }
 
     // --- files ---------------------------------------------------------------
@@ -716,6 +928,7 @@ impl Conn {
     fn create(&mut self, c: &Ctx, share: usize) -> Result<Reply, u32> {
         let r = c.req;
         let access = u32_at(r, HDR + 24);
+        let attrs = u32_at(r, HDR + 28);
         let disposition = u32_at(r, HDR + 36);
         let options = u32_at(r, HDR + 40);
         let noff = u16_at(r, HDR + 44) as usize;
@@ -780,6 +993,14 @@ impl Conn {
                 Err(e) => return Err(from_io(&e)),
             }
         };
+        // a new or overwritten file takes the client's attributes; read-only
+        // is the one a host file has (after the open above, which writes)
+        if action != 1 && attrs & hostfs::ATTR_READONLY != 0 && !meta.is_dir() {
+            let mut p = meta.permissions();
+            p.set_readonly(true);
+            fs::set_permissions(&path, p).map_err(|e| from_io(&e))?;
+        }
+        let meta = fs::metadata(&path).map_err(|e| from_io(&e))?;
         let leaf = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let info = hostfs::info(&leaf, &meta);
         let id = self.next_file;
@@ -811,6 +1032,7 @@ impl Conn {
         let id = self.file_id(c, 8)?;
         let flags = u16_at(c.req, HDR + 2);
         let o = self.opens.remove(&id).unwrap();
+        self.end_watches(STATUS_NOTIFY_CLEANUP, |w| w.file_id == id);
         let info = if flags & 1 != 0 { fs::metadata(&o.path).ok().map(|m| hostfs::info("", &m)) } else { None };
         finish(&self.cfg, o);
         let mut w = W::new();
@@ -963,6 +1185,40 @@ impl Conn {
         let mut w = W::new();
         w.u16(9).u16((HDR + 8) as u16).u32(out.len() as u32).bytes(&out.0);
         ok(w.0)
+    }
+
+    fn change_notify(&mut self, h: &Hdr, c: &Ctx) -> Result<Reply, u32> {
+        if h.next != 0 || h.flags & FLAG_RELATED != 0 {
+            return Err(STATUS_NOT_SUPPORTED); // only ever sent alone
+        }
+        let tree = u16_at(c.req, HDR + 2) & 1 != 0;
+        let max_out = u32_at(c.req, HDR + 4) as usize;
+        let id = self.file_id(c, 8)?;
+        let o = &self.opens[&id];
+        if !o.is_dir {
+            return Err(STATUS_INVALID_PARAMETER);
+        }
+        let Some(Session { state: SessionState::Done { key, .. }, .. }) = self.sessions.get(&c.session_id) else {
+            return Err(STATUS_USER_SESSION_DELETED);
+        };
+        let async_id = self.next_async;
+        self.next_async += 1;
+        let w = Watch {
+            async_id,
+            message_id: h.message_id,
+            credit_charge: h.credit_charge,
+            session_id: c.session_id,
+            file_id: id,
+            key: key.clone(),
+            snap: snapshot(&o.path, tree),
+            max_out,
+            path: o.path.clone(),
+            tree,
+            armed: false,
+        };
+        self.watches.lock().unwrap().push(w);
+        self.start_watcher();
+        Ok(Reply { status: STATUS_PENDING, body: error_body(), async_id: Some(async_id), ..Default::default() })
     }
 
     fn query_info(&mut self, c: &Ctx) -> Result<Reply, u32> {

@@ -82,8 +82,10 @@ So the first server needs:
   except validate-negotiate.
 - Credits enough for Explorer's pipelining. Oplocks and leases are
   refused (none granted), so no break traffic.
-- `CHANGE_NOTIFY` answered with `STATUS_NOT_SUPPORTED` at first. Explorer
-  copes and refreshes on F5. A host watcher (`notify` crate) comes later.
+- `CHANGE_NOTIFY`: an interim STATUS_PENDING, then a signed async
+  completion from a watcher thread that polls the folder once a second
+  (no file-watching dependency). A one-folder watch gets real change
+  records, and a tree watch gets "enumerate again" (M23 step 3).
 
 Path handling is where the safety lives. Every name is resolved under
 the share's root with no `..` and no symlink escaping it (the user's

@@ -3,11 +3,12 @@
 //! response is signed (what Windows 11 24H2's client requires).
 //!
 //! It speaks dialects 2.0.2 through 3.1.1 without encryption, leases or
-//! oplocks, durable handles, DFS or change notification. It is meant for
-//! one trusted client on a private transport, such as a virtual machine's
-//! guest reaching it through the hypervisor's NAT, rather than for a
-//! network: the transport is the security boundary, and the account is
-//! what the client's protocol needs.
+//! oplocks, durable handles or DFS. Change notification polls the folder
+//! once a second and reports what was added, removed or modified.
+//! It is meant for one trusted client on a private transport, such as a
+//! virtual machine's guest reaching it through the hypervisor's NAT,
+//! rather than for a network: the transport is the security boundary, and
+//! the account is what the client's protocol needs.
 //!
 //! ```no_run
 //! use libsmb::{Account, Config, Server, Share};
@@ -135,10 +136,12 @@ impl Server {
         Server { cfg: Arc::new(cfg) }
     }
 
-    /// Serves one connection until the client closes it. `peer` names it
-    /// in the log.
-    pub fn serve<S: Read + Write>(&self, stream: S, peer: &str) -> io::Result<()> {
-        conn::Conn::new(self.cfg.clone(), peer.to_string()).run(stream)
+    /// Serves one connection until the client closes it: its reading and
+    /// writing halves (for a socket, the socket and its `try_clone`). The
+    /// writer is shared with the thread that completes change
+    /// notifications. `peer` names the connection in the log.
+    pub fn serve<R: Read, W: Write + Send + 'static>(&self, reader: R, writer: W, peer: &str) -> io::Result<()> {
+        conn::Conn::new(self.cfg.clone(), peer.to_string()).run(reader, writer)
     }
 
     /// Accepts connections on a TCP address, each on a thread of its
@@ -150,7 +153,8 @@ impl Server {
             let s = s?;
             let _ = s.set_nodelay(true);
             let peer = s.peer_addr().map(|a| a.to_string()).unwrap_or_default();
-            self.spawn(s, peer);
+            let w = s.try_clone()?;
+            self.spawn(s, w, peer);
         }
         Ok(())
     }
@@ -164,15 +168,17 @@ impl Server {
         let mut n = 0u64;
         for s in l.incoming() {
             n += 1;
-            self.spawn(s?, format!("unix#{}", n));
+            let s = s?;
+            let w = s.try_clone()?;
+            self.spawn(s, w, format!("unix#{}", n));
         }
         Ok(())
     }
 
-    fn spawn<S: Read + Write + Send + 'static>(&self, s: S, peer: String) {
+    fn spawn<R: Read + Send + 'static, W: Write + Send + 'static>(&self, r: R, w: W, peer: String) {
         let me = self.clone();
         thread::spawn(move || {
-            if let Err(e) = me.serve(s, &peer) {
+            if let Err(e) = me.serve(r, w, &peer) {
                 me.cfg.log(false, &format!("[{}] {}", peer, e));
             }
         });

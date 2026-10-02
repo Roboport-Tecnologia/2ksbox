@@ -13,8 +13,11 @@ every response is signed, which is what current Windows clients insist on
   security descriptor.
 - Names resolved under the share's root only: no `..`, no symlink out of
   it, case-insensitive lookup on case-sensitive hosts.
+- Change notification from a watcher that polls once a second: the names
+  added, removed or modified for a one-folder watch (FileSystemWatcher's
+  Created / Deleted / Changed), "enumerate again" for a whole tree.
 - Not supported: encryption, oplocks and leases, durable handles, DFS,
-  change notification, named streams, SMB1 (an SMB1 negotiate that offers
+  named streams, SMB1 (an SMB1 negotiate that offers
   SMB2 is answered so the client moves on).
 
 It is meant for one trusted client over a private transport (a virtual
@@ -36,7 +39,8 @@ mount_smbfs //smb:smb@127.0.0.1:4450/host /tmp/mnt        # macOS
 smbclient //127.0.0.1/host -p 4450 -U smb%smb              # Samba
 ```
 
-Tested against macOS's client (2.1 and 3.1.1) and Windows 11's
-(2.1 and 3.1.1, build 26300, ARM64).
+Tested against macOS's client (2.1 and 3.1.1) and Windows 11's (2.1
+and 3.1.1, build 26300, ARM64): Explorer's copy engine both ways, large
+files, editing in place, attributes and times, change notification.
 
 Licensed under either of MIT or Apache-2.0, at your option.

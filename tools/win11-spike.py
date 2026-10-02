@@ -54,8 +54,10 @@ Environment:
   PROBE=1              boot, ARCH=aarch64: on the desktop, tools/win11-spike/
                        probe.ps1 from the REPORT disk, elevated the same way
                        (UAC's Yes at UAC_YES_ARM), appends W11-PROBE lines
-  PROBE_PS1=<file>     the script PROBE=1 runs instead of probe.ps1
+  PROBE_PS1=<file>     the script PROBE=1 runs instead of probe.ps1, as
+                       main.ps1 under stub.ps1, which logs a refusal
                        (tools/win11-spike/smb.ps1: the shared folder, M23)
+  PROBE_WAIT=60        seconds a probe may run after its first line
   SMB=<socket>         NET=1: the guest's 10.0.2.4:445 forwarded to the Unix
                        socket an SMB server listens on (smbserve --unix,
                        track M23; QEMU patch 79)
@@ -98,6 +100,7 @@ REPORT = os.environ.get("REPORT", "") == "1"
 PROBE = os.environ.get("PROBE", "") == "1"
 SMB = os.environ.get("SMB", "")
 TPM_PPI = os.environ.get("TPM_PPI", "on") != "off"
+PROBE_WAIT = int(os.environ.get("PROBE_WAIT", "60"))
 SPIKE = os.path.join(ROOT, "tools/win11-spike")
 PROBE_PS1 = os.environ.get("PROBE_PS1", os.path.join(SPIKE, "probe.ps1"))
 ARM_CODE = "2ksbox-aarch64-code.fd" if OURS else "edk2-aarch64-code.fd"
@@ -532,26 +535,38 @@ PROBE_CMD = ("powershell -ep bypass -c \"& ((Get-Volume -FileSystemLabel REPORT)
 
 
 def probe(q, qmp, serial, shots):
-    """probe.ps1 from the REPORT disk, elevated (Windows on Arm, M20 step 4)."""
+    """probe.ps1 from the REPORT disk, elevated (Windows on Arm, M20 step 4).
+    A launch that writes no line at all (UAC's Yes missed, or the shell
+    refused it: "Windows cannot access the specified device, path, or
+    file" was seen once, M23) is launched again, after an Esc for the
+    error box it may have left (Esc on a bare desktop does nothing)."""
     time.sleep(20)
-    keys(qmp, "meta_l", "r")
-    time.sleep(3)
-    type_text(qmp, PROBE_CMD)
-    keys(qmp, "ctrl", "shift", "ret")
-    r = None
-    for attempt in range(4):
-        time.sleep(10)
-        shots.take("uac-%d.png" % attempt)
-        if OURS:
-            click(qmp, *UAC_YES)            # our firmware's 1280x800
-        else:
-            click(qmp, *UAC_YES_ARM, w=800, h=600)
-        r = wait(q, serial, shots, "W11-PROBE done", 60)
-        if r:
+    for launch in range(3):
+        keys(qmp, "esc")
+        time.sleep(1)
+        keys(qmp, "meta_l", "r")
+        time.sleep(3)
+        type_text(qmp, PROBE_CMD)
+        keys(qmp, "ctrl", "shift", "ret")
+        started = None
+        for attempt in range(3):
+            time.sleep(10)
+            shots.take("uac-%d-%d.png" % (launch, attempt))
+            if OURS:
+                click(qmp, *UAC_YES)            # our firmware's 1280x800
+            else:
+                click(qmp, *UAC_YES_ARM, w=800, h=600)
+            started = wait(q, serial, shots, "W11-PROBE", 20)
+            if started:
+                break
+        if started:
+            if started[1].startswith("W11-PROBE done") or wait(q, serial, shots, "W11-PROBE done", PROBE_WAIT):
+                return
             break
-    if r is None:
-        shots.take("probe-fail.png")
-        log("FAIL: no W11-PROBE done (shots/uac-*.png, shots/probe-fail.png)")
+        shots.take("probe-nothing-%d.png" % launch)
+        log("probe launch %d wrote nothing (shots/probe-nothing-%d.png); again" % (launch, launch))
+    shots.take("probe-fail.png")
+    log("FAIL: no W11-PROBE done (shots/uac-*.png, shots/probe-fail.png)")
 
 
 def type_text(qmp, text):
@@ -593,7 +608,12 @@ def boot():
         die("no %s; run install first" % DISK)
     if ARM:
         report_disk()       # makes it in a fresh OUT
-        subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, PROBE_PS1, "::probe.ps1"], check=True)
+        if PROBE_PS1 == os.path.join(SPIKE, "probe.ps1"):
+            subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, PROBE_PS1, "::probe.ps1"], check=True)
+        else:
+            # another script runs under stub.ps1, which logs a refusal
+            subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, os.path.join(SPIKE, "stub.ps1"), "::probe.ps1"], check=True)
+            subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, PROBE_PS1, "::main.ps1"], check=True)
     q, swtpm, qmp, serial, t0 = run_qemu([])
     shots = Shots(qmp, t0)
     timeout = 900 if ACCEL == "kvm" else 3 * 3600

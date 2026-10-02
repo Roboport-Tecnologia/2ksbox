@@ -434,6 +434,17 @@ index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
 
+`tools/smb-win11-test.sh [build/w11d]` (M23 step 3): the shared folder
+under Windows 11 on Arm's own use, on a fresh overlay of an installed
+spike machine in `OUT=build/w11s`. smbserve serves a host tree with
+awkward names and a 3000-file folder, and adds a file every 3 s for the
+change-notification item. `tools/win11-spike/smb-explorer.ps1` (run as
+`main.ps1` under `stub.ps1`) copies through Explorer's engine both ways,
+times 512 MB, edits in place, watches the folder, and opens Explorer on
+the share for `shots/desktop-hvf.png`. The host then checks the guest's
+upload and lists what the server refused. About 10 minutes; macOS on
+Apple Silicon only so far.
+
 `tools/win11-spike.py boot` with `SMB=<socket> PROBE=1
 PROBE_PS1=tools/win11-spike/smb.ps1 NET=1 ARCH=aarch64` (M23 step 2): the
 guest's `10.0.2.4:445` reaches `smbserve --unix <socket>` through QEMU
