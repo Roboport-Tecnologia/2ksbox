@@ -1,6 +1,7 @@
 # Track M22: the player on mitsuami
 
-Opened 2026-10-01 (user: "now lets make the mitsuami player"). ADR-025:
+Opened 2026-10-01 (user: "now lets make the mitsuami player"), merged to
+`main` the same day (user), and worked on there. ADR-025:
 the player gets a mitsuami front end beside the winit one, as the
 launcher did (ADR-023, M19), and replaces it once it runs everywhere.
 User decisions at the start: a `player-core` library with two thin front
