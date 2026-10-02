@@ -951,3 +951,33 @@ rewritten, and `win-cross.sh` with its container retires once the native
 build packages. The PC needs MSYS2 (for QEMU) beside Visual Studio, and
 both Rust Windows targets. The embed API's C runtime boundary has to be
 audited before the player moves.
+
+## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
+
+**Status.** Accepted (user decisions: Windows 11 first; "In-process SMB
+server"). Work in track M23, design in doc 24.
+
+**Decision.** A host folder reaches the guest as an SMB share served by
+`libsmb`, our own Rust server running in the player. The guest's TCP
+connection to `10.0.2.4:445` is forwarded by slirp, one connection at a
+time, to a Unix socket the player listens on (`slirp_add_unix`, through a
+QEMU patch to `guestfwd=`). The clipboard uses QEMU's own `qemu-vdagent`
+chardev and `ui/clipboard.c`, with the player as a clipboard peer through
+the embed API, and a guest agent of ours speaking the SPICE agent
+protocol over virtio-serial.
+
+**Why.** Windows' own SMB client is in every guest family, so no guest
+filesystem driver is needed. In-process, the server ships on all three
+hosts, unlike virtiofsd (Linux only) or Samba (an external install,
+GPLv3). QEMU already implements the clipboard's host half.
+
+**Rejected.** virtiofs; QEMU's `smb=` with the host's Samba; a guest
+filesystem driver per family; a writable virtual FAT disk; Red Hat's
+`vdagent-win` (x86 / x64 only, a service plus an installer). Reasons are
+in doc 24 §2–3.
+
+**Costs.** An SMB2 server to write and keep compatible with Windows
+11's tightening defaults: signing now, maybe more later. SMB1 for the
+vintage guests is a second dialect on top. One QEMU patch, one libslirp
+patch for Windows hosts, and spice-protocol's headers as a new pinned
+dependency.

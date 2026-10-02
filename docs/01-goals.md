@@ -53,7 +53,8 @@ rectangle in a window.
   workarounds are out of scope. Users supply their own media, licences
   and dumps.
 - **Integration features** (shared folders beyond a folder disc,
-  clipboard sync). Later nice-to-haves (doc 07's out of scope).
+  clipboard sync) were later nice-to-haves; since 2026-10-02 they are
+  track M23 (doc 24, ADR-027), Windows 11 first.
 
 ## The pillars
 

@@ -873,6 +873,7 @@ Store upload itself (a Partner Center identity).
 
 ## Out of scope for v1
 
-Shared folders and drag-and-drop, clipboard sync, USB passthrough,
-multi-monitor guests, and recording/streaming helpers. Recording pairs
+Drag-and-drop, USB passthrough, multi-monitor guests, and
+recording/streaming helpers. (Shared folders and the clipboard are track
+M23 since 2026-10-02, doc 24.) Recording pairs
 with the shader pipeline and is the first post-v1 candidate.

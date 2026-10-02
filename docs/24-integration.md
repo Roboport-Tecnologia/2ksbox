@@ -1,0 +1,162 @@
+# 24. Integration: shared folders and the clipboard
+
+Track M23 (`tracks/m23-integration.md`), ADR-027. Doc 01 had these as
+later nice-to-haves and doc 07 left them out of v1. ADR-024 makes them
+due sooner: a modern guest's user expects them on day one. **Windows 11
+comes first** (user decision, 2026-10-02). The vintage families follow
+on the same host side (§5).
+
+## 1. What the user gets
+
+- **A host folder as a network drive.** The machine form gets a "Shared
+  folder" path. While the machine runs, the guest sees it as
+  `\\10.0.2.4\host`, read-write and live, mapped to a drive letter by our
+  guest agent. It needs no guest driver, because Windows' own SMB client
+  does the work.
+- **The clipboard both ways**, text first. You copy on the host and paste
+  in the guest, and the reverse.
+
+Both are per machine and off by default, the way the network is.
+
+## 2. Shared folders: an SMB server in the player
+
+**Decision (user):** an SMB server written in Rust, running inside the
+player process and reached through slirp. These were rejected:
+
+- **virtiofs.** It needs `virtiofsd`, a separate vhost-user daemon that
+  only runs on Linux. Nothing serves it on macOS or Windows hosts.
+  virtio-win does ship `viofs` for ARM64 Windows 11, so the guest half
+  exists.
+- **QEMU's `-netdev user,smb=`.** It runs the host's Samba `smbd`, which
+  is a separate install that we cannot ship (GPLv3 and very large). It
+  is also not built for Windows hosts.
+- **A filesystem driver of ours in the guest** (an NT minifilter or
+  redirector, a 9x IFS VxD). Each one is a project the size of a display
+  driver, and every guest family would need its own.
+- **A writable virtual FAT disk** (vvfat-like). It is not live, and the
+  host and guest both writing to it can conflict.
+
+No Rust SMB *server* crate exists. The `smb` and `smb2` crates are
+clients, and become our test peers. So the server is ours: `libsmb/`, a
+library with no QEMU dependency, so it can be tested against real
+clients on its own.
+
+### 2.1 The path from the guest
+
+```
+guest SMB client ─TCP→ 10.0.2.4:445 (slirp) ─AF_UNIX→ <runtime dir>/smb.sock ─→ libsmb (player thread)
+```
+
+- libslirp 4.9.5 has `slirp_add_unix(slirp, path, guest_addr, port)`.
+  For each guest connection it opens a new connection to a Unix socket,
+  so the server sees ordinary per-connection streams. QEMU's
+  `guestfwd=` knows only `cmd:` and a chardev, and a chardev carries one
+  connection for the machine's whole life. **A QEMU patch** adds
+  `guestfwd=tcp:10.0.2.4:445-unix:<path>`. The launcher passes it when
+  the machine has a shared folder, and the player owns the listener.
+- `slirp_add_unix` is `G_OS_UNIX` only. Windows 10 and later have
+  `AF_UNIX` (`afunix.h`), so Windows hosts get a `patches/deps/libslirp`
+  patch that turns it on there. Windows hosts come after macOS and Linux.
+- **The socket is the security boundary.** It sits in a per-run
+  directory only the user can open (mode 0700), and slirp exposes it
+  only at 10.0.2.4 on the guest's NAT. So the credentials can be a fixed
+  pair (`2ksbox` / `2ksbox`). They exist because Windows 11 refuses guest
+  logons, not to keep anyone out.
+
+### 2.2 The protocol subset
+
+Windows 11 24H2 requires **signing** on its client by default (Pro and
+up), and with signing required it does not fall back to a guest logon.
+So the first server needs:
+
+- NEGOTIATE with one dialect. 2.1 first: HMAC-SHA256 signing and no
+  preauthentication integrity. 3.1.1 (AES-CMAC signing and the SHA-512
+  preauthentication hash) only if the client turns 2.1 down. **Step 2
+  measures which one 24H2 accepts.**
+- SESSION_SETUP over SPNEGO / NTLMSSP with NTLMv2 checked against the
+  fixed password. The session key comes from it and signs every message.
+- TREE_CONNECT (`IPC$` and the one share), CREATE, CLOSE, READ, WRITE,
+  QUERY_DIRECTORY, QUERY_INFO / SET_INFO (basic, standard, rename,
+  disposition, end of file), FLUSH, ECHO, and IOCTL refusing everything
+  except validate-negotiate.
+- Credits enough for Explorer's pipelining. Oplocks and leases are
+  refused (none granted), so no break traffic.
+- `CHANGE_NOTIFY` answered with `STATUS_NOT_SUPPORTED` at first. Explorer
+  copes and refreshes on F5. A host watcher (`notify` crate) comes later.
+
+Path handling is where the safety lives. Every name is resolved under
+the share's root with no `..` and no symlink escaping it (the user's
+folder, nothing above it). Windows names are case-insensitive, while
+Linux hosts are case-sensitive: the server looks up names
+case-insensitively on case-sensitive hosts and refuses ambiguous
+matches.
+
+### 2.3 The vintage guests later
+
+Win98 and XP speak SMB1 (`NT LM 0.12`), and Win98 also uses share-level
+security. That is a second dialect on the same filesystem layer and the
+same socket. It is out of scope until Windows 11 works, and is then
+scoped in the track doc. Until then a vintage machine keeps the folder
+disc (`isodir:`, track M5g).
+
+## 3. The clipboard: the SPICE agent protocol, QEMU's host side
+
+QEMU 11.1 carries the host half already. `-chardev
+qemu-vdagent,id=vda,clipboard=on` speaks the SPICE agent protocol to a
+guest agent and feeds `ui/clipboard.c`, where front ends join as
+*clipboard peers* (`qemu_clipboard_peer_register`). The guest end is a
+virtio-serial port named `com.redhat.spice.0`:
+
+```
+-device virtio-serial-pci -device virtserialport,chardev=vda,name=com.redhat.spice.0
+```
+
+- **QEMU build:** `vdagent.c` builds only `when: spice_protocol`. That
+  means the spice-protocol **headers** (no SPICE server), so
+  `build-deps.sh` gains spice-protocol from a pinned tarball and
+  `configure-qemu.sh` drops `--disable-spice-protocol`. `--disable-spice`
+  stays.
+- **The embed API** gains a clipboard peer for the player (an API
+  version bump). The guest grabbing, the host's text arriving, and
+  requests both ways.
+- **The player** bridges that peer to the host's clipboard in
+  `player-core`, through the `arboard` crate, polled on focus changes
+  and when the window gets focus. A front end with a toolkit clipboard
+  (mitsuami) can take over later. Text only: QEMU's peer interface has
+  `QEMU_CLIPBOARD_TYPE_TEXT` and nothing richer.
+- **The guest driver:** virtio-win's `vioserial`, which has a signed
+  ARM64 Windows 11 build (`vioserial/w11/ARM64`), joins our drivers disc
+  (`scripts/build-virtio-win.sh`) beside NetKVM and viogpudo. x64
+  Windows 11 needs the same driver, from the same ISO.
+- **The guest agent is ours** (§4). Red Hat's `vdagent-win` exists, but
+  its builds are x86 / x64 only. It runs as a service plus a session
+  process, and it ships inside an installer (`virtio-win-guest-tools.exe`).
+
+## 4. The guest agent
+
+`guest-agent/` is a small Rust program for modern Windows, built for
+`x86_64` and `aarch64` Windows (native ARM64, no emulation). It runs in
+the user's session, started from the Run key that our drivers disc's
+setup step writes. It does two jobs:
+
+1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
+   the agent protocol subset QEMU's `vdagent.c` implements: capabilities,
+   GRAB / REQUEST / CLIPBOARD / RELEASE with the selection and serial
+   capabilities, and `CF_UNICODETEXT` ↔ UTF-8. It watches the clipboard
+   with `AddClipboardFormatListener`.
+2. **The share:** at login, if `10.0.2.4:445` answers, it maps the share
+   to a drive letter (`WNetAddConnection2`, the fixed credentials). It
+   shows no UI, and a machine without a shared folder simply has no
+   drive.
+
+Its log goes to `C:\2KSBOX\agent.log`, the guest-output convention.
+
+## 5. Order and what the vintage families reuse
+
+Windows 11 on Arm on the Air goes first, then x64 Windows 11, then the
+vintage families. The SMB server and the clipboard peer are host code
+that every family shares. A vintage agent (C, mingw, Win98 / XP) would
+speak the same agent protocol over a **COM port**: `qemu-vdagent` is a
+chardev, so `-serial chardev:vda` works with no driver, and the Win32
+serial API is in every Windows. The track doc carries that plan once it
+is scheduled.
