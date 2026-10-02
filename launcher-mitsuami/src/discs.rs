@@ -254,7 +254,8 @@ fn DriveCard() -> impl View {
     let has_disc = move || card().is_some_and(|c| c.kind.is_some());
     view! {
         <Group margin_x=Spacing::Xl shrink=0.0>
-            <Row gap=Spacing::Md align=Align::Center>
+            // Room after Eject, past the box's own inset (user).
+            <Row gap=Spacing::Md padding_end=Spacing::Sm align=Align::Center>
                 <Icon
                     name=move || card().and_then(|c| c.kind).map_or(icons::DISCS, kind_icon).to_owned()
                     color=move || if has_disc() { Color::Accent } else { Color::SecondaryLabel }

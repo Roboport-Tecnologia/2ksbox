@@ -177,7 +177,7 @@ is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug ve
    **The shelf redone 2026-10-01 (user's design):** opened on a machine
    it has the drive as a card on top, with no heading (user: it is
    plain what it is) (the disc's kind icon, its label, the
-   core's detail line, Eject; or "Tray empty"), then "Library" with the
+   core's detail line, Eject, with room after it since 2026-10-01, user; or "Tray empty"), then "Library" with the
    core's count and an Add menu button (Disc image…, Folder as disc…,
    Guest tools ISO, checked once it is on the shelf), then the rows, and
    under them a `Group` of its own that takes dropped images and folders.
