@@ -45,7 +45,8 @@ On Windows the toolbar sits in the title bar beside the caption buttons,
 as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
 `winui::set_toolbar_place(ToolbarPlace::InTitleBar(ToolbarAlign::End))`,
 a WinUI-only choice (`Start` and `Center` are the others), before the app
-runs. The machine window's details are a shade darker there than the
+runs. The machine window starts 50 wider and taller there (820 × 610,
+user). Its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a
 tweak on the details' `ScrollView`, user), and the machine form's
 sidebar is half WinUI's default width (160, user), open from an 800-wide
