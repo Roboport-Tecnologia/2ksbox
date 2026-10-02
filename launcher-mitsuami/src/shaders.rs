@@ -329,10 +329,17 @@ fn ProfileTable() -> impl View {
         })
         .expand(),
         // On makes this profile the default (the library has one, so the
-        // others go off); off leaves none.
+        // others go off); off leaves none. On macOS the small switch, as
+        // dense lists there have (user).
         TableColumn::new("Default", move |path: PathBuf| {
             let id = shader_library::id_of(&path);
-            Switch::new("Default").checked(is_default(&path)).on_change(move |on| {
+            let small = platform! {
+                macos => mitsuami::appkit::tweak(|s: &mitsuami::appkit::objc2_app_kit::NSSwitch| {
+                    s.setControlSize(mitsuami::appkit::objc2_app_kit::NSControlSize::Small)
+                }),
+                _ => Tweak::none(),
+            };
+            Switch::new("Default").checked(is_default(&path)).native(small).on_change(move |on| {
                 let chosen = on.then_some(id.as_str());
                 if let Err(e) = shader_library::set_default(&Shaders::dir(), chosen) {
                     eprintln!("[shader-manager] setting the default profile to {chosen:?}: {e}");
