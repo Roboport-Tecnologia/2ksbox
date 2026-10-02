@@ -117,7 +117,10 @@ embed library, as for the winit player, into a target dir of its own.
    shows a classic menu bar instead (mitsuami 1cf8624, 2c3f5e5), its menus
    windows of their own with their items from the start: 24 opens in 24
    over the surface, and Ctrl+Q runs the player's Close as on GTK
-   (Kirigami's own Quit had taken it). Checked under a headless sway with
+   (Kirigami's own Quit had taken it). In full screen the bar goes and
+   comes back on leaving (user; mitsuami 2cf54ff, which also made the
+   content, not the window, take the bar's height after full screen).
+   Checked under a headless sway with
    a virtual pointer, `zwlr_virtual_pointer_v1` from a scratch client
    (`wayland-protocols-wlr`), which also gives step 2 a pointer to test
    with. Build: `cargo build --release --no-default-features --features
