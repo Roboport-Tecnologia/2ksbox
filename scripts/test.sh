@@ -1510,6 +1510,25 @@ sb16_irq_check() {
   return $rc
 }
 
+companions_env_check() { # what the player names reaches QEMU's own getenv (doc 11, "The C runtime boundary")
+  local dir="$OUT/companions-env" o rc=0
+  rm -rf "$dir"; mkdir -p "$dir"
+  # From a folder with no soundfonts/ in it and no LIBSYNTH_SF2 in the
+  # environment, only the bank the player names itself can answer a
+  # General MIDI port, the Win98 and DOS default. On Windows a variable
+  # set with std::env::set_var never reached QEMU's getenv(), and the
+  # packaged player refused every such machine run from anywhere but
+  # its own folder. The player quits once the BIOS has drawn.
+  o="$(cd "$dir" && env -u LIBSYNTH_SF2 PLAYER_QMP_EXEC='{"execute":"quit"}' \
+       timeout 120 "$ROOT/$PLAYER" -- -L "$(np "$ROOT/qemu/pc-bios")" -M pc -m 32 \
+       -device mpu401,audiodev=embed0,synth=gm 2>&1)" \
+    || { echo "the player did not run a General MIDI machine to the BIOS and quit"; rc=1; }
+  case "$o" in *"found no SoundFont"*)
+    echo "the player's LIBSYNTH_SF2 did not reach QEMU (qemu_embed_setenv, companions.rs)"; rc=1;; esac
+  [ $rc = 0 ] || printf '%s\n' "$o" | tail -5
+  return $rc
+}
+
 music_check() { # the two pickers, and then the devices actually sounding
   local rc=0 dir="$OUT/music" bundle args f want o irr
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -2301,6 +2320,12 @@ host_stage() {
   # devices sounding into a wav QEMU recorded itself.
   if [ -x $LAUNCHERX ] && [ -x $SYNTHX ]; then
     run_check music music.log music_check || true
+  fi
+  # the bank the player names reaching QEMU's own C runtime (doc 11)
+  if [ -x $PLAYER ] && { [ "$OS" != Linux ] || [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; }; then
+    run_check companions-env companions-env.log companions_env_check || true
+  else
+    skip companions-env "needs $PLAYER and a display (it runs the player)"
   fi
   if [ -x $QSYS ]; then
     run_check sb-mixer sb-mixer.log sb_mixer_check || true

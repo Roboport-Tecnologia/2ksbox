@@ -345,6 +345,14 @@ int qemu_embed_socket_to_fd(uint64_t sock)
 #endif
 }
 
+bool qemu_embed_setenv(const char *name, const char *value)
+{
+    /* GLib's, because on Windows it is _wputenv on this library's CRT
+     * (which keeps getenv()'s copy in step and sets the process's block
+     * too), and plain setenv() elsewhere. */
+    return name && value && g_setenv(name, value, TRUE);
+}
+
 qemu_embed_t *qemu_embed_new(int argc, char **argv,
                              const qemu_embed_display_cb *cb, void *ud)
 {

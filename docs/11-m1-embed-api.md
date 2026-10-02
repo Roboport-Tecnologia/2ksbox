@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v9** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v10** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
@@ -48,6 +48,8 @@ not block. Everything else may come from any thread.
 | 6 | macOS zero-copy: `on_3d_iosurface` |
 | 7 | `socket_to_fd` for the QMP socket on Windows (below) |
 | 8 | `pad_state`, `pad_present`: the gamepad (M13); the same bytes feed the gameport |
+| 9 | `set_window_size`, `display_follows_window`: the window's size as a monitor's (M20, below) |
+| 10 | `setenv`: an environment variable set on the library's C runtime ("The C runtime boundary") |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -121,6 +123,58 @@ whichever CRT the module links, which the player cannot know. The handle
 crosses as a handle and **`qemu_embed_socket_to_fd()` converts it inside
 the library**. A raw `SOCKET` is refused at startup as `File descriptor
 'N' is not a socket`.
+
+## The C runtime boundary
+
+On Windows the player and the library are two C runtimes apart, or
+will be. QEMU stays mingw (msvcrt) under ADR-026, and the player moves
+to MSVC with its static UCRT when the mitsuami player builds there (M22
+step 4). Today's winit player is `windows-gnu` and shares QEMU's
+`msvcrt.dll`, which hides any state the two sides happen to share.
+Audited 2026-10-02, every channel the API or the process offers:
+
+- **Memory.** Nothing allocated on one side is freed on the other.
+  `new` copies `argv` (`g_strdup`) and `destroy` frees the copies; the
+  callbacks' pixels and cursor are borrowed for the call; the audio ring
+  is the caller's memory and only atomics cross it.
+- **Descriptors.** One: QMP's `fd=`, converted in the library
+  (`socket_to_fd`, v7, "QMP" above). The dma-buf fds are Linux only.
+- **The environment: the hole.** QEMU, our devices and the Direct3D
+  executor read variables with their C runtime's `getenv()`, and msvcrt
+  answers from a copy it made when the process started. Rust's
+  `std::env::set_var` is `SetEnvironmentVariableW` on both Windows
+  targets and never reaches that copy (checked: a DLL's `getenv` sees a
+  variable inherited at start, not one set after). So every companion
+  the player named (`player-core/src/companions.rs`) was invisible to
+  QEMU on Windows, already with the `windows-gnu` player. The executor
+  and DXVK were saved by `LoadLibrary`'s bare-name search; the SoundFont
+  was not, and the packaged player refused every General MIDI machine
+  (the Win98 and DOS default) with `mpu401: synth=gm found no
+  SoundFont` unless it ran from the package's own folder, where the
+  in-tree relative path happened to resolve. **`qemu_embed_setenv`**
+  (v10) sets a variable through GLib's `g_setenv` inside the library,
+  which on Windows updates its runtime's copy and the process's block.
+  The rule: a variable QEMU or anything it loads reads goes through
+  `qemu_embed::setenv`; `std::env::set_var` only for what Rust reads.
+  An environment given at spawn (the launcher's `DXVK_LOG_PATH`, a
+  developer's `D3DPT_EXEC_LIB=`) is inherited by both runtimes and fine.
+- **stdio.** QEMU writes its runtime's `stderr`, bound to the process's
+  standard handle when that runtime started. The launcher redirects the
+  player's at spawn, so both runtimes write `player.log`. A player must
+  never redirect its own stderr in-process (`SetStdHandle`, `freopen`):
+  QEMU's runtime would not follow. None does.
+- **Exit.** `hard_exit` is `std::process::exit` on Windows, so
+  `ExitProcess` on either target.
+- **Threads.** QEMU's thread is Rust's `std::thread` (`CreateThread`
+  either way), and the library is linked at load, never opened later
+  (patch 63), so its static TLS is set up as for any thread.
+- **Types.** Pointers, `int`, fixed-width integers and C `bool` (one
+  byte in both compilers), no struct by value and no `long double`;
+  function pointers on the Windows x64 convention both use.
+
+Left for the MSVC build: `link.exe` looks for an import library
+`qemu-embed-<target>.lib`, and the mingw build makes
+`libqemu-embed-<target>.dll.a`.
 
 ## What needs patches
 

@@ -140,7 +140,17 @@ embed library, as for the winit player, into a target dir of its own:
    arrows to the system (the player turns the window server's hot keys
    off). Either mitsuami takes the player's ways, or `kbcapture`'s halves
    move into `player-core` on the surface's raw handle. Windows also needs
-   the native MSVC build mitsuami requires (ADR-023's cost).
+   the native MSVC build mitsuami requires (ADR-023's cost), which puts
+   the player and QEMU (mingw, ADR-026) on two C runtimes. **The boundary
+   was audited first (2026-10-02, doc 11 "The C runtime boundary")**: the
+   API shares no memory or descriptor across it, but the environment did.
+   The companions the player names never reached QEMU's `getenv()` on
+   Windows, even from today's `windows-gnu` player, and the packaged
+   player refused every General MIDI machine run from outside its folder.
+   Fixed by `qemu_embed_setenv` (embed API v10) and checked by
+   `test.sh`'s `companions-env`. Left before the MSVC link: an import
+   library `link.exe` takes (`qemu-embed-<target>.lib`; mingw makes a
+   `.dll.a`).
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and

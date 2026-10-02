@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 9;
+pub const API_VERSION: u32 = 10;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -86,6 +86,7 @@ extern "C" {
         rd_idx: *const u32,
     );
     fn qemu_embed_socket_to_fd(sock: u64) -> c_int;
+    fn qemu_embed_setenv(name: *const c_char, value: *const c_char) -> bool;
 }
 
 /// A socket the caller owns, as the `fd=` of `-chardev socket,fd=N`.
@@ -98,6 +99,26 @@ extern "C" {
 pub fn socket_to_fd(sock: u64) -> Option<i32> {
     let fd = unsafe { qemu_embed_socket_to_fd(sock) };
     (fd >= 0).then_some(fd)
+}
+
+/// Set an environment variable where QEMU, our devices and the Direct3D
+/// executor read it (v10), and in the process's environment as well.
+///
+/// Not `std::env::set_var`: they read it with their C runtime's
+/// `getenv()`, which on Windows answers from a copy made when the process
+/// started, and `set_var` (`SetEnvironmentVariableW`) never updates that
+/// copy. The library sets it on its own runtime's side. Call before
+/// [`Qemu::new`], while no other thread exists. `false` if it failed or a
+/// string holds a NUL.
+///
+/// # Safety
+/// As `std::env::set_var`: no other thread may be reading or writing the
+/// environment.
+pub unsafe fn setenv(name: &str, value: &std::ffi::OsStr) -> bool {
+    let (Ok(name), Some(Ok(value))) = (CString::new(name), value.to_str().map(CString::new)) else {
+        return false;
+    };
+    qemu_embed_setenv(name.as_ptr(), value.as_ptr())
 }
 
 /// Install the audio ring. Must be called BEFORE [`Qemu::new`] on any
