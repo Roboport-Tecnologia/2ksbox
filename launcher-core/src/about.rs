@@ -69,11 +69,8 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        title: "Apps",
+        title: "Other",
         credits: &[
-            c("Qt", "The launcher's interface", "LGPL-3.0", "https://www.qt.io"),
-            c("CXX-Qt", "Rust and Qt together", "MIT OR Apache-2.0", "https://github.com/KDAB/cxx-qt"),
-            c("winit", "The player's window", "Apache-2.0", "https://github.com/rust-windowing/winit"),
             c("gilrs", "Game controllers", "MIT OR Apache-2.0", "https://gitlab.com/gilrs-project/gilrs"),
             c("UIDE", "The DOS CD-ROM driver", "Free with source", "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/latest/pkg-html/uide.html"),
         ],
