@@ -262,6 +262,14 @@ pub fn MachinesWindow() -> impl View {
             library.selected.set(shown);
         }
     });
+    let shelf = move || view! { <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button> };
+    let shaders_button = move || view! { <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button> };
+    // On macOS 26 one item, a row, so one capsule (user); elsewhere two
+    // items, which the platform spaces as its toolbars do.
+    let shelf_and_shaders = platform! {
+        macos => view! { <Row>{shelf()}{shaders_button()}</Row> },
+        _ => (shelf(), shaders_button()),
+    };
     view! {
         <Column grow=1.0 min_height=0>
             <Toolbar>
@@ -276,11 +284,7 @@ pub fn MachinesWindow() -> impl View {
                     />
                 </Show>
                 <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
-                // One item, so one capsule on macOS 26.
-                <Row>
-                    <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button>
-                    <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button>
-                </Row>
+                {shelf_and_shaders}
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
                 <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>

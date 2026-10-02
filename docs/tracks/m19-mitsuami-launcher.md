@@ -139,9 +139,12 @@ is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug ve
    items (`machine_actions`, shared by both; user, 2026-10-01; clicked
    through on Broadway, Discs opened on the row's machine). The toolbar keeps New, Shelf, Shaders (named so since
    2026-10-01, user; an empty library's button stays New machine),
-   with platform icons, Shelf and Shaders one item, a `Row`, so on
-   macOS 26 they share one glass capsule (mitsuami's segmented group;
-   titled buttons each get their own otherwise), and the first-run
+   with platform icons. On macOS only, Shelf and Shaders are one item,
+   a `Row`, so on macOS 26 they share one glass capsule (mitsuami's
+   segmented group; titled buttons each get their own otherwise);
+   elsewhere they are two items, spaced as the platform spaces its
+   toolbar's, since the other backends draw a `Row` as buttons touching
+   (user, 2026-10-01). Then the first-run
    download's progress bar ahead of them while it runs, with no capsule
    (user, 2026-10-01). The status line is gone (user: "we won't have
    status text"; it said only that a machine started, or that a clone
