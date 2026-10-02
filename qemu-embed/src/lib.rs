@@ -8,7 +8,18 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 8;
+pub const API_VERSION: u32 = 9;
+
+/// The system emulator this build links (`qemu-x86_64` feature: Windows
+/// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
+/// name for itself.
+pub const QEMU_NAME: &str = if cfg!(feature = "qemu-x86_64") {
+    "qemu-system-x86_64"
+} else if cfg!(feature = "qemu-aarch64") {
+    "qemu-system-aarch64"
+} else {
+    "qemu-system-i386"
+};
 pub const FMT_XRGB8888: u32 = 1;
 
 #[repr(C)]
@@ -66,6 +77,8 @@ extern "C" {
     fn qemu_embed_pad_present(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_input_flush(e: *mut qemu_embed_t);
     fn qemu_embed_set_refresh_ms(e: *mut qemu_embed_t, ms: u32);
+    fn qemu_embed_set_window_size(e: *mut qemu_embed_t, w: u32, h: u32, dpi: u32);
+    fn qemu_embed_display_follows_window(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_set_audio_ring(
         base: *mut c_void,
         bytes: usize,
@@ -139,7 +152,7 @@ impl Qemu {
             "libqemu-embed API version mismatch"
         );
         let mut cargs: Vec<CString> = Vec::with_capacity(args.len() + 1);
-        cargs.push(CString::new("qemu-system-i386").unwrap());
+        cargs.push(CString::new(QEMU_NAME).unwrap());
         for a in args {
             cargs.push(CString::new(a.as_str()).ok()?);
         }
@@ -208,6 +221,17 @@ impl Qemu {
     /// Display refresh pull interval (ms); QEMU's default is 30.
     pub fn set_refresh_ms(&self, ms: u32) {
         unsafe { qemu_embed_set_refresh_ms(self.0, ms) }
+    }
+    /// The window's drawable size in pixels and its DPI (v9, M20), for an
+    /// adapter that takes the window's size as its mode (virtio-gpu with
+    /// Windows' viogpudo). Every other adapter ignores it.
+    pub fn set_window_size(&self, w: u32, h: u32, dpi: u32) {
+        unsafe { qemu_embed_set_window_size(self.0, w, h, dpi) }
+    }
+    /// Whether the adapter on show takes [`Self::set_window_size`], so
+    /// the window should not be held to the guest's mode (v9).
+    pub fn display_follows_window(&self) -> bool {
+        unsafe { qemu_embed_display_follows_window(self.0) }
     }
 }
 

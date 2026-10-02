@@ -101,11 +101,6 @@ pub enum Capture {
     MacOS(mac::HotKeys),
 }
 
-/// Whether a run starts with the host's shortcuts going to the guest.
-pub fn on_at_start() -> bool {
-    std::env::var("PLAYER_KEYBOARD_CAPTURE").as_deref() != Ok("0")
-}
-
 impl Capture {
     /// `None` on a host this cannot do anything on (the reason is printed).
     pub fn new(window: &Window, vm: Qemu) -> Option<Capture> {

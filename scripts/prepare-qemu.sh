@@ -73,6 +73,9 @@ echo "==> overlaying libdisc/ (CD-ROM image block driver: block/cdimage.c, doc 1
 rsync -c "$ROOT/libdisc/qemu/cdimage.c" "$QEMU/block/"
 rsync -c "$ROOT/libdisc/qemu/cdimage.h" "$ROOT/libdisc/libdisc.h" "$QEMU/include/block/"
 
+echo "==> overlaying tpm/ (the libtpms TPM backend: backends/tpm/tpm_libtpms.c, M20)"
+rsync -c "$ROOT/tpm/qemu/tpm_libtpms.c" "$QEMU/backends/tpm/"
+
 echo "==> overlaying gamepad/ (the two pad devices: hw/usb/dev-gamepad.c, hw/input/gameport.c, M13)"
 rsync -c "$ROOT/gamepad/qemu/dev-gamepad.c" "$QEMU/hw/usb/"
 rsync -c "$ROOT/gamepad/qemu/gameport.c" "$QEMU/hw/input/"
@@ -194,6 +197,18 @@ done
 # firmware/ holds the same VGA BIOS built with patches/seabios/
 # (scripts/build-vgabios.sh), checked in because it needs an x86 gcc. A
 # whole blob replaced, so nothing to restore first.
+echo "==> unpacking the EDK2 firmware a Windows 11 machine boots (M20)"
+# QEMU keeps its EDK2 builds compressed in pc-bios/ and unpacks them only
+# into its own build tree, which neither the launcher's -L nor any
+# packager reads. The secure build's code and the variable store's
+# template (the x86_64 firmware uses the i386 one), next to the BIOSes.
+for f in edk2-x86_64-secure-code.fd edk2-i386-vars.fd; do
+  if [ ! -f "$QEMU/pc-bios/$f" ] || [ "$QEMU/pc-bios/$f.bz2" -nt "$QEMU/pc-bios/$f" ]; then
+    bunzip2 -kc "$QEMU/pc-bios/$f.bz2" > "$QEMU/pc-bios/$f.part" && mv "$QEMU/pc-bios/$f.part" "$QEMU/pc-bios/$f"
+  fi
+  echo "    $f"
+done
+
 echo "==> installing our VGA BIOSes (VBE 4F09h, patches/seabios)"
 for f in "$ROOT"/firmware/vgabios-*.bin; do
   [ -e "$f" ] || continue

@@ -71,6 +71,20 @@ pub fn default_label(profiles: &[ProfileEntry]) -> String {
     }
 }
 
+/// The same for a machine of `family`: a modern one's default is no
+/// shader at all, whatever the library marks (`player::resolve_shader`),
+/// and the row says so rather than naming a profile it will not run.
+pub fn default_label_for(family: crate::bundle::Family, profiles: &[ProfileEntry]) -> String {
+    if family.is_modern() {
+        format!("{} {}", crate::wizard::SHADER_DEFAULT_LABEL, NO_SHADER_LABEL)
+    } else {
+        default_label(profiles)
+    }
+}
+
+/// What a modern machine's default runs: nothing.
+pub const NO_SHADER_LABEL: &str = "None";
+
 /// The profile id a machine's `shader_profile` field stores: a `.toml`
 /// file's bare stem (e.g. `trinitron-warm`), matching `path`'s own name so
 /// looking one up by id (`find`, below) is a plain filename join.
@@ -191,6 +205,12 @@ pub fn scan(dir: &Path) -> Vec<ProfileEntry> {
 /// falls back to no shader override rather than failing the machine.
 pub fn find(dir: &Path, id: &str) -> Option<ShaderProfile> {
     ShaderProfile::load(&dir.join(format!("{id}.toml"))).ok()
+}
+
+/// What a front end asks before `delete`: a headline naming the profile,
+/// and the line under it.
+pub fn delete_question(name: &str) -> (String, &'static str) {
+    (format!("Delete the profile “{name}”?"), "This can't be undone.")
 }
 
 /// Delete a profile; if it was the library's default, the library has

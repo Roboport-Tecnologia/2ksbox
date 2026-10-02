@@ -46,6 +46,20 @@ player line runs a machine with nothing else.
   spawns a player. "Running" is the launcher's own child *or* a
   listening monitor socket, so a player started by `--play` counts too.
   The launcher only observes (`try_wait`); a spawned player outlives it.
+- **On mitsuami the library is a list beside the chosen machine's
+  details**, as UTM and VirtualBox lay theirs out (user, 2026-10-01).
+  The machines run down the leading side, each with its name and
+  `Machines::subtitle` (family and state); double-click or Return starts
+  one. Beside them: the chosen machine's name, Start and its windows
+  (Settings, Discs, Snapshots, Clone), then its settings in a group
+  per page of the form, Storage second (`Machines::details`, `launcherx
+  --machine-details`; user: the drives are what is most often looked
+  for). The details show only what the form shows for
+  that family (no Direct3D row without our adapter), and a path shows
+  its file name. The toolbar keeps what is not about one machine: New
+  machine, Disc shelf, Shader profiles and the status line; no button
+  label there ends in "…" (user). The Qt
+  window keeps its grid until the flip.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Play is logged with the line it ran**, quoted to paste back
@@ -76,6 +90,11 @@ player line runs a machine with nothing else.
   so such a clone of a running machine goes ahead. `launcherx --clone
   <machine.toml> [--same-disk] [name]` and `lc_machines_clone` (its
   `same_disk` argument) are the same model.
+  A Windows 11 machine's TPM is copied with the rest (the clone has the
+  same TPM identity, and BitLocker keeps working) unless **"Give the
+  copy a new TPM"** is ticked (user decision, 2026-10-01): then its state
+  file and the snapshots' copies of it stay behind, and the clone's
+  first start makes a new TPM.
 - **Not built:** last-frame thumbnails in the grid, and bundle
   import/export.
 
@@ -118,7 +137,7 @@ lay theirs out (user request): General (family, name), System (memory,
 processor, acceleration, emulation optimizations, extra QEMU
 arguments), Display (adapter, Direct3D, the Voodoo 2, the shader
 profile), Audio (sound card, music, SoundFont, MT-32 ROMs), Input
-(gamepad, pointer), Network, Storage (disk, install media, floppy, boot
+(gamepad, pointer), Network, Storage (disk, CD in drive, floppy, boot
 order). The sections and their order are the model's (`wizard::Section`,
 `lc_wizard_label(LC_LABEL_SECTION, …)`); which field sits on which page
 is the front end's. The form opens on its first page for a new or
@@ -152,11 +171,18 @@ The fields, and why each is what it is:
 - **Memory** is bounded per family (`bundle::ram_mb_range`: Win98
   32–512, since more will not boot; XP 64–3072, DOS 4–256, Other
   16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
-- **Acceleration** is Automatic / hardware-required / Emulation,
+- **Acceleration** is Automatic / hardware only / Emulation,
   `accel = "auto" | "kvm" | "tcg"` on every host. `kvm` means "hardware
-  acceleration, required", spelled `whpx` on Windows at spawn (labels
-  "KVM (required)" / "WHPX (required)"), and refuses to start without
-  it. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
+  acceleration, required", spelled `whpx` on Windows at spawn, and
+  refuses to start without it. The picker says "Hardware virtualization";
+  the note under it names this host's kind, "Hardware virtualization
+  (KVM)" (WHPX on Windows, HVF on macOS; user). The picker offers it
+  only where this host can run the machine with it
+  (`Form::accel_choices`; user, 2026-10-01: "(required)" beside
+  Automatic read as nonsense), so on a host without it the list is
+  Automatic and Emulation; a machine already set to it keeps the entry,
+  under the note that it won't start. `launcherx --kvm [machine.toml]`
+  prints the list. The Qt window still lists all three. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
   `whpx` then `tcg` on Windows), not a probe of ours that could be stale
   by spawn time; on macOS it is TCG. `player::hw_accel_available()`
   backs only the hint beside the picker: Linux opens `/dev/kvm` for
@@ -185,6 +211,9 @@ The fields, and why each is what it is:
   `x87-pc64-as-53`, the one that changes what the guest computes. The
   section is a disclosure headed "Emulation optimizations (N of M on)",
   gives each switch's measured gain, and says they do nothing under KVM.
+  The mitsuami form shows the section only where the machine will be
+  emulated (`Form::optimizations_apply`; user, 2026-10-01); Qt still
+  shows it with that note.
   "All defaults", "Turn all off" and "Turn all on" sit above them
   (`Form::*_all_optimizations`), and the note says which of the three
   states the machine is in. Patch 21's `pinned-regs` is not offered (user decision:
@@ -223,7 +252,9 @@ The fields, and why each is what it is:
   A bundle saying `system` opened on another host shows Automatic and
   keeps its value, and so does a machine moved to another adapter.
 - **What this host gives the guest's Direct3D is stated, not chosen**
-  (ADR-013), in the note under that picker (`d3d9_note()`;
+  (ADR-013), in the note under that picker (`d3d9_note()`, which on
+  Automatic is only this host's answer, not the paths it takes
+  elsewhere, user 2026-10-01;
   `graphics_note()` for a front end with no picker, the C smoke among
   them), so nobody finds out after the machine exists. `launcher-core/src/host_gpu.rs` loads the Vulkan
   loader dynamically (no libvulkan is a report, not a crash), creates
@@ -306,6 +337,18 @@ The fields, and why each is what it is:
   and profile libraries), because a rip belongs to the person, not the
   machine that installed it first. A machine keeps only which disc is in
   its drive at boot.
+- **One drive** (2026-10-01, user): a machine's shelf shows its CD drive
+  as a card above the list, and a row's Insert (▶) and the card's Eject
+  act on it whether the machine is up or not. Stopped, they set the boot
+  disc; running, they swap the disc now and set the boot disc too, so
+  the drive still holds it after a restart. While the machine runs the
+  card is what the drive holds this moment, read with `query-block`
+  (`control::cd_medium`) and polled, because `CDSHELF` and the guest's
+  own eject change it too; the matching row reads "In drive". A disc's
+  kind is disc, folder or guest tools (`DiscKind`), not its image
+  format. `launcherx --drive` prints the card and rows; the `drive`
+  check runs it against a paused QEMU. The Qt window keeps its separate
+  Boot and live Insert until mitsuami replaces it.
 - **Sorted by label**, case-insensitively, with **digit runs compared as
   numbers** (`disc 10` after `disc 2`). It is an invariant of
   `DiscLibrary`, not a sort each view does, because the flat file the
@@ -386,6 +429,13 @@ and runs without live control.
   same snapshots `savevm` writes) and lists them with `qemu-img info
   --output=json`, since the table form cannot escape a tag with a space.
   `qemu-img`'s stderr is the window's error text.
+- **A Windows 11 machine's snapshot is three things** (track M20): the
+  disk, its firmware variable store (a qcow2 that takes the same
+  snapshot by name, live and offline; a live load or delete includes it
+  only when it holds that snapshot), and its TPM state, copied to
+  `tpm-snapshots/` after every take and put back by an offline restore
+  (a live load restores it from the vmstate). A snapshot taken before
+  these were covered restores the disk alone.
 - Each mode is refused in the other, because `qemu-img` writing an
   image QEMU has open corrupts it. Restore asks for confirmation (it has
   no undo, and it sits beside Delete).
@@ -821,8 +871,10 @@ checkout it was built from (`target/`, `build/qemu`, `qemu/pc-bios`,
 
 ```
 <prefix>/bin/2ksbox                            the launcher
-<prefix>/bin/2ksbox-player                     the player
-<prefix>/lib/2ksbox/libqemu-embed-i386.so
+<prefix>/bin/2ksbox-player                     the player (era machines)
+<prefix>/bin/2ksbox-player-x86_64              the player for Windows 11
+<prefix>/lib/2ksbox/libqemu-embed-i386.so      the QEMU each links
+<prefix>/lib/2ksbox/libqemu-embed-x86_64.so
 <prefix>/lib/2ksbox/…                          D3D executor + DXVK, wine/
 <prefix>/libexec/2ksbox/qemu-img               ours, patched, kept off PATH
 <prefix>/share/2ksbox/pc-bios/                 QEMU firmware (the player's -L)
@@ -840,7 +892,7 @@ Three rules hold it together:
   `$ORIGIN/../lib/2ksbox` rpath (`@loader_path` on macOS) ordered
   *before* the build-directory one, so a packaged binary never loads a
   developer's library. The packaged player names the dlopened
-  companions to QEMU itself (`player/src/companions.rs`,
+  companions to QEMU itself (`player-core/src/companions.rs`,
   `player --companions`).
 - **One layout or the other, never a mixture.** An installed launcher
   answers only with its own prefix, even for a file the package left

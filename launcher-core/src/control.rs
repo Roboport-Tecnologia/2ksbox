@@ -6,7 +6,7 @@
 //! `-qmp unix:<path>,server,nowait` to the arguments it spawns the
 //! player with and talks QMP to that socket itself, as `tools/qmpc.py`
 //! does to drive a guest. QEMU allows several monitors, so the player's
-//! own in-process one (`player/src/qmp.rs`, on a socketpair with no
+//! own in-process one (`player-core/src/qmp.rs`, on a socketpair with no
 //! filesystem path) is untouched and neither binary needs IPC of its
 //! own. A hand-written bundle run straight through `player` has no
 //! launcher socket, which is the documented "the launcher is optional"
@@ -275,6 +275,23 @@ impl Control {
 /// medium change can name it.
 pub const CDROM_ID: &str = "ide1-cd0";
 
+/// The host path behind a medium name from `query-block`, the inverse of
+/// `disc_library::qemu_medium`.
+fn medium_path(file: &str) -> PathBuf {
+    if let Some(dir) = file.strip_prefix("isodir:") {
+        return dir.into();
+    }
+    if let Some(json) = file.strip_prefix("json:") {
+        let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
+        let dir = v["dir"].as_str().or_else(|| v["file"]["dir"].as_str());
+        let name = v["filename"].as_str().or_else(|| v["file"]["filename"].as_str());
+        if let Some(path) = dir.or(name) {
+            return path.into();
+        }
+    }
+    file.into()
+}
+
 impl Control {
     /// Put `disc` in the CD-ROM tray, replacing whatever is there.
     /// `blockdev-change-medium` does open/eject/insert/close as one
@@ -306,6 +323,29 @@ impl Control {
     /// Open the tray and leave it empty.
     pub fn eject_disc(&mut self) -> Result<(), String> {
         self.execute("eject", serde_json::json!({"id": CDROM_ID, "force": true})).map(|_| ())
+    }
+
+    /// What is in the CD-ROM drive now, or `None` for an empty tray.
+    /// Asked rather than remembered from our own `insert_disc`, because
+    /// the guest changes discs too: CDSHELF (patch 52) and an eject from
+    /// Explorer never pass through the launcher.
+    ///
+    /// The path comes back the way QEMU names the medium: an image's own
+    /// path (a `.cue` is the `cdimage` node over it, which reports the
+    /// file below), and a folder disc as `isodir:<dir>` or, once QEMU
+    /// has rebuilt the name from the node's options, a `json:` object
+    /// with the folder in `dir`. Both are turned back into the folder.
+    pub fn cd_medium(&mut self) -> Result<Option<PathBuf>, String> {
+        let devices = self.execute("query-block", Value::Null)?;
+        let devices = devices.as_array().ok_or("query-block: not an array")?;
+        let drive = devices
+            .iter()
+            .find(|d| d["qdev"].as_str().is_some_and(|q| q.contains(CDROM_ID)))
+            .ok_or_else(|| format!("the running machine has no {CDROM_ID}"))?;
+        let Some(file) = drive["inserted"]["file"].as_str() else {
+            return Ok(None);
+        };
+        Ok(Some(medium_path(file)))
     }
 
     /// The block node holding `disk`, and the snapshots already in it.
@@ -341,8 +381,20 @@ impl Control {
     /// created and finish later (saving a 512 MB guest's RAM takes a
     /// visible moment), so the caller polls `job` below instead of
     /// blocking the UI thread on QEMU's main loop.
-    pub fn start_snapshot_job(&mut self, command: &str, job_id: &str, tag: &str, node: &str) -> Result<(), String> {
-        let mut args = serde_json::json!({"job-id": job_id, "tag": tag, "devices": [node]});
+    ///
+    /// `also` are more block nodes the snapshot covers beside the disk: a
+    /// Windows 11 machine's firmware variable store (`snaps.rs`).
+    pub fn start_snapshot_job(
+        &mut self,
+        command: &str,
+        job_id: &str,
+        tag: &str,
+        node: &str,
+        also: &[String],
+    ) -> Result<(), String> {
+        let mut devices = vec![node.to_string()];
+        devices.extend(also.iter().cloned());
+        let mut args = serde_json::json!({"job-id": job_id, "tag": tag, "devices": devices});
         if command != "snapshot-delete" {
             // The VM state goes in the same qcow2 as the disk, as with
             // `savevm`, so `qemu-img snapshot -a` (the offline path) can

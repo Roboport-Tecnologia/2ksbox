@@ -262,10 +262,10 @@ index 552ee00122..8e77ca5ac0 100644
                                     tcg_get_one_insn_per_tb,
                                     tcg_set_one_insn_per_tb);
 diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
-index a3a1419abd..95685994ac 100644
+index a3a1419abd..aac2fbb5ef 100644
 --- a/accel/tcg/translate-all.c
 +++ b/accel/tcg/translate-all.c
-@@ -646,3 +646,28 @@ void tcg_flush_jmp_cache(CPUState *cpu)
+@@ -646,3 +646,33 @@ void tcg_flush_jmp_cache(CPUState *cpu)
          qatomic_set(&jc->array[i].tb, NULL);
      }
  }
@@ -283,6 +283,11 @@ index a3a1419abd..95685994ac 100644
 + */
 +void tcg_flush_jmp_cache_lazy(CPUState *cpu)
 +{
++    /* As tcg_flush_jmp_cache: no cache yet, or none at all without TCG
++     * (qtest, KVM), where loadvm's tlb_flush still lands here. */
++    if (unlikely(cpu->tb_jmp_cache == NULL)) {
++        return;
++    }
 +    if (TB_JMP_CACHE_GEN && tcg_jump_cache_keep) {
 +        uint32_t gen = cpu->tb_jmp_cache->gen + 1;
 +

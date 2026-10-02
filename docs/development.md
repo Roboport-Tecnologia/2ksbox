@@ -67,9 +67,12 @@ Also: [testing](testing.md), [macOS](build-macos.md),
 
 `scripts/build.sh` is the one command, and the one to run after every
 `git pull`; it redoes only what changed. `--help` lists the stages
-(`deps qemu rust qt dxvk exec guest`; `deps` is macOS only, QEMU's
-libraries and Qt built from source, [build-macos.md](build-macos.md)
-"The libraries"). Naming stages builds only those,
+(`deps qemu edk2 virtio rust qt dxvk exec guest`; `deps` builds QEMU's
+libraries from source, on macOS Qt too, [build-macos.md](build-macos.md)
+"The libraries"; `edk2` and `virtio` are an Arm host's alone, Windows
+11 on Arm's firmware (`scripts/build-edk2.sh`, `patches/edk2/README.md`)
+and drivers disc (`scripts/build-virtio-win.sh`)). Naming
+stages builds only those,
 `--test` follows with `scripts/test.sh host`, and a stage whose tools
 are missing is skipped with the reason in the closing summary. What it
 runs, for driving one stage by hand:
@@ -77,8 +80,15 @@ runs, for driving one stage by hand:
 ```sh
 scripts/prepare-qemu.sh      # overlay qemu-3dfx + embed/, the patch queue, sign_commit
 scripts/configure-qemu.sh    # uv-managed Python; also builds libdisc and libsynth
-ninja -C build/qemu qemu-system-i386 qemu-img qemu-io libqemu-embed-i386.so   # .dylib on macOS
-cargo build --release        # default members; the player links libqemu-embed
+ninja -C build/qemu qemu-system-i386 qemu-system-x86_64 qemu-img qemu-io \
+  libqemu-embed-i386.so libqemu-embed-x86_64.so   # .dylib on macOS, which has no x86_64 target
+cargo build --release        # default members; the player links libqemu-embed-i386
+cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64   # Windows 11's player (Linux)
+# an Arm host (M20 step 4): ninja also builds qemu-system-aarch64 and libqemu-embed-aarch64, then
+scripts/build-edk2.sh        # Windows 11 on Arm's firmware into qemu/pc-bios
+scripts/build-virtio-win.sh  # its drivers disc, build/virtio-win/2ksbox-drivers-arm64.iso
+cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64   # its player
+codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player   # a Mac: HVF
 cargo check --release --workspace          # launcher-capi, the one non-default member
 (cd launcher-qt && cargo build --release)  # the Qt launcher; its own workspace
 # Direct3D pass-through (doc 14):
@@ -113,16 +123,18 @@ What each stage needs to know:
   real `distlib`). It is for a sandbox that has a Python and cannot fetch
   one, such as the Flatpak.
 - **QEMU links a GLib of its own on Linux** (`scripts/build-deps.sh`
-  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static;
+  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static, and
+  libtpms with OpenSSL's libcrypto for patch 75's TPM;
   `build.sh`'s `deps` stage runs it). `configure-qemu.sh` links them
   with their symbols hidden and turns smartcard off, so
   `libqemu-embed` shows no system GLib in `ldd`. The reason is QEMU's
   main loop: it iterates GLib's global default `GMainContext` on QEMU's
   thread, and with a GLib shared with its process, a toolkit that runs
   on that context (GTK; Qt's GLib event dispatcher) would have its
-  sources dispatched there (`spikes/player-gtk/README.md`). GLib 2.90
+  sources dispatched there (`tracks/m22-mitsuami-player.md`, "Why QEMU links a GLib of its own"). GLib 2.90
   wants meson 1.4. **`QEMU_DEPS=system`** links the distribution's GLib
-  and libslirp instead (`build.sh` and `configure-qemu.sh` both read it;
+  and libslirp instead, and libtpms if it has one (`build.sh` and
+  `configure-qemu.sh` both read it;
   `build.sh` reconfigures QEMU when it changes).
 - **A `D3DPT_PROTO_VERSION` bump makes the executor and the guest-tools
   ISO stale, silently.** The suite fails as `d3dpt-dp2: protocol
@@ -260,6 +272,20 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   drain latency, zero-length presses and drops, only when something is
   off.
 
+### The mitsuami player (M22)
+
+`player-mitsuami/` takes the same command line and every `PLAYER_*`
+knob, which are `player-core`'s. It is its own cargo workspace: `cd
+player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
+--features kde,gilrs` for Kirigami), and `LAUNCHER_PLAYER_BIN` points a
+launcher at it. Its chords are the winit player's, as menu shortcuts
+(Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
+Screen, Release Mouse, Send Shortcuts to Guest, the two screenshots), and
+a keyboard close asks in the platform's alert. Two knobs of its own:
+`PLAYER_INPUT_LOG=1` prints every input the surface reports, with the lock
+and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
+`tracks/m22-mitsuami-player.md` has what is checked and what is not.
+
 ### Audio and music
 
 - `PLAYER_AUDIO_MS=40` (default) is the cushion QEMU keeps in the ring
@@ -369,7 +395,7 @@ Diagnostics:
 - While a 3D device is active, the player shows the VGA surface again
   after 1 s without a presented frame if the guest drew on it (an error
   box, a movie, a crashed game): `[display] no 3D frame for …`.
-- `player --companions` prints what `player/src/companions.rs` resolved
+- `player --companions` prints what `player-core/src/companions.rs` resolved
   for the executor, DXVK and the Wine pair; it is the packagers' check.
 
 ### OpenGL pass-through (doc 12)
@@ -433,8 +459,9 @@ finds Qt through `qmake6`. In a checkout the binary is
 root `target/release` (`LAUNCHER_PLAYER_BIN` overrides).
 
 The toolkit-free debug verbs (`launcher_core::cli`: `--print-args`,
-`--print-player-args`, `--new`, `--discs`, `--host-check`, `--paths`,
-`--diagnose`, `--wizard-edit`, …) answer identically from `launcher-qt`
+`--print-player-args`, `--prepare` (a Windows 11 machine's firmware
+variables, made before a hand-run QEMU starts it), `--new`, `--discs`,
+`--host-check`, `--paths`, `--diagnose`, `--wizard-edit`, …) answer identically from `launcher-qt`
 and from `launcherx`, a binary with no toolkit that `scripts/test.sh`
 and the guest tools drive:
 

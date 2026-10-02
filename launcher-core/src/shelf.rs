@@ -17,10 +17,18 @@
 //!
 //! The rows are in the shelf's own order (by label, `disc_library`'s
 //! invariant), so a row number is only good until the next edit.
+//!
+//! **One drive.** To the person at the window a machine has one CD
+//! drive, shown as a card above the shelf. `insert` and `eject` act on it
+//! whether or not the machine is up: on a stopped machine they set the
+//! disc it boots with, and on a running one they also swap the disc now,
+//! so the drive still holds it after a restart. While the machine runs
+//! the card shows what is in the drive at this moment (`refresh_live`),
+//! which the guest can change too.
 
 use crate::bundle::Machine;
 use crate::control;
-use crate::disc_library::{self, Disc, DiscLibrary};
+use crate::disc_library::{self, Disc, DiscKind, DiscLibrary};
 use std::path::{Path, PathBuf};
 
 /// What the window needs when it was opened for a particular machine.
@@ -45,6 +53,10 @@ pub struct Shelf {
     /// `None` when the window was opened for the shelf itself rather
     /// than for one machine.
     machine: Option<MachineContext>,
+    /// What the running machine's drive holds (`None` inside for an
+    /// empty tray), or `None` when its monitor did not answer: a stopped
+    /// machine, or one started outside the launcher.
+    live: Option<Option<PathBuf>>,
     status: Option<String>,
     error: Option<String>,
 }
@@ -69,6 +81,7 @@ impl Shelf {
             ..Default::default()
         };
         self.load(library_path);
+        self.refresh_live();
     }
 
     /// The same, from a bundle path, for a front end that addresses its
@@ -99,7 +112,7 @@ impl Shelf {
     /// The window's title: the machine's name when it has one.
     pub fn title(&self) -> String {
         match &self.machine {
-            Some(m) => format!("Discs — {}", m.name),
+            Some(m) => format!("Discs · {}", m.name),
             None => "Disc shelf".to_string(),
         }
     }
@@ -137,6 +150,145 @@ impl Shelf {
     /// The label for it, ready to print.
     pub fn boot_label(&self) -> String {
         self.boot().map(disc_library::default_label).unwrap_or_else(|| "(empty tray)".to_string())
+    }
+
+    /// Ask the running machine what is in its drive. Called when the
+    /// window opens and after every live change; a front end also calls
+    /// it on a timer while the window is up, because the guest swaps and
+    /// ejects discs on its own. A machine that does not answer is a
+    /// stopped one, not an error.
+    pub fn refresh_live(&mut self) {
+        let probe = self.probe_live();
+        self.apply_live(probe);
+    }
+
+    /// `refresh_live`'s question without its answer applied, so a front
+    /// end polling it can leave the window alone when nothing changed
+    /// (`live_changed`).
+    pub fn probe_live(&self) -> LiveProbe {
+        let Some(dir) = self.bundle_dir() else { return LiveProbe::default() };
+        match control::Control::connect(&control::socket_path(dir)) {
+            Err(_) => LiveProbe::default(),
+            Ok(mut c) => match c.cd_medium() {
+                Ok(disc) => LiveProbe { drive: Some(disc), error: None },
+                Err(e) => LiveProbe { drive: None, error: Some(e) },
+            },
+        }
+    }
+
+    pub fn live_changed(&self, probe: &LiveProbe) -> bool {
+        self.live != probe.drive || probe.error.is_some()
+    }
+
+    pub fn apply_live(&mut self, probe: LiveProbe) {
+        self.live = probe.drive;
+        if probe.error.is_some() {
+            self.error = probe.error;
+        }
+    }
+
+    /// Whether the machine is up, as far as the last `refresh_live` knows.
+    pub fn running(&self) -> bool {
+        self.live.is_some()
+    }
+
+    /// The disc in the drive: what the running machine holds now, or
+    /// what a stopped one boots with.
+    pub fn drive(&self) -> Option<&Path> {
+        match &self.live {
+            Some(disc) => disc.as_deref(),
+            None => self.boot(),
+        }
+    }
+
+    /// The card above the shelf. `None` when the window was opened on the
+    /// shelf alone, which has no drive.
+    pub fn drive_card(&self) -> Option<DriveCard> {
+        self.machine.as_ref()?;
+        Some(match self.drive() {
+            Some(path) => DriveCard {
+                kind: Some(DiscKind::of(path)),
+                title: self.label_for(path),
+                detail: disc_library::detail(path),
+            },
+            None => DriveCard {
+                kind: None,
+                title: "Tray empty".into(),
+                detail: if self.running() {
+                    "Insert a disc from the library below.".into()
+                } else {
+                    "The machine boots without a disc. Insert one from the library below.".into()
+                },
+            },
+        })
+    }
+
+    /// A disc's name: its shelf label, or the file's for a disc that is
+    /// not on the shelf (the guest put it in, or it was removed since).
+    fn label_for(&self, path: &Path) -> String {
+        match self.library.position(path) {
+            Some(i) => self.library.discs[i].label.clone(),
+            None => disc_library::default_label(path),
+        }
+    }
+
+    /// How many discs, beside the shelf's heading.
+    pub fn count_label(&self) -> String {
+        match self.library.discs.len() {
+            1 => "1 disc".into(),
+            n => format!("{n} discs"),
+        }
+    }
+
+    pub fn row_kind(&self, row: usize) -> Option<DiscKind> {
+        self.library.discs.get(row).map(|d| DiscKind::of(&d.path))
+    }
+
+    /// The line under a row's label: "Disc image · ~/Games/zork.iso".
+    pub fn row_detail(&self, row: usize) -> String {
+        self.library.discs.get(row).map(|d| disc_library::detail(&d.path)).unwrap_or_default()
+    }
+
+    /// Whether this row is the disc in the drive, which shows as a mark
+    /// in place of its Insert button.
+    pub fn row_in_drive(&self, row: usize) -> bool {
+        self.machine.is_some() && self.library.discs.get(row).is_some_and(|d| self.drive() == Some(d.path.as_path()))
+    }
+
+    /// Put `disc` in the drive: the boot disc, and on a running machine
+    /// the disc in the tray now as well.
+    pub fn insert(&mut self, disc: &Path) {
+        let label = self.label_for(disc);
+        if self.running() {
+            self.insert_live(disc);
+            if self.error.is_some() {
+                return;
+            }
+            self.refresh_live();
+        }
+        if self.set_boot(Some(disc.to_path_buf())).is_some() {
+            self.status = Some(format!("inserted {label}"));
+        }
+    }
+
+    pub fn insert_row(&mut self, row: usize) {
+        if let Some(path) = self.library.discs.get(row).map(|d| d.path.clone()) {
+            self.insert(&path);
+        }
+    }
+
+    /// Empty the drive, now and at the next boot.
+    pub fn eject(&mut self) {
+        if self.running() {
+            self.eject_live();
+            if self.error.is_some() {
+                return;
+            }
+            self.refresh_live();
+        }
+        if self.set_boot(None).is_some() {
+            self.status = Some("ejected".into());
+        }
     }
 
     /// Write pending shelf edits now.
@@ -199,6 +351,12 @@ impl Shelf {
             Some(iso) => self.add(iso),
             None => self.error = Some("no guest-tools ISO built (guest-tools/build-wrappers.sh)".into()),
         }
+    }
+
+    /// Whether the guest-tools ISO `add_guest_tools` would add is on the
+    /// shelf already, for a check mark on its menu item.
+    pub fn has_guest_tools(&self) -> bool {
+        disc_library::guest_tools_iso().is_some_and(|iso| self.library.position(&iso).is_some())
     }
 
     pub fn remove(&mut self, path: &Path) {
@@ -313,4 +471,21 @@ impl Shelf {
             }
         }
     }
+}
+
+/// The card above the shelf that shows the machine's drive. Eject is
+/// offered when `kind` is set.
+pub struct DriveCard {
+    /// `None` for an empty tray.
+    pub kind: Option<DiscKind>,
+    pub title: String,
+    pub detail: String,
+}
+
+/// What the running machine's monitor said about its drive
+/// (`Shelf::probe_live`).
+#[derive(Default)]
+pub struct LiveProbe {
+    drive: Option<Option<PathBuf>>,
+    error: Option<String>,
 }

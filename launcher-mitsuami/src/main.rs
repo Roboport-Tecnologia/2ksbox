@@ -58,12 +58,27 @@ fn main() {
     // title bars). The PNG is one of the sizes `scripts/gen-icons.sh`
     // derives from the icon the packages install.
     let icon = include_bytes!("../../packaging/icon/2ksbox-256.png");
+    // The toolbar in the title bar beside the caption buttons, as Windows
+    // 11's own apps have it (user), rather than on a row of its own under it.
+    #[cfg(windows)]
+    {
+        use mitsuami::winui::{ToolbarAlign, ToolbarPlace, set_toolbar_place};
+        set_toolbar_place(ToolbarPlace::InTitleBar(ToolbarAlign::End));
+    }
     App::new()
         .id(launcher_core::paths::APP_ID)
         .name("2ksbox")
         .icon(AppIcon::bytes(icon.as_slice()))
-        // Wide enough for a row's five buttons with room to spare, as the
-        // Qt window is.
-        .window("2ksbox", Size::new(1060.0, 560.0), || view! { <machines::MachinesWindow/> })
+        // The machine list and its details, with room for a long path; 50
+        // wider and taller on Windows and GTK (user).
+        .window(
+            "2ksbox",
+            if cfg!(any(windows, all(target_os = "linux", feature = "gtk", not(feature = "kde")))) {
+                Size::new(820.0, 610.0)
+            } else {
+                Size::new(770.0, 560.0)
+            },
+            || view! { <machines::MachinesWindow/> },
+        )
         .run();
 }

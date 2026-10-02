@@ -309,7 +309,7 @@ its pair, and the Wine that runs it, are the app's add-on
 the player names that Wine to QEMU as `D3DPT_WINE`. No Vulkan driver
 travels with the Linux packages; the macOS app carries the LunarG loader
 and KosmicKrisp. The packaged player names the files to QEMU through
-`player/src/companions.rs`, and packagers check `player --companions`,
+`player-core/src/companions.rs`, and packagers check `player --companions`,
 which prints what that rule resolved. `D3DPT_EXEC_LIB` /
 `D3DPT_DXVK_LIB` point `tools/d3dpt-dp2-test` at a staged pair, the
 cheap proof that the files themselves work.

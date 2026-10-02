@@ -55,11 +55,13 @@ copy).
 | `libdisc` | `discx selftest`: synthetic cue/bin, CCD, ISO; reads, EDC/ECC, Q synthesis, MMC responders (doc 17) |
 | `cdimage` | the `cdimage` block driver (patch 50) through QEMU's block layer |
 | `dirdisc` | a folder served as `isodir:` reads back identical through xorriso/bsdtar, qemu-img and SeaBIOS's ATAPI probe (M5g) |
-| `dirshelf`, `shelforder` | a folder on the disc shelf and on the boot drive; the shelf is one list in one order |
+| `dirshelf`, `shelforder`, `drive` | a folder on the disc shelf and on the boot drive; the shelf is one list in one order; the shelf's one drive: Insert and Eject set the boot disc, and on a running machine (a paused QEMU here) also swap the tray, which the card reads back through `query-block`, a folder disc included |
+| `accel-choices` | the acceleration picker offers hardware acceleration only where the host has it (`launcherx --kvm`), checked on this host and under `bwrap` with a `/dev` that has no `/dev/kvm`; a machine already set to it keeps the entry (doc 07) |
+| `machine-details` | what the machine window shows of a chosen machine (`launcherx --machine-details`): the family and state under its name, a group per page of the form with the form's labels (System, Storage, then the form's order), a disk by its file name, no Direct3D row on a machine without our adapter (doc 07) |
 | `clone`, `qt-clone` | **Clone…** gives a machine with its own disk copy and snapshots, the original untouched; refused while the machine runs (doc 07); "same hard disk" boots the original's disk, copies none of it, warns, and goes ahead while the machine runs; the Qt window is as tall as its content (`;show` and the layout line), and its checkbox reaches the model (`;same`) |
 | `snapshot-tree` | the snapshot window's tree over a real qcow2 (doc 07): take, restore, take again gives siblings, not a line; a delete moves the branch up; a snapshot deleted or taken by hand is dropped from the record or shown at the top level; the clone carries the tree |
 | `shader-defaults` | the first-run shader offer without a toolkit, and the library's default profile: the first download marks CRT Aperture, a machine on "(default)" resolves to it and follows it when moved, a named profile does not, a second run of the starters never moves it, clearing it and a deleted profile both mean no default |
-| `qt-wizard`, `qt-close`, `qt-esc`, `qt-profilesclose`, `qt-profile`, `qt-shelf`, `qt-firstrun`, `qt-snapshots` | real Qt windows driven offscreen: what the controls show agrees with the shared model (the shader profile combo shows the default among the app default and two planted profiles); close/Esc reach exactly one window; closing the profile list after a cancelled wizard does not bring the wizard back; the form opens where it should; the snapshots list is the one item that grows and its header's columns start where its rows' do, at the window's own size and at its narrowest (needs a built `launcher-qt`) |
+| `qt-wizard`, `qt-close`, `qt-esc`, `qt-profilesclose`, `qt-profile`, `qt-shelf`, `qt-firstrun`, `qt-snapshots` | real Qt windows driven offscreen, on every family (Windows 11 included): what the controls show agrees with the shared model (the shader profile combo shows the default among the app default and two planted profiles); close/Esc reach exactly one window; closing the profile list after a cancelled wizard does not bring the wizard back; the form opens where it should; the snapshots list is the one item that grows and its header's columns start where its rows' do, at the window's own size and at its narrowest (needs a built `launcher-qt`) |
 | `host-check` | `launcherx --host-check`: no Vulkan reported unavailable, software Vulkan warned not refused, loader and floor always named (ADR-013/018) |
 | `optimizations` | the form's emulation switches land on `-cpu` / `-accel tcg` and our QEMU accepts all fourteen flipped; an untouched machine emits nothing; `pinned-regs` never reaches the command line |
 | `pointer` | "Seamless mouse": Windows gets `-usb -device usb-tablet`, DOS neither; toggling removes/restores both |
@@ -76,6 +78,8 @@ copy).
 | `sb16-irq` | a DSP reset over auto-init DMA raises no IRQ 5 edge; each silence block exactly one (patch 25) |
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
 | `machine-map` | `info mtree` of a PC machine: the `mesapt` pass-through region is there, and no Glide one (patch 74, ADR-020) and no SysBus `d3dpt` one (M16 step 7) |
+| `win11-snapshots` | a new Windows 11 machine's offline snapshot (take, restore, delete through `launcherx --snapshots`) covers its firmware variable store and a copy of its TPM state, with a snapshot name that has a space; a clone copies the TPM, and `--clone --new-tpm` leaves it behind (M20) |
+| `tpm-qtest` | the libtpms TPM backend under qtest: a fresh TPM, a restart on its state file, a savevm / loadvm round trip (`tools/tpm-qtest.py`, patch 75); needs `qemu-system-x86_64`, or `-i386` on a Mac |
 | `no-optionals` | no disabled library (libpng and libjpeg among them) is linked, named in a binary, or present as a QAPI audio enumerator; on a Mac, no Homebrew path in any load command of `libqemu-embed`, `qemu-system-i386` or `qemu-img`, whose libraries are our own static builds (`build-macos.md` "The libraries") |
 | `icons` | `scripts/gen-icons.sh --check` |
 | `package` | `scripts/package-linux.sh --no-tar` (or `package-macos.sh --no-sign --no-dmg` on a Mac) |
@@ -88,6 +92,7 @@ copy).
 | `exec-no-device` | the dp2 test with both Vulkan loader variables at a missing file, so DXVK's constructor throws out of `Direct3DCreate9`; it must end in the test's own exit 77, never a signal (DXVK patch 09, the executor's once-per-library rule) |
 | `crtcal` | `build/crtcal-render`: every calibration pattern's circle round on its tube |
 | `mode-sweep` | `player --mode-sweep`: the display path without a guest |
+| `player-mitsuami` | `tools/player-mitsuami-test.sh`: the mitsuami player (M22) on a private headless sway, the mode sweep through it, its test pattern read back off the compositor, a key reaching its surface; skipped unless `player-mitsuami` is built and sway, grim and wtype are there |
 | `d3dgame9-nat`, `d3dfeat9-nat` | the reference scene / feature test natively on DXVK, against the rig golden; the guest stage's oracle |
 
 ### Guest-stage checks
@@ -220,6 +225,7 @@ another.
 | Tool | Proves / runs |
 |---|---|
 | `target/release/player --mode-sweep <dir>` | every mode through mode analysis, geometry and a real CRT preset: aspect, integer vertical scale, the preset's parameters, the scanline count counted in the frame; `PLAYER_MODE_PARAMS=0` the control; `mode-sweep` |
+| `tools/player-mitsuami-test.sh [out]` | the mitsuami player (`player-mitsuami/`, M22, built from its own directory) on a private headless sway (`WLR_BACKENDS=headless`), so nothing opens on the desktop: `--mode-sweep` through it (player-core's session driven from mitsuami's loop), the test pattern on its `GpuSurface` read back with `grim` (five or more bright colours across the window's middle row), and a `wtype` Windows key arriving as `MetaLeft` down and up (`PLAYER_INPUT_LOG`). The headless seat has no pointer, so nothing here clicks; a guest run's recipe is in `tracks/m22-mitsuami-player.md`; `player-mitsuami` |
 | `build/crtcal-render <dir>` (`tools/crtcal-render.c`) | doc 09's eight calibration patterns (`guest-tools/src/crtcal.h`) at every era mode, circles round; `crtcal`. `TESTS\CRTCAL.EXE` shows them on a real tube, `TESTS\TEXTCAL.COM` the 720×400 text-mode ones, `player --shader <preset> --calib <bmp\|dir>` renders them through a preset at 3200×2400 |
 | `tools/vga-dirty-guest-test.py [13h\|vesa] [std\|cirrus]` | the display sees what the guest wrote to video memory, page by page (patch 28): polls screendumps throughout (an idle display hides lost dirty bits), stripes `rep stosw` against a byte loop (`FLIP=1`), and the guest reads back its writes (`VERIFY_BAD=`) to separate a lost store from a missed redraw; `--refill`. Two traps that look like a QEMU bug: `c6_to_8()` expands the 6-bit DAC by replicating the low bit (33 reads back 135, not 132), and the VBE window granularity is 64 KiB on std, 16 KiB on the Cirrus (read it from the mode-info block). `VBEPAL=1 … vesa` is the `vbe-palette` check: our VGA BIOS's 4F09h (`patches/seabios/`, `scripts/build-vgabios.sh`, `firmware/vgabios-*.bin`) |
 | `tools/xp-driver-test.sh <image> <mode>` | the XP display-driver loop headless (doc 15), on Windows 7 too (track M18: `MEM=2048`; `install` then runs DRVINST in an administrator's console opened from the Start menu's search box and clicks the unsigned-driver prompt, the family read from `ver` on COM1): `install`, `ddtest` (8/16/32 bpp + windowed), `modes`, `vesa` (the inbox VGA driver's VESA mode change with no driver of ours installed, the patch 44 regression of 2026-09-24; PASS/FAIL from the screendump), `d3d7` (frame diffed against `d3dpt-dp2-test`'s), `d3dgame8` (XP's own d3d8.dll on the DX8 DDI), `shtest`, `cktest`, `ebtest [-rgb]`, `gamma`, `probe <NAME>`, `probes` (all ten DX8 probes, one boot), `cubetest`, `d3dgame9` (D3DGAME9 through XP's own d3d9.dll, M16), `d3dfeat9` (D3DFEAT9 the same way, its frame and query / getter lines against the native run's byte for byte, M16), `caps` (DX8CAPS + DX9CAPS), `winetest` (Wine's suites, M16), `cmd '<line>'`, `bat <file>` (staged as `E:\RUN.BAT`: the Run box truncates; `UNTIL=word` waits for the batch to echo it to COM1). Knobs: `CPU=pentium3`, `GAME_ISO=`, `SHOTS=n`, `SHOT_KEYS="12:esc"`, `QEMU_EXTRA=`, `VGA=cirrus` (inbox-driver control), `DRIVER_ISO=` (another build's driver), `NO_EXEC=1`, `EXEC=wine`, `FBVER=N` (the adapter reports another register-set version), `KEEP=1` (leave the guest up), `NO_KVM=1`, `OUT=`. `install` puts DRVINST's lines on COM1 and screendumps every 20 s |
@@ -321,6 +327,7 @@ another.
 | `scripts/win-sideload.ps1 [<msix>] [-Check\|-NoInstall\|-Remove]` | on the PC: certificate, trust (one UAC prompt), sign, install. With `-Check`, the installed launcher's `--diagnose` run with package identity must write its `library … (packaged)` line into `%USERPROFILE%\2ksbox\launcher.log`; the real answer to "where does a Store install keep the machines" |
 | `appcert.exe test -appxpackagepath <signed msix> -reportoutputpath <xml>` | the Windows App Certification Kit on the sideload's signed copy: the checks Store certification runs. `OVERALL_RESULT` must be `PASS` (a WARNING also certifies; the DPI one was fixed by the executables' manifest); the two optional tests that fail by the package's nature are named in `build-windows.md` "The Store package" |
 | `LAUNCHER_SHOT=<png> launcher-mitsuami` | the mitsuami launcher (M19) opens its window with its toolkit found and photographs the content; `LAUNCHER_SCREEN` picks a window and what it opens on (the table in the track doc), and the create and saveprofile runs must print `saved`; `LAUNCHER_PICK=<label>=<path>` answers the named path field's dialog and prints the dialog it would have opened (its start folder and filters); on Linux under `gtk4-broadwayd` (`GDK_BACKEND=broadway`), the recipe in `tracks/m19-mitsuami-launcher.md`. Not in `scripts/test.sh` yet (step 7) |
+| `tools/rfb-shot.py <port> <png>` | one frame of a local VNC server: the whole KDE window, sidebar included, on Qt's VNC platform, where `LAUNCHER_SHOT` sees only the content (GTK: Broadway's web page) |
 | `tools/qtmin/` | the smallest cross-built cxx-qt binary in three rungs, for "which layer faults before `main`" on Windows (answer in its README) |
 | `tools/gpl-scan.py`, `tools/third-party-notices.py` | GPL-2.0-only QEMU files (after a QEMU bump, ADR-010) and the crate licence listing |
 
@@ -345,6 +352,40 @@ Local only; each works on a raw copy or overlay of an image.
 | `tools/xp-diablo.sh install\|play <image>` | Diablo on 8 bpp palettized modes into Tristram |
 
 ## Other tools
+
+`tools/tpm-qtest.py [qemu-system-x86_64]` (the `tpm-qtest` host check;
+patch 75, M20 step 2): the libtpms TPM backend with no guest. QEMU runs
+under `-accel qtest` and the script is the CPU, sending raw TPM 2.0
+commands through `tpm-crb`'s registers as QEMU's `tests/qtest/tpm-util.c`
+does. A fresh TPM (Startup, GetRandom, a PCR extend checked against
+SHA-256 computed in Python, an NV index), a second QEMU on the same state
+file (the index survives, the PCR is reset), and a savevm / loadvm round
+trip (PCR and index come back, and a third QEMU reads the snapshot's
+index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
+`scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
+`tpm-crb`.
+
+`tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
+Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a
+swtpm TPM. `install` runs setup from `tools/win11-spike/autounattend.xml`
+(one click on the product key page) and `spike.ps1` reports the build,
+firmware, TPM and Secure Boot on COM1; `boot` times power-on to the
+desktop and ends with the power button. `ACCEL=tcg`, `OUT=`, `SMP=`,
+`MEM=`, `VNC=`, `SHOT=`, `SETTLE=`; needs `swtpm`, `xorriso`, `7z`.
+`ARCH=aarch64` (M20 step 4) is Windows 11 on Arm from Microsoft's Arm64
+ISO on `qemu-system-aarch64`'s `virt` board under HVF, the launcher's
+machine: our EDK2 (`scripts/build-edk2.sh`; `FW_ARM=edk2` for QEMU's,
+which needs `SB_BYPASS=1`), the disk and CDs on AHCI, `tpm-tis-device`
+with the libtpms TPM, `ramfb`, HD Audio. Windows does not make the
+board's PL011 a COM port, so the guest also writes its lines to a FAT
+disk on USB (`OUT/report.img`), which the script reads with mtools;
+`PROBE=1` on `boot` runs `tools/win11-spike/probe.ps1` from it elevated
+(the TPM through `tpmtool` and WMI, every storage, display, sound and
+USB device, the network adapters and addresses, the driver store, the
+volumes). `LANG_ISO=en-US` stands in for `7z`. `NET=1` adds a network
+card (`virtio-net` on aarch64, whose driver comes from the drivers disc,
+`build/virtio-win/2ksbox-drivers-arm64.iso`, attached when it exists,
+`DRIVERS=` for none); `GPU=virtio-gpu-pci` swaps ramfb for virtio-gpu.
 
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),

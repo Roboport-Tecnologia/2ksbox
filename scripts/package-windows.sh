@@ -405,7 +405,7 @@ if command -v wine >/dev/null; then
   # import table: here, the Direct3D executor and the DXVK `d3d9` it runs
   # on. Nothing above can see them, which is how the Linux packages once
   # shipped without them. The staged *player* knows where they should be
-  # (`player/src/companions.rs`), so ask it.
+  # (`player-core/src/companions.rs`), so ask it.
   companions=$(runw 2ksbox-player.exe --companions || true)
   if [ -n "$companions" ]; then
     printf '%s\n' "$companions"

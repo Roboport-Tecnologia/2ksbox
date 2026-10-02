@@ -17,15 +17,27 @@
 #           (docs/build-macos.md, "The libraries"). Linux: QEMU's own
 #           glib (pcre2, glib, libslirp; static), so QEMU never shares a
 #           glib with the process it is embedded in (QEMU_DEPS in
-#           docs/development.md); the rest is the distribution's.
+#           docs/development.md), and libtpms with its libcrypto; the
+#           rest is the distribution's.
 #   qemu    prepare-qemu.sh (overlay + patch queue) -> configure-qemu.sh
-#           -> ninja: qemu-system-i386, qemu-img, qemu-io,
-#           libqemu-embed-i386.{so,dylib}
+#           -> ninja: qemu-system-i386, qemu-system-x86_64 (not on a Mac), qemu-img,
+#           qemu-io, libqemu-embed-{i386,x86_64}.{so,dylib} (x86_64 is
+#           Windows 11's, linked by a player of its own; see `rust`), and
+#           on an Arm host qemu-system-aarch64 and libqemu-embed-aarch64
+#           (Windows 11 on Arm)
+#   edk2    Arm hosts: build-edk2.sh, the firmware of Windows 11 on Arm
+#           (EDK2's ArmVirtQemu with Secure Boot and AHCI) into
+#           qemu/pc-bios. Needs clang and lld (Homebrew's on a Mac)
+#   virtio  Arm hosts: build-virtio-win.sh, Windows 11 on Arm's drivers
+#           disc (virtio-win's ARM64 network and display drivers, from a
+#           pinned download) into build/virtio-win. Needs xorriso
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
 #           build/qemu. Then `cargo check --release --workspace` keeps the
-#           one non-default member, `launcher-capi`, compiling.
+#           one non-default member, `launcher-capi`, compiling. On Linux
+#           also Windows 11's player, into target/qemu-x86_64; on an Arm
+#           host Windows 11 on Arm's, into target/qemu-aarch64.
 #   qt      cargo build --release in launcher-qt/ (its own workspace):
 #           the Qt 6 / QML launcher that every package ships (ADR-015).
 #           Needs Qt 6 development files. Without them the stage is
@@ -65,7 +77,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -86,7 +98,7 @@ while [ $# -gt 0 ]; do
     -t|--test) RUN_TEST=1; shift ;;
     --x86_64) X86_64=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    deps|qemu|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
+    deps|qemu|edk2|virtio|rust|qt|dxvk|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -121,7 +133,7 @@ fi
 
 EXPLICIT=""
 if [ ${#STAGES[@]} -eq 0 ]; then
-  STAGES=(deps qemu rust qt dxvk exec guest)
+  STAGES=(deps qemu edk2 virtio rust qt dxvk exec guest)
 else
   EXPLICIT=1
 fi
@@ -263,7 +275,7 @@ if want qemu; then
     if STAMP_GITS="qemu third_party/qemu-3dfx" \
        stamp_stale qemu-prepare patches/qemu embed d3dpt/hw d3dpt/d3dpt_proto.h \
          d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h libdisc/qemu libdisc/libdisc.h \
-         libsynth/qemu libsynth/libsynth.h gamepad/qemu voodoo firmware \
+         libsynth/qemu libsynth/libsynth.h gamepad/qemu tpm/qemu voodoo firmware \
          scripts/prepare-qemu.sh third_party/qemu-3dfx/00-qemu92x-mesa-glide.patch; then
       scripts/prepare-qemu.sh
       stamp_save
@@ -362,10 +374,50 @@ if want qemu; then
         cargo build --release -p libdisc -p libsynth ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"}
       fi
       say "qemu: ninja"
+      # Windows 11's QEMUs, where configure-qemu.sh made them: x86_64
+      # everywhere but a Mac, aarch64 on an Arm host.
+      W11=()
+      for t in x86_64 aarch64; do
+        if grep -q "^build qemu-system-$t" "$QB/build.ninja"; then
+          W11+=("qemu-system-$t" "libqemu-embed-$t.$SO")
+        fi
+      done
       ninja -C "$QB" ${JOBS[@]+"${JOBS[@]}"} \
-        qemu-system-i386 qemu-img qemu-io "libqemu-embed-i386.$SO"
+        qemu-system-i386 qemu-img qemu-io "libqemu-embed-i386.$SO" ${W11[@]+"${W11[@]}"}
       BUILT+=(qemu)
     fi
+  fi
+fi
+
+# --- edk2 -------------------------------------------------------------
+# Windows 11 on Arm's firmware, where QEMU has the aarch64 target. Its own
+# stamp (build/edk2/.stamp) makes an unchanged run a no-op.
+if want edk2; then
+  if [ -n "$ROSETTA" ] || ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
+    skip edk2 "an x86 host runs no Windows 11 on Arm" || true
+  elif [ "$(uname -s)" = Darwin ] && ! [ -x /opt/homebrew/opt/lld/bin/ld.lld ]; then
+    skip edk2 "no lld (brew install llvm lld; build tools only)" || true
+  elif [ "$(uname -s)" != Darwin ] && ! { have clang && have ld.lld; }; then
+    skip edk2 "no clang / lld" || true
+  else
+    say "edk2: build-edk2.sh"
+    scripts/build-edk2.sh
+    BUILT+=(edk2)
+  fi
+fi
+
+# --- virtio -----------------------------------------------------------
+# Windows 11 on Arm's drivers disc, beside its firmware. Its own stamp
+# (build/virtio-win/.stamp); the first run downloads virtio-win's ISO.
+if want virtio; then
+  if [ -n "$ROSETTA" ] || ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
+    skip virtio "an x86 host runs no Windows 11 on Arm" || true
+  elif ! have xorriso; then
+    skip virtio "no xorriso" || true
+  else
+    say "virtio: build-virtio-win.sh"
+    scripts/build-virtio-win.sh
+    BUILT+=(virtio)
   fi
 fi
 
@@ -378,6 +430,26 @@ if want rust; then
   else
     say "rust: cargo build --release (default members)"
     cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"}
+    # The Windows 11 player (track M20): the same player linked to
+    # libqemu-embed-x86_64. A build of its own, in its own target
+    # directory, because a feature is shared by everything one cargo run
+    # builds. Linked rather than opened at run time for patch 63 (doc 22
+    # §5.0). Linux only for now: the family runs nowhere else yet.
+    if [ "$(uname -s)" = Linux ]; then
+      say "rust: the x86_64 player (Windows 11)"
+      cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64 ${JOBS[@]+"${JOBS[@]}"}
+    fi
+    # Windows 11 on Arm's player, where QEMU has the aarch64 target (an
+    # Arm host, configure-qemu.sh). On a Mac it needs Hypervisor.framework's
+    # entitlement even ad-hoc signed, and cargo's relink drops it, so it
+    # is signed again on every build.
+    if [ -f "build/qemu/libqemu-embed-aarch64.$SO" ] && [ -z "$ROSETTA" ]; then
+      say "rust: the aarch64 player (Windows 11 on Arm)"
+      cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64 ${JOBS[@]+"${JOBS[@]}"}
+      if [ "$(uname -s)" = Darwin ]; then
+        codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player
+      fi
+    fi
     # The member that is not a default member (Cargo.toml):
     # `launcher-capi`, a cdylib + staticlib of the whole launcher that
     # nothing installs. Checked rather than built, so it cannot rot. Once

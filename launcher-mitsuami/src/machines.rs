@@ -1,5 +1,5 @@
 //! The machine library window, over `launcher_core::machines::Machines`:
-//! the scan, the running-player map, what "Play" does (publish the shelf,
+//! the scan, the running-player map, what "Start" does (publish the shelf,
 //! derive the monitor socket from the bundle directory, spawn) and the
 //! reap that notices a player exiting.
 //!
@@ -13,7 +13,8 @@
 //! The list is keyed by bundle directory, and a keyed row stays mounted
 //! while its key does, so a row reads its fields through the model by
 //! that key rather than holding a copy: a player exiting changes only its
-//! row's "Running" label.
+//! row's state line. Beside the list, the chosen machine's details (the
+//! core's `details`), as UTM and VirtualBox show theirs.
 
 use crate::clone::{CloneWindow, Cloner};
 use crate::firstrun::Offer;
@@ -21,26 +22,30 @@ use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
 use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
-use launcher_core::machines::Machines;
+use launcher_core::machines::{DetailGroup, Machines};
+use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-/// The widths of the three text columns, shared by the header and every
-/// row so they line up.
-const NAME_W: f32 = 190.0;
-const FAMILY_W: f32 = 80.0;
-const SHADER_W: f32 = 170.0;
+/// The machine list's width, beside the details.
+const LIST_W: f32 = 260.0;
+/// The details' label column.
+const LABEL_W: f32 = 150.0;
 
 #[derive(Clone, Copy)]
 pub struct Library {
     /// Never set: a `Copy` handle on the model, so the store is `Copy`.
     model: Signal<Rc<RefCell<Machines>>>,
     version: Signal<u64>,
-    /// The line at the end of the toolbar: what "Play" last did.
-    pub status: Signal<String>,
+    /// A start that failed, as the alert's headline and the core's error,
+    /// until the window shows it.
+    failure: Signal<Option<(String, String)>>,
+    /// The list's selection, by bundle directory; `current` is what the
+    /// details show.
+    selected: Signal<Vec<PathBuf>>,
 }
 
 impl Store for Library {
@@ -48,7 +53,8 @@ impl Store for Library {
         Library {
             model: signal(Rc::new(RefCell::new(Machines::load()))),
             version: signal(0),
-            status: signal(String::new()),
+            failure: signal(None),
+            selected: signal(Vec::new()),
         }
     }
 }
@@ -99,6 +105,19 @@ impl Library {
         self.read(|m| row_of(m, dir).and_then(|row| f(m, row)).unwrap_or_default())
     }
 
+    /// The machine the details show: the selected one, or the first while
+    /// none is (at start, or after the selected one went).
+    fn current(&self) -> Option<PathBuf> {
+        let dirs = self.dirs();
+        let chosen = self.selected.with(|s| s.first().cloned()).filter(|d| dirs.contains(d));
+        chosen.or_else(|| dirs.first().cloned())
+    }
+
+    /// A machine's details, by its bundle directory.
+    fn details(&self, dir: &Path) -> Vec<DetailGroup> {
+        self.read(|m| row_of(m, dir).map(|row| m.details(row)).unwrap_or_default())
+    }
+
     fn is_running(&self, dir: &Path) -> bool {
         self.read(|m| m.is_running_dir(dir))
     }
@@ -106,12 +125,14 @@ impl Library {
     fn play(&self, dir: &Path) {
         self.write(|m| {
             let Some(row) = row_of(m, dir) else { return false };
-            let (line, started) = match m.play(row) {
-                Ok(line) => (line, true),
-                Err(e) => (e, false),
-            };
-            self.status.set(line);
-            started
+            match m.play(row) {
+                Ok(_) => true,
+                Err(e) => {
+                    let name = m.machine(row).map(|x| x.name.clone()).unwrap_or_default();
+                    self.failure.set(Some((Machines::start_failed(&name), e)));
+                    false
+                }
+            }
         })
     }
 
@@ -140,7 +161,7 @@ pub fn MachinesWindow() -> impl View {
     let offer = use_store::<Offer>();
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm(&["", "create", "clonego", "firstrun"]);
+    crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
     // The first-run offer asks on a real start, and on
     // `firstrun[:<answers>]` with scripted answers; every other headless
     // screen runs without it, as the Qt build's do.
@@ -167,33 +188,33 @@ pub fn MachinesWindow() -> impl View {
         cloner.open_for(Path::new(&bundle), false);
         cloner.set_same_disk(same);
     }
-    // `snapshots:<machine.toml>[:ask=<name>]`: the window on a machine,
-    // with a row's Restore asking.
-    if let Some(arg) = crate::shot::screen("snapshots") {
-        let (bundle, ask) = match arg.rsplit_once(":ask=") {
-            Some((bundle, name)) => (bundle.to_owned(), Some(name.to_owned())),
-            None => (arg, None),
-        };
+    // `snapshots:<machine.toml>`: the window on a machine.
+    if let Some(bundle) = crate::shot::screen("snapshots") {
         snaps.open_for(Path::new(&bundle), false);
-        if let Some(name) = ask {
-            snaps.ask(&name);
-        }
     }
-    // `shelf[:<disc>]`: the shared shelf, with a disc added through its
-    // Add field; `discs:<machine.toml>[:boot=<disc>]`: the shelf for a
-    // machine, with a disc ticked to boot with.
+    // `takesnapshot:<machine.toml>`: the window on a machine, with Take
+    // snapshot's name sheet open.
+    if let Some(bundle) = crate::shot::screen("takesnapshot") {
+        snaps.open_for(Path::new(&bundle), false);
+        snaps.ask_name();
+    }
+    // `shelf[:<disc>]`: the shared shelf, with a disc added as the Add
+    // menu would; `discs:<machine.toml>[:insert=<disc>]`: the shelf for a
+    // machine, with a disc's ▶ pressed.
     if let Some(add) = crate::shot::screen("shelf") {
         discs.open_library(library);
-        discs.add(&add);
+        if !add.is_empty() {
+            discs.add(Path::new(&add));
+        }
     }
     if let Some(arg) = crate::shot::screen("discs") {
-        let (bundle, boot) = match arg.split_once(":boot=") {
+        let (bundle, insert) = match arg.split_once(":insert=") {
             Some((bundle, disc)) => (bundle.to_owned(), Some(PathBuf::from(disc))),
             None => (arg, None),
         };
-        discs.open_for(PathBuf::from(bundle), library, false);
-        if boot.is_some() {
-            discs.set_boot(boot);
+        discs.open_for(PathBuf::from(bundle), library);
+        if let Some(disc) = insert {
+            discs.insert(&disc);
         }
     }
     // `profiles`: the profile list; `editor:<preset>[;<image>[;<p>=<v>]]`:
@@ -214,33 +235,64 @@ pub fn MachinesWindow() -> impl View {
     if let Some(arg) = crate::shot::screen("create") {
         wizard.create_for_screen(&arg, library);
     }
+    // `select:<machine.toml>`: the window with that machine chosen, as a
+    // click on its row would.
+    if let Some(bundle) = crate::shot::screen("select") {
+        let dir = Path::new(&bundle).parent().map(Path::to_path_buf).unwrap_or_default();
+        library.selected.set(vec![dir]);
+    }
+    // A start that failed says why in the platform's alert, over this
+    // window.
+    let ui = inject::<Ui>().expect("a window's component");
+    let window = inject::<CurrentWindow>().map(|CurrentWindow(w)| w);
+    effect(move || {
+        let Some((headline, detail)) = library.failure.get() else { return };
+        library.failure.set(None);
+        let alert = Alert::new(headline).message(detail).style(AlertStyle::Critical).button("OK");
+        let asker = ui.clone();
+        ui.spawn_local(async move {
+            asker.alert(window, alert).await;
+        });
+    });
+    // The list shows what the details do: the first machine until one is
+    // chosen, and the first again when the chosen one goes.
+    effect(move || {
+        let shown: Vec<PathBuf> = library.current().into_iter().collect();
+        if library.selected.with_untracked(|s| *s != shown) {
+            library.selected.set(shown);
+        }
+    });
+    let shelf = move || view! { <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button> };
+    let shaders_button = move || view! { <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button> };
+    // On macOS 26 one item, a row, so one capsule (user); elsewhere two
+    // items, which the platform spaces as its toolbars do.
+    let shelf_and_shaders = platform! {
+        macos => view! { <Row>{shelf()}{shaders_button()}</Row> },
+        _ => (shelf(), shaders_button()),
+    };
     view! {
-        <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
+        <Column grow=1.0 min_height=0>
             <Toolbar>
                 <Show when=move || offer.progress.get().is_some()>
-                    <Row gap=Spacing::Sm align=Align::Center>
-                        <Spinner label="Downloading"/>
-                        <Text>{move || offer.progress.get().unwrap_or_default()}</Text>
-                    </Row>
+                    // Only a bar, on the toolbar with no capsule: the size
+                    // isn't known until it ends, and the headline is its
+                    // label for a screen reader.
+                    <Progress
+                        label=move || offer.progress.get().unwrap_or_default()
+                        indeterminate=true
+                        width=160
+                    />
                 </Show>
-                <Text max_lines=1 max_width=320 tooltip=library.status>{library.status}</Text>
+                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
+                {shelf_and_shaders}
             </Toolbar>
-            <Text text_style=TextStyle::Title>"Machines"</Text>
-            <Row padding_x=Spacing::Md gap=Spacing::Md>
-                <Text text_style=TextStyle::Headline width=NAME_W>"Name"</Text>
-                <Text text_style=TextStyle::Headline width=FAMILY_W>"Family"</Text>
-                <Text text_style=TextStyle::Headline width=SHADER_W>"Shader"</Text>
-            </Row>
-            <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineList/> }>
-                <Column grow=1.0 align=Align::Center justify=Justify::Center>
-                    <Text>{move || library.read(|m| format!("No machines yet.\n{}", m.library_dir.display()))}</Text>
+            <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
+                <Column grow=1.0 gap=Spacing::Md align=Align::Center justify=Justify::Center padding=Spacing::Xl>
+                    <Text text_style=TextStyle::Title>"No machines yet"</Text>
+                    <Text color=Color::SecondaryLabel>{move || library.read(|m| m.library_dir.display().to_string())}</Text>
+                    <Button role=ButtonRole::Default @click=move || wizard.open_fresh()>"New machine"</Button>
                 </Column>
             </Show>
-            <Row gap=Spacing::Sm>
-                <Button @click=move || wizard.open_fresh()>"New machine…"</Button>
-                <Button @click=move || discs.open_library(library)>"Disc shelf…"</Button>
-                <Button @click=move || shaders.open_list()>"Shader profiles…"</Button>
-            </Row>
             <WizardWindow/>
             <CloneWindow/>
             <SnapshotsWindow/>
@@ -251,73 +303,262 @@ pub fn MachinesWindow() -> impl View {
     }
 }
 
+/// The library: the machines down the leading side, and the chosen one's
+/// details beside them, as UTM and VirtualBox lay theirs out.
 #[component]
-fn MachineList() -> impl View {
+fn MachineLibrary() -> impl View {
     let library = use_store::<Library>();
+    // On macOS the list a shade darker than the details beside it (user),
+    // in light and dark alike: a colour AppKit asks for each appearance.
+    let darker = platform! {
+        macos => mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
+            table.setBackgroundColor(&darker_list_background())
+        }),
+        _ => Tweak::none(),
+    };
     view! {
-        <List each=move || library.dirs() key=|d: &PathBuf| d.clone() grow=1.0 let:dir>
-            <MachineRow dir=dir/>
-        </List>
+        <Row grow=1.0 min_height=0>
+            <List
+                each=move || library.dirs()
+                key=|d: &PathBuf| d.clone()
+                native=darker
+                selection_mode=SelectionMode::Single
+                selected=library.selected
+                list_style=ListStyle::Plain
+                width=LIST_W
+                shrink=0.0
+                @activate=move |dir: PathBuf| {
+                    if !library.is_running(&dir) {
+                        library.play(&dir);
+                    }
+                }
+                let:dir
+            >
+                <MachineRow dir=dir/>
+            </List>
+            <Separator orientation=Orientation::Vertical/>
+            <Show when=move || library.current().is_some()>
+                <Details/>
+            </Show>
+        </Row>
     }
 }
 
-/// One machine: its name, family and shader, and what can be done to it.
-#[component]
-fn MachineRow(dir: PathBuf) -> impl View {
+/// The machine list's background on macOS: the details' (control
+/// background, 0x1E in dark, white in light) a few steps darker.
+#[cfg(target_os = "macos")]
+fn darker_list_background() -> mitsuami::appkit::objc2::rc::Retained<mitsuami::appkit::objc2_app_kit::NSColor> {
+    use mitsuami::appkit::objc2_app_kit::{NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor};
+    use mitsuami::appkit::objc2_foundation::NSArray;
+    use std::ptr::NonNull;
+    let (light, dark) = (
+        NSColor::colorWithSRGBRed_green_blue_alpha(0.949, 0.949, 0.949, 1.0),
+        NSColor::colorWithSRGBRed_green_blue_alpha(0.090, 0.090, 0.090, 1.0),
+    );
+    let provider = block2::RcBlock::new(move |appearance: NonNull<NSAppearance>| -> NonNull<NSColor> {
+        let names = unsafe { NSArray::from_slice(&[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]) };
+        let is_dark = unsafe { appearance.as_ref() }
+            .bestMatchFromAppearancesWithNames(&names)
+            .is_some_and(|name| unsafe { &*name == NSAppearanceNameDarkAqua });
+        // The block keeps both colours, and the colour keeps the block.
+        NonNull::from(&**if is_dark { &dark } else { &light })
+    });
+    unsafe { NSColor::colorWithName_dynamicProvider(None, &provider) }
+}
+
+/// What can be done to a machine besides starting it, each opening its
+/// window on it: the details' More menu, and the list's context menu
+/// under Start. `dir` names the machine when the menu is used.
+fn machine_actions(dir: Rc<dyn Fn() -> PathBuf>) -> impl mitsuami::core::services::MenuEntries {
     let library = use_store::<Library>();
     let wizard = use_store::<Wizard>();
     let cloner = use_store::<Cloner>();
     let snaps = use_store::<Snaps>();
     let discs = use_store::<Discs>();
+    let bundle = {
+        let dir = dir.clone();
+        move || library.bundle_path(&dir())
+    };
+    let running = move || library.is_running(&dir());
+    let (b1, b2, b3, b4) = (bundle.clone(), bundle.clone(), bundle.clone(), bundle);
+    let r1 = running.clone();
+    (
+        MenuItem::new("Settings").on_select(move || {
+            if let Some(bundle) = b1() {
+                wizard.open_edit(bundle);
+            }
+        }),
+        MenuItem::new("Discs").on_select(move || {
+            if let Some(bundle) = b2() {
+                discs.open_for(bundle, library);
+            }
+        }),
+        MenuItem::new("Snapshots").on_select(move || {
+            if let Some(bundle) = b3() {
+                snaps.open_for(&bundle, r1());
+            }
+        }),
+        MenuItem::new("Clone").enabled(move || !cloner.busy()).on_select(move || {
+            if let Some(bundle) = b4() {
+                cloner.open_for(&bundle, running());
+            }
+        }),
+    )
+}
+
+/// One machine in the list: its name, and its family and state under it.
+/// A right click offers what the details' Start and More do.
+#[component]
+fn MachineRow(dir: PathBuf) -> impl View {
+    let library = use_store::<Library>();
     let dir = Rc::new(dir);
-    let (d1, d2, d3, d4, d5, d6, d7, d8, d9) = (
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir.clone(),
-        dir,
+    let (d1, d2, d3, d4) = (dir.clone(), dir.clone(), dir.clone(), dir.clone());
+    let menu = (
+        MenuItem::new("Start").enabled(move || !library.is_running(&d3)).on_select(move || library.play(&d4)),
+        MenuSeparator::new(),
+        machine_actions(Rc::new(move || dir.to_path_buf())),
     );
     view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
-            <Text max_lines=1 width=NAME_W>
-                {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
-            </Text>
-            <Text max_lines=1 width=FAMILY_W>
-                {move || library.field(&d2, |m, row| m.machine(row).map(|x| x.family.label().to_string()))}
-            </Text>
-            <Text max_lines=1 width=SHADER_W grow=1.0>
-                {move || library.field(&d3, |m, row| Some(m.shader_label_at(row)))}
-            </Text>
-            <Show when=move || library.is_running(&d4) fallback=move || {
-                let dir = d5.clone();
-                view! { <Button width=60 @click=move || library.play(&dir)>"Play"</Button> }
-            }>
-                <Text width=60>"Running"</Text>
-            </Show>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d6) {
-                    wizard.open_edit(bundle);
-                }
-            }>"Edit…"</Button>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d9) {
-                    discs.open_for(bundle, library, library.is_running(&d9));
-                }
-            }>"Discs…"</Button>
-            <Button @click=move || {
-                if let Some(bundle) = library.bundle_path(&d8) {
-                    snaps.open_for(&bundle, library.is_running(&d8));
-                }
-            }>"Snapshots…"</Button>
-            <Button enabled=move || !cloner.busy() @click=move || {
-                if let Some(bundle) = library.bundle_path(&d7) {
-                    cloner.open_for(&bundle, library.is_running(&d7));
-                }
-            }>"Clone…"</Button>
+        <Row padding_x=Spacing::Lg padding_y=Spacing::Md gap=Spacing::Md align=Align::Center context_menu=menu>
+            <Icon name=icons::MACHINE icon_size=32.0/>
+            <Column min_width=0 grow=1.0 gap=Spacing::Xs>
+                <Text text_style=TextStyle::Headline max_lines=1>
+                    {move || library.field(&d1, |m, row| m.machine(row).map(|x| x.name.clone()))}
+                </Text>
+                <Text text_style=TextStyle::Caption color=Color::SecondaryLabel max_lines=1>
+                    {move || library.field(&d2, |m, row| Some(m.subtitle(row)))}
+                </Text>
+            </Column>
         </Row>
     }
+}
+
+/// The chosen machine: its name, what can be done to it, and its
+/// settings, a group per page of the machine form.
+#[component]
+fn Details() -> impl View {
+    let library = use_store::<Library>();
+    let current = move || library.current().unwrap_or_default();
+    let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
+    let running = move || library.is_running(&current());
+    // On Windows the details are a shade darker than the list beside them
+    // (user): Fluent's secondary background, which follows the theme as the
+    // window's base one does, set as a style so it switches with it.
+    let background = platform! {
+        windows => mitsuami::winui::tweak(|view: &mitsuami::winui::bindings::ScrollViewer| {
+            use mitsuami::winui::bindings as w;
+            use mitsuami::winui::windows_core::Interface;
+            let markup = r#"<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ScrollViewer"><Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"/></Style>"#;
+            view.cast::<w::IFrameworkElement>()?.SetStyle(&w::XamlReader::Load(markup)?.cast::<w::Style>()?)
+        }),
+        _ => Tweak::none(),
+    };
+    view! {
+        <ScrollView grow=1.0 min_width=0 native=background>
+            // Half the room above the name as at the other edges (user).
+            <Column padding_x=Spacing::Xl padding_bottom=Spacing::Xl padding_top=Spacing::Md gap=Spacing::Lg>
+                <Row gap=Spacing::Md align=Align::Center>
+                    <Column gap=Spacing::Xs grow=1.0 min_width=0>
+                        <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
+                        <Text color=Color::SecondaryLabel>{field(|m, row| Some(m.subtitle(row)))}</Text>
+                    </Column>
+                    <Button
+                        role=ButtonRole::Default
+                        icon=icons::START
+                        enabled=move || !running()
+                        @click=move || library.play(&current())
+                    >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
+                    <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>
+                </Row>
+                <For
+                    each=move || library.details(&current())
+                    key=|g: &DetailGroup| g.clone()
+                    let:group
+                >
+                    <DetailBox group=group/>
+                </For>
+            </Column>
+        </ScrollView>
+    }
+}
+
+/// One page's settings, label and value a row each. A file's value is
+/// one line, cut in the middle to fit, with its whole path as the tooltip.
+#[component]
+fn DetailBox(group: DetailGroup) -> impl View {
+    let rows: Vec<_> = group
+        .rows
+        .into_iter()
+        .map(|row| {
+            let value = match &row.path {
+                Some(path) => view! {
+                    <Text grow=1.0 min_width=0 max_lines=1 truncation=Truncation::Middle tooltip={path.display().to_string()}>
+                        {row.value}
+                    </Text>
+                },
+                None => view! { <Text grow=1.0 min_width=0>{row.value}</Text> },
+            };
+            view! {
+                <Row gap=Spacing::Md>
+                    <Text color=Color::SecondaryLabel width=LABEL_W shrink=0.0>{row.label}</Text>
+                    {value}
+                </Row>
+            }
+        })
+        .collect();
+    // Room inside the box, past the platform's own inset (user).
+    view! {
+        <Group title=group.title>
+            <Column padding_x=Spacing::Md padding_y=Spacing::Sm gap=Spacing::Sm>{rows}</Column>
+        </Group>
+    }
+}
+
+/// The platform's own icons: an SF Symbol, a symbolic GTK theme icon, a
+/// Breeze icon, a Segoe Fluent Icons glyph.
+pub(crate) mod icons {
+    use mitsuami::prelude::platform;
+
+    pub const MACHINE: &str = platform! {
+        macos => "desktopcomputer", gtk => "computer-symbolic", kde => "computer", windows => "\u{E977}",
+    };
+    pub const NEW: &str = platform! {
+        macos => "plus", gtk => "list-add-symbolic", kde => "list-add", windows => "\u{E710}",
+    };
+    pub const START: &str = platform! {
+        macos => "play.fill", gtk => "media-playback-start-symbolic", kde => "media-playback-start", windows => "\u{E768}",
+    };
+    pub const DISCS: &str = platform! {
+        macos => "opticaldisc", gtk => "media-optical-symbolic", kde => "media-optical", windows => "\u{E958}",
+    };
+    pub const SNAPSHOTS: &str = platform! {
+        macos => "camera", gtk => "camera-photo-symbolic", kde => "camera-photo", windows => "\u{E722}",
+    };
+    // The shader list's No default; on macOS and Windows a slashed star,
+    // not a clear mark (user): Segoe's Unfavorite on Windows.
+    pub const CLEAR: &str = platform! {
+        macos => "star.slash", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E8D9}",
+    };
+    pub const FOLDER: &str = platform! {
+        macos => "folder", gtk => "folder-symbolic", kde => "folder", windows => "\u{E8B7}",
+    };
+    pub const TOOLS: &str = platform! {
+        macos => "wrench.and.screwdriver", gtk => "applications-engineering-symbolic", kde => "tools", windows => "\u{E90F}",
+    };
+    pub const EDIT: &str = platform! {
+        macos => "pencil", gtk => "document-edit-symbolic", kde => "document-edit", windows => "\u{E70F}",
+    };
+    /// Segoe Fluent Icons has no eject glyph: the button shows its caption.
+    pub const EJECT: &str = platform! {
+        macos => "eject", gtk => "media-eject-symbolic", kde => "media-eject", windows => "",
+    };
+    pub const DOWNLOAD: &str = platform! {
+        macos => "square.and.arrow.down", gtk => "folder-download-symbolic", kde => "download", windows => "\u{E896}",
+    };
+    pub const TRASH: &str = platform! {
+        macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
+    };
+    pub const SHADERS: &str = platform! {
+        macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+    };
 }

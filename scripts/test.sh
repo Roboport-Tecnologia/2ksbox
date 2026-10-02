@@ -334,6 +334,109 @@ shelforder_check() { # the disc shelf is in order by label, all the way to the g
   [ "$o" = "Age of Empires" ] || { echo "a disc added later did not land in order (first row: $o)"; rc=1; }
   return $rc
 }
+drive_check() { # the shelf's one drive: the boot disc when stopped, the tray when running
+  local rc=0 dir="$OUT/drive" bundle o sock qpid i
+  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/Patch 1.3"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  : >"$dir/disk.qcow2"
+  truncate -s 2M "$dir/zork.iso" "$dir/guest-tools-3dfx-0000000.iso"
+  bundle="$(target/release/launcherx --new xp Drive "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
+  target/release/launcherx --discs add "$dir/zork.iso" "$dir/Patch 1.3" "$dir/guest-tools-3dfx-0000000.iso" >/dev/null \
+    || { echo "--discs add failed"; return 1; }
+  # Stopped, empty: the card says so, and every row is a kind of its own.
+  o="$(target/release/launcherx --drive "$bundle" 2>&1)" || { echo "--drive failed: $o"; return 1; }
+  grep -qx $'running\tfalse' <<<"$o" || { echo "a stopped machine reads as running: $o"; rc=1; }
+  grep -q $'^drive\tempty\tTray empty\tThe machine boots without a disc' <<<"$o" || { echo "empty card: $o"; rc=1; }
+  grep -q $'^-\tdisc\tzork\tDisc image · ' <<<"$o" || { echo "zork's row: $o"; rc=1; }
+  grep -q $'^-\tfolder\tPatch 1.3\tFolder · ' <<<"$o" || { echo "the folder's row: $o"; rc=1; }
+  grep -q $'^-\ttools\tguest-tools-3dfx-0000000\tGuest tools · ' <<<"$o" || { echo "guest tools' row: $o"; rc=1; }
+  # Insert on a stopped machine is the boot disc, written to the bundle.
+  o="$(target/release/launcherx --drive "$bundle" insert "$dir/zork.iso" 2>&1)" || { echo "insert failed: $o"; return 1; }
+  grep -q $'^drive\tdisc\tzork\t' <<<"$o" || { echo "the card after insert: $o"; rc=1; }
+  grep -q $'^in-drive\tdisc\tzork\t' <<<"$o" || { echo "zork is not marked in the drive: $o"; rc=1; }
+  grep -qx $'Storage\tCD in drive\tzork.iso' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+    || { echo "the bundle does not boot with zork"; rc=1; }
+  # Running: the card is the tray, read from the monitor. A paused QEMU
+  # with the machine's CD drive stands in for the player.
+  if [ -x build/qemu/qemu-system-i386 ]; then
+    sock="$(target/release/launcherx --qmp-socket "$bundle")"
+    mkdir -p "$(dirname "$sock")"; rm -f "$sock"
+    build/qemu/qemu-system-i386 -machine pc -S -display none -nodefaults \
+      -drive "if=none,id=cd0,media=cdrom,file=$dir/zork.iso" -device ide-cd,bus=ide.1,id=ide1-cd0,drive=cd0 \
+      -qmp "unix:$sock,server=on,wait=off" >"$dir/qemu.log" 2>&1 & qpid=$!
+    for i in $(seq 100); do [ -S "$sock" ] && break; sleep 0.05; done
+    o="$(target/release/launcherx --drive "$bundle" 2>&1)"
+    grep -qx $'running\ttrue' <<<"$o" || { echo "a running machine reads as stopped: $o"; rc=1; }
+    grep -q $'^drive\tdisc\tzork\t' <<<"$o" || { echo "the running card: $o"; rc=1; }
+    # A folder goes in as isodir: and comes back out of query-block as the folder.
+    o="$(target/release/launcherx --drive "$bundle" insert "$dir/Patch 1.3" 2>&1)"
+    grep -q $'^drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the card after a live folder insert: $o"; rc=1; }
+    grep -q $'^in-drive\tfolder\tPatch 1.3\t' <<<"$o" || { echo "the folder is not marked in the drive: $o"; rc=1; }
+    grep -qx $'Storage\tCD in drive\tPatch 1.3' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+      || { echo "a live insert did not set the boot disc too"; rc=1; }
+    o="$(target/release/launcherx --drive "$bundle" eject 2>&1)"
+    grep -q $'^drive\tempty\tTray empty\tInsert a disc from the library' <<<"$o" || { echo "the card after a live eject: $o"; rc=1; }
+    grep -qx $'Storage\tCD in drive\tEmpty' <<<"$(target/release/launcherx --machine-details "$bundle")" \
+      || { echo "a live eject did not empty the boot drive too"; rc=1; }
+    kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
+  else
+    echo "  (no build/qemu/qemu-system-i386: the running card is not checked)"
+  fi
+  return $rc
+}
+machinedetails_check() { # what the machine window shows of a chosen machine (doc 07)
+  local rc=0 dir="$OUT/machinedetails" xp dos o groups
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  : >"$dir/xp.qcow2"; : >"$dir/dos.qcow2"
+  xp="$(target/release/launcherx --new xp "XP box" "$dir/xp.qcow2")" || { echo "--new xp failed"; return 1; }
+  dos="$(target/release/launcherx --new dos "DOS box" "$dir/dos.qcow2")" || { echo "--new dos failed"; return 1; }
+  o="$(target/release/launcherx --machine-details "$xp" 2>&1)" || { echo "--machine-details failed: $o"; return 1; }
+  # The line under the name, then a group per page of the form with the
+  # form's own labels: System, Storage, then the rest in the form's order.
+  [ "$(head -1 <<<"$o")" = "XP · Stopped" ] || { echo "xp subtitle: $(head -1 <<<"$o")"; rc=1; }
+  groups="$(tail -n +2 <<<"$o" | cut -f1 | uniq | tr '\n' ' ')"
+  [ "$groups" = "System Storage Display Audio Input Network " ] || { echo "xp groups: $groups"; rc=1; }
+  grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }
+  # The disk is its file and two folders: .../<OUT's name>/machinedetails/xp.qcow2.
+  grep -qx "Storage"$'\t'"Hard disk"$'\t'".../$(basename "$OUT")/machinedetails/xp.qcow2" <<<"$o" \
+    || { echo "xp's disk is not its file and two folders: $(grep 'Hard disk' <<<"$o")"; rc=1; }
+  grep -qx $'Storage\tCD in drive\tEmpty' <<<"$o" || { echo "xp's drive is not empty"; rc=1; }
+  # No Direct3D on a machine without our adapter, as the form hides it.
+  o="$(target/release/launcherx --machine-details "$dos" 2>&1)" || { echo "--machine-details dos failed: $o"; return 1; }
+  [ "$(head -1 <<<"$o")" = "DOS · Stopped" ] || { echo "dos subtitle: $(head -1 <<<"$o")"; rc=1; }
+  grep -q $'\tDirect3D\t' <<<"$o" && { echo "dos shows a Direct3D row"; rc=1; }
+  grep -qx $'System\tMemory\t64 MB' <<<"$o" || { echo "dos memory: $(grep Memory <<<"$o")"; rc=1; }
+  return $rc
+}
+
+accelchoices_check() { # the acceleration picker offers hardware acceleration only where the host has it
+  local rc=0 dir="$OUT/accelchoices" bundle o nokvm=(bwrap --bind / / --dev /dev)
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles"
+  # This host, as it is.
+  o="$(target/release/launcherx --kvm 2>/dev/null)"
+  if [ "$(head -1 <<<"$o")" = available ]; then
+    grep -qx 'choices: Automatic, Hardware virtualization, Emulation' <<<"$o" || { echo "with KVM: $o"; rc=1; }
+  else
+    grep -qx 'choices: Automatic, Emulation' <<<"$o" || { echo "without KVM: $o"; rc=1; }
+  fi
+  # A host with no KVM at all: a fresh /dev, with no /dev/kvm in it.
+  o="$("${nokvm[@]}" target/release/launcherx --kvm 2>/dev/null)"
+  [ "$(head -1 <<<"$o")" = "not available" ] || { echo "bwrap left /dev/kvm: $o"; return 1; }
+  grep -qx 'choices: Automatic, Emulation' <<<"$o" || { echo "a new machine without KVM: $o"; rc=1; }
+  # A machine already set to it keeps the entry, so the picker shows it.
+  : >"$dir/disk.qcow2"
+  bundle="$(target/release/launcherx --new xp "On KVM" "$dir/disk.qcow2")" || { echo "--new failed"; return 1; }
+  target/release/launcherx --wizard-edit "$bundle" - - kvm >/dev/null 2>&1 || { echo "--wizard-edit kvm failed"; return 1; }
+  o="$("${nokvm[@]}" target/release/launcherx --kvm "$bundle" 2>/dev/null)"
+  grep -qx 'choices: Automatic, Hardware virtualization, Emulation' <<<"$o" || { echo "a KVM machine without KVM: $o"; rc=1; }
+  return $rc
+}
+
 clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   local rc=0 dir="$OUT/clone" img=build/qemu/qemu-img io=build/qemu/qemu-io
   local bundle disk copy copy_disk o args outside twin sock qpid i
@@ -419,6 +522,48 @@ clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   fi
   return $rc
 }
+win11snap_check() { # a Windows 11 machine's offline snapshot holds its firmware variables and TPM (M20)
+  local rc=0 dir="$OUT/win11snap" img=build/qemu/qemu-img bundle bdir vars tpm copy
+  rm -rf "$dir"; mkdir -p "$dir/library"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" LAUNCHER_QEMU_IMG_BIN="$img"
+  # The wizard's own machine, no guest: what the snapshot window does to
+  # the files is the whole question. A fresh TPM is a file libtpms
+  # writes on first start, so a stand-in is enough here.
+  bundle="$(target/release/launcherx --wizard-new win11 W11 64 2>/dev/null | tail -1)"
+  [ -f "$bundle" ] || { echo "--wizard-new made no bundle"; return 1; }
+  bdir="$(dirname "$bundle")"; vars="$bdir/efivars.qcow2"; tpm="$bdir/tpm.permall"
+  target/release/launcherx --prepare "$bundle" || { echo "--prepare failed"; return 1; }
+  [ -f "$vars" ] || { echo "--prepare made no $vars"; return 1; }
+  printf 'first' > "$tpm"
+  op() { target/release/launcherx --snapshots "$bundle" "$@" >/dev/null 2>&1 || { echo "--snapshots $* failed"; return 1; }; }
+  has() { "$img" snapshot -l "$vars" | grep -qF "  $1  "; }   # the name may have spaces
+  op take "a b" || return 1
+  has "a b" || { echo "the take put no snapshot on the variable store"; rc=1; }
+  copy="$(ls "$bdir"/tpm-snapshots/*.permall 2>/dev/null)"
+  [ -n "$copy" ] && [ "$(cat "$copy")" = first ] || { echo "the take kept no copy of the TPM's state"; rc=1; }
+  printf 'second' > "$tpm"
+  op restore "a b" || return 1
+  [ "$(cat "$tpm")" = first ] || { echo "the restore did not put the TPM's state back (holds: $(cat "$tpm"))"; rc=1; }
+  # Clone (user decision): the TPM is copied with the machine unless the
+  # window's "new TPM" box is ticked, which leaves the state file and the
+  # snapshots' copies of it behind.
+  local clone
+  clone="$(target/release/launcherx --clone "$bundle" "Same TPM" 2>/dev/null)" || { echo "--clone failed"; return 1; }
+  cmp -s "$tpm" "$(dirname "$clone")/tpm.permall" || { echo "a plain clone did not copy the TPM's state"; rc=1; }
+  [ -n "$(ls "$(dirname "$clone")"/tpm-snapshots 2>/dev/null)" ] || { echo "a plain clone did not copy the snapshot's TPM"; rc=1; }
+  grep -q "tpm_state = \"$(dirname "$clone")/tpm.permall\"" "$clone" || { echo "the clone's tpm_state does not name its own file"; rc=1; }
+  clone="$(target/release/launcherx --clone "$bundle" --new-tpm "New TPM" 2>/dev/null)" || { echo "--clone --new-tpm failed"; return 1; }
+  [ ! -e "$(dirname "$clone")/tpm.permall" ] || { echo "a new-TPM clone copied the TPM's state"; rc=1; }
+  [ -z "$(ls "$(dirname "$clone")"/tpm-snapshots 2>/dev/null)" ] || { echo "a new-TPM clone copied the snapshots' TPM"; rc=1; }
+  [ -f "$(dirname "$clone")/efivars.qcow2" ] && [ -f "$(dirname "$clone")/disk.qcow2" ] || { echo "a new-TPM clone lost its disk or variables"; rc=1; }
+  op delete "a b" || return 1
+  has "a b" && { echo "the delete left the snapshot on the variable store"; rc=1; }
+  [ -z "$(ls "$bdir"/tpm-snapshots 2>/dev/null)" ] || { echo "the delete left the TPM's copy"; rc=1; }
+  [ $rc = 0 ] && echo "take, restore, clone and delete cover the variable store and the TPM"
+  return $rc
+}
+
 snaptree_check() { # the snapshot window's tree (doc 07): the launcher's own record over a qcow2, which keeps none
   local rc=0 dir="$OUT/snaptree" img=build/qemu/qemu-img bundle disk copy o want
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -760,7 +905,7 @@ qtwizard_fields_check() { # the fields, family by family
   # Every other launcher check asks the model and cannot see it. So this
   # asks the *window*. It opens the real wizard headlessly on each family
   # and prints what its memory field holds beside what the form says.
-  for f in win98 xp dos other; do
+  for f in win98 xp dos other win11; do
     out="$(timeout 120 env LAUNCHER_QT_SCREEN=wizard LAUNCHER_QT_ARG="$f" LAUNCHER_QT_DELAY=250 \
            "$bin" 2>&1)"
     o="$(printf '%s\n' "$out" | sed -n 's/^\[diag\] wizard memory: //p')"
@@ -818,7 +963,7 @@ qtwizard_fields_check() { # the fields, family by family
     [ -n "$shown" ] || { echo "$f: the Direct3D combo shows nothing"; rc=1; }
     case "$f:$o" in
       win98:*"applies true"|xp:*"applies true") ;;
-      dos:*"applies false"|other:*"applies false") ;;
+      dos:*"applies false"|other:*"applies false"|win11:*"applies false") ;;
       *) echo "$f: the Direct3D row's visibility does not follow the adapter: $o"; rc=1;;
     esac
     # The shader profile combo, whose rows come from the model: the app
@@ -829,7 +974,9 @@ qtwizard_fields_check() { # the fields, family by family
     n="$(printf '%s' "$o" | sed -n 's/^shown \[.*\] of \([0-9]*\) .*/\1/p')"
     echo "  $f: shader $o"
     [ "$n" = 3 ] || { echo "$f: the shader profile combo has $n entries, not the default and the two profiles"; rc=1; }
-    [ "$shown" = "(default)" ] || { echo "$f: a new machine's shader profile combo shows [$shown], not the default"; rc=1; }
+    # A Windows 11 machine's default runs no shader, and the row says so.
+    want="(default)"; [ "$f" = win11 ] && want="(default) None"
+    [ "$shown" = "$want" ] || { echo "$f: a new machine's shader profile combo shows [$shown], not [$want]"; rc=1; }
     case "$o" in *"model 0 default true") ;; *) echo "$f: the model does not say the default: $o"; rc=1;; esac
   done
   # The optimization shortcuts beside boxes that were clicked by hand
@@ -2348,13 +2495,25 @@ host_stage() {
   if [ -x target/release/launcherx ]; then
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true
-  else skip dirshelf "needs target/release/launcherx"; skip shelforder "needs target/release/launcherx"; fi
+    run_check drive drive.log drive_check || true
+    run_check machine-details machine-details.log machinedetails_check || true
+    if command -v bwrap >/dev/null; then
+      run_check accel-choices accel-choices.log accelchoices_check || true
+    else skip accel-choices "needs bwrap, for a /dev with no /dev/kvm"; fi
+  else
+    skip dirshelf "needs target/release/launcherx"; skip shelforder "needs target/release/launcherx"
+    skip machine-details "needs target/release/launcherx"; skip accel-choices "needs target/release/launcherx"
+  fi
   if [ -x target/release/launcherx ] && [ -x build/qemu/qemu-img ] && [ -x build/qemu/qemu-io ]; then
     run_check clone clone.log clone_check || true
   else skip clone "needs target/release/launcherx, build/qemu/qemu-img and qemu-io"; fi
   if [ -x target/release/launcherx ] && [ -x build/qemu/qemu-img ]; then
     run_check snapshot-tree snapshot-tree.log snaptree_check || true
-  else skip snapshot-tree "needs target/release/launcherx and build/qemu/qemu-img"; fi
+    run_check win11-snapshots win11-snapshots.log win11snap_check || true
+  else
+    skip snapshot-tree "needs target/release/launcherx and build/qemu/qemu-img"
+    skip win11-snapshots "needs target/release/launcherx and build/qemu/qemu-img"
+  fi
   # The first-run shader offer and the starter profiles behind it. Needs
   # the preset collection to check what a "yes" writes, so it is skipped
   # on a checkout without the submodule rather than downloading 50 MB
@@ -2499,6 +2658,20 @@ host_stage() {
     run_check machine-map machine-map.log machine_map_check || true
   else
     skip bios-date "needs build/qemu/qemu-system-i386"
+  fi
+
+  # the libtpms TPM backend (patch 75, track M20) with no guest: qtest
+  # drives tpm-crb's registers, and a fresh TPM, a restart on the same
+  # state file, and a savevm / loadvm round trip each have to hold. On
+  # the i386 QEMU where there is no x86_64 one (a Mac): its q35 has the
+  # same tpm-crb and backend
+  tpm_qemu=build/qemu/qemu-system-x86_64
+  [ -x "$tpm_qemu" ] || tpm_qemu=build/qemu/qemu-system-i386
+  if [ -x "$tpm_qemu" ]; then
+    run_check tpm-qtest tpm-qtest.log env OUT="$OUT/tpm-qtest" \
+      tools/tpm-qtest.py "$tpm_qemu" || true
+  else
+    skip tpm-qtest "needs build/qemu/qemu-system-x86_64 or -i386"
   fi
 
   # nothing shipped links or loads one of the optional host libraries we
@@ -2673,6 +2846,16 @@ host_stage() {
     else FAIL+=(mode-sweep); echo "  FAIL mode-sweep (build)"; tail -5 "$OUT/player-build.log"; fi
   else
     skip mode-sweep "needs a display and the slang-shaders submodule"
+  fi
+
+  # the mitsuami player (M22) on a private headless sway: the mode sweep
+  # through it, the test pattern on its GpuSurface, a key reaching it.
+  # Its own workspace, built by hand until it has a build stage.
+  if [ -x player-mitsuami/target/release/player-mitsuami ] \
+      && command -v sway >/dev/null && command -v grim >/dev/null && command -v wtype >/dev/null; then
+    run_check player-mitsuami player-mitsuami.log tools/player-mitsuami-test.sh "$OUT/player-mitsuami" || true
+  else
+    skip player-mitsuami "needs player-mitsuami built (cd player-mitsuami && cargo build --release), sway, grim and wtype"
   fi
 
   # the launcher's shader preview, which unlike the player renders only

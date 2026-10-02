@@ -341,10 +341,56 @@ pub struct Probe {
     pub gpu: HostGpu,
     /// The loader's own version, `None` when there is no loader.
     pub loader: Option<(u32, u32, u32)>,
-    /// Whether that loader is the package's own copy rather than the
-    /// system's ([`shipped_loader`]).
-    pub own_loader: bool,
+    /// Whose loader that is.
+    pub loader_from: LoaderFrom,
     pub devices: Vec<Device>,
+}
+
+/// Where the probe's Vulkan loader came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoaderFrom {
+    /// The system's, by its leaf name (on a Mac, one a `DYLD_LIBRARY_PATH`
+    /// names).
+    System,
+    /// The package's own copy ([`shipped_loader`]).
+    App,
+    /// A checkout's: the Vulkan SDK's ([`sdk_loader`]).
+    Sdk,
+}
+
+/// The Vulkan SDK a checkout runs on, on macOS: the newest
+/// `~/VulkanSDK/<version>/macOS` with KosmicKrisp in it, the one
+/// `scripts/package-macos.sh` copies into the app. Stock macOS has no
+/// Vulkan, so without this a launcher started from a checkout with no
+/// `DYLD_LIBRARY_PATH` found no loader and said Direct3D goes through
+/// Wine, which is what its player then did (user: "make both fall back
+/// to the SDK"). `None` in a package, which ships its own, and off macOS.
+/// The player has the same rule (`player-core/src/companions.rs`).
+fn sdk_dir() -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") || shipped_loader().is_some() {
+        return None;
+    }
+    let root = PathBuf::from(std::env::var_os("HOME")?).join("VulkanSDK");
+    let version = |d: &Path| -> Vec<u32> {
+        let name = d.parent().and_then(Path::file_name).and_then(|n| n.to_str()).unwrap_or("");
+        name.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    };
+    std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join("macOS"))
+        .filter(|d| d.join("lib/libvulkan_kosmickrisp.dylib").is_file() && d.join("lib/libvulkan.1.dylib").is_file())
+        .max_by_key(|d| version(d))
+}
+
+/// The SDK's loader, for a checkout ([`sdk_dir`]).
+pub fn sdk_loader() -> Option<PathBuf> {
+    sdk_dir().map(|d| d.join("lib/libvulkan.1.dylib"))
+}
+
+/// The SDK's KosmicKrisp manifest, for a checkout ([`sdk_dir`]).
+pub fn sdk_icd() -> Option<PathBuf> {
+    sdk_dir().map(|d| d.join("share/vulkan/icd.d/libkosmickrisp_icd.json")).filter(|f| f.is_file())
 }
 
 /// The Vulkan loader this package carries, when it carries one. Stock
@@ -385,7 +431,7 @@ pub fn announce_driver() {
     if std::env::var_os("VK_DRIVER_FILES").is_some() || std::env::var_os("VK_ICD_FILENAMES").is_some() {
         return;
     }
-    let Some(icd) = shipped_icd() else { return };
+    let Some(icd) = shipped_icd().or_else(sdk_icd) else { return };
     // SAFETY: the caller's contract above: main, before any thread.
     unsafe { std::env::set_var("VK_DRIVER_FILES", icd) };
 }
@@ -399,11 +445,17 @@ pub fn announce_driver() {
 ///
 /// # Safety
 /// As `Entry::load`: a library on the search path runs its initialisers.
-unsafe fn load_entry() -> Result<(ash::Entry, bool), ash::LoadingError> {
+unsafe fn load_entry() -> Result<(ash::Entry, LoaderFrom), ash::LoadingError> {
     if let Some(path) = shipped_loader() {
-        return unsafe { ash::Entry::load_from(path) }.map(|e| (e, true));
+        return unsafe { ash::Entry::load_from(path) }.map(|e| (e, LoaderFrom::App));
     }
-    unsafe { ash::Entry::load() }.map(|e| (e, false))
+    // The system's first, so a developer's own `DYLD_LIBRARY_PATH` wins,
+    // then a checkout's SDK.
+    match (unsafe { ash::Entry::load() }, sdk_loader()) {
+        (Ok(e), _) => Ok((e, LoaderFrom::System)),
+        (Err(_), Some(path)) => unsafe { ash::Entry::load_from(path) }.map(|e| (e, LoaderFrom::Sdk)),
+        (Err(e), None) => Err(e),
+    }
 }
 
 fn split(v: u32) -> (u32, u32, u32) {
@@ -421,14 +473,14 @@ pub fn probe() -> Probe {
     let none = |gpu| Probe {
         gpu,
         loader: None,
-        own_loader: false,
+        loader_from: LoaderFrom::System,
         devices: Vec::new(),
     };
 
     // SAFETY: `load_entry` dlopens the loader; unsafe because a hostile
     // `libvulkan` on the search path could do anything. Same call the
     // player and every other Vulkan app make.
-    let (entry, own_loader) = match unsafe { load_entry() } {
+    let (entry, loader_from) = match unsafe { load_entry() } {
         Ok(e) => e,
         Err(_) => return none(HostGpu::NoLoader),
     };
@@ -477,7 +529,7 @@ pub fn probe() -> Probe {
                     HostGpu::LoaderTooOld
                 },
                 loader: Some(loader),
-                own_loader,
+                loader_from,
                 devices: Vec::new(),
             }
         }
@@ -523,7 +575,7 @@ pub fn probe() -> Probe {
     Probe {
         gpu,
         loader: Some(loader),
-        own_loader,
+        loader_from,
         devices,
     }
 }
@@ -546,8 +598,14 @@ pub fn report_text(p: &Probe) -> String {
     }
     s.push('\n');
     match p.loader {
-        Some((a, b, c)) if p.own_loader => s.push_str(&format!("Vulkan loader: {a}.{b}.{c} (the app's own)\n")),
-        Some((a, b, c)) => s.push_str(&format!("Vulkan loader: {a}.{b}.{c}\n")),
+        Some((a, b, c)) => s.push_str(&format!(
+            "Vulkan loader: {a}.{b}.{c}{}\n",
+            match p.loader_from {
+                LoaderFrom::App => " (the app's own)",
+                LoaderFrom::Sdk => " (the Vulkan SDK's)",
+                LoaderFrom::System => "",
+            }
+        )),
         None => s.push_str("Vulkan loader: not present\n"),
     }
     if !cfg!(windows) {

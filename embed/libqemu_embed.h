@@ -151,9 +151,22 @@ QEMU_EMBED_API void qemu_embed_set_refresh_ms(qemu_embed_t *e, uint32_t ms);
  * value comes back unchanged. Returns -1 if it cannot be converted. */
 QEMU_EMBED_API int qemu_embed_socket_to_fd(uint64_t sock);
 
+/* v9: the window's drawable size in pixels and its DPI, as a monitor the
+ * guest's adapter can take the size of (virtio-gpu, M20: Windows 11 on Arm
+ * with viogpudo). The console on show hears the first size at once, later
+ * ones after a second without a newer one (a window being dragged), and a
+ * console switched to hears the current one at once; an adapter with fixed
+ * modes ignores it. What the guest does with it is its driver's: viogpudo
+ * 0.1.302 on Arm64 takes it only when it starts. Any thread. */
+QEMU_EMBED_API void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w,
+                                               uint32_t h, uint32_t dpi);
+/* v9: whether the console on show takes the window's size, so the window
+ * should not be held to the guest's mode. Any thread. */
+QEMU_EMBED_API bool qemu_embed_display_follows_window(qemu_embed_t *e);
+
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 8
+#define QEMU_EMBED_API_VERSION 9
 
 #ifdef __cplusplus
 }

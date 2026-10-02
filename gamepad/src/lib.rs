@@ -354,7 +354,7 @@ pub fn hid_hat(up: bool, right: bool, down: bool, left: bool) -> u8 {
 /// An axis binds *twice*, once per direction, because a key has no
 /// sign. `Binding::key` holds the AT set-1 scancode the player hands to
 /// `qemu_embed_key`, which is the same currency `PLAYER_KEYS` already
-/// speaks (`player/src/qemu_vm.rs`), so the two scripted input paths
+/// speaks (`player-core/src/qemu_vm.rs`), so the two scripted input paths
 /// cannot drift apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {

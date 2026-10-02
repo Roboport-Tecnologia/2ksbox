@@ -5,24 +5,22 @@
 //! window as pixels in an `Image`, where the Qt build goes through a BMP on
 //! disk.
 //!
-//! The preview renders at the size of the area it sits in. mitsuami tells
-//! no view its size, so the editor reads the area's frame (`Ui::frame`,
-//! the node from `after_build`) on a short tick, and renders again when
-//! the size, the parameters or the picture changed, or when an animated
-//! shader's next frame is due.
+//! The preview renders at the size of the area it sits in (`use_size`),
+//! again when that size, the parameters or the picture changed, and, for
+//! an animated shader, when its next frame is due.
 
 use crate::machines::Library;
 use crate::path_field::PathField;
 use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PresetState, Presets};
 use launcher_core::preview::Preview;
 use launcher_core::shader_library::{self, ProfileEntry};
-use mitsuami::core::{NodeId, Ui};
+use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const LABEL_W: f32 = 150.0;
 
@@ -174,10 +172,19 @@ impl Shaders {
             self.preview_error.set(Some("no frame rendered".to_owned()));
             return;
         };
-        let rgba: Vec<u8> = rgb.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+        // A picture bigger than the area renders at scale 1, bigger than
+        // the area: show its centre and cut what overflows, as the player
+        // and the Qt window (`clip`) do. Never scaled down.
         let (vw, vh) = preview.viewport();
+        let (cw, ch) = (vw.min(w.max(1)).min(fw), vh.min(h.max(1)).min(fh));
+        let (x0, y0) = ((fw - cw) / 2, (fh - ch) / 2);
+        let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+        for row in rgb.chunks_exact(fw as usize * 3).skip(y0 as usize).take(ch as usize) {
+            let row = &row[x0 as usize * 3..(x0 + cw) as usize * 3];
+            rgba.extend(row.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]));
+        }
         self.preview_error.set(None);
-        self.frame.set(Some(Frame { width: vw as f32, height: vh as f32, pixels: Pixels::new(fw, fh, rgba) }));
+        self.frame.set(Some(Frame { width: cw as f32, height: ch as f32, pixels: Pixels::new(cw, ch, rgba) }));
     }
 
     fn frame_interval(&self) -> Option<Duration> {
@@ -206,7 +213,7 @@ fn PresetCollection() -> impl View {
                 </Row>
             </Show>
             <Show when={let s = s3.clone(); move || s().0 == 3}>
-                <Text text_style=TextStyle::Callout>
+                <Text color=Color::Error>
                     {let s = s3.clone(); move || format!("Couldn't download the shader presets: {}", s().1)}
                 </Text>
             </Show>
@@ -241,7 +248,7 @@ pub fn ShaderProfilesWindow() -> impl View {
     view! {
         <Window
             title="Shader profiles"
-            size=Size::new(660.0, 340.0)
+            size=Size::new(720.0, 340.0)
             min_size=Size::new(480.0, 240.0)
             modal=Modality::Application
             open=shaders.open
@@ -249,17 +256,14 @@ pub fn ShaderProfilesWindow() -> impl View {
         >
             <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
                 {crate::shot::arm(&["profiles", "saveprofile"])}
-                <Show
-                    when=move || shaders.profiles.with(Vec::is_empty)
-                    fallback=|| view! { <ProfileList/> }
-                >
-                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
-                        <Text>"No shader profiles yet."</Text>
-                    </Column>
-                </Show>
-                <Row gap=Spacing::Sm shrink=0.0>
-                    <Button @click=move || shaders.open_editor(Editor::new_profile)>"New profile…"</Button>
+                <Toolbar>
+                    <Button icon=crate::machines::icons::NEW @click=move || shaders.open_editor(Editor::new_profile)>
+                        "New"
+                    </Button>
                     <Button
+                        icon=crate::machines::icons::CLEAR
+                        icon_only=true
+                        tooltip="No default"
                         enabled=move || shaders.profiles.with(|p| p.iter().any(|e| e.is_default))
                         @click=move || {
                             if let Err(e) = shader_library::set_default(&Shaders::dir(), None) {
@@ -268,76 +272,131 @@ pub fn ShaderProfilesWindow() -> impl View {
                             shaders.refresh();
                         }
                     >"No default"</Button>
-                </Row>
+                </Toolbar>
+                <Show
+                    when=move || shaders.profiles.with(Vec::is_empty)
+                    fallback=|| view! { <ProfileTable/> }
+                >
+                    <Column grow=1.0 align=Align::Center justify=Justify::Center>
+                        <Text>"No shader profiles yet."</Text>
+                    </Column>
+                </Show>
                 <PresetCollection/>
             </Column>
         </Window>
     }
 }
 
+/// The profiles under column headers: name, preset, a switch for the
+/// default, and what can be done to it. Rows are keyed by the profile's
+/// file and read their fields by it, so an edit shows in place. Activating
+/// a row (double-click, Return) opens it in the editor; the trash button
+/// asks before it deletes.
 #[component]
-fn ProfileList() -> impl View {
+fn ProfileTable() -> impl View {
     let shaders = use_store::<Shaders>();
-    view! {
-        <List
-            each=move || shaders.profiles.with(|p| p.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
-            key=|p: &PathBuf| p.clone()
-            grow=1.0
-            min_height=0
-            let:path
-        >
-            <ProfileRow path=path/>
-        </List>
-    }
-}
-
-/// One profile: its name, its preset, and what can be done to it.
-#[component]
-fn ProfileRow(path: PathBuf) -> impl View {
-    let shaders = use_store::<Shaders>();
-    let path = Rc::new(path);
-    let field = {
+    let ui = inject::<Ui>().expect("a window's component");
+    let window = inject::<CurrentWindow>().map(|CurrentWindow(w)| w);
+    let field = move |path: &PathBuf, f: fn(&ProfileEntry) -> String| {
         let path = path.clone();
-        move |f: fn(&ProfileEntry) -> String| {
-            let path = path.clone();
-            move || shaders.profiles.with(|p| p.iter().find(|e| e.path == *path).map(f).unwrap_or_default())
-        }
+        move || shaders.profiles.with(|p| p.iter().find(|e| e.path == path).map(f).unwrap_or_default())
     };
-    let is_default = {
+    let is_default = move |path: &PathBuf| {
         let path = path.clone();
-        move || shaders.profiles.with(|p| p.iter().any(|e| e.path == *path && e.is_default))
+        move || shaders.profiles.with(|p| p.iter().any(|e| e.path == path && e.is_default))
     };
-    let (d1, d2) = (is_default.clone(), is_default);
-    let (p1, p2, p3) = (path.clone(), path.clone(), path);
-    view! {
-        <Row padding_x=Spacing::Md padding_y=Spacing::Xs gap=Spacing::Md align=Align::Center>
-            <Text max_lines=1 width=170 shrink=0.0>{field(|e| e.profile.name.clone())}</Text>
-            <Text text_style=TextStyle::Caption max_lines=1 grow=1.0 min_width=0>
-                {field(|e| e.profile.preset.display().to_string())}
-            </Text>
-            <Show when=d1>
-                <Text text_style=TextStyle::Headline>"default"</Text>
-            </Show>
-            <Show when=move || !d2()>
-                <Button @click={let path = p1.clone(); move || {
-                    let id = shader_library::id_of(&path);
-                    if let Err(e) = shader_library::set_default(&Shaders::dir(), Some(&id)) {
-                        eprintln!("[shader-manager] marking {id} as the default: {e}");
-                    }
-                    shaders.refresh();
-                }}>"Use as default"</Button>
-            </Show>
-            <Button @click=move || {
-                let path = p2.to_path_buf();
-                shaders.open_editor(|e| e.edit_path(path));
-            }>"Edit…"</Button>
-            <Button @click=move || {
-                if let Err(e) = shader_library::delete(&p3) {
-                    eprintln!("[shader-manager] deleting {}: {e}", p3.display());
+    let columns = vec![
+        TableColumn::new("Name", move |path: PathBuf| {
+            // In from the frame by about what the actions column leaves
+            // after the trash button (user).
+            let name = field(&path, |e| e.profile.name.clone());
+            view! {
+                <Row padding_start=Spacing::Sm min_width=0>
+                    <Text max_lines=1>{name}</Text>
+                </Row>
+            }
+        })
+        .width(170),
+        TableColumn::new("Preset", move |path: PathBuf| {
+            Text::new(field(&path, |e| e.profile.preset.display().to_string()))
+                .text_style(TextStyle::Caption)
+                .color(Color::SecondaryLabel)
+                .max_lines(1)
+                .truncation(Truncation::Start)
+                .grow(1.0)
+                .shrink(1.0)
+                .basis(0)
+        })
+        .expand(),
+        // On makes this profile the default (the library has one, so the
+        // others go off); off leaves none. On macOS the small switch, as
+        // dense lists there have (user).
+        TableColumn::new("Default", move |path: PathBuf| {
+            let id = shader_library::id_of(&path);
+            let small = platform! {
+                macos => mitsuami::appkit::tweak(|s: &mitsuami::appkit::objc2_app_kit::NSSwitch| {
+                    s.setControlSize(mitsuami::appkit::objc2_app_kit::NSControlSize::Small)
+                }),
+                _ => Tweak::none(),
+            };
+            Switch::new("Default").checked(is_default(&path)).native(small).on_change(move |on| {
+                let chosen = on.then_some(id.as_str());
+                if let Err(e) = shader_library::set_default(&Shaders::dir(), chosen) {
+                    eprintln!("[shader-manager] setting the default profile to {chosen:?}: {e}");
                 }
                 shaders.refresh();
-            }>"Delete"</Button>
-        </Row>
+            })
+        })
+        .width(80),
+        TableColumn::new("", move |path: PathBuf| {
+            let path = Rc::new(path);
+            let (p2, p3) = (path.clone(), path);
+            let ui = ui.clone();
+            view! {
+                <Row gap=Spacing::Sm padding_y=Spacing::Xs align=Align::Center>
+                    <Button @click=move || {
+                        let path = p2.to_path_buf();
+                        shaders.open_editor(|e| e.edit_path(path));
+                    }>"Edit"</Button>
+                    <Button icon=crate::machines::icons::TRASH icon_only=true tooltip="Delete" @click=move || {
+                        let path = p3.to_path_buf();
+                        let name = shaders.profiles.with_untracked(|p| {
+                            p.iter().find(|e| e.path == path).map(|e| e.profile.name.clone()).unwrap_or_default()
+                        });
+                        let (headline, detail) = shader_library::delete_question(&name);
+                        // Cancel first: the first is the default, and Return
+                        // should not delete.
+                        let alert = Alert::new(headline)
+                            .message(detail)
+                            .style(AlertStyle::Critical)
+                            .button("Cancel")
+                            .button("Delete");
+                        let asker = ui.clone();
+                        ui.spawn_local(async move {
+                            if asker.alert(window, alert).await != 1 {
+                                return;
+                            }
+                            if let Err(e) = shader_library::delete(&path) {
+                                eprintln!("[shader-manager] deleting {}: {e}", path.display());
+                            }
+                            shaders.refresh();
+                        });
+                    }>"Delete"</Button>
+                </Row>
+            }
+        })
+        .width(124),
+    ];
+    view! {
+        <Table
+            each=move || shaders.profiles.with(|p| p.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
+            key=|p: &PathBuf| p.clone()
+            columns=columns
+            list_style=ListStyle::Framed
+            @activate=move |path: PathBuf| shaders.open_editor(|e| e.edit_path(path))
+            grow=1.0
+            min_height=0
+        />
     }
 }
 
@@ -389,7 +448,7 @@ pub fn ShaderEditorWindow() -> impl View {
                 />
                 <PresetCollection/>
                 <Show when=move || shaders.read(|e| e.parse_error().is_some())>
-                    <Text text_style=TextStyle::Callout>
+                    <Text color=Color::Error>
                         {move || format!(
                             "Couldn't read this preset's parameters: {}",
                             shaders.read(|e| e.parse_error().unwrap_or_default().to_owned()),
@@ -417,7 +476,7 @@ pub fn ShaderEditorWindow() -> impl View {
                     </Column>
                 </Row>
                 <Show when=move || shaders.read(|e| e.error.is_some())>
-                    <Text text_style=TextStyle::Callout>{move || shaders.read(|e| e.error.clone().unwrap_or_default())}</Text>
+                    <Text color=Color::Error>{move || shaders.read(|e| e.error.clone().unwrap_or_default())}</Text>
                 </Show>
                 <Row gap=Spacing::Sm shrink=0.0>
                     <Button role=ButtonRole::Default @click=save>"Save"</Button>
@@ -519,25 +578,34 @@ fn ParamRow(id: String) -> impl View {
 #[component]
 fn PreviewArea() -> impl View {
     let shaders = use_store::<Shaders>();
-    let area: Signal<Option<NodeId>> = signal(None);
-    let ui = inject::<Ui>();
-    // The render tick: the area's size, the editor's inputs and an
-    // animated shader's clock, checked every 30 ms.
-    spawn_local(async move {
-        let mut last_size = (0, 0);
-        let mut last_render = Instant::now();
-        loop {
-            sleep(Duration::from_millis(30)).await;
-            let (Some(ui), Some(id)) = (ui.as_ref(), area.get_untracked()) else { continue };
-            let Some(frame) = ui.frame(id) else { continue };
-            let size = (frame.size.width.round() as u32, frame.size.height.round() as u32);
-            let due = shaders.frame_interval().is_some_and(|i| last_render.elapsed() >= i);
-            if size != last_size || shaders.stale.get_untracked() || due {
-                last_size = size;
-                last_render = Instant::now();
-                shaders.stale.set(false);
-                shaders.render(size.0, size.1);
-            }
+    let area = node_ref();
+    let size = use_size(area);
+    let last_size = Cell::new((0, 0));
+    // An animated shader's next frame: one wake-up at a time, which marks
+    // the preview stale. On the `Ui` itself, as a task the effect spawned
+    // would be cancelled by its next run (each run disposes the last's).
+    let ui = inject::<Ui>().expect("a window's component");
+    let waking = Rc::new(Cell::new(false));
+    effect(move || {
+        // Both read on every run, so the effect follows both.
+        let stale = shaders.stale.get();
+        let size = size.get();
+        let size = (size.width.round() as u32, size.height.round() as u32);
+        if size == (0, 0) || (size == last_size.get() && !stale) {
+            return;
+        }
+        last_size.set(size);
+        shaders.stale.set(false);
+        shaders.render(size.0, size.1);
+        if let Some(interval) = shaders.frame_interval()
+            && !waking.replace(true)
+        {
+            let (waking, wait) = (waking.clone(), ui.sleep(interval));
+            ui.spawn_local(async move {
+                wait.await;
+                waking.set(false);
+                shaders.stale.set(true);
+            });
         }
     });
     let frame = move |f: fn(&Frame) -> f32| move || Length::from(shaders.frame.with(|x| x.as_ref().map_or(0.0, f)));
@@ -545,7 +613,8 @@ fn PreviewArea() -> impl View {
         let pixels = shaders.frame.with(|f| f.as_ref().map(|f| f.pixels.clone()));
         ImageSource::Pixels(pixels.unwrap_or_else(|| Pixels::new(1, 1, vec![0u8; 4])))
     };
-    let mut column = Column::new()
+    Column::new()
+        .node_ref(area)
         .grow(1.0)
         .min_height(0)
         .min_width(0)
@@ -553,10 +622,10 @@ fn PreviewArea() -> impl View {
         .justify(Justify::Center)
         .children(view! {
             <Show when=move || shaders.read(|e| e.preview_image_path.trim().is_empty())>
-                <Text text_style=TextStyle::Caption>"Pick a screenshot to preview the shader."</Text>
+                <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>"Pick a screenshot to preview the shader."</Text>
             </Show>
             <Show when=move || shaders.preview_error.get().is_some()>
-                <Text text_style=TextStyle::Callout>{move || shaders.preview_error.get().unwrap_or_default()}</Text>
+                <Text color=Color::Error>{move || shaders.preview_error.get().unwrap_or_default()}</Text>
             </Show>
             <Show when=move || shaders.frame.with(Option::is_some)>
                 <Image
@@ -568,9 +637,7 @@ fn PreviewArea() -> impl View {
                     shrink=0.0
                 />
             </Show>
-        });
-    column.element().after_build(move |_, id| area.set(Some(id)));
-    column
+        })
 }
 
 /// For the headless `saveprofile:<preset>` screen: a new profile named

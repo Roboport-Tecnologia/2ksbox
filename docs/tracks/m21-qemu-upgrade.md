@@ -326,7 +326,7 @@ gets `LEGACY_BOARD` (9.2's), and `CURRENT_BOARD` moves to
   ADR-001 amendment), OpenGL half only, which folds 02 and 74.
 - 35 patches ported: 00, 04, 10, 13, 14, 20-embed-audio, 22, 23, 25 to
   28, 30 to 32, 34, 40, 41, 50 to 56, 60 to 62, 64 to 66, 70 to 73, and
-  one new one, 75 (11.0 never finalizes an audio backend a device uses,
+  one new one, 78 (75 until main's M20 took the number; 11.0 never finalizes an audio backend a device uses,
   so the `wav` audiodev's header kept lengths of 0 and the `music` and
   `sb-mixer` checks read silence). The TCG patches wait in
   `patches/qemu-pending/` as their 9.2 versions.
@@ -499,6 +499,34 @@ package and the Flatpak. Each packager's own checks must pass.
 rewritten for 11.1 (every row's "when to drop it" re-checked), doc 22's
 numbers re-measured or marked as 9.2's, and `CLAUDE.md`'s v9.2.4
 mentions updated. The user hand-tests a game before the merge.
+
+#### Where step 5 stands
+
+Merged to `main` on 2026-10-02 as one commit, at the user's word ("merge
+to main as a single commit"), before step 4 and before a hand test. What
+came with main and was ported: M20's patches 75 (libtpms TPM; the backend
+`tpm/qemu/tpm_libtpms.c` on 11.1's `system/` headers and `const`
+`class_init`), 76 (Arm HVF on macOS 12; 11.1's `hvf_arch_vm_create` grew
+nested virtualization and the in-kernel GIC, so the macOS 13 path moved
+whole into a helper marked available from 13) and 77 (applied as is), 42's
+early return for a CPU with no jump cache, and the embed library's
+console following (11.1's `qemu_console_register_listener` and
+`qemu_console_*_ui_info`). M21's wav patch became 78. On this Linux box:
+`scripts/test.sh all` 72 passed, the four known failures (icons, package,
+exec-no-device, pit-guest), `tpm-qtest` passing; Windows 11 (M20's spike
+disk through an overlay, KVM, the libtpms TPM, EDK2 from `qemu/pc-bios`)
+reaches the desktop in 25.3 s and powers off clean.
+
+Still open after the merge:
+- Step 4 entire: the Air (App Store, community, the Intel build), where
+  76 has never compiled, the Windows cross build, the Linux package and
+  the Flatpak.
+- A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
+  so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
+  (`Machine::board`) does not cover it. User's call.
+- Doc 22's numbers are 9.2's; the README's "Drop" lines not re-checked
+  row by row; x87 softfloat ~1.7x slower on 11.1 with the fast path off.
+- A hand test by the user.
 
 ## Owns
 

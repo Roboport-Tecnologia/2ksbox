@@ -34,7 +34,7 @@ keeps scope, test loop, traps and open items. The design:
   `tools/wgl-probe.c`; `launcher-core/src/console.rs`, `fatal.rs`,
   `paths.rs`, `player.rs`, `wizard.rs`, `bundle.rs` (one-folder layout,
   WHPX naming), `control.rs` (live control over Winsock AF_UNIX);
-  `player/src/qmp.rs`, `player/src/kbcapture.rs`;
+  `player-core/src/qmp.rs`, `player/src/kbcapture.rs`;
   `launcher-qt/src/appearance.cpp`; `d3dpt/hw/d3dpt_exec_load.c`,
   `d3dpt/exec/*.cpp`; `libdisc/src/bin/discx.rs`.
 - Patches added: 68 (clang), 69 (mkvenv's `file://C:/…` wheels URL under

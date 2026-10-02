@@ -47,6 +47,7 @@ pub fn parse_family(arg: Option<&str>, usage: &str) -> Family {
         Some("xp") => Family::Xp,
         Some("dos") => Family::Dos,
         Some("other") => Family::Other,
+        Some("win11") => Family::Win11,
         _ => panic!("{usage}"),
     }
 }
@@ -58,6 +59,22 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let path = args.next().expect("usage: --print-args <machine.toml>");
             let machine = Machine::load(Path::new(&path)).expect("load bundle");
             println!("{}", machine.qemu_args(&player::pc_bios_dir(), None).join(" "));
+        }
+        "--machine-details" => {
+            // What the machine window shows of a selected machine: the
+            // line under its name, then each group and its rows, as
+            // `<group>\t<label>\t<value>`. The machine is found in the
+            // library (`LAUNCHER_LIBRARY_DIR`), as the window finds it.
+            let path = args.next().expect("usage: --machine-details <machine.toml>");
+            let dir = Path::new(&path).parent().expect("a bundle in a directory").to_path_buf();
+            let library = machines::Machines::load();
+            let row = library.entries().iter().position(|e| e.dir == dir).expect("a machine in the library");
+            println!("{}", library.subtitle(row));
+            for group in library.details(row) {
+                for row in group.rows {
+                    println!("{}\t{}\t{}", group.title, row.label, row.value);
+                }
+            }
         }
         "--print-shader-args" => {
             let path = args.next().expect("usage: --print-shader-args <machine.toml>");
@@ -73,6 +90,17 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let mut argv = player::shader_args(&machine);
             argv.extend(player::pad_args(&machine));
             println!("{}", argv.join(" "));
+        }
+        "--prepare" => {
+            // What the player's start makes before QEMU runs (a Windows
+            // 11 machine's firmware variables), for a script that runs
+            // QEMU itself from `--print-args`.
+            let path = args.next().expect("usage: --prepare <machine.toml>");
+            let machine = Machine::load(Path::new(&path)).expect("load bundle");
+            if let Err(e) = player::prepare(&machine) {
+                eprintln!("{e}");
+                return Some(1);
+            }
         }
         "--play" => {
             let path = PathBuf::from(args.next().expect("usage: --play <machine.toml>"));
@@ -98,6 +126,17 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // What the wizard's acceleration hint reads, on its own:
             // this host's answer, not the bundle's setting.
             println!("{}", if player::hw_accel_available() { "available" } else { "not available" });
+            // And the acceleration picker's entries, on a new XP machine
+            // or the one given (`--kvm [machine.toml]`): hardware
+            // acceleration only where it is here, or where the machine
+            // already asks for it.
+            let mut form = wizard::Form::default();
+            match args.next() {
+                Some(bundle) => form.open_edit_path(PathBuf::from(bundle)),
+                None => form.open_new(Family::Xp),
+            }
+            let choices: Vec<_> = form.accel_choices().iter().map(|a| a.label()).collect();
+            println!("choices: {}", choices.join(", "));
         }
         "--host-check" => {
             // The other half of `--kvm`: what this host can do for the
@@ -136,7 +175,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             crate::fatal::record("--diagnose", &text);
         }
         "--new" => {
-            let usage = "usage: --new <win98|xp|dos|other> <name> <disk.qcow2>";
+            let usage = "usage: --new <win98|xp|dos|other|win11> <name> <disk.qcow2>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let disk = args.next().expect(usage).into();
@@ -146,7 +185,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
         "--wizard-new" => {
             // Headless equivalent of the "New machine" window: the real
             // form's `submit`, disk creation via qemu-img included.
-            let usage = "usage: --wizard-new <win98|xp|dos|other> <name> <disk-size-gb>";
+            let usage = "usage: --wizard-new <win98|xp|dos|other|win11> <name> <disk-size-gb>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let size_gb: u32 = args.next().expect(usage).parse().expect("disk size must be a number");
@@ -293,13 +332,18 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // running machine, a name already in the library) and the
             // same copy. With no name it takes the one the window offers.
             // `--same-disk` is the window's checkbox: no copy of the disk.
-            let usage = "usage: --clone <machine.toml> [--same-disk] [new name]";
+            // `--new-tpm` the other one (a Windows 11 machine's).
+            let usage = "usage: --clone <machine.toml> [--same-disk] [--new-tpm] [new name]";
             let path: PathBuf = args.next().expect(usage).into();
             let mut window = clone_machine::CloneMachine::default();
             window.open_for_path(&path, false);
             let mut name = args.next();
-            if name.as_deref() == Some("--same-disk") {
-                window.same_disk = true;
+            loop {
+                match name.as_deref() {
+                    Some("--same-disk") => window.same_disk = true,
+                    Some("--new-tpm") => window.new_tpm = true,
+                    _ => break,
+                }
                 name = args.next();
             }
             if let Some(name) = name {
@@ -522,6 +566,37 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                     eprintln!("[disc-shelf] {e}");
                     return Some(1);
                 }
+            }
+        }
+        "--drive" => {
+            // Headless equivalent of the shelf window opened for a
+            // machine: its drive card, then each disc with its kind and
+            // whether it is the one in the drive. `insert`/`eject` are the
+            // card's and the rows' buttons, which set the boot disc and,
+            // on a running machine, swap the disc now as well.
+            let usage = "usage: --drive <machine.toml> [insert <disc>|eject]";
+            let path: PathBuf = args.next().expect(usage).into();
+            let mut shelf = shelf::Shelf::default();
+            shelf.open_for_path(path, &disc_library::default_path());
+            match (args.next().as_deref(), args.next()) {
+                (Some("insert"), Some(disc)) => shelf.insert(Path::new(&disc)),
+                (Some("eject"), None) => shelf.eject(),
+                (None, _) => {}
+                _ => panic!("{usage}"),
+            }
+            if let Err(e) = shelf.last_result() {
+                eprintln!("[drive] {e}");
+                return Some(1);
+            }
+            println!("running\t{}", shelf.running());
+            if let Some(card) = shelf.drive_card() {
+                let kind = card.kind.map_or("empty", |k| k.key());
+                println!("drive\t{kind}\t{}\t{}", card.title, card.detail);
+            }
+            for (row, disc) in shelf.discs().iter().enumerate() {
+                let kind = shelf.row_kind(row).map_or("", |k| k.key());
+                let mark = if shelf.row_in_drive(row) { "in-drive" } else { "-" };
+                println!("{mark}\t{kind}\t{}\t{}", disc.label, shelf.row_detail(row));
             }
         }
         "--snapshots" => {
@@ -817,6 +892,7 @@ fn paths_text() -> String {
     }
     .ok();
     writeln!(s, "player       {}", player::player_binary().display()).ok();
+    writeln!(s, "player-x86_64 {}", player::target_player_binary("x86_64").display()).ok();
     writeln!(s, "qemu-img     {}", player::qemu_img_binary().display()).ok();
     writeln!(s, "pc-bios      {}", player::pc_bios_dir().display()).ok();
     match disc_library::guest_tools_iso() {

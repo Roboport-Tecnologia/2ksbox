@@ -1,0 +1,199 @@
+The libtpms TPM backend: a TPM 2.0 inside QEMU's process (track M20).
+
+backends/tpm/tpm_libtpms.c is ours, overlaid from tpm/qemu/ by
+prepare-qemu.sh; this wires it in. A `libtpms` meson feature (configure
+--enable-libtpms) finds libtpms and libcrypto by pkg-config (on Linux and
+macOS the static pair scripts/build-deps.sh builds; libtpms's .pc names
+only -ltpms, so libcrypto is asked for by name), sets
+CONFIG_TPM_LIBTPMS, and builds the file. QAPI gains the `libtpms`
+TpmType with its `state` option, so `-tpmdev libtpms,id=..,state=<file>`
+parses and query-tpm / `info tpm` describe it. Everything sits behind
+CONFIG_TPM, which QEMU 9.2 still refuses on a Windows host.
+
+diff --git a/backends/tpm/meson.build b/backends/tpm/meson.build
+index 0bfa6c422b..bcd5c76b53 100644
+--- a/backends/tpm/meson.build
++++ b/backends/tpm/meson.build
+@@ -3,4 +3,5 @@ if have_tpm
+   system_ss.add(files('tpm_util.c'))
+   system_ss.add(when: 'CONFIG_TPM_PASSTHROUGH', if_true: files('tpm_passthrough.c'))
+   system_ss.add(when: 'CONFIG_TPM_EMULATOR', if_true: files('tpm_emulator.c'))
++  system_ss.add(when: libtpms, if_true: files('tpm_libtpms.c'))
+ endif
+diff --git a/meson.build b/meson.build
+index eec3015f6e..1fef327717 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1701,6 +1701,19 @@ if not get_option('libssh').auto() or have_block
+                     required: get_option('libssh'))
+ endif
+ 
++# libtpms: the TPM itself, in this process (backends/tpm/tpm_libtpms.c).
++# Its .pc names only -ltpms, so a static libtpms needs libcrypto asked for.
++libtpms = not_found
++if have_tpm and not get_option('libtpms').disabled()
++  libtpms_lib = dependency('libtpms', method: 'pkg-config',
++                           required: get_option('libtpms'))
++  libtpms_crypto = dependency('libcrypto', method: 'pkg-config',
++                              required: get_option('libtpms'))
++  if libtpms_lib.found() and libtpms_crypto.found()
++    libtpms = declare_dependency(dependencies: [libtpms_lib, libtpms_crypto])
++  endif
++endif
++
+ libbzip2 = not_found
+ if not get_option('bzip2').auto() or have_block
+   libbzip2 = cc.find_library('bz2', has_headers: ['bzlib.h'],
+@@ -2540,6 +2553,7 @@ if have_tcg
+   config_host_data.set('CONFIG_TCG_INTERPRETER', tcg_arch == 'tci')
+ endif
+ config_host_data.set('CONFIG_TPM', have_tpm)
++config_host_data.set('CONFIG_TPM_LIBTPMS', libtpms.found())
+ config_host_data.set('CONFIG_TSAN', get_option('tsan'))
+ config_host_data.set('CONFIG_USB_LIBUSB', libusb.found())
+ config_host_data.set('CONFIG_VDE', vde.found())
+@@ -5073,6 +5087,7 @@ endif
+ summary_info += {'seccomp support':   seccomp}
+ summary_info += {'hv-balloon support': hv_balloon}
+ summary_info += {'TPM support':       have_tpm}
++summary_info += {'libtpms support':   libtpms}
+ summary_info += {'IGVM support':      igvm}
+ summary_info += {'libssh support':    libssh}
+ summary_info += {'lzo support':       lzo}
+diff --git a/meson_options.txt b/meson_options.txt
+index e0bf1015d6..a45e174b3a 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -123,6 +123,8 @@ option('qemu_vnc', type: 'feature', value: 'auto',
+        description: 'standalone VNC server over D-Bus')
+ option('tpm', type : 'feature', value : 'auto',
+        description: 'TPM support')
++option('libtpms', type : 'feature', value : 'auto',
++       description: 'TPM 2.0 in process through libtpms (-tpmdev libtpms)')
+ option('valgrind', type : 'feature', value: 'auto',
+        description: 'valgrind debug support for coroutine stacks')
+ option('igvm', type: 'feature', value: 'auto',
+diff --git a/qapi/tpm.json b/qapi/tpm.json
+index 3f2850a573..fab535ed56 100644
+--- a/qapi/tpm.json
++++ b/qapi/tpm.json
+@@ -48,9 +48,13 @@
+ #
+ # @emulator: Software Emulator TPM type (since 2.11)
+ #
++# @libtpms: TPM 2.0 in this process through libtpms (2ksbox)
++#
+ # Since: 1.5
+ ##
+-{ 'enum': 'TpmType', 'data': [ 'passthrough', 'emulator' ],
++{ 'enum': 'TpmType', 'data': [ 'passthrough', 'emulator',
++                               { 'name': 'libtpms',
++                                 'if': 'CONFIG_TPM_LIBTPMS' } ],
+   'if': 'CONFIG_TPM' }
+ 
+ ##
+@@ -97,6 +101,18 @@
+ { 'struct': 'TPMEmulatorOptions', 'data': { 'chardev' : 'str' },
+   'if': 'CONFIG_TPM' }
+ 
++##
++# @TPMLibtpmsOptions:
++#
++# Information about the libtpms TPM type
++#
++# @state: File holding the TPM's permanent state
++#
++# Since: 9.2 (2ksbox)
++##
++{ 'struct': 'TPMLibtpmsOptions', 'data': { 'state' : 'str' },
++  'if': 'CONFIG_TPM_LIBTPMS' }
++
+ ##
+ # @TPMPassthroughOptionsWrapper:
+ #
+@@ -119,6 +135,17 @@
+   'data': { 'data': 'TPMEmulatorOptions' },
+   'if': 'CONFIG_TPM' }
+ 
++##
++# @TPMLibtpmsOptionsWrapper:
++#
++# @data: Information about the libtpms TPM type
++#
++# Since: 9.2 (2ksbox)
++##
++{ 'struct': 'TPMLibtpmsOptionsWrapper',
++  'data': { 'data': 'TPMLibtpmsOptions' },
++  'if': 'CONFIG_TPM_LIBTPMS' }
++
+ ##
+ # @TpmTypeOptions:
+ #
+@@ -130,6 +157,8 @@
+ #       passthrough type
+ #     - 'emulator' The configuration options for TPM emulator backend
+ #       type
++#     - 'libtpms' The configuration options for the libtpms backend
++#       type
+ #
+ # Since: 1.5
+ ##
+@@ -137,7 +166,9 @@
+   'base': { 'type': 'TpmType' },
+   'discriminator': 'type',
+   'data': { 'passthrough' : 'TPMPassthroughOptionsWrapper',
+-            'emulator': 'TPMEmulatorOptionsWrapper' },
++            'emulator': 'TPMEmulatorOptionsWrapper',
++            'libtpms': { 'type': 'TPMLibtpmsOptionsWrapper',
++                         'if': 'CONFIG_TPM_LIBTPMS' } },
+   'if': 'CONFIG_TPM' }
+ 
+ ##
+diff --git a/scripts/meson-buildoptions.sh b/scripts/meson-buildoptions.sh
+index c003985047..935f934784 100644
+--- a/scripts/meson-buildoptions.sh
++++ b/scripts/meson-buildoptions.sh
+@@ -141,6 +141,7 @@ meson_options_help() {
+   printf "%s\n" '  libnfs          libnfs block device driver'
+   printf "%s\n" '  libpmem         libpmem support'
+   printf "%s\n" '  libssh          ssh block device support'
++  printf "%s\n" '  libtpms         TPM 2.0 in process through libtpms (-tpmdev libtpms)'
+   printf "%s\n" '  libudev         Use libudev to enumerate host devices'
+   printf "%s\n" '  libusb          libusb support for USB passthrough'
+   printf "%s\n" '  libvduse        build VDUSE Library'
+@@ -378,6 +379,8 @@ _meson_option_parse() {
+     --disable-libpmem) printf "%s" -Dlibpmem=disabled ;;
+     --enable-libssh) printf "%s" -Dlibssh=enabled ;;
+     --disable-libssh) printf "%s" -Dlibssh=disabled ;;
++    --enable-libtpms) printf "%s" -Dlibtpms=enabled ;;
++    --disable-libtpms) printf "%s" -Dlibtpms=disabled ;;
+     --enable-libudev) printf "%s" -Dlibudev=enabled ;;
+     --disable-libudev) printf "%s" -Dlibudev=disabled ;;
+     --enable-libusb) printf "%s" -Dlibusb=enabled ;;
+diff --git a/system/tpm-hmp-cmds.c b/system/tpm-hmp-cmds.c
+index 9ed6ad6c4d..5f3ae2d629 100644
+--- a/system/tpm-hmp-cmds.c
++++ b/system/tpm-hmp-cmds.c
+@@ -19,6 +19,9 @@ void hmp_info_tpm(Monitor *mon, const QDict *qdict)
+     unsigned int c = 0;
+     TPMPassthroughOptions *tpo;
+     TPMEmulatorOptions *teo;
++#ifdef CONFIG_TPM_LIBTPMS
++    TPMLibtpmsOptions *tlo;
++#endif
+ 
+     info_list = qmp_query_tpm(&err);
+     if (err) {
+@@ -52,6 +55,12 @@ void hmp_info_tpm(Monitor *mon, const QDict *qdict)
+             teo = ti->options->u.emulator.data;
+             monitor_printf(mon, ",chardev=%s", teo->chardev);
+             break;
++#ifdef CONFIG_TPM_LIBTPMS
++        case TPM_TYPE_LIBTPMS:
++            tlo = ti->options->u.libtpms.data;
++            monitor_printf(mon, ",state=%s", tlo->state);
++            break;
++#endif
+         case TPM_TYPE__MAX:
+             break;
+         }

@@ -82,8 +82,79 @@ pub fn default_path() -> PathBuf {
 /// keeps its whole name, extension and all (`Patch 1.3` is a name,
 /// `Patch 1` a mangling of one).
 pub fn default_label(path: &Path) -> String {
-    let name = if path.is_dir() { path.file_name() } else { path.file_stem() };
+    let name = if is_folder(path) { path.file_name() } else { path.file_stem() };
     name.map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
+}
+
+/// Whether a shelf entry is a shared folder, for its icon and label. A
+/// disc image's extension answers without asking the filesystem: a disc
+/// on a network share that has gone idle (or a mapped drive whose server
+/// is off) blocks every `is_dir` for seconds while Windows reconnects,
+/// and the windows ask once per row each time the shelf changes.
+/// `qemu_medium` still asks, once, when the disc is handed to QEMU.
+fn is_folder(path: &Path) -> bool {
+    let image = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| DISC_FILTER.1.iter().any(|x| x.eq_ignore_ascii_case(e)));
+    !image && path.is_dir()
+}
+
+/// What a shelf entry is, for its icon and the word under its label.
+/// Image formats are not told apart: an `.iso`, a `.cue` and an `.mds`
+/// are all a disc to the person picking one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscKind {
+    Disc,
+    /// A host folder served as a generated disc (`qemu_medium`).
+    Folder,
+    /// One of our guest-tools ISOs, any revision (`guest_tools_iso`).
+    GuestTools,
+}
+
+impl DiscKind {
+    /// Decided from the path each time, like `qemu_medium` (`is_folder`).
+    pub fn of(path: &Path) -> DiscKind {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if is_folder(path) {
+            DiscKind::Folder
+        } else if name.starts_with("guest-tools-") && name.ends_with(".iso") {
+            DiscKind::GuestTools
+        } else {
+            DiscKind::Disc
+        }
+    }
+
+    /// A stable name for a front end to pick an icon by.
+    pub fn key(self) -> &'static str {
+        match self {
+            DiscKind::Disc => "disc",
+            DiscKind::Folder => "folder",
+            DiscKind::GuestTools => "tools",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DiscKind::Disc => "Disc image",
+            DiscKind::Folder => "Folder",
+            DiscKind::GuestTools => "Guest tools",
+        }
+    }
+}
+
+/// A path as a row shows it: the home directory as `~`.
+pub fn display_path(path: &Path) -> String {
+    let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
+    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => Path::new("~").join(rest).display().to_string(),
+        None => path.display().to_string(),
+    }
+}
+
+/// The line under a disc's label: what it is and where it lives.
+pub fn detail(path: &Path) -> String {
+    format!("{} · {}", DiscKind::of(path).label(), display_path(path))
 }
 
 /// The shelf's order: by label, the way a shelf of discs is looked
@@ -244,6 +315,23 @@ pub fn write_shelf_file(library: &DiscLibrary, path: &Path) -> std::io::Result<(
 /// Matches `CDSHELF_FILE_MAX_ENTRIES` in `cdshelf/cdshelf_proto.h`: the
 /// guest walks the reply with a fixed stride and a bounded buffer.
 pub const MAX_SHELF_ENTRIES: usize = 256;
+
+/// Windows 11 on Arm's drivers disc (`scripts/build-virtio-win.sh`):
+/// virtio-win's ARM64 network and display drivers, which Windows on Arm
+/// has none of in the box. Shipped as `share/2ksbox/drivers/`, built
+/// into `build/virtio-win` in a checkout; `LAUNCHER_ARM_DRIVERS_ISO`
+/// overrides both. `None` when it is not there, and the machine then
+/// starts without it (`player::prepare` says so).
+pub fn arm_drivers_iso() -> Option<PathBuf> {
+    let path = match std::env::var("LAUNCHER_ARM_DRIVERS_ISO") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => crate::paths::resource("share/2ksbox/drivers", "build/virtio-win").join(ARM_DRIVERS_ISO),
+    };
+    path.is_file().then(|| path.canonicalize().unwrap_or(path))
+}
+
+/// The drivers disc's file name, in either place.
+pub const ARM_DRIVERS_ISO: &str = "2ksbox-drivers-arm64.iso";
 
 /// The newest guest-tools ISO (`guest-tools/build-wrappers.sh` writes
 /// `guest-tools/out/guest-tools-3dfx-<rev>.iso`), for doc 07's

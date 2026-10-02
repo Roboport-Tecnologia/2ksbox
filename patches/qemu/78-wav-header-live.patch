@@ -1,4 +1,4 @@
-75-wav-header-live: the wav audiodev writes a valid header as it goes
+78-wav-header-live: the wav audiodev writes a valid header as it goes
 
 Since 11.0 every open voice holds a reference on its audio backend, and
 devices are not unrealized at exit, so audio_cleanup() never finalizes a

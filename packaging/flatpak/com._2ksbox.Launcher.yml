@@ -139,8 +139,10 @@ modules:
       # configure-qemu.sh links by default): the tarballs it pins, where
       # it looks for them before fetching, so the build stays offline.
       # libslirp is here rather than a module of its own, because the
-      # runtime's has to be built against this glib. Versions and
-      # checksums are build-deps.sh's.
+      # runtime's has to be built against this glib. OpenSSL's libcrypto
+      # and libtpms are the TPM 2.0 of a Windows 11 machine (patch 75,
+      # track M20), built the same way. Versions and checksums are
+      # build-deps.sh's.
       - type: file
         url: https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2
         sha256: b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed
@@ -153,14 +155,26 @@ modules:
         url: https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.gz
         sha256: f43e68b60b580647574ec4a0e2b6c600a56281e6c39f79426510832dc810f483
         dest: build/deps/src
+      - type: file
+        url: https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
+        sha256: 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+        dest: build/deps/src
+      - type: file
+        url: https://github.com/stefanberger/libtpms/archive/refs/tags/v0.10.2.tar.gz
+        sha256: edac03680f8a4a1c5c1d609a10e3f41e1a129e38ff5158f0c8deaedc719fb127
+        dest: build/deps/src
+        dest-filename: libtpms-0.10.2.tar.gz
     build-commands:
       - scripts/build-deps.sh
       # The steps a developer runs, then the tarball's staging script
       # with `<prefix>` = `/app`, so the install layout needs no
       # Flatpak-specific variant.
       - scripts/configure-qemu.sh --disable-download
-      - ninja -C build/qemu qemu-img libqemu-embed-i386.so
+      - ninja -C build/qemu qemu-img libqemu-embed-i386.so libqemu-embed-x86_64.so
       - cargo build --release --locked --offline -p player
+      # Windows 11's player (track M20): the same, linked to the x86_64
+      # QEMU, in a target directory of its own.
+      - cargo build --release --locked --offline -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
       # `launcher-qt` is its own cargo workspace (ADR-015), so it is its
       # own build command; `CARGO_HOME` above points both at the one
       # vendored directory, which cargo-sources.json fills from both lock

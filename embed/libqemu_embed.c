@@ -24,6 +24,9 @@
  * absent. */
 #include "usb-gamepad.h"
 #include "gameport.h"
+/* CONFIG_GAMEPORT: the gameport is an ISA device, which the aarch64
+ * target (Windows 11 on Arm) does not build. */
+#include CONFIG_DEVICES
 
 #ifdef _WIN32
 #include <io.h>                 /* _open_osfhandle() for qemu_embed_socket_to_fd */
@@ -68,6 +71,9 @@ struct qemu_embed {
     qemu_embed_display_cb cb;
     void *ud;
     QemuConsole *con;
+    bool follow_pending;    /* bh_follow_console scheduled */
+    uint32_t win_w, win_h, win_dpi;     /* qemu_embed_set_window_size, 0 = none */
+    bool win_seen;          /* the console was told a size at least once */
 
     QemuMutex in_lock;
     in_event in_q[IN_QUEUE_LEN];
@@ -153,9 +159,106 @@ void embed_fx_frame_ready(int slot)
 
 /* ---------------------------------------------------------------- display */
 
+/*
+ * The screen a machine with two adapters shows (M20, Windows 11 on Arm):
+ * the last graphic console whose device has a picture, else the default
+ * one. The `virt` board has `ramfb`, which the firmware and Windows setup
+ * draw on, and then `virtio-gpu-pci`, which Windows draws on once
+ * viogpudo is installed. virtio-gpu holds a placeholder surface whenever
+ * no driver scans out (reset, the firmware's hand-over, a Windows without
+ * the driver, its recovery), so following it needs no state of our own.
+ * A machine with one adapter always gets that one.
+ */
+static void embed_tell_window_size(qemu_embed_t *e, bool delay);
+static const DisplayChangeListenerOps embed_dcl_ops;
+
+static QemuConsole *embed_live_console(void)
+{
+    QemuConsole *live = NULL;
+    for (unsigned i = 0;; i++) {
+        QemuConsole *con = qemu_console_lookup_by_index(i);
+        if (!con) {
+            break;
+        }
+        if (qemu_console_is_graphic(con) &&
+            !surface_is_placeholder(qemu_console_surface(con))) {
+            live = con;
+        }
+    }
+    return live ? live : qemu_console_lookup_default();
+}
+
+/* Out of the listener's own refresh: re-registering inside it would edit
+ * the display state's listener list while QEMU walks it. Registering fires
+ * gfx_switch with the new console's surface, so the player sees a mode
+ * change and nothing else. */
+static void bh_follow_console(void *opaque)
+{
+    qemu_embed_t *e = opaque;
+    QemuConsole *con = embed_live_console();
+    e->follow_pending = false;
+    if (con == e->con) {
+        return;
+    }
+    g_autofree char *label = qemu_console_get_label(con);
+    fprintf(stderr, "qemu-embed: showing console %d (%s)\n", qemu_console_get_index(con), label);
+    qemu_console_unregister_listener(&e->dcl);
+    qatomic_set(&e->con, con);
+    qemu_console_register_listener(con, &e->dcl, &embed_dcl_ops);
+    e->win_seen = false;
+    embed_tell_window_size(e, false);
+}
+
+/* The window's size to the console on show. `delay` is QEMU's own
+ * one-second settle, for a window being dragged; the first size a console
+ * hears goes at once, so a guest that starts drawing gets the window's size
+ * as its first mode. Main loop. */
+static void embed_tell_window_size(qemu_embed_t *e, bool delay)
+{
+    uint32_t w = qatomic_read(&e->win_w), h = qatomic_read(&e->win_h);
+    uint32_t dpi = qatomic_read(&e->win_dpi);
+    if (!w || !h || !qemu_console_ui_info_supported(e->con)) {
+        return;
+    }
+    QemuUIInfo info = *qemu_console_get_ui_info(e->con);
+    info.width = w;
+    info.height = h;
+    if (dpi) {
+        /* the size a monitor of this DPI would have: the EDID Windows picks
+         * its recommended scaling from */
+        info.width_mm = (uint16_t)MIN(w * 254u / (dpi * 10u), UINT16_MAX);
+        info.height_mm = (uint16_t)MIN(h * 254u / (dpi * 10u), UINT16_MAX);
+    }
+    qemu_console_set_ui_info(e->con, &info, delay && e->win_seen);
+    e->win_seen = true;
+}
+
+static void bh_window_size(void *opaque)
+{
+    embed_tell_window_size(opaque, true);
+}
+
+void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w, uint32_t h, uint32_t dpi)
+{
+    qatomic_set(&e->win_w, w);
+    qatomic_set(&e->win_h, h);
+    qatomic_set(&e->win_dpi, dpi);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_window_size, e);
+}
+
+bool qemu_embed_display_follows_window(qemu_embed_t *e)
+{
+    QemuConsole *con = qatomic_read(&e->con);
+    return con && qemu_console_ui_info_supported(con);
+}
+
 static void embed_dpy_refresh(DisplayChangeListener *dcl)
 {
     qemu_embed_t *e = container_of(dcl, qemu_embed_t, dcl);
+    if (!e->follow_pending && embed_live_console() != e->con) {
+        e->follow_pending = true;
+        aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_follow_console, e);
+    }
     qemu_console_hw_update(dcl->con);
     if (e->cb.on_refresh_done) {
         e->cb.on_refresh_done(e->ud);
@@ -273,7 +376,10 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
     qemu_console_register_listener(e->con, &e->dcl, &embed_dcl_ops);
     /* qemu-3dfx: window-less context provider (doc 12) */
     fx_instance = e;
+#ifdef TARGET_I386
+    /* qemu-3dfx's OpenGL pass-through, the x86 targets' alone (patch 77) */
     embed_fx_register();
+#endif
     return e;
 }
 
@@ -446,7 +552,12 @@ void qemu_embed_pad_state(qemu_embed_t *e, const uint8_t *axes,
 bool qemu_embed_pad_present(qemu_embed_t *e)
 {
     (void)e;
-    return usb_gamepad_present() || gameport_present();
+#ifdef CONFIG_GAMEPORT
+    if (gameport_present()) {
+        return true;
+    }
+#endif
+    return usb_gamepad_present();
 }
 
 /* Runs on the main loop under BQL. */
@@ -533,7 +644,9 @@ static void bh_input_drain(void *opaque)
              * is cheaper than asking twice and keeps this file out of
              * the business of knowing which path the bundle chose. */
             usb_gamepad_set_state(axes, (uint8_t)ev->b, (uint16_t)ev->c);
+#ifdef CONFIG_GAMEPORT
             gameport_set_state(axes, (uint8_t)ev->b, (uint16_t)ev->c);
+#endif
             break;
         }
         }

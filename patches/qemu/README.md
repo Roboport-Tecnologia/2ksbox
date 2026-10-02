@@ -21,7 +21,7 @@ The test tools named here are in `docs/testing.md`.
    headers; `voodoo/` → `hw/voodoo/`; `libsynth/qemu/` → `hw/audio/`
    (`opl3.c`, `mpu401.c`); `libdisc/qemu/` → `block/cdimage.c` and
    `include/block/`; `gamepad/qemu/` → `hw/usb/dev-gamepad.c` and
-   `hw/input/gameport.c`. Our device code lives in these overlays and is
+   `hw/input/gameport.c`; `tpm/qemu/` → `backends/tpm/tpm_libtpms.c`. Our device code lives in these overlays and is
    edited in the repo; a patch only wires it into QEMU's build and machines.
 2. **Restore.** Every tracked file any patch touches is checked out
    pristine, and every file a patch creates is deleted.
@@ -519,8 +519,11 @@ A TLB flush no longer empties the jump cache. An entry carries the
 cache's generation in the pc word's high half, a flush bumps the
 generation, and `tb_lookup()` re-validates a stale entry against the pc's
 current mapping and re-stamps it. The cache is 65,536 entries instead of
-4,096. Win98's VMM writes the same CR3 2,400 times a second.
-**Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
+4,096. Win98's VMM writes the same CR3 2,400 times a second. The
+generation bump returns early on a CPU with no jump cache, as upstream's
+clear does: without TCG (qtest, KVM) `loadvm`'s `tlb_flush` still lands
+there, and the i386 QEMU crashed on it (2026-10-01, the `tpm-qtest`
+check on a Mac). **Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
 physical page. **On 11.1:** whether the cache carries a generation is a run-time `target_long_bits() <= 32` (`TARGET_LONG_BITS` is poisoned in code built once per mode): `qemu-system-i386` keeps it, `qemu-system-x86_64` the clear.
 
 ### 43-eob-chain
@@ -809,7 +812,58 @@ bytes that process maps. No change for any other VGA. **Drop:** never.
 ### 74-no-glidept
 **Dropped in M21** (QEMU 11.1). Folded into the qemu-3dfx port, which carries only the OpenGL half.
 
-### 75-wav-header-live
+### 75-tpm-libtpms
+The libtpms TPM backend, `-tpmdev libtpms,id=…,state=<file>`: a TPM 2.0
+inside QEMU's process for Windows 11 (track M20), where QEMU's own
+`emulator` backend talks to swtpm in a second process. The backend is
+ours (`tpm/qemu/tpm_libtpms.c`, overlaid); the patch adds the `libtpms`
+meson feature (`--enable-libtpms`; it asks pkg-config for libcrypto by
+name too, since libtpms's `.pc` names only `-ltpms` and ours is static),
+`CONFIG_TPM_LIBTPMS`, the `libtpms` `TpmType` with its `state` option in
+QAPI, and `info tpm`'s line for it. The TPM's permanent state is the one
+file, replaced atomically; snapshots carry the permanent and volatile
+state, and `loadvm` writes the snapshot's permanent state back to the
+file. libtpms and libcrypto come static and hidden from
+`scripts/build-deps.sh` on Linux and macOS (`QEMU_DEPS=system` leaves
+the feature on auto). Everything is behind `CONFIG_TPM`, which QEMU 9.2
+refuses on a Windows host, so the Windows build has no TPM yet.
+**Test:** `tools/tpm-qtest.py` (the `tpm-qtest` host check): a fresh
+TPM, a restart on the same file and a savevm / loadvm round trip
+through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
+with `TPM=libtpms` for Windows 11. **Drop:** never (upstream QEMU has no
+in-process TPM). **On 11.1:** the backend includes `system/` headers (11.1
+renamed `sysemu/`) and its `class_init` takes `const void *`; the patch
+applies with offsets. Not yet run on 11.1 (the `tpm-qtest` check).
+
+### 76-hvf-arm-macos12
+Arm HVF on the macOS 12 floor (track M20 step 4). QEMU 9.2's Arm
+Hypervisor.framework accelerator sizes the VM's IPA space with the VM
+configuration calls macOS 13 added, unguarded, so `aarch64-softmmu` (the
+Windows 11 on Arm target, built on Arm hosts) failed the floor's
+`-Werror=unguarded-availability-new`. Each call now runs under
+`__builtin_available(macOS 13, *)`; on 12 the VM is made with no
+configuration (a 36-bit IPA space) and one that needs more is refused.
+**Test:** the build on the floor; a Windows 11 on Arm boot under HVF.
+The macOS 12 path is unrun (no macOS 12 host with HVF here).
+**Drop:** when the floor is macOS 13 or later, or upstream guards it.
+**On 11.1:** `hvf_arch_vm_create` also sets up nested virtualization and
+the in-kernel GIC (both macOS 15); the configuration path moved whole into
+`hvf_arm_vm_create_config` (marked macOS 13), and before 13 a VM asking
+for either is refused too. Not compiled yet (no macOS here).
+
+### 77-arm-target-no-era-devices
+The era's devices stay out of a target with no ISA bus (track M20 step
+4). `aarch64-softmmu`, Windows 11 on Arm's QEMU on an Arm host, is the
+first target of ours that is not a PC: OPL3 and the MPU-401 (patch 60)
+now also need `CONFIG_ISA_BUS`, and libqemu-embed compiles
+`embed/mglcntx_embed.c` (the `hw/mesa` backend) and `embed/embedfx.c`
+(its UI provider, registered under `TARGET_I386`) only for the x86
+targets, where `hw/mesa` is built. `embed/libqemu_embed.c` itself calls
+the gameport only under `CONFIG_GAMEPORT`. **Test:** the Arm build links;
+the x86 targets are unchanged (`scripts/test.sh host`). **Drop:** with
+patches 60 and 10, or when they say the same.
+
+### 78-wav-header-live
 QEMU's `wav` audiodev stores the RIFF and data lengths after every write.
 Since 11.0 every open voice holds a reference on its audio backend and
 devices are not unrealized at exit, so `audio_cleanup()` never finalizes

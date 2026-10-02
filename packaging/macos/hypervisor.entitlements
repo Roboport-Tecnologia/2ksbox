@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hypervisor.framework (HVF), for Windows 11 on Arm (track M20 step
+       4). Without it hv_vm_create() fails with HV_DENIED and QEMU's
+       `-accel hvf` refuses to start, ad-hoc signed or not, so
+       scripts/build.sh signs the checkout's aarch64 player with this
+       file. A linker-signed binary that cargo relinks loses it. -->
+  <key>com.apple.security.hypervisor</key> <true/>
+</dict>
+</plist>

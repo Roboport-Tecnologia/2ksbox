@@ -13,7 +13,8 @@
 //! which is how every other window finds it again (doc 07, "How the
 //! launcher reaches a running machine").
 
-use crate::bundle::Machine;
+use crate::bundle::{self, D3d9, Machine, Music, Video};
+use crate::wizard::Section;
 use crate::{control, disc_library, library, player, shader_library};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -108,11 +109,29 @@ impl Machines {
             .and_then(|id| self.profiles.iter().find(|e| shader_library::id_of(&e.path) == id))
             .map(|e| e.profile.name.clone())
             .or_else(|| entry.machine.shader.as_ref().map(|p| p.display().to_string()))
-            .unwrap_or_else(|| shader_library::default_label(&self.profiles))
+            .unwrap_or_else(|| shader_library::default_label_for(entry.machine.family, &self.profiles))
     }
 
     pub fn shader_label_at(&self, row: usize) -> String {
         self.entries.get(row).map(|e| self.shader_label(e)).unwrap_or_default()
+    }
+
+    /// The line under a machine's name in the list: its family, and
+    /// whether it is running.
+    pub fn subtitle(&self, row: usize) -> String {
+        let Some(machine) = self.machine(row) else { return String::new() };
+        let state = if self.is_running(row) { "Running" } else { "Stopped" };
+        format!("{} · {state}", machine.family.label())
+    }
+
+    /// What the window shows of the selected machine, a group per page
+    /// of the machine form: System, then Storage (what is in the drives
+    /// is what is most often looked for, user), then the rest in the
+    /// form's order. Only what the form would show for this family: no
+    /// Direct3D row on a machine without our adapter.
+    pub fn details(&self, row: usize) -> Vec<DetailGroup> {
+        let Some(entry) = self.entries.get(row) else { return Vec::new() };
+        details(&entry.machine, self.shader_label(entry))
     }
 
     pub fn is_running(&self, row: usize) -> bool {
@@ -131,6 +150,12 @@ impl Machines {
 
     /// Start a machine's player. `Ok` carries the line to show, `Err`
     /// the reason it didn't start.
+    /// The headline over `play`'s error, for a front end that shows it
+    /// in an alert; the error is the line under it.
+    pub fn start_failed(name: &str) -> String {
+        format!("Couldn't start “{name}”")
+    }
+
     pub fn play(&mut self, row: usize) -> Result<String, String> {
         let entry = self.entries.get(row).ok_or("no such machine")?;
         let dir = entry.dir.clone();
@@ -184,6 +209,112 @@ impl Machines {
             publish_shelf(&self.disc_library_path, &control::shelf_path(dir));
         }
     }
+}
+
+/// One group of a machine's details: a page of the machine form, and its
+/// settings as label and value.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DetailGroup {
+    pub title: &'static str,
+    pub rows: Vec<DetailRow>,
+}
+
+/// One setting. A file's row shows the file's name and carries its whole
+/// path, for a tooltip.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DetailRow {
+    pub label: &'static str,
+    pub value: String,
+    pub path: Option<PathBuf>,
+}
+
+impl From<(&'static str, String)> for DetailRow {
+    fn from((label, value): (&'static str, String)) -> DetailRow {
+        DetailRow { label, value, path: None }
+    }
+}
+
+/// A machine's details, with the shader column's label for it. The
+/// labels are the machine form's, so a row reads as the field it came
+/// from; a file shows its name, the hard disk its name and two folders
+/// (`short_path`), each with its whole path kept for a tooltip.
+pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
+    let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
+    let file = |label: &'static str, path: Option<&PathBuf>| DetailRow {
+        label,
+        value: match path {
+            Some(p) => p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned()),
+            None => "Empty".to_owned(),
+        },
+        path: path.cloned(),
+    };
+    let rows = |rows: Vec<(&'static str, String)>| rows.into_iter().map(DetailRow::from).collect::<Vec<_>>();
+    let video = machine.effective_video();
+    let mut display = Vec::new();
+    if let Some(video) = video {
+        display.push(("Display adapter", video.label().to_owned()));
+    }
+    if video == Some(Video::D3dpt) {
+        display.push(("Direct3D", machine.d3d9.unwrap_or(D3d9::Auto).label().to_owned()));
+    }
+    let voodoo = match (machine.voodoo2, machine.voodoo2_undither) {
+        (true, true) => "On, with the Voodoo3 undither filter".to_owned(),
+        (on, _) => on_off(on),
+    };
+    display.push(("3dfx Voodoo 2", voodoo));
+    display.push(("Shader profile", shader));
+    let music = machine.effective_music();
+    let mut audio = rows(vec![
+        ("Sound card", machine.effective_sound().label().to_owned()),
+        ("Music (MIDI)", music.label().to_owned()),
+    ]);
+    if music == Music::Gm && machine.soundfont.is_some() {
+        audio.push(file("SoundFont", machine.soundfont.as_ref()));
+    }
+    let mut input = Vec::new();
+    if bundle::pad_choices(machine.family).len() > 1 {
+        input.push(("Gamepad", machine.effective_pad().label().to_owned()));
+    }
+    input.push(("Seamless mouse", on_off(machine.seamless_mouse)));
+    vec![
+        DetailGroup {
+            title: Section::System.label(),
+            rows: rows(vec![
+                ("Memory", format!("{} MB", machine.ram_mb)),
+                ("Processor", machine.effective_cpu_speed().label().to_owned()),
+                ("Acceleration", machine.effective_accel().label().to_owned()),
+            ]),
+        },
+        DetailGroup {
+            title: Section::Storage.label(),
+            rows: vec![
+                DetailRow {
+                    label: "Hard disk",
+                    value: short_path(&machine.disk),
+                    path: Some(machine.disk.clone()),
+                },
+                file("CD in drive", machine.boot_disc()),
+                file("Floppy", machine.floppy.as_ref()),
+                ("Boot from", machine.effective_boot().label().to_owned()).into(),
+            ],
+        },
+        DetailGroup { title: Section::Display.label(), rows: rows(display) },
+        DetailGroup { title: Section::Audio.label(), rows: audio },
+        DetailGroup { title: Section::Input.label(), rows: rows(input) },
+        DetailGroup { title: Section::Network.label(), rows: rows(vec![("Networking", on_off(machine.network))]) },
+    ]
+}
+
+/// A path cut to its file and the two folders above it, after `...`:
+/// `.../machines/winxp/disk.qcow2`. Enough to tell one machine's disk
+/// from another's without the whole path; a shorter path is shown whole.
+fn short_path(path: &Path) -> String {
+    let parts: Vec<_> = path.components().collect();
+    if parts.len() <= 3 {
+        return path.display().to_string();
+    }
+    let tail: PathBuf = parts[parts.len() - 3..].iter().collect();
+    Path::new("...").join(tail).display().to_string()
 }
 
 /// Write the shared shelf out in the flat form a machine's ATAPI drive

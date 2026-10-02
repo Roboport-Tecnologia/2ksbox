@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["player", "libdisc", "libsynth", "gamepad", "launcher-core", "launcher-capi", "qemu-embed", "shader-chain"]
+members = ["player", "player-core", "libdisc", "libsynth", "gamepad", "launcher-core", "launcher-capi", "qemu-embed", "shader-chain"]
 # `launcher-capi` is deliberately not a *default* member: it builds a
 # `cdylib` and a `staticlib` of the whole launcher, which nobody needs
 # unless they are building a front end in another language.
@@ -9,7 +9,7 @@ members = ["player", "libdisc", "libsynth", "gamepad", "launcher-core", "launche
 # itself is `launcher-qt/`, its own workspace so that nothing here needs
 # Qt 6 (ADR-015); the egui front end that used to be a member here was
 # retired on 2026-09-13 (ADR-017).
-default-members = ["player", "libdisc", "libsynth", "gamepad", "launcher-core", "qemu-embed", "shader-chain"]
+default-members = ["player", "player-core", "libdisc", "libsynth", "gamepad", "launcher-core", "qemu-embed", "shader-chain"]
 
 [workspace.package]
 version = "0.0.1"

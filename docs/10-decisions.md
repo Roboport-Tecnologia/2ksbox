@@ -30,6 +30,9 @@ The roadmap is doc 08.
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
+| 023 | The launcher moves to mitsuami | accepted, work in M19 |
+| 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
+| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22 |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -294,7 +297,7 @@ That is 0.1 % of a frame typically and ~1.4 % at p99, so **latency is
 not what stops it**. The work does: the VGA surface through shared
 memory, IOSurface handles over a mach port on macOS, and the lifecycle
 rules, headless dumps and guest harnesses that assume one process.
-`player/src/qemu_vm.rs` is the only module touching the embed API, so
+`player-core/src/qemu_vm.rs` is the only module touching the embed API, so
 it would be a track, not a rewrite. Re-run the spike on the Air first.
 A distribution refusing the player is the signal to open that track.
 
@@ -790,4 +793,82 @@ it is packaged.
 **Unchanged.** ADR-014: every rule and every sentence stays in
 `launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami
 takes its pixels in an `Image`); the player keeps winit (a mitsuami player
-is a separate question, `spikes/player-gtk`).
+was a separate question, answered by ADR-025).
+
+## ADR-024: A general-purpose VM manager, best at vintage boxes (2026-10-01)
+
+**Status.** Accepted (user decision: "lets be a general purpose vm
+manager, that just so happens to also be awesome at emulating vintage
+boxes"). Removes doc 01's "modern guests" non-goal. Work in track M20.
+
+**Decision.** 2ksbox runs current guests as well as era ones. The first
+is Windows 11 (track M20), asked for by the user so people who need it
+for work can run it on a Mac. A modern box uses the same launcher,
+bundle format, snapshots, player and in-process QEMU as a vintage one,
+but none of the era devices: no `d3dpt-vga`, no Voodoo 2, no
+guest-tools ISO, no CRT shader by default. On Apple Silicon a modern
+guest runs as ARM64 under Hypervisor.framework (`aarch64-softmmu`,
+`-accel hvf`). Emulating a current x86 system under TCG is too slow for
+work there. Vintage boxes stay x86 under TCG.
+
+**Why.** Everything a modern box needs from us outside QEMU already
+exists for the vintage ones: the machine library, the wizard, snapshots,
+the disc shelf, packaging on three platforms. A second app for modern
+guests would duplicate all of it. UTM covers the Mac only and is not our
+stack.
+
+**Unchanged.** Every locked decision: QEMU as the base (ADR-001),
+in-process (ADR-002), Rust where possible (ADR-004), one launcher
+library (ADR-014), everything open source, nothing shipped from
+Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
+
+**Costs.**
+
+- The player links one QEMU (`libqemu-embed-i386`), and has to keep
+  linking it (patch 63, doc 22 §5.0). So each target is a player binary
+  of its own: `2ksbox-player-x86_64` for a modern PC guest (M20 step 3),
+  aarch64 on a Mac later. Packages grow by a player and a QEMU library
+  per target.
+- The trimmed QEMU (`no-optionals`, the patches README) gains what a
+  modern guest needs: the TPM and its backend, NVMe, virtio, ramfb, HVF.
+- New libraries to build from pinned sources: libtpms and OpenSSL's
+  libcrypto (M20). EDK2 firmware, which QEMU's `pc-bios/` already
+  carries.
+- Doc 01's integration features (clipboard, shared folders, the guest
+  resizing its screen to the window) stay later work, but a modern
+  guest's users will expect them sooner than a game player does.
+
+## ADR-025: The player moves to mitsuami, over a shared `player-core` (2026-10-01)
+
+**Status.** Accepted (user decision: "now lets make the mitsuami
+player"). Work in track M22. Until it runs on every host, `player/` (winit)
+ships.
+
+**Decision.** The player gets a mitsuami front end, `player-mitsuami/`,
+its picture on mitsuami's `GpuSurface` (a desync Wayland subsurface or an
+X11 child window on Linux, a `CAMetalLayer` view on macOS, a child HWND on
+Windows) and the platform's menus over it. Everything but the window moves
+into `player-core/`, which both front ends drive, as `launcher-core` holds
+the launcher's rules (ADR-014): the QEMU thread, the picture and its CRT
+chain, audio, gamepads, what the guest holds, the command line. The user
+chose this shape over a copy of the modules or a rewrite of `player/` in
+place, GTK on Wayland as the first host, and a menu bar over a window that
+is otherwise only the picture.
+
+**Why.** The player's window then has the platform's menus, alerts and
+full screen, and what the winit player built by hand per windowing system
+(the pointer lock's raw motion, the guest's cursor, keys a keymap moved)
+is the toolkit's. The latency question was measured first (2026-09-27,
+the spike in `tracks/m22-mitsuami-player.md`): a desync subsurface
+presented to in Mailbox matched the winit window at the median, where
+GTK's own offload waited a refresh for its frame clock. Its other
+precondition, QEMU's main loop off the toolkit's `GMainContext`, is the
+private GLib `libqemu-embed` links on Linux since 2026-09-27.
+
+**Costs.** The player is still linked to QEMU, never opened at run time
+(patch 63), so it stays one binary per embed target, now per toolkit too
+while both front ends exist. On Windows it needs the native MSVC build
+mitsuami needs (ADR-023). The keyboard grab mitsuami gives is weaker on
+Windows and macOS than the winit player's capture (doc 03 "Input path"),
+so those hosts wait for it to match.
+

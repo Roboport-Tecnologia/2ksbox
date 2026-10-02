@@ -1,0 +1,39 @@
+[package]
+name = "player-mitsuami"
+version = "0.0.1"
+# mitsuami is edition 2024 and needs Rust 1.95; the root workspace's
+# `stable` toolchain is newer than both.
+edition = "2024"
+# It links QEMU (libqemu-embed, through player-core), as the winit player
+# does (ADR-009).
+license = "GPL-2.0-only"
+description = "The player (doc 02/03) in a mitsuami window: player-core's machine and picture on a GpuSurface, with the platform's menus (track M22)."
+
+# Its own workspace, excluded from the root one like `launcher-mitsuami`,
+# so a plain `cargo build` at the repository root never needs GTK 4 (or
+# Qt, with the `kde` feature) development files. Build it from this
+# directory.
+[workspace]
+
+[features]
+default = ["gtk", "gilrs"]
+# The Linux toolkit (ADR-023): GTK 4 by default, Kirigami with `kde`.
+# Neither makes a difference on macOS or Windows.
+gtk = ["mitsuami/gtk"]
+kde = ["mitsuami/kde"]
+# player-core's switches (its Cargo.toml): real gamepads, and which
+# libqemu-embed is linked, a second target being a second binary.
+gilrs = ["player-core/gilrs"]
+qemu-x86_64 = ["qemu-embed/qemu-x86_64", "player-core/qemu-x86_64"]
+qemu-aarch64 = ["qemu-embed/qemu-aarch64", "player-core/qemu-aarch64"]
+
+[dependencies]
+player-core = { path = "../player-core", default-features = false }
+# Linked here as well as through player-core so build.rs gets its
+# DEP_QEMU_EMBED_LIBDIR (the rpath), which cargo gives only to a crate
+# that depends on the `links` crate directly.
+qemu-embed = { path = "../qemu-embed" }
+# Pinned to a commit (user decision, ADR-023), the launcher's rev: bump
+# both together. For work on both repositories at once, a `[patch]` in a
+# local, uncommitted `.cargo/config.toml` (docs/tracks/m19-mitsuami-launcher.md).
+mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "2cf54ff21536cc2232fe61d283948cfdda8e3eda", default-features = false }

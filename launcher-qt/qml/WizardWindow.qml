@@ -335,6 +335,7 @@ Window {
                             // whether an era game is playable at all (doc 06).
                             RowLayout {
                                 Layout.fillWidth: true
+                                visible: root.wizard.cpuSpeedApplies
                                 spacing: 8
                                 Label { text: qsTr("Processor"); Layout.minimumWidth: 150 }
                                 ComboBox {
@@ -352,7 +353,7 @@ Window {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: root.wizard.cpuNote !== ""
+                                visible: root.wizard.cpuSpeedApplies && root.wizard.cpuNote !== ""
                                 text: root.wizard.cpuNote
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 11
@@ -602,6 +603,7 @@ Window {
                             // shared form's too.
                             RowLayout {
                                 Layout.fillWidth: true
+                                visible: root.wizard.voodoo2Applies
                                 spacing: 16
 
                                 CheckBox {
@@ -619,6 +621,7 @@ Window {
                             }
                             Label {
                                 Layout.fillWidth: true
+                                visible: root.wizard.voodoo2Applies
                                 text: root.wizard.voodoo2Note
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 11
@@ -626,7 +629,7 @@ Window {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: root.wizard.voodoo2UnditherNote !== ""
+                                visible: root.wizard.voodoo2Applies && root.wizard.voodoo2UnditherNote !== ""
                                 text: root.wizard.voodoo2UnditherNote
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 11
@@ -703,6 +706,7 @@ Window {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
+                                visible: root.wizard.musicApplies
                                 spacing: 8
                                 Label { text: qsTr("Music (MIDI)"); Layout.minimumWidth: 150 }
                                 ComboBox {
@@ -720,6 +724,7 @@ Window {
                             }
                             Label {
                                 Layout.fillWidth: true
+                                visible: root.wizard.musicApplies
                                 text: root.wizard.musicNote
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 11
@@ -891,7 +896,7 @@ Window {
                             PathField {
                                 id: mediaField
                                 Layout.fillWidth: true
-                                label: qsTr("Install media (optional)")
+                                label: qsTr("CD in drive (optional)")
                                 nameFilter: root.wizard.mediaFilter()
                                 value: root.wizard.installMedia
                                 onEdited: (path) => root.wizard.installMedia = path
@@ -902,6 +907,7 @@ Window {
                             PathField {
                                 id: floppyField
                                 Layout.fillWidth: true
+                                visible: root.wizard.floppyApplies
                                 label: qsTr("Floppy (optional)")
                                 nameFilter: root.wizard.floppyFilter()
                                 value: root.wizard.floppy
@@ -911,6 +917,7 @@ Window {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
+                                visible: root.wizard.bootApplies
                                 spacing: 8
                                 Label { text: qsTr("Boot from"); Layout.minimumWidth: 150 }
                                 ComboBox {
@@ -923,7 +930,7 @@ Window {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: root.wizard.bootNote !== ""
+                                visible: root.wizard.bootApplies && root.wizard.bootNote !== ""
                                 text: root.wizard.bootNote
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 11

@@ -107,12 +107,12 @@ travels. A front end that declines an offer keeps the readback path.
   as EGLImage textures; each swap blits FBO 0 (Y-flipped) into the next.
   The player imports each dma-buf into wgpu through `wgpu-hal` Vulkan
   (`VK_EXT_external_memory_dma_buf` + `VK_EXT_image_drm_format_modifier`,
-  `player/src/dmabuf.rs`). The frontend gets its own `gbm_bo_get_fd`,
+  `player-core/src/dmabuf.rs`). The frontend gets its own `gbm_bo_get_fd`,
   since a Vulkan import takes ownership of the fd, and a declined offer
   is closed.
 - **macOS.** An IOSurface ring bound to rectangle textures with
   `CGLTexImageIOSurface2D`. The player wraps each surface in a Metal
-  texture (`player/src/iosurface.rs`).
+  texture (`player-core/src/iosurface.rs`).
 - **Sync** is `glFinish` before the hand-off; a fence is the open
   refinement.
 

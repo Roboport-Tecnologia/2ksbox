@@ -454,7 +454,7 @@ ApplicationWindow {
             switch (diag.screen) {
             case "wizard":
                 wizard.openFresh(); profiles.refresh(); wizardWindow.show()
-                // `LAUNCHER_QT_ARG=<win98|xp|dos|other>[:<page>]` exercises the one piece
+                // `LAUNCHER_QT_ARG=<win98|xp|dos|other|win11>[:<page>]` exercises the one piece
                 // of form behaviour a screenshot can prove:
                 // switching family moves the memory, processor,
                 // acceleration and networking defaults with it, but only
@@ -462,7 +462,7 @@ ApplicationWindow {
                 // form's own (`bundle::Family::ALL`), which is also the
                 // order `familyLabels()` hands the combo box, so the two
                 // cannot get out of step.
-                const families = ["win98", "xp", "dos", "other"]
+                const families = ["win98", "xp", "dos", "other", "win11"]
                 // The page the shot is of, as a section index after a
                 // colon (`xp:2` is the Display page), for looking at one
                 // row of the form rather than always its first page.
@@ -587,7 +587,7 @@ ApplicationWindow {
                 wizard.openFresh()
                 const spec = diag.arg.split(":")
                 const named = spec.length > 1
-                const family = named ? ["win98", "xp", "dos", "other"].indexOf(spec[0]) : 1
+                const family = named ? ["win98", "xp", "dos", "other", "win11"].indexOf(spec[0]) : 1
                 wizard.chooseFamily(family < 0 ? 1 : family)
                 wizard.name = named ? spec[1] : diag.arg
                 wizard.existingDisk = true

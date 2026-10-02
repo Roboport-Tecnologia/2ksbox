@@ -1,6 +1,6 @@
 //! The first-run shader offer (`launcher_core::firstrun`): on the first
 //! start of a launcher with no preset collection, a question; after a
-//! yes, the download's progress in the machine window's toolbar; then
+//! yes, a small progress bar in the machine window's toolbar; then
 //! what came of it. The steps and every sentence are the core's. The
 //! question and the outcome are the platform's own alert, as the Qt build
 //! uses Qt's `MessageDialog`.
@@ -24,7 +24,7 @@ use std::time::Duration;
 #[derive(Clone, Copy)]
 pub struct Offer {
     model: Signal<FirstRun>,
-    /// The download's line for the toolbar, while one runs.
+    /// The toolbar bar's label (the core's headline), while a download runs.
     pub progress: Signal<Option<String>>,
 }
 
@@ -116,7 +116,7 @@ impl Offer {
                     None => return,
                 },
                 Step::Downloading => {
-                    self.progress.set(Some(format!("{} {}", message.headline, message.detail)));
+                    self.progress.set(Some(message.headline.clone()));
                     sleep(Duration::from_millis(300)).await;
                 }
                 Step::Failed => {

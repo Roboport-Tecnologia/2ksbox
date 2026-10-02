@@ -22,6 +22,12 @@ use std::path::PathBuf;
 /// The width of the labels in front of each control, so the controls on
 /// a page line up.
 const LABEL_W: f32 = 180.0;
+/// The pickers' and number boxes' width, so the values line up.
+const FIELD_W: f32 = 260.0;
+/// The window's content, the sidebar beside it. Smaller on macOS (user),
+/// whose sidebar is wider than the other platforms' and whose controls
+/// are more compact.
+const WINDOW: Size = platform! { macos => Size::new(560.0, 330.0), _ => Size::new(650.0, 440.0) };
 
 #[derive(Clone, Copy)]
 pub struct Wizard {
@@ -80,6 +86,7 @@ impl Wizard {
             Some("dos") => Some(Family::Dos),
             Some("other") => Some(Family::Other),
             Some("win98") => Some(Family::Win98),
+            Some("win11") => Some(Family::Win11),
             _ => None,
         };
         let section = parts.next().and_then(|p| p.parse::<usize>().ok()).and_then(|i| Section::ALL.get(i).copied());
@@ -166,35 +173,33 @@ pub fn WizardWindow() -> impl View {
     view! {
         <Window
             title=get(wiz, |f| f.title().to_owned())
-            size=Size::new(820.0, 440.0)
-            min_size=Size::new(640.0, 400.0)
+            size=WINDOW
+            min_size=Size::new(480.0, 300.0)
             modal=Modality::Application
             open=move || wiz.is_open()
             @close_request=move || wiz.close()
         >
-            // `min_height=0` on the column and the row: a flex item is at
-            // least as tall as its content unless told otherwise (as in
-            // CSS), so without them a long page grew the window's content
-            // past the window and pushed the buttons out, instead of the
-            // scroll view taking only the room left.
+            // `min_height=0` on the column: a flex item is at least as tall
+            // as its content unless told otherwise (as in CSS), so without
+            // it a long page grew the window's content past the window and
+            // pushed the buttons out, instead of the scroll view taking only
+            // the room left.
             <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
                 {crate::shot::arm(&["wizard", "edit"])}
-                <Row gap=Spacing::Md grow=1.0 min_height=0>
-                    <Sections/>
-                    <ScrollView grow=1.0>
-                        <Column gap=Spacing::Md padding_x=Spacing::Sm>
-                            <Show when=on(wiz, Section::General)><GeneralPage/></Show>
-                            <Show when=on(wiz, Section::System)><SystemPage/></Show>
-                            <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
-                            <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
-                            <Show when=on(wiz, Section::Input)><InputPage/></Show>
-                            <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
-                            <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
-                        </Column>
-                    </ScrollView>
-                </Row>
+                <Sections/>
+                <ScrollView grow=1.0 min_height=0>
+                    <Column gap=Spacing::Md padding_x=Spacing::Sm>
+                        <Show when=on(wiz, Section::General)><GeneralPage/></Show>
+                        <Show when=on(wiz, Section::System)><SystemPage/></Show>
+                        <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
+                        <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
+                        <Show when=on(wiz, Section::Input)><InputPage/></Show>
+                        <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
+                        <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
+                    </Column>
+                </ScrollView>
                 <Show when=get(wiz, |f| f.error.is_some())>
-                    <Text text_style=TextStyle::Callout>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
+                    <Text color=Color::Error>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
                 </Show>
                 <Row gap=Spacing::Sm justify=Justify::End shrink=0.0>
                     <Button role=ButtonRole::Cancel @click=move || wiz.close()>"Cancel"</Button>
@@ -207,41 +212,76 @@ pub fn WizardWindow() -> impl View {
     }
 }
 
-/// The sidebar: the form's pages, in the form's order.
+/// The window's sidebar: the form's pages, in the form's order, each with
+/// the platform's own icon.
 #[component]
 fn Sections() -> impl View {
     let wiz = use_store::<Wizard>();
-    let selected = signal(vec![0usize]);
+    let page = signal(wiz.form.with_untracked(|f| f.section));
     // The page follows the form (every open starts on the first) and the
     // form follows a click; each side only writes when they differ.
     effect(move || {
-        let at = index_of(&Section::ALL, wiz.read(|f| f.section));
-        if selected.get_untracked() != [at] {
-            selected.set(vec![at]);
+        let at = wiz.read(|f| f.section);
+        if page.get_untracked() != at {
+            page.set(at);
         }
     });
     effect(move || {
-        if let Some(&at) = selected.get().first() {
-            let section = Section::ALL[at];
-            if wiz.form.with_untracked(|f| f.section) != section {
-                wiz.edit(|f| f.choose_section(section));
-            }
+        let at = page.get();
+        if wiz.form.with_untracked(|f| f.section) != at {
+            wiz.edit(|f| f.choose_section(at));
         }
     });
-    view! {
-        <List
-            each=|| (0..Section::ALL.len()).collect::<Vec<_>>()
-            key=|i: &usize| *i
-            selected=selected
-            width=150
-            min_width=150
-            max_width=150
-            let:i
-        >
-            <Row padding_x=Spacing::Md padding_y=Spacing::Sm>
-                <Text>{Section::ALL[i].label()}</Text>
-            </Row>
-        </List>
+    let items: Vec<_> =
+        Section::ALL.iter().map(|&s| SidebarItem::new(s.label(), s).icon(section_icon(s))).collect();
+    // Kirigami gives every column of a wide page row its default width (20
+    // grid units), far more than these names need; KDE's apps narrow it.
+    // WinUI's pane is 320 wide by default; half of it (user) still fits
+    // "Storage" beside its icon. The view opens it only from a window width
+    // (1008 by default, past this window's 650 and the pane), so that comes
+    // down too: open at the window's size, icons only when it's narrowed.
+    let narrow = platform! {
+        kde => mitsuami::kirigami::tweak(|page: &mitsuami::kirigami::QmlObject| {
+            if let Some(row) = page.object("mitsuamiStack") {
+                row.set_int("defaultColumnWidth", (mitsuami::kirigami::grid_unit() * 10.0).round() as i32);
+            }
+        }),
+        windows => mitsuami::winui::tweak(|view: &mitsuami::winui::bindings::NavigationView| {
+            use mitsuami::winui::windows_core::Interface;
+            let view = view.cast::<mitsuami::winui::bindings::INavigationView>()?;
+            view.SetOpenPaneLength(160.0)?;
+            view.SetExpandedModeThresholdWidth(800.0)
+        }),
+        _ => Tweak::none(),
+    };
+    Sidebar::new(page).native(narrow).children(items)
+}
+
+/// An SF Symbol, a symbolic GTK theme icon, a Breeze icon, a Segoe Fluent
+/// Icons glyph.
+fn section_icon(section: Section) -> &'static str {
+    match section {
+        Section::General => platform! {
+            macos => "gearshape", gtk => "preferences-system-symbolic", kde => "preferences-system", windows => "\u{E713}",
+        },
+        Section::System => platform! {
+            macos => "cpu", gtk => "computer-symbolic", kde => "computer", windows => "\u{E977}",
+        },
+        Section::Display => platform! {
+            macos => "display", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+        },
+        Section::Audio => platform! {
+            macos => "speaker.wave.2", gtk => "audio-speakers-symbolic", kde => "audio-speakers", windows => "\u{E767}",
+        },
+        Section::Input => platform! {
+            macos => "keyboard", gtk => "input-keyboard-symbolic", kde => "input-keyboard", windows => "\u{E765}",
+        },
+        Section::Network => platform! {
+            macos => "network", gtk => "network-wired-symbolic", kde => "network-wired", windows => "\u{E839}",
+        },
+        Section::Storage => platform! {
+            macos => "internaldrive", gtk => "drive-harddisk-symbolic", kde => "drive-harddisk", windows => "\u{EDA2}",
+        },
     }
 }
 
@@ -255,20 +295,20 @@ fn on(wiz: Wizard, section: Section) -> impl Fn() -> bool + 'static {
 fn Note(text: Value<String>) -> impl View {
     view! {
         <Show when={let text = text.clone(); move || !text.get().is_empty()}>
-            <Text text_style=TextStyle::Caption>{text.clone()}</Text>
+            <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{text.clone()}</Text>
         </Show>
     }
 }
 
-/// A note that can be a warning (a machine that will refuse to start).
-/// mitsuami has no text colour yet, so a warning is set in the stronger
-/// style instead of the Qt window's amber.
+/// A note that can be a warning (a machine that will refuse to start),
+/// then in the platform's warning colour, as the Qt window's amber;
+/// otherwise in the secondary colour, as every note under a control.
 #[component]
 fn AccelLine(note: Value<(String, bool)>) -> impl View {
     let (n1, n2, n3) = (note.clone(), note.clone(), note);
     view! {
         <Show when=move || !n1.get().0.is_empty()>
-            <Text text_style={let n2 = n2.clone(); move || if n2.get().1 { TextStyle::Callout } else { TextStyle::Caption }}>
+            <Text text_style=TextStyle::Caption color={let n2 = n2.clone(); move || if n2.get().1 { Color::Warning } else { Color::SecondaryLabel }}>
                 {let n3 = n3.clone(); move || n3.get().0}
             </Text>
         </Show>
@@ -301,7 +341,7 @@ fn Picker(
     view! {
         <Row gap=Spacing::Sm align=Align::Center>
             <Text width=LABEL_W>{label.clone()}</Text>
-            <Select label=label width=260 options=options selected=selected @change=move |i| on_choose.call(i)/>
+            <Select label=label width=FIELD_W options=options selected=selected @change=move |i| on_choose.call(i)/>
             {reset}
         </Row>
     }
@@ -340,6 +380,7 @@ fn SystemPage() -> impl View {
                 <Text width=LABEL_W>"Memory (MB)"</Text>
                 <NumberInput
                     label="Memory (MB)"
+                    width=FIELD_W
                     range_with=get(wiz, |f| {
                         let r = f.ram_range();
                         (*r.start() as i32, *r.end() as i32)
@@ -351,55 +392,69 @@ fn SystemPage() -> impl View {
                 <Button enabled=get(wiz, |f| !f.ram_is_default()) @click=move || wiz.edit(Form::reset_ram)>"Default"</Button>
             </Row>
             <Note text=get(wiz, |f| f.ram_note().unwrap_or_default().to_owned())/>
-            <Picker
-                label="Processor"
-                options=labels(&CpuSpeed::ALL, CpuSpeed::label)
-                selected=get(wiz, |f| index_of(&CpuSpeed::ALL, f.cpu_speed()))
-                @choose=move |i| wiz.edit(|f| f.choose_cpu_speed(CpuSpeed::ALL[i]))
-                is_default=get(wiz, Form::cpu_speed_is_default)
-                @reset=move |()| wiz.edit(Form::reset_cpu_speed)
-            />
-            <Note text=get(wiz, |f| joined(f.cpu_speed_notes()))/>
+            <Show when=get(wiz, Form::cpu_speed_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Processor"
+                        options=labels(&CpuSpeed::ALL, CpuSpeed::label)
+                        selected=get(wiz, |f| index_of(&CpuSpeed::ALL, f.cpu_speed()))
+                        @choose=move |i| wiz.edit(|f| f.choose_cpu_speed(CpuSpeed::ALL[i]))
+                        is_default=get(wiz, Form::cpu_speed_is_default)
+                        @reset=move |()| wiz.edit(Form::reset_cpu_speed)
+                    />
+                    <Note text=get(wiz, |f| joined(f.cpu_speed_notes()))/>
+                </Column>
+            </Show>
             <Picker
                 label="Acceleration"
-                options=labels(&Accel::ALL, Accel::label)
-                selected=get(wiz, |f| index_of(&Accel::ALL, f.accel()))
-                @choose=move |i| wiz.edit(|f| f.choose_accel(Accel::ALL[i]))
+                options=get(wiz, |f| labels(&f.accel_choices(), Accel::label))
+                selected=get(wiz, |f| index_of(&f.accel_choices(), f.accel()))
+                @choose=move |i| wiz.edit(|f| {
+                    if let Some(&accel) = f.accel_choices().get(i) {
+                        f.choose_accel(accel);
+                    }
+                })
                 is_default=get(wiz, Form::accel_is_default)
                 @reset=move |()| wiz.edit(Form::reset_accel)
             />
             <AccelLine note=get(wiz, |f| accel(f.accel_note()))/>
-            // A disclosure header: Qt Quick has none either, and the Qt window
-            // builds its own from a tool button.
-            <Row>
-                <Button button_style=ButtonStyle::Borderless @click=move || expanded.update(|e| *e = !*e)>
-                    {move || format!(
-                        "{} Emulation optimizations ({})",
-                        if expanded.get() { "▾" } else { "▸" },
-                        wiz.read(Form::optimizations_summary),
-                    )}
-                </Button>
-            </Row>
-            <Show when=expanded>
-                <Column gap=Spacing::Xs padding_x=Spacing::Lg>
-                    <Note text=get(wiz, |f| f.optimizations_note().to_owned())/>
-                    <For each=|| Optimization::ALL.to_vec() key=|o: &Optimization| o.label() let:opt>
-                        <Column gap=Spacing::Xs>
-                            <Checkbox
-                                checked=get(wiz, move |f| f.optimization_enabled(opt))
-                                @change=move |on| wiz.edit(|f| f.choose_optimization(opt, on))
-                            >{opt.label()}</Checkbox>
-                            <Text text_style=TextStyle::Caption>{opt.note()}</Text>
-                        </Column>
-                    </For>
-                    <Row gap=Spacing::Sm>
-                        <Button enabled=get(wiz, |f| !f.optimizations_all_off())
-                            @click=move || wiz.edit(Form::disable_all_optimizations)>"Turn all off"</Button>
-                        <Button enabled=get(wiz, |f| !f.optimizations_all_on())
-                            @click=move || wiz.edit(Form::enable_all_optimizations)>"Turn all on"</Button>
-                        <Button enabled=get(wiz, |f| !f.optimizations_are_default())
-                            @click=move || wiz.edit(Form::reset_optimizations)>"All defaults"</Button>
+            // Only where the machine will be emulated: they are speed-ups in
+            // the emulator, and do nothing under hardware virtualization.
+            <Show when=get(wiz, Form::optimizations_apply)>
+                <Column gap=Spacing::Md>
+                    // A disclosure header: Qt Quick has none either, and the Qt window
+                    // builds its own from a tool button.
+                    <Row>
+                        <Button button_style=ButtonStyle::Borderless @click=move || expanded.update(|e| *e = !*e)>
+                            {move || format!(
+                                "{} Emulation optimizations ({})",
+                                if expanded.get() { "▾" } else { "▸" },
+                                wiz.read(Form::optimizations_summary),
+                            )}
+                        </Button>
                     </Row>
+                    <Show when=expanded>
+                        <Column gap=Spacing::Xs padding_x=Spacing::Lg>
+                            <Note text=get(wiz, |f| f.optimizations_note().to_owned())/>
+                            <For each=|| Optimization::ALL.to_vec() key=|o: &Optimization| o.label() let:opt>
+                                <Column gap=Spacing::Xs>
+                                    <Checkbox
+                                        checked=get(wiz, move |f| f.optimization_enabled(opt))
+                                        @change=move |on| wiz.edit(|f| f.choose_optimization(opt, on))
+                                    >{opt.label()}</Checkbox>
+                                    <Text text_style=TextStyle::Caption color=Color::SecondaryLabel>{opt.note()}</Text>
+                                </Column>
+                            </For>
+                            <Row gap=Spacing::Sm>
+                                <Button enabled=get(wiz, |f| !f.optimizations_all_off())
+                                    @click=move || wiz.edit(Form::disable_all_optimizations)>"Turn all off"</Button>
+                                <Button enabled=get(wiz, |f| !f.optimizations_all_on())
+                                    @click=move || wiz.edit(Form::enable_all_optimizations)>"Turn all on"</Button>
+                                <Button enabled=get(wiz, |f| !f.optimizations_are_default())
+                                    @click=move || wiz.edit(Form::reset_optimizations)>"All defaults"</Button>
+                            </Row>
+                        </Column>
+                    </Show>
                 </Column>
             </Show>
             <Row gap=Spacing::Sm align=Align::Center>
@@ -446,21 +501,25 @@ fn DisplayPage() -> impl View {
                     <AccelLine note=get(wiz, |f| accel(f.d3d9_note()))/>
                 </Column>
             </Show>
-            <Row gap=Spacing::Lg>
-                <Checkbox checked=get(wiz, Form::voodoo2) @change=move |on| wiz.edit(|f| f.choose_voodoo2(on))>
-                    "3dfx Voodoo 2"
-                </Checkbox>
-                <Checkbox
-                    enabled=get(wiz, Form::voodoo2_undither_enabled)
-                    checked=get(wiz, Form::voodoo2_undither)
-                    @change=move |on| wiz.edit(|f| f.choose_voodoo2_undither(on))
-                >"Voodoo3 undither filter"</Checkbox>
-            </Row>
-            <Note text=get(wiz, |f| joined(f.voodoo2_notes()))/>
-            <Note text=get(wiz, |f| joined(f.voodoo2_undither_notes()))/>
+            <Show when=get(wiz, Form::voodoo2_applies)>
+                <Column gap=Spacing::Md>
+                    <Row gap=Spacing::Lg>
+                        <Checkbox checked=get(wiz, Form::voodoo2) @change=move |on| wiz.edit(|f| f.choose_voodoo2(on))>
+                            "3dfx Voodoo 2"
+                        </Checkbox>
+                        <Checkbox
+                            enabled=get(wiz, Form::voodoo2_undither_enabled)
+                            checked=get(wiz, Form::voodoo2_undither)
+                            @change=move |on| wiz.edit(|f| f.choose_voodoo2_undither(on))
+                        >"Voodoo3 undither filter"</Checkbox>
+                    </Row>
+                    <Note text=get(wiz, |f| joined(f.voodoo2_notes()))/>
+                    <Note text=get(wiz, |f| joined(f.voodoo2_undither_notes()))/>
+                </Column>
+            </Show>
             <Picker
                 label="Shader profile"
-                options=move || wiz.profiles.with(|p| Form::shader_profile_labels(p))
+                options=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_labels(p)))
                 selected=move || wiz.profiles.with(|p| wiz.read(|f| f.shader_profile_index(p)))
                 @choose=move |i| wiz.profiles.with_untracked(|p| wiz.edit(|f| f.choose_shader_profile(p, i)))
                 is_default=get(wiz, Form::shader_profile_is_default)
@@ -485,18 +544,21 @@ fn AudioPage() -> impl View {
             />
             <AccelLine note=get(wiz, |f| (f.sound_warning().unwrap_or_default().to_owned(), true))/>
             <Note text=get(wiz, |f| joined(f.sound_notes()))/>
-            <Picker
-                label="Music (MIDI)"
-                options=get(wiz, |f| labels(f.music_choices(), |m| m.label()))
-                selected=get(wiz, |f| index_of(f.music_choices(), f.music()))
-                @choose=move |i| wiz.edit(|f| f.choose_music(f.music_choices()[i]))
-                is_default=get(wiz, Form::music_is_default)
-                @reset=move |()| wiz.edit(Form::reset_music)
-            />
-            <Note text=get(wiz, |f| joined(f.music_notes()))/>
+            <Show when=get(wiz, Form::music_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Music (MIDI)"
+                        options=get(wiz, |f| labels(f.music_choices(), |m| m.label()))
+                        selected=get(wiz, |f| index_of(f.music_choices(), f.music()))
+                        @choose=move |i| wiz.edit(|f| f.choose_music(f.music_choices()[i]))
+                        is_default=get(wiz, Form::music_is_default)
+                        @reset=move |()| wiz.edit(Form::reset_music)
+                    />
+                    <Note text=get(wiz, |f| joined(f.music_notes()))/>
+                </Column>
+            </Show>
             <Show when=get(wiz, Form::soundfont_applies)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="SoundFont (optional)"
                     filter=SOUNDFONT_FILTER
@@ -506,7 +568,6 @@ fn AudioPage() -> impl View {
             </Show>
             <Show when=get(wiz, Form::mt32_roms_applies)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="MT-32 ROMs"
                     folder=true
@@ -571,7 +632,6 @@ fn StoragePage() -> impl View {
             </Show>
             <Show when=move || wiz.read(|f| f.is_editing() || f.existing_disk)>
                 <PathField
-                label_width=LABEL_W
                     label_width=LABEL_W
                     label="Disk path"
                     filter=DISK_FILTER
@@ -584,6 +644,7 @@ fn StoragePage() -> impl View {
                     <Text width=LABEL_W>"New disk size (GB)"</Text>
                     <NumberInput
                         label="New disk size (GB)"
+                        width=FIELD_W
                         range_with=(1, 128)
                         value=get(wiz, |f| f.disk_size_gb as i32)
                         @change=move |gb| wiz.edit(|f| f.disk_size_gb = gb.max(1) as u32)
@@ -592,26 +653,32 @@ fn StoragePage() -> impl View {
             </Show>
             <PathField
                 label_width=LABEL_W
-                label="Install media (optional)"
+                label="CD in drive (optional)"
                 filter=MEDIA_FILTER
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
-            <PathField
-                label_width=LABEL_W
-                label="Floppy (optional)"
-                filter=FLOPPY_FILTER
-                value=get(wiz, |f| f.floppy.clone())
-                @edit=move |p| wiz.edit(|f| f.floppy = p)
-            />
-            <Picker
-                label="Boot from"
-                resettable=false
-                options=labels(&Boot::ALL, Boot::label)
-                selected=get(wiz, |f| index_of(&Boot::ALL, f.boot))
-                @choose=move |i| wiz.edit(|f| f.boot = Boot::ALL[i])
-            />
-            <Note text=get(wiz, |f| f.boot_note().unwrap_or_default().to_owned())/>
+            <Show when=get(wiz, Form::floppy_applies)>
+                <PathField
+                    label_width=LABEL_W
+                    label="Floppy (optional)"
+                    filter=FLOPPY_FILTER
+                    value=get(wiz, |f| f.floppy.clone())
+                    @edit=move |p| wiz.edit(|f| f.floppy = p)
+                />
+            </Show>
+            <Show when=get(wiz, Form::boot_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Boot from"
+                        resettable=false
+                        options=labels(&Boot::ALL, Boot::label)
+                        selected=get(wiz, |f| index_of(&Boot::ALL, f.boot))
+                        @choose=move |i| wiz.edit(|f| f.boot = Boot::ALL[i])
+                    />
+                    <Note text=get(wiz, |f| f.boot_note().unwrap_or_default().to_owned())/>
+                </Column>
+            </Show>
         </Column>
     }
 }

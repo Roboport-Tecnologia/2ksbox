@@ -2,23 +2,35 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v8** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v9** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
-library before the player links). The 3D context provider is doc 12, the
+libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
 `qemu/` as prepared from v9.2.4.
 
 ## Shape
 
-One shared library per target, `libqemu-embed-i386.{so,dylib,dll}`,
-built by QEMU's own meson from the per-target static library (which
-already excludes `system/main.c`, so there is no `main()`) plus our shim
+One shared library per target, `libqemu-embed-<target>.{so,dylib,dll}`
+(`i386` for the era's machines, `x86_64` for Windows 11), built by
+QEMU's own meson from the per-target static library (which already
+excludes `system/main.c`, so there is no `main()`) plus our shim
 `embed/libqemu_embed.c`. `prepare-qemu.sh` rsyncs `embed/` into
 `qemu/embed/`, like the 3dfx overlay. A stale copy links the player
 against an old library (`undefined symbol _qemu_embed_…`;
 `qemu-embed/build.rs` warns). The `qemu-embed` crate's bindings are
 hand-written: the API is small, `qemu_embed_api_version()` catches
 drift, and no libclang is needed.
+
+**One player binary per target, each linking its QEMU.** The era's
+`2ksbox-player` links i386; Windows 11's `2ksbox-player-x86_64` is the
+same player built with `--features qemu-x86_64` (track M20), and the
+launcher starts the one a machine needs (`player::player_binary_for`).
+Not one player opening its QEMU at run time: patch 63 reserves TCG's
+code buffer next to the helpers from a constructor that has to run when
+the image loads, before `main()` and anything else fragments the address
+space, and a library opened later puts it 8 GiB away on Apple Silicon in
+a third of launches, helper-heavy code then 35–45 % slower (doc 22 §5.0).
+Tried and reverted in M20 step 3 for that reason.
 
 **Thread contract.** Call `qemu_embed_new`, `_run` and `_destroy` on one
 thread. Display callbacks fire on that thread with the BQL held and must
@@ -56,7 +68,22 @@ Windows has no zero-copy slot; its 3D frames arrive through
   on return, so never retain it (`ui/console.c:853`). `dpy_gfx_update`
   gives a clamped dirty rect. `dpy_refresh` calls `graphic_hw_update()`,
   the pull that makes the VGA device render; the GUI timer exists only if
-  some listener has `dpy_refresh` (`ui/console.c:108-127`).
+  some listener has `dpy_refresh` (`ui/console.c:108-127`). On a machine
+  with two adapters (Windows 11 on Arm's `ramfb` and `virtio-gpu-pci`,
+  M20) the listener moves, from a bottom half, to the last graphic
+  console whose surface is not a placeholder, and back to the default
+  when there is none (`embed_live_console`); the move is one more
+  `dpy_gfx_switch`, and input follows it.
+- **The window's size** (v9). `qemu_embed_set_window_size(w, h, dpi)`
+  passes the player window's drawable size in physical pixels to the
+  console on show as QEMU's `QemuUIInfo` (`dpy_set_ui_info`, with a
+  width and height in millimetres for that DPI): the first size at once,
+  later ones after QEMU's one-second settle, and the current one again on
+  a console switch. Only an adapter with a `ui_info` hook hears it
+  (virtio-gpu); `qemu_embed_display_follows_window` says whether the one
+  on show does, and the player then lets the window go below the guest's
+  mode. What the guest makes of it is its driver's: Windows 11 on Arm's
+  viogpudo takes it when it starts, not live (track M20).
   `dpy_gfx_check_format` accepts only `x8r8g8b8`, so QEMU shadows
   8/15/16/24 bpp into 32 bpp; 32 bpp modes are zero-copy (the surface
   points into VRAM, `hw/display/vga.c:1637`). All callbacks fire on the
@@ -77,7 +104,7 @@ Windows has no zero-copy slot; its 3D frames arrive through
 
 ### QMP
 
-The player (`player/src/qmp.rs`) makes a `socketpair(AF_UNIX)` and passes
+The player (`player-core/src/qmp.rs`) makes a `socketpair(AF_UNIX)` and passes
 one end as `-chardev socket,id=qmp0,fd=N -mon chardev=qmp0,mode=control`:
 full QMP with events, the monitor on its own iothread, no filesystem path
 and no network. The player logs notable events and runs
@@ -159,7 +186,7 @@ including the two earlier designs that failed. The rules:
 
 ## Player side
 
-`player/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
+`player-core/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
 a shared staging frame under the callback and publishes it on
 `on_refresh_done`. While 3D is active, the VGA surface is shown only
 once 3D frames stop and the guest has drawn on it. 3D frames arrive as a
