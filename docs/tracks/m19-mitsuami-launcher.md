@@ -137,7 +137,7 @@ is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug ve
    and Edit…, the window's `Sidebar` for the pages (since 2026-10-01,
    user; a platform list before), each with the platform's icon (the
    window's 650 × 440 is its content's, the sidebar added to it;
-   560 × 380 on macOS since 2026-10-01, user: shorter and narrower; on KDE the
+   560 × 330 on macOS since 2026-10-01, user: shorter and narrower; on KDE the
    column is narrowed to 10 grid units through `Sidebar::native`, from
    Kirigami's 20), one page per section, the
    core's lists, notes and warnings, the platform file dialog for the
@@ -152,7 +152,7 @@ is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug ve
      is rebuilt by its `Show`); the Qt window keeps it open.
 3. **Clone, snapshots and the disc shelf (done 2026-09-27).** `clone.rs`,
    `snaps.rs`, `discs.rs`, each a store over its core model. Clone is a
-   dialog whose height follows its content (`FollowHeight`, as the Qt
+   dialog 480 wide (560 until 2026-10-01, user) whose height follows its content (`FollowHeight`, as the Qt
    one's is bound to it: the warning and the progress bar grow it) that
    polls the copy's thread and puts the new row in the list. Snapshots is the tree, rows keyed by snapshot id (qcow2
    reuses an id once its snapshot is deleted, so a row reads its fields
