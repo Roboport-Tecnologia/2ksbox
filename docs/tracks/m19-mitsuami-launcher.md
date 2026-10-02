@@ -136,7 +136,8 @@ is 920 wide since 2026-10-01 (user: "a bit narrower"; 1060 before). The debug ve
    stays the core's. An application-modal `Window` opened by New machine
    and Edit…, the window's `Sidebar` for the pages (since 2026-10-01,
    user; a platform list before), each with the platform's icon (the
-   window's 650 is its content's, the sidebar added to it; on KDE the
+   window's 650 × 440 is its content's, the sidebar added to it;
+   560 × 380 on macOS since 2026-10-01, user: shorter and narrower; on KDE the
    column is narrowed to 10 grid units through `Sidebar::native`, from
    Kirigami's 20), one page per section, the
    core's lists, notes and warnings, the platform file dialog for the

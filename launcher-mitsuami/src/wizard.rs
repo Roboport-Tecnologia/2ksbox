@@ -24,6 +24,10 @@ use std::path::PathBuf;
 const LABEL_W: f32 = 180.0;
 /// The pickers' and number boxes' width, so the values line up.
 const FIELD_W: f32 = 260.0;
+/// The window's content, the sidebar beside it. Smaller on macOS (user),
+/// whose sidebar is wider than the other platforms' and whose controls
+/// are more compact.
+const WINDOW: Size = platform! { macos => Size::new(560.0, 380.0), _ => Size::new(650.0, 440.0) };
 
 #[derive(Clone, Copy)]
 pub struct Wizard {
@@ -169,8 +173,8 @@ pub fn WizardWindow() -> impl View {
     view! {
         <Window
             title=get(wiz, |f| f.title().to_owned())
-            size=Size::new(650.0, 440.0)
-            min_size=Size::new(480.0, 400.0)
+            size=WINDOW
+            min_size=Size::new(480.0, 340.0)
             modal=Modality::Application
             open=move || wiz.is_open()
             @close_request=move || wiz.close()
