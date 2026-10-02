@@ -4,11 +4,12 @@
  * DxgkInitialize; the XP-model miniport (../../nt/d3dptvid.c) stays the
  * driver for XP and the fallback on Windows 7.
  *
- * This is plan step 2's empty driver: the device-level callbacks are
- * real (add, start, stop, remove), every other DDI is a stub that names
+ * Enough of WDDM 1.1 for Windows 7's GDI desktop: the child, the VidPN,
+ * allocations, paging and cdd.dll's presents, executed by the CPU at
+ * submit time (the command stream, below). What is still a stub names
  * itself in the QEMU log and fails. The log is the device's DEBUG
  * register, one character per write (doc 15's rule: the QEMU log, never
- * a debugger), so the first boot shows what dxgkrnl asks for next.
+ * a debugger), so a boot shows what dxgkrnl asks for next.
  *
  * Build: guest-tools/build-wddm.cmd (the EWDK's MSBuild, kernel-mode
  * toolset, TargetVersion Windows7, Win32; docs/build-windows.md "The
@@ -27,6 +28,20 @@
 
 #define D3DPT_TAG 'kd3d'
 
+/* The DMA buffers, in system memory (segment set 0), each a run of this
+ * driver's packets (the command stream, below); allocation and patch lists
+ * sized for what the presents use, a user-mode driver's Render will want
+ * more. */
+#define D3DPT_DMA_SIZE (64 * 1024)
+
+/* Segment 2, the aperture: system memory the "GPU" reaches through a page
+ * table dxgkrnl fills (MAP_APERTURE_SEGMENT), here kernel mappings of the
+ * pages. GDI's shadow surface lives there, locked for the CPU all along,
+ * so it can never move to VRAM. Its GPU addresses start at a base no VRAM
+ * address reaches, which keeps the two apart in a trace. */
+#define D3DPT_AP_BASE 0x80000000u
+#define D3DPT_AP_PAGES ((64u * 1024 * 1024) / PAGE_SIZE)
+
 /* One adapter: the device has no multi-head and the INF installs one. */
 typedef struct D3DPT_ADAPTER {
     PDEVICE_OBJECT pdo;
@@ -41,7 +56,44 @@ typedef struct D3DPT_ADAPTER {
     struct { ULONG w, h, hz; } modes[64];   /* the host's 32-bpp modes (MODE_*) */
     ULONG nmodes;
     ULONG cur_w, cur_h, cur_pitch, cur_hz;  /* what CommitVidPn programmed */
+    PUCHAR vram;                      /* the segment mapped (kernel VA): the "GPU" is the CPU */
+    PUCHAR *ap_va;                    /* segment 2, the aperture: each page's kernel VA, or NULL */
+    struct D3DPT_AP_MAP { PVOID base; PMDL mdl; BOOLEAN mine; } *ap_map; /* at a mapping's first page */
+    volatile LONG fence_done;         /* the last submission fence executed */
+    volatile LONG fence_notify;       /* the fence the next DPC reports */
+    volatile LONG preempt_fence;      /* a preemption request to answer, 0 for none */
 } D3DPT_ADAPTER;
+
+/* A device and a context are only names here: everything they would hold
+ * lives in the adapter (one engine, executed on the CPU at submit time). */
+typedef struct D3DPT_DEVICE {
+    D3DPT_ADAPTER *a;
+    HANDLE dxgk_device;
+} D3DPT_DEVICE;
+
+typedef struct D3DPT_CONTEXT {
+    D3DPT_DEVICE *dev;
+} D3DPT_CONTEXT;
+
+/* What an allocation is, as the private driver data dxgkrnl carries from
+ * GetStandardAllocationDriverData to CreateAllocation, and the allocation
+ * itself (hAllocation). */
+#define D3DPT_ALLOC_MAGIC 0x3d41544cu           /* "LTA=" */
+enum { D3DPT_ALLOC_PRIMARY = 1, D3DPT_ALLOC_SHADOW, D3DPT_ALLOC_STAGING };
+
+typedef struct D3DPT_ALLOC_DESC {
+    ULONG magic;
+    ULONG kind;
+    ULONG w, h, pitch, bpp;
+    D3DDDIFORMAT format;
+    D3DDDI_RATIONAL refresh;
+    D3DDDI_VIDEO_PRESENT_SOURCE_ID source;
+} D3DPT_ALLOC_DESC;
+
+typedef struct D3DPT_ALLOC {
+    D3DPT_ALLOC_DESC d;
+    SIZE_T size;
+} D3DPT_ALLOC;
 
 /* The DEBUG register of the adapter that started last: stubs called with
  * no adapter handle (Unload, ControlEtwLogging) log through it too. */
@@ -187,6 +239,8 @@ static void read_modes(D3DPT_ADAPTER *a)
     dbg_puts("\n");
 }
 
+static void unmap(D3DPT_ADAPTER *a);
+
 static DXGKDDI_START_DEVICE d3dpt_start_device;
 static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start,
                                    IN_PDXGKRNL_INTERFACE dxgk, OUT_PULONG sources,
@@ -245,6 +299,24 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
 
     read_modes(a);
 
+    /* The segment as the "GPU" sees it: paging transfers, fills and the
+     * presents' blits run on the CPU at submit time, through this. */
+    a->vram = MmMapIoSpace(a->vram_phys, a->seg_size, MmWriteCombined);
+    if (!a->vram) {
+        dbg_line("StartDevice: cannot map the segment");
+        unmap(a);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    a->ap_va = ExAllocatePoolWithTag(NonPagedPool, D3DPT_AP_PAGES * sizeof(*a->ap_va), D3DPT_TAG);
+    a->ap_map = ExAllocatePoolWithTag(NonPagedPool, D3DPT_AP_PAGES * sizeof(*a->ap_map), D3DPT_TAG);
+    if (!a->ap_va || !a->ap_map) {
+        unmap(a);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlZeroMemory(a->ap_va, D3DPT_AP_PAGES * sizeof(*a->ap_va));
+    RtlZeroMemory(a->ap_map, D3DPT_AP_PAGES * sizeof(*a->ap_map));
+    a->fence_done = a->fence_notify = a->preempt_fence = 0;
+
     /* one scanout, one monitor */
     *sources = 1;
     *children = 1;
@@ -253,6 +325,25 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
 
 static void unmap(D3DPT_ADAPTER *a)
 {
+    ULONG i;
+
+    if (a->ap_map) {
+        for (i = 0; i < D3DPT_AP_PAGES; i++) {
+            if (a->ap_map[i].base && a->ap_map[i].mine) {
+                MmUnmapLockedPages(a->ap_map[i].base, a->ap_map[i].mdl);
+            }
+        }
+        ExFreePoolWithTag(a->ap_map, D3DPT_TAG);
+        a->ap_map = NULL;
+    }
+    if (a->ap_va) {
+        ExFreePoolWithTag(a->ap_va, D3DPT_TAG);
+        a->ap_va = NULL;
+    }
+    if (a->vram) {
+        MmUnmapIoSpace(a->vram, a->seg_size);
+        a->vram = NULL;
+    }
     if (a->regs) {
         if (g_regs == a->regs) {
             g_regs = NULL;
@@ -304,14 +395,18 @@ static NTSTATUS driver_caps(DXGK_DRIVERCAPS *c)
     c->MaxAllocationListSlotId = 16;
     c->MaxQueuedFlipOnVSync = 1;
     c->GpuEngineTopology.NbAsymetricProcessingNodes = 1;
+    /* the blits are memcpy row by row: a screen-to-screen blit whose
+     * rectangles overlap comes through a staging copy instead */
+    c->PresentationCaps.NoOverlapScreenBlt = 1;
     c->WDDMVersion = DXGKDDI_WDDMv1;
     return STATUS_SUCCESS;
 }
 
-/* One memory segment: VRAM below the command window, linear and CPU
- * visible (BAR 0). Its GPU address is the VRAM offset itself, so an
- * allocation's segment address is what the OFFSET register takes. The
- * paging buffer is in system memory (segment 0). */
+/* Segment 1: VRAM below the command window, linear and CPU visible
+ * (BAR 0). Its GPU address is the VRAM offset itself, so an allocation's
+ * segment address is what the OFFSET register takes. Segment 2: the
+ * aperture (D3DPT_AP_BASE). The paging buffer is in system memory
+ * (segment 0). */
 static NTSTATUS query_segment(const D3DPT_ADAPTER *a, const DXGKARG_QUERYADAPTERINFO *q)
 {
     DXGK_QUERYSEGMENTOUT *o = (DXGK_QUERYSEGMENTOUT *)q->pOutputData;
@@ -321,17 +416,21 @@ static NTSTATUS query_segment(const D3DPT_ADAPTER *a, const DXGKARG_QUERYADAPTER
         return STATUS_INVALID_PARAMETER;
     }
     if (!o->pSegmentDescriptor) {               /* the first call asks how many */
-        o->NbSegment = 1;
+        o->NbSegment = 2;
         return STATUS_SUCCESS;
     }
     d = o->pSegmentDescriptor;
-    RtlZeroMemory(d, sizeof(*d));
-    d->BaseAddress.QuadPart = 0;
-    d->CpuTranslatedAddress = a->vram_phys;
-    d->Size = a->seg_size;
-    d->CommitLimit = a->seg_size;
-    d->Flags.CpuVisible = 1;
-    o->NbSegment = 1;
+    RtlZeroMemory(d, 2 * sizeof(*d));
+    d[0].BaseAddress.QuadPart = 0;
+    d[0].CpuTranslatedAddress = a->vram_phys;
+    d[0].Size = a->seg_size;
+    d[0].CommitLimit = a->seg_size;
+    d[0].Flags.CpuVisible = 1;
+    d[1].BaseAddress.QuadPart = D3DPT_AP_BASE;
+    d[1].Size = D3DPT_AP_PAGES * PAGE_SIZE;
+    d[1].CommitLimit = D3DPT_AP_PAGES * PAGE_SIZE;
+    d[1].Flags.Aperture = 1;
+    o->NbSegment = 2;
     o->PagingBufferSegmentId = 0;
     o->PagingBufferSize = 64 * 1024;
     o->PagingBufferPrivateDataSize = 0;
@@ -372,10 +471,20 @@ static BOOLEAN d3dpt_interrupt(IN_CONST_PVOID ctx, IN_ULONG msg)
     return FALSE;       /* the device has no interrupt yet (plan step 4) */
 }
 
+/* Queued after every completion reported from a submit (complete_fence):
+ * dxgkrnl's own DPC work, the scheduler's half of DMA_COMPLETED. */
 static DXGKDDI_DPC_ROUTINE d3dpt_dpc;
 static VOID d3dpt_dpc(IN_CONST_PVOID ctx)
 {
-    UNREFERENCED_PARAMETER(ctx);
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    static ULONG logged;
+
+    if (logged < 4) {
+        logged++;
+        dbg_hex("d3dptkmd: DPC, fence ", (ULONG)a->fence_notify);
+        dbg_puts("\n");
+    }
+    a->dxgk.DxgkCbNotifyDpc(a->dxgk.DeviceHandle);
 }
 
 static DXGKDDI_CONTROL_ETW_LOGGING d3dpt_control_etw_logging;
@@ -531,26 +640,939 @@ static NTSTATUS d3dpt_query_interface(IN_CONST_PVOID ctx, IN_PQUERY_INTERFACE qi
     return STATUS_NOT_SUPPORTED;
 }
 
-/* the adapter, device, context and overlay halves (d3dkmddi.h) */
-STUB2(DXGKDDI_CREATEDEVICE, d3dpt_create_device, IN_CONST_HANDLE, INOUT_PDXGKARG_CREATEDEVICE)
-STUB2(DXGKDDI_CREATEALLOCATION, d3dpt_create_allocation, IN_CONST_HANDLE, INOUT_PDXGKARG_CREATEALLOCATION)
-STUB2(DXGKDDI_DESTROYALLOCATION, d3dpt_destroy_allocation, IN_CONST_HANDLE, IN_CONST_PDXGKARG_DESTROYALLOCATION)
-STUB2(DXGKDDI_DESCRIBEALLOCATION, d3dpt_describe_allocation, IN_CONST_HANDLE, INOUT_PDXGKARG_DESCRIBEALLOCATION)
-STUB2(DXGKDDI_GETSTANDARDALLOCATIONDRIVERDATA, d3dpt_get_standard_allocation_driver_data, IN_CONST_HANDLE, INOUT_PDXGKARG_GETSTANDARDALLOCATIONDRIVERDATA)
+/* the adapter, device, context and overlay halves (d3dkmddi.h) still to do */
 STUB2(DXGKDDI_ACQUIRESWIZZLINGRANGE, d3dpt_acquire_swizzling_range, IN_CONST_HANDLE, INOUT_PDXGKARG_ACQUIRESWIZZLINGRANGE)
 STUB2(DXGKDDI_RELEASESWIZZLINGRANGE, d3dpt_release_swizzling_range, IN_CONST_HANDLE, IN_CONST_PDXGKARG_RELEASESWIZZLINGRANGE)
-STUB2(DXGKDDI_PATCH, d3dpt_patch, IN_CONST_HANDLE, IN_CONST_PDXGKARG_PATCH)
-STUB2(DXGKDDI_SUBMITCOMMAND, d3dpt_submit_command, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SUBMITCOMMAND)
-STUB2(DXGKDDI_PREEMPTCOMMAND, d3dpt_preempt_command, IN_CONST_HANDLE, IN_CONST_PDXGKARG_PREEMPTCOMMAND)
-STUB2(DXGKDDI_BUILDPAGINGBUFFER, d3dpt_build_paging_buffer, IN_CONST_HANDLE, IN_PDXGKARG_BUILDPAGINGBUFFER)
 STUB2(DXGKDDI_SETPALETTE, d3dpt_set_palette, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETPALETTE)
-STUB2(DXGKDDI_SETPOINTERPOSITION, d3dpt_set_pointer_position, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETPOINTERPOSITION)
+/* no hardware cursor yet: a refused shape makes GDI draw the pointer */
 STUB2(DXGKDDI_SETPOINTERSHAPE, d3dpt_set_pointer_shape, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETPOINTERSHAPE)
-STUB1(DXGKDDI_RESETFROMTIMEOUT, d3dpt_reset_from_timeout, IN_CONST_HANDLE)
-STUB1(DXGKDDI_RESTARTFROMTIMEOUT, d3dpt_restart_from_timeout, IN_CONST_HANDLE)
 STUB2(DXGKDDI_ESCAPE, d3dpt_escape, IN_CONST_HANDLE, IN_CONST_PDXGKARG_ESCAPE)
-STUB2(DXGKDDI_COLLECTDBGINFO, d3dpt_collect_dbg_info, IN_CONST_HANDLE, IN_CONST_PDXGKARG_COLLECTDBGINFO)
-STUB2(DXGKDDI_QUERYCURRENTFENCE, d3dpt_query_current_fence, IN_CONST_HANDLE, INOUT_PDXGKARG_QUERYCURRENTFENCE)
+
+static DXGKDDI_SETPOINTERPOSITION d3dpt_set_pointer_position;
+static NTSTATUS APIENTRY d3dpt_set_pointer_position(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SETPOINTERPOSITION p)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(p);
+    return STATUS_SUCCESS;
+}
+
+/* ------------------------------------------------- devices and contexts */
+
+static DXGKDDI_CREATEDEVICE d3dpt_create_device;
+static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_CREATEDEVICE c)
+{
+    D3DPT_DEVICE *d = ExAllocatePoolWithTag(NonPagedPool, sizeof(*d), D3DPT_TAG);
+
+    if (!d) {
+        return STATUS_NO_MEMORY;
+    }
+    d->a = (D3DPT_ADAPTER *)h;
+    d->dxgk_device = c->hDevice;
+    c->hDevice = d;
+    /* Flags and pInfo share their storage, and Windows 7 hands a pointer
+     * there (0x81e6a050 and the like, a kernel address): the device's DMA
+     * buffer and list sizes, as the Vista-era interface reads them. */
+    if ((ULONG_PTR)c->pInfo >= (ULONG_PTR)MM_SYSTEM_RANGE_START && MmIsAddressValid(c->pInfo)) {
+        c->pInfo->DmaBufferSize = D3DPT_DMA_SIZE;
+        c->pInfo->DmaBufferSegmentSet = 0;
+        c->pInfo->DmaBufferPrivateDataSize = 0;
+        c->pInfo->AllocationListSize = 64;
+        c->pInfo->PatchLocationListSize = 256;
+        c->pInfo->Flags.Value = 0;
+    }
+    dbg_line("CreateDevice");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_DESTROYDEVICE d3dpt_destroy_device;
+static NTSTATUS APIENTRY d3dpt_destroy_device(IN_CONST_HANDLE h)
+{
+    dbg_line("DestroyDevice");
+    ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_CREATECONTEXT d3dpt_create_context;
+static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_CREATECONTEXT c)
+{
+    D3DPT_CONTEXT *x = ExAllocatePoolWithTag(NonPagedPool, sizeof(*x), D3DPT_TAG);
+
+    if (!x) {
+        return STATUS_NO_MEMORY;
+    }
+    x->dev = (D3DPT_DEVICE *)h;
+    c->hContext = x;
+    c->ContextInfo.DmaBufferSize = D3DPT_DMA_SIZE;
+    c->ContextInfo.DmaBufferSegmentSet = 0;
+    c->ContextInfo.DmaBufferPrivateDataSize = 0;
+    c->ContextInfo.AllocationListSize = 64;
+    c->ContextInfo.PatchLocationListSize = 256;
+    dbg_hex("d3dptkmd: CreateContext node=", c->NodeOrdinal);
+    dbg_hex(" flags=", c->Flags.Value);
+    dbg_puts("\n");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_DESTROYCONTEXT d3dpt_destroy_context;
+static NTSTATUS APIENTRY d3dpt_destroy_context(IN_CONST_HANDLE h)
+{
+    ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
+    return STATUS_SUCCESS;
+}
+
+/* --------------------------------------------------------- allocations */
+
+static ULONG format_bpp(D3DDDIFORMAT f)
+{
+    switch (f) {
+    case D3DDDIFMT_R5G6B5:
+    case D3DDDIFMT_X1R5G5B5:
+    case D3DDDIFMT_A1R5G5B5:
+        return 2;
+    case D3DDDIFMT_P8:
+        return 1;
+    default:
+        return 4;
+    }
+}
+
+/* What dxgkrnl's own surfaces are (the desktop's primary, the shadow GDI
+ * draws into, a staging surface for readbacks), as the private data its
+ * CreateAllocation then hands back. GDI surfaces need GDI acceleration,
+ * which the caps do not claim. */
+static DXGKDDI_GETSTANDARDALLOCATIONDRIVERDATA d3dpt_get_standard_allocation_driver_data;
+static NTSTATUS APIENTRY d3dpt_get_standard_allocation_driver_data(IN_CONST_HANDLE h,
+    INOUT_PDXGKARG_GETSTANDARDALLOCATIONDRIVERDATA g)
+{
+    D3DPT_ALLOC_DESC d;
+
+    UNREFERENCED_PARAMETER(h);
+    RtlZeroMemory(&d, sizeof(d));
+    d.magic = D3DPT_ALLOC_MAGIC;
+    switch (g->StandardAllocationType) {
+    case D3DKMDT_STANDARDALLOCATION_SHAREDPRIMARYSURFACE:
+        d.kind = D3DPT_ALLOC_PRIMARY;
+        d.w = g->pCreateSharedPrimarySurfaceData->Width;
+        d.h = g->pCreateSharedPrimarySurfaceData->Height;
+        d.format = g->pCreateSharedPrimarySurfaceData->Format;
+        d.refresh = g->pCreateSharedPrimarySurfaceData->RefreshRate;
+        d.source = g->pCreateSharedPrimarySurfaceData->VidPnSourceId;
+        break;
+    case D3DKMDT_STANDARDALLOCATION_SHADOWSURFACE:
+        d.kind = D3DPT_ALLOC_SHADOW;
+        d.w = g->pCreateShadowSurfaceData->Width;
+        d.h = g->pCreateShadowSurfaceData->Height;
+        d.format = g->pCreateShadowSurfaceData->Format;
+        break;
+    case D3DKMDT_STANDARDALLOCATION_STAGINGSURFACE:
+        d.kind = D3DPT_ALLOC_STAGING;
+        d.w = g->pCreateStagingSurfaceData->Width;
+        d.h = g->pCreateStagingSurfaceData->Height;
+        d.format = D3DDDIFMT_X8R8G8B8;
+        break;
+    default:
+        dbg_hex("d3dptkmd: GetStandardAllocationDriverData type ", (ULONG)g->StandardAllocationType);
+        dbg_puts(" refused\n");
+        return STATUS_NOT_SUPPORTED;
+    }
+    d.bpp = format_bpp(d.format);
+    d.pitch = (d.w * d.bpp + 3) & ~3u;
+    if (g->StandardAllocationType == D3DKMDT_STANDARDALLOCATION_SHADOWSURFACE) {
+        g->pCreateShadowSurfaceData->Pitch = d.pitch;
+    } else if (g->StandardAllocationType == D3DKMDT_STANDARDALLOCATION_STAGINGSURFACE) {
+        g->pCreateStagingSurfaceData->Pitch = d.pitch;
+    }
+    g->AllocationPrivateDriverDataSize = sizeof(d);
+    g->ResourcePrivateDriverDataSize = 0;
+    if (g->pAllocationPrivateDriverData) {
+        RtlCopyMemory(g->pAllocationPrivateDriverData, &d, sizeof(d));
+    }
+    return STATUS_SUCCESS;
+}
+
+/* Every allocation is CPU visible (GDI locks the shadow and staging
+ * surfaces, the primary is scanned out from VRAM) and is evicted to
+ * system memory. */
+static DXGKDDI_CREATEALLOCATION d3dpt_create_allocation;
+static NTSTATUS APIENTRY d3dpt_create_allocation(IN_CONST_HANDLE h, INOUT_PDXGKARG_CREATEALLOCATION c)
+{
+    ULONG i;
+
+    UNREFERENCED_PARAMETER(h);
+    for (i = 0; i < c->NumAllocations; i++) {
+        DXGK_ALLOCATIONINFO *info = &c->pAllocationInfo[i];
+        const D3DPT_ALLOC_DESC *d = (const D3DPT_ALLOC_DESC *)info->pPrivateDriverData;
+        D3DPT_ALLOC *al;
+
+        if (!d || info->PrivateDriverDataSize < sizeof(*d) || d->magic != D3DPT_ALLOC_MAGIC) {
+            /* a user-mode driver's allocation: none exists yet */
+            dbg_hex("d3dptkmd: CreateAllocation: not ours, private data size ", info->PrivateDriverDataSize);
+            dbg_puts("\n");
+            goto fail;
+        }
+        al = ExAllocatePoolWithTag(NonPagedPool, sizeof(*al), D3DPT_TAG);
+        if (!al) {
+            goto fail;
+        }
+        al->d = *d;
+        al->size = ROUND_TO_PAGES((SIZE_T)d->pitch * d->h);
+        info->Alignment = 0;
+        info->Size = al->size;
+        info->PitchAlignedSize = 0;
+        RtlZeroMemory(&info->HintedBank, sizeof(info->HintedBank));
+        RtlZeroMemory(&info->PreferredSegment, sizeof(info->PreferredSegment));
+        /* the primary is scanned out, so VRAM only; the rest may stay in
+         * system memory behind the aperture (bit 1: segment 2) */
+        info->SupportedReadSegmentSet = d->kind == D3DPT_ALLOC_PRIMARY ? 1 : 3;
+        info->SupportedWriteSegmentSet = info->SupportedReadSegmentSet;
+        info->EvictionSegmentSet = 0;
+        info->MaximumRenamingListLength = 0;
+        info->hAllocation = al;
+        info->Flags.Value = 0;
+        info->Flags.CpuVisible = 1;
+        info->pAllocationUsageHint = NULL;
+        info->AllocationPriority = d->kind == D3DPT_ALLOC_PRIMARY ? D3DDDI_ALLOCATIONPRIORITY_HIGH
+                                                                  : D3DDDI_ALLOCATIONPRIORITY_NORMAL;
+        dbg_hex("d3dptkmd: CreateAllocation kind=", d->kind);
+        dbg_hex(" ", d->w);
+        dbg_hex(" x ", d->h);
+        dbg_hex(" fmt ", (ULONG)d->format);
+        dbg_puts("\n");
+    }
+    return STATUS_SUCCESS;
+
+fail:
+    while (i--) {
+        ExFreePoolWithTag(c->pAllocationInfo[i].hAllocation, D3DPT_TAG);
+        c->pAllocationInfo[i].hAllocation = NULL;
+    }
+    return STATUS_INVALID_PARAMETER;
+}
+
+static DXGKDDI_DESTROYALLOCATION d3dpt_destroy_allocation;
+static NTSTATUS APIENTRY d3dpt_destroy_allocation(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_DESTROYALLOCATION d)
+{
+    ULONG i;
+
+    UNREFERENCED_PARAMETER(h);
+    dbg_hex("d3dptkmd: DestroyAllocation ", d->NumAllocations);
+    dbg_puts("\n");
+    for (i = 0; i < d->NumAllocations; i++) {
+        if (d->pAllocationList[i]) {
+            ExFreePoolWithTag(d->pAllocationList[i], D3DPT_TAG);
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_DESCRIBEALLOCATION d3dpt_describe_allocation;
+static NTSTATUS APIENTRY d3dpt_describe_allocation(IN_CONST_HANDLE h, INOUT_PDXGKARG_DESCRIBEALLOCATION d)
+{
+    const D3DPT_ALLOC *al = (const D3DPT_ALLOC *)d->hAllocation;
+
+    UNREFERENCED_PARAMETER(h);
+    d->Width = al->d.w;
+    d->Height = al->d.h;
+    d->Format = al->d.format;
+    d->MultisampleMethod.NumSamples = 0;
+    d->MultisampleMethod.NumQualityLevels = 0;
+    d->RefreshRate = al->d.refresh;
+    d->PrivateDriverFormatAttribute = 0;
+    return STATUS_SUCCESS;
+}
+
+/* A device's handle on an allocation is the allocation itself. */
+static DXGKDDI_OPENALLOCATIONINFO d3dpt_open_allocation;
+static NTSTATUS APIENTRY d3dpt_open_allocation(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_OPENALLOCATION o)
+{
+    const D3DPT_DEVICE *dev = (const D3DPT_DEVICE *)h;
+    ULONG i;
+
+    for (i = 0; i < o->NumAllocations; i++) {
+        DXGKARGCB_GETHANDLEDATA gd;
+        D3DPT_ALLOC *al;
+
+        RtlZeroMemory(&gd, sizeof(gd));
+        gd.hObject = o->pOpenAllocation[i].hAllocation;
+        gd.Type = DXGK_HANDLE_ALLOCATION;
+        al = (D3DPT_ALLOC *)dev->a->dxgk.DxgkCbGetHandleData(&gd);
+        if (!al || al->d.magic != D3DPT_ALLOC_MAGIC) {
+            dbg_line("OpenAllocation: GetHandleData gave no allocation of ours");
+            return STATUS_INVALID_PARAMETER;
+        }
+        o->pOpenAllocation[i].hDeviceSpecificAllocation = al;
+    }
+    dbg_hex("d3dptkmd: OpenAllocation ", o->NumAllocations);
+    dbg_puts("\n");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_CLOSEALLOCATION d3dpt_close_allocation;
+static NTSTATUS APIENTRY d3dpt_close_allocation(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_CLOSEALLOCATION c)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(c);
+    return STATUS_SUCCESS;
+}
+
+/* ------------------------------------------------------ the command stream */
+
+/*
+ * The DMA buffers hold this driver's own packets, executed on the CPU when
+ * dxgkrnl submits them (SubmitCommand): there is no GPU behind the
+ * segment, only memory both sides map. Every packet starts with a header
+ * whose size takes the reader to the next one.
+ */
+#define D3DPT_PKT_MAGIC 0x3d504b54u             /* "TKP=" */
+enum { PKT_TRANSFER = 1, PKT_FILL, PKT_BLT, PKT_COLORFILL, PKT_FLIP, PKT_MAP, PKT_UNMAP };
+
+typedef struct PKT_HDR { ULONG magic, op, size; } PKT_HDR;
+
+/* one side of a paging transfer: a segment address, or system memory */
+typedef struct PKT_MEM { ULONG seg, addr; PMDL mdl; ULONG mdl_off; } PKT_MEM;
+
+typedef struct PKT_TRANSFER_T { PKT_HDR h; ULONG bytes; PKT_MEM src, dst; } PKT_TRANSFER_T;
+typedef struct PKT_FILL_T { PKT_HDR h; ULONG bytes, pattern, seg, addr; } PKT_FILL_T;
+
+/* A surface of a present: its slot in the allocation list, where it is
+ * (from that list at Present, again at Patch), its pitch and pixel size. */
+typedef struct PKT_SURF { ULONG index, seg, addr, pitch, bpp; } PKT_SURF;
+/* a destination rectangle and the source corner it copies from */
+typedef struct PKT_RECT { LONG sx, sy, l, t, r, b; } PKT_RECT;
+typedef struct PKT_BLT_T { PKT_HDR h; PKT_SURF src, dst; ULONG color, n; PKT_RECT r[1]; } PKT_BLT_T;
+typedef struct PKT_FLIP_T { PKT_HDR h; PKT_SURF src; } PKT_FLIP_T;
+/* aperture pages first..first+n-1 onto an MDL's pages from mdl_off on */
+typedef struct PKT_MAP_T { PKT_HDR h; ULONG first, n; PMDL mdl; ULONG mdl_off, cached; } PKT_MAP_T;
+
+static void pkt_hdr(PKT_HDR *p, ULONG op, ULONG size)
+{
+    p->magic = D3DPT_PKT_MAGIC;
+    p->op = op;
+    p->size = size;
+}
+
+/* System memory the "GPU" touches: an MDL already in system space as it
+ * is, any other mapped here (and unmapped by the caller when *mine). */
+static PUCHAR mdl_map(PMDL m, MEMORY_CACHING_TYPE cache, BOOLEAN *mine)
+{
+    *mine = FALSE;
+    if (m->MdlFlags & (MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)) {
+        return (PUCHAR)m->MappedSystemVa;
+    }
+    *mine = TRUE;
+    return (PUCHAR)MmMapLockedPagesSpecifyCache(m, KernelMode, cache, NULL, FALSE, NormalPagePriority);
+}
+
+/* A segment address range as the CPU reaches it, or NULL: VRAM through the
+ * BAR mapping, the aperture through the pages' mappings when the range's
+ * pages are contiguous there (callers ask a row at a time). */
+static PUCHAR seg_va(D3DPT_ADAPTER *a, ULONG seg, ULONG addr, ULONG bytes)
+{
+    if (seg == 1) {
+        if (addr > a->seg_size || bytes > a->seg_size - addr) {
+            return NULL;
+        }
+        return a->vram + addr;
+    }
+    if (seg == 2 && addr >= D3DPT_AP_BASE && bytes) {
+        ULONG off = addr - D3DPT_AP_BASE, first, last, i;
+        PUCHAR base;
+
+        if (off >= D3DPT_AP_PAGES * PAGE_SIZE || bytes > D3DPT_AP_PAGES * PAGE_SIZE - off) {
+            return NULL;
+        }
+        first = off >> PAGE_SHIFT;
+        last = (off + bytes - 1) >> PAGE_SHIFT;
+        base = a->ap_va[first];
+        if (!base) {
+            return NULL;
+        }
+        for (i = first + 1; i <= last; i++) {
+            if (a->ap_va[i] != base + (i - first) * PAGE_SIZE) {
+                return NULL;
+            }
+        }
+        return base + (off & (PAGE_SIZE - 1));
+    }
+    return NULL;
+}
+
+/* MAP_APERTURE_SEGMENT: the MDL mapped once, each page's address noted;
+ * UNMAP: the mapping undone at the page it started from. */
+static void run_map(D3DPT_ADAPTER *a, const PKT_MAP_T *p)
+{
+    BOOLEAN mine;
+    PUCHAR base;
+    ULONG i;
+
+    if (p->first >= D3DPT_AP_PAGES || p->n > D3DPT_AP_PAGES - p->first) {
+        return;
+    }
+    base = mdl_map(p->mdl, p->cached ? MmCached : MmWriteCombined, &mine);
+    if (!base) {
+        dbg_hex("d3dptkmd: aperture map failed, pages ", p->n);
+        dbg_puts("\n");
+        return;
+    }
+    if (a->ap_map[p->first].base && a->ap_map[p->first].mine) {
+        MmUnmapLockedPages(a->ap_map[p->first].base, a->ap_map[p->first].mdl);
+    }
+    a->ap_map[p->first].base = base;
+    a->ap_map[p->first].mdl = p->mdl;
+    a->ap_map[p->first].mine = mine;
+    for (i = 0; i < p->n; i++) {
+        a->ap_va[p->first + i] = base + (p->mdl_off + i) * PAGE_SIZE;
+    }
+}
+
+static void run_unmap(D3DPT_ADAPTER *a, const PKT_MAP_T *p)
+{
+    ULONG i;
+
+    if (p->first >= D3DPT_AP_PAGES || p->n > D3DPT_AP_PAGES - p->first) {
+        return;
+    }
+    for (i = p->first; i < p->first + p->n; i++) {
+        if (a->ap_map[i].base && a->ap_map[i].mine) {
+            MmUnmapLockedPages(a->ap_map[i].base, a->ap_map[i].mdl);
+        }
+        a->ap_map[i].base = NULL;
+        a->ap_va[i] = NULL;
+    }
+}
+
+static void run_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
+{
+    PUCHAR src, dst, sm = NULL, dm = NULL;
+    BOOLEAN smine = FALSE, dmine = FALSE;
+
+    if (p->src.seg == 0) {
+        sm = mdl_map(p->src.mdl, MmWriteCombined, &smine);
+        src = sm ? sm + p->src.mdl_off : NULL;
+    } else {
+        src = seg_va(a, p->src.seg, p->src.addr, p->bytes);
+    }
+    if (p->dst.seg == 0) {
+        dm = mdl_map(p->dst.mdl, MmWriteCombined, &dmine);
+        dst = dm ? dm + p->dst.mdl_off : NULL;
+    } else {
+        dst = seg_va(a, p->dst.seg, p->dst.addr, p->bytes);
+    }
+    if (src && dst) {
+        RtlCopyMemory(dst, src, p->bytes);
+    } else {
+        dbg_hex("d3dptkmd: transfer skipped, segments ", p->src.seg);
+        dbg_hex(" -> ", p->dst.seg);
+        dbg_puts("\n");
+    }
+    if (smine && sm) {
+        MmUnmapLockedPages(sm, p->src.mdl);
+    }
+    if (dmine && dm) {
+        MmUnmapLockedPages(dm, p->dst.mdl);
+    }
+}
+
+static void run_fill(D3DPT_ADAPTER *a, const PKT_FILL_T *p)
+{
+    PULONG d = (PULONG)seg_va(a, p->seg, p->addr, p->bytes);
+    ULONG i;
+
+    if (!d) {
+        return;
+    }
+    for (i = 0; i < p->bytes / 4; i++) {
+        d[i] = p->pattern;
+    }
+}
+
+/* Row by row: an aperture surface's rows need not be contiguous in system
+ * space (an allocation can be mapped in pieces). */
+static void run_blt(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
+{
+    static ULONG skipped;
+    ULONG k;
+
+    for (k = 0; k < p->n; k++) {
+        const PKT_RECT *r = &p->r[k];
+        ULONG w = (ULONG)(r->r - r->l), hgt = (ULONG)(r->b - r->t), y, x;
+
+        if (r->r <= r->l || r->b <= r->t || r->l < 0 || r->t < 0 ||
+            (p->h.op == PKT_BLT && (r->sx < 0 || r->sy < 0))) {
+            continue;
+        }
+        for (y = 0; y < hgt; y++) {
+            PUCHAR drow = seg_va(a, p->dst.seg,
+                                 p->dst.addr + ((ULONG)r->t + y) * p->dst.pitch + (ULONG)r->l * p->dst.bpp,
+                                 w * p->dst.bpp);
+            PUCHAR srow = NULL;
+
+            if (p->h.op == PKT_BLT) {
+                srow = seg_va(a, p->src.seg,
+                              p->src.addr + ((ULONG)r->sy + y) * p->src.pitch + (ULONG)r->sx * p->src.bpp,
+                              w * p->src.bpp);
+            }
+            if (!drow || (p->h.op == PKT_BLT && !srow)) {
+                if (skipped < 16) {
+                    skipped++;
+                    dbg_hex("d3dptkmd: blit row skipped, segments ", p->src.seg);
+                    dbg_hex(" -> ", p->dst.seg);
+                    dbg_hex(" at ", p->h.op == PKT_BLT && !srow ? p->src.addr : p->dst.addr);
+                    dbg_puts("\n");
+                }
+                break;
+            }
+            if (p->h.op == PKT_BLT) {
+                RtlCopyMemory(drow, srow, w * p->dst.bpp);
+            } else if (p->dst.bpp == 4) {
+                for (x = 0; x < w; x++) {
+                    ((PULONG)drow)[x] = p->color;
+                }
+            } else if (p->dst.bpp == 2) {
+                for (x = 0; x < w; x++) {
+                    ((PUSHORT)drow)[x] = (USHORT)p->color;
+                }
+            } else {
+                RtlFillMemory(drow, w, (UCHAR)p->color);
+            }
+        }
+    }
+}
+
+/* Execute one submission: every packet from start to end, in order. */
+static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
+{
+    ULONG off = 0;
+
+    while (off + sizeof(PKT_HDR) <= len) {
+        const PKT_HDR *hd = (const PKT_HDR *)(p + off);
+
+        if (hd->magic != D3DPT_PKT_MAGIC || hd->size < sizeof(*hd) || hd->size > len - off) {
+            dbg_hex("d3dptkmd: bad packet at ", off);
+            dbg_hex(" magic ", hd->magic);
+            dbg_puts("\n");
+            return;
+        }
+        switch (hd->op) {
+        case PKT_TRANSFER:
+            run_transfer(a, (const PKT_TRANSFER_T *)hd);
+            break;
+        case PKT_FILL:
+            run_fill(a, (const PKT_FILL_T *)hd);
+            break;
+        case PKT_BLT:
+        case PKT_COLORFILL:
+            run_blt(a, (const PKT_BLT_T *)hd);
+            break;
+        case PKT_FLIP:
+            if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
+                a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
+            }
+            break;
+        case PKT_MAP:
+            run_map(a, (const PKT_MAP_T *)hd);
+            break;
+        case PKT_UNMAP:
+            run_unmap(a, (const PKT_MAP_T *)hd);
+            break;
+        }
+        off += hd->size;
+    }
+}
+
+/* ---------------------------------------------------------------- fences */
+
+/*
+ * The device raises no interrupt for finished work: a submission is done
+ * when SubmitCommand returns. The completion is still reported the way an
+ * interrupt service routine would, under the interrupt's lock, and the
+ * DPC dxgkrnl expects after it is queued from there.
+ */
+static KSYNCHRONIZE_ROUTINE notify_completed;
+static BOOLEAN notify_completed(PVOID ctx)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
+
+    RtlZeroMemory(&n, sizeof(n));
+    n.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
+    n.DmaCompleted.SubmissionFenceId = (UINT)a->fence_notify;
+    a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
+    a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+    return TRUE;
+}
+
+static KSYNCHRONIZE_ROUTINE notify_preempted;
+static BOOLEAN notify_preempted(PVOID ctx)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
+
+    RtlZeroMemory(&n, sizeof(n));
+    n.InterruptType = DXGK_INTERRUPT_DMA_PREEMPTED;
+    n.DmaPreempted.PreemptionFenceId = (UINT)a->preempt_fence;
+    n.DmaPreempted.LastCompletedFenceId = (UINT)a->fence_done;
+    a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
+    a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+    return TRUE;
+}
+
+static void complete_fence(D3DPT_ADAPTER *a, ULONG fence)
+{
+    BOOLEAN ret = FALSE;
+    NTSTATUS st;
+
+    a->fence_done = (LONG)fence;
+    a->fence_notify = (LONG)fence;
+    st = a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_completed, a, 0, &ret);
+    if (!NT_SUCCESS(st) || !ret) {
+        dbg_hex("d3dptkmd: SynchronizeExecution ", (ULONG)st);
+        dbg_hex(" ran ", (ULONG)ret);
+        dbg_puts("\n");
+    }
+}
+
+/* --------------------------------------------- building and submitting */
+
+static void transfer_side(PKT_MEM *m, UINT seg, LARGE_INTEGER addr, MDL *mdl, UINT offset, UINT mdl_pages)
+{
+    m->seg = seg;
+    if (seg == 0) {
+        m->addr = 0;
+        m->mdl = mdl;
+        m->mdl_off = mdl_pages * PAGE_SIZE;
+    } else {
+        m->addr = addr.LowPart + offset;
+        m->mdl = NULL;
+        m->mdl_off = 0;
+    }
+}
+
+/* Paging: moving allocations between the segment and system memory, and
+ * filling new ones. Each operation is one packet, run at submit time in
+ * the order dxgkrnl queued it. */
+static DXGKDDI_BUILDPAGINGBUFFER d3dpt_build_paging_buffer;
+static NTSTATUS APIENTRY d3dpt_build_paging_buffer(IN_CONST_HANDLE h, IN_PDXGKARG_BUILDPAGINGBUFFER b)
+{
+    static ULONG logged;
+
+    UNREFERENCED_PARAMETER(h);
+    switch (b->Operation) {
+    case DXGK_OPERATION_TRANSFER: {
+        PKT_TRANSFER_T *p = (PKT_TRANSFER_T *)b->pDmaBuffer;
+
+        if (b->DmaSize < sizeof(*p)) {
+            return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+        }
+        pkt_hdr(&p->h, PKT_TRANSFER, sizeof(*p));
+        p->bytes = (ULONG)b->Transfer.TransferSize;
+        transfer_side(&p->src, b->Transfer.Source.SegmentId, b->Transfer.Source.SegmentAddress,
+                      b->Transfer.Source.pMdl, b->Transfer.TransferOffset, b->Transfer.MdlOffset);
+        transfer_side(&p->dst, b->Transfer.Destination.SegmentId, b->Transfer.Destination.SegmentAddress,
+                      b->Transfer.Destination.pMdl, b->Transfer.TransferOffset, b->Transfer.MdlOffset);
+        if (logged < 16) {          /* what TransferOffset and MdlOffset hold, the first few times */
+            logged++;
+            dbg_hex("d3dptkmd: transfer ", p->bytes);
+            dbg_hex(" seg ", p->src.seg);
+            dbg_hex(" -> ", p->dst.seg);
+            dbg_hex(" offset ", b->Transfer.TransferOffset);
+            dbg_hex(" mdl pages ", b->Transfer.MdlOffset);
+            dbg_puts("\n");
+        }
+        b->pDmaBuffer = (PUCHAR)b->pDmaBuffer + sizeof(*p);
+        break;
+    }
+    case DXGK_OPERATION_FILL: {
+        PKT_FILL_T *p = (PKT_FILL_T *)b->pDmaBuffer;
+
+        if (b->DmaSize < sizeof(*p)) {
+            return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+        }
+        pkt_hdr(&p->h, PKT_FILL, sizeof(*p));
+        p->bytes = (ULONG)b->Fill.FillSize;
+        p->pattern = b->Fill.FillPattern;
+        p->seg = b->Fill.Destination.SegmentId;
+        p->addr = b->Fill.Destination.SegmentAddress.LowPart;
+        b->pDmaBuffer = (PUCHAR)b->pDmaBuffer + sizeof(*p);
+        break;
+    }
+    case DXGK_OPERATION_MAP_APERTURE_SEGMENT:
+    case DXGK_OPERATION_UNMAP_APERTURE_SEGMENT: {
+        PKT_MAP_T *p = (PKT_MAP_T *)b->pDmaBuffer;
+        BOOLEAN map = b->Operation == DXGK_OPERATION_MAP_APERTURE_SEGMENT;
+
+        if (b->DmaSize < sizeof(*p)) {
+            return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+        }
+        pkt_hdr(&p->h, map ? PKT_MAP : PKT_UNMAP, sizeof(*p));
+        if (map) {
+            p->first = (ULONG)b->MapApertureSegment.OffsetInPages;
+            p->n = (ULONG)b->MapApertureSegment.NumberOfPages;
+            p->mdl = b->MapApertureSegment.pMdl;
+            p->mdl_off = b->MapApertureSegment.MdlOffset;
+            p->cached = b->MapApertureSegment.Flags.CacheCoherent;
+        } else {
+            p->first = (ULONG)b->UnmapApertureSegment.OffsetInPages;
+            p->n = (ULONG)b->UnmapApertureSegment.NumberOfPages;
+            p->mdl = NULL;
+            p->mdl_off = 0;
+            p->cached = 0;
+        }
+        b->pDmaBuffer = (PUCHAR)b->pDmaBuffer + sizeof(*p);
+        break;
+    }
+    case DXGK_OPERATION_DISCARD_CONTENT:
+        break;
+    default:
+        dbg_hex("d3dptkmd: BuildPagingBuffer operation ", (ULONG)b->Operation);
+        dbg_puts(" ignored\n");
+        break;
+    }
+    return STATUS_SUCCESS;
+}
+
+/* A patch location for a surface of a present: dxgkrnl then makes the
+ * allocation resident before the submission and calls Patch with where it
+ * went (with none, the source never left system memory). Patch walks the
+ * packets itself; the offset only has to point inside the buffer. */
+static BOOLEAN add_patch(INOUT_PDXGKARG_PRESENT p, const PUCHAR start, const PKT_SURF *s)
+{
+    D3DDDI_PATCHLOCATIONLIST *pl = p->pPatchLocationListOut;
+
+    if (!pl || p->PatchLocationListOutSize == 0) {
+        return FALSE;
+    }
+    RtlZeroMemory(pl, sizeof(*pl));
+    pl->AllocationIndex = s->index;
+    pl->PatchOffset = (UINT)((const UCHAR *)&s->seg - start);
+    p->pPatchLocationListOut = pl + 1;
+    p->PatchLocationListOutSize--;
+    return TRUE;
+}
+
+static void surf_from_list(PKT_SURF *s, const DXGK_ALLOCATIONLIST *list, ULONG index)
+{
+    const D3DPT_ALLOC *al = (const D3DPT_ALLOC *)list[index].hDeviceSpecificAllocation;
+
+    s->index = index;
+    s->seg = list[index].SegmentId;
+    s->addr = list[index].PhysicalAddress.LowPart;
+    s->pitch = al ? al->d.pitch : 0;
+    s->bpp = al ? al->d.bpp : 4;
+}
+
+/*
+ * cdd.dll's presents (no DWM yet): blits from the shadow surface GDI drew
+ * into to the primary, color fills, and a flip. One packet per call; when
+ * the sub-rectangles do not all fit, the rest go in the next DMA buffer
+ * (MultipassOffset).
+ */
+static DXGKDDI_PRESENT d3dpt_present;
+static NTSTATUS APIENTRY d3dpt_present(IN_CONST_HANDLE h, INOUT_PDXGKARG_PRESENT p)
+{
+    static ULONG logged;
+    PKT_BLT_T *k = (PKT_BLT_T *)p->pDmaBuffer;
+    ULONG room, n, total, i;
+
+    UNREFERENCED_PARAMETER(h);
+    if (logged < 8) {
+        logged++;
+        dbg_hex("d3dptkmd: Present flags=", p->Flags.Value);
+        dbg_hex(" subrects ", p->SubRectCnt);
+        dbg_puts("\n");
+    }
+    if (p->Flags.Flip) {
+        PKT_FLIP_T *f = (PKT_FLIP_T *)p->pDmaBuffer;
+
+        if (p->DmaSize < sizeof(*f)) {
+            return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+        }
+        pkt_hdr(&f->h, PKT_FLIP, sizeof(*f));
+        surf_from_list(&f->src, p->pAllocationList, DXGK_PRESENT_SOURCE_INDEX);
+        if (!add_patch(p, (PUCHAR)f, &f->src)) {
+            return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+        }
+        p->pDmaBuffer = (PUCHAR)p->pDmaBuffer + sizeof(*f);
+        return STATUS_SUCCESS;
+    }
+    if (!p->Flags.Blt && !p->Flags.ColorFill) {
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (p->DmaSize < sizeof(*k)) {
+        return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+    }
+    total = p->SubRectCnt ? p->SubRectCnt : 1;
+    room = (ULONG)((p->DmaSize - FIELD_OFFSET(PKT_BLT_T, r)) / sizeof(PKT_RECT));
+    n = total - p->MultipassOffset;
+    if (n > room) {
+        n = room;
+    }
+    if (p->Flags.ColorFill) {
+        pkt_hdr(&k->h, PKT_COLORFILL, 0);
+        RtlZeroMemory(&k->src, sizeof(k->src));
+        k->color = p->Color;
+    } else {
+        pkt_hdr(&k->h, PKT_BLT, 0);
+        surf_from_list(&k->src, p->pAllocationList, DXGK_PRESENT_SOURCE_INDEX);
+        k->color = 0;
+    }
+    surf_from_list(&k->dst, p->pAllocationList, DXGK_PRESENT_DESTINATION_INDEX);
+    if (p->PatchLocationListOutSize < 2 ||
+        (p->Flags.Blt && !add_patch(p, (PUCHAR)k, &k->src)) || !add_patch(p, (PUCHAR)k, &k->dst)) {
+        return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
+    }
+    if (logged < 8) {
+        dbg_hex("d3dptkmd: Present source in segment ", k->src.seg);
+        dbg_hex(" at ", k->src.addr);
+        dbg_hex(", destination in ", k->dst.seg);
+        dbg_puts("\n");
+    }
+    for (i = 0; i < n; i++) {
+        const RECT *d = p->SubRectCnt ? &p->pDstSubRects[p->MultipassOffset + i] : &p->DstRect;
+        PKT_RECT *r = &k->r[i];
+
+        r->l = d->left;
+        r->t = d->top;
+        r->r = d->right;
+        r->b = d->bottom;
+        r->sx = p->SrcRect.left + (d->left - p->DstRect.left);
+        r->sy = p->SrcRect.top + (d->top - p->DstRect.top);
+    }
+    k->n = n;
+    k->h.size = FIELD_OFFSET(PKT_BLT_T, r) + n * sizeof(PKT_RECT);
+    p->pDmaBuffer = (PUCHAR)p->pDmaBuffer + k->h.size;
+    p->MultipassOffset += n;
+    return p->MultipassOffset < total ? STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER : STATUS_SUCCESS;
+}
+
+/* Where the present's surfaces ended up: every packet of the submission
+ * takes its surfaces' addresses from the list again. */
+static DXGKDDI_PATCH d3dpt_patch;
+static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH p)
+{
+    PUCHAR buf = (PUCHAR)p->pDmaBuffer;
+    ULONG off = p->DmaBufferSubmissionStartOffset;
+    static ULONG logged;
+
+    UNREFERENCED_PARAMETER(h);
+    if (logged < 8) {
+        logged++;
+        dbg_hex("d3dptkmd: Patch fence ", p->SubmissionFenceId);
+        dbg_hex(" patches ", p->PatchLocationListSubmissionLength);
+        if (p->AllocationListSize > DXGK_PRESENT_SOURCE_INDEX) {
+            dbg_hex(" source segment ", p->pAllocationList[DXGK_PRESENT_SOURCE_INDEX].SegmentId);
+            dbg_hex(" at ", p->pAllocationList[DXGK_PRESENT_SOURCE_INDEX].PhysicalAddress.LowPart);
+        }
+        dbg_puts("\n");
+    }
+    while (off + sizeof(PKT_HDR) <= p->DmaBufferSubmissionEndOffset) {
+        PKT_HDR *hd = (PKT_HDR *)(buf + off);
+
+        if (hd->magic != D3DPT_PKT_MAGIC || hd->size < sizeof(*hd)) {
+            break;
+        }
+        if (hd->op == PKT_BLT || hd->op == PKT_COLORFILL) {
+            PKT_BLT_T *k = (PKT_BLT_T *)hd;
+
+            if (hd->op == PKT_BLT && k->src.index < p->AllocationListSize) {
+                k->src.seg = p->pAllocationList[k->src.index].SegmentId;
+                k->src.addr = p->pAllocationList[k->src.index].PhysicalAddress.LowPart;
+            }
+            if (k->dst.index < p->AllocationListSize) {
+                k->dst.seg = p->pAllocationList[k->dst.index].SegmentId;
+                k->dst.addr = p->pAllocationList[k->dst.index].PhysicalAddress.LowPart;
+            }
+        } else if (hd->op == PKT_FLIP) {
+            PKT_FLIP_T *f = (PKT_FLIP_T *)hd;
+
+            if (f->src.index < p->AllocationListSize) {
+                f->src.seg = p->pAllocationList[f->src.index].SegmentId;
+                f->src.addr = p->pAllocationList[f->src.index].PhysicalAddress.LowPart;
+            }
+        }
+        off += hd->size;
+    }
+    return STATUS_SUCCESS;
+}
+
+/* The DMA buffer is in contiguous system memory (segment set 0), so its
+ * physical address gives it back in system space. Run it, then report the
+ * fence done. */
+static DXGKDDI_SUBMITCOMMAND d3dpt_submit_command;
+static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SUBMITCOMMAND s)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    static ULONG logged;
+
+    if (logged < 8) {
+        logged++;
+        dbg_hex("d3dptkmd: SubmitCommand fence ", s->SubmissionFenceId);
+        dbg_hex(" flags ", s->Flags.Value);
+        dbg_hex(" bytes ", s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
+        dbg_puts("\n");
+    }
+    if (s->DmaBufferSubmissionEndOffset > s->DmaBufferSubmissionStartOffset) {
+        PHYSICAL_ADDRESS pa = s->DmaBufferPhysicalAddress;
+        PUCHAR va;
+
+        pa.QuadPart += s->DmaBufferSubmissionStartOffset;
+        va = s->DmaBufferSegmentId == 0 ? (PUCHAR)MmGetVirtualForPhysical(pa) : NULL;
+        if (va) {
+            run(a, va, s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
+        } else {
+            dbg_hex("d3dptkmd: SubmitCommand: no system address for the DMA buffer, segment ",
+                    s->DmaBufferSegmentId);
+            dbg_puts("\n");
+        }
+    }
+    complete_fence(a, s->SubmissionFenceId);
+    return STATUS_SUCCESS;
+}
+
+/* Nothing is ever in flight, so a preemption finds the queue empty: it is
+ * answered at once with the last fence done. */
+static DXGKDDI_PREEMPTCOMMAND d3dpt_preempt_command;
+static NTSTATUS APIENTRY d3dpt_preempt_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PREEMPTCOMMAND p)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    BOOLEAN ret;
+
+    a->preempt_fence = (LONG)p->PreemptionFenceId;
+    a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_preempted, a, 0, &ret);
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_QUERYCURRENTFENCE d3dpt_query_current_fence;
+static NTSTATUS APIENTRY d3dpt_query_current_fence(IN_CONST_HANDLE h, INOUT_PDXGKARG_QUERYCURRENTFENCE q)
+{
+    q->CurrentFence = (UINT)((D3DPT_ADAPTER *)h)->fence_done;
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_RESETFROMTIMEOUT d3dpt_reset_from_timeout;
+static NTSTATUS APIENTRY d3dpt_reset_from_timeout(IN_CONST_HANDLE h)
+{
+    UNREFERENCED_PARAMETER(h);
+    dbg_line("ResetFromTimeout");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_RESTARTFROMTIMEOUT d3dpt_restart_from_timeout;
+static NTSTATUS APIENTRY d3dpt_restart_from_timeout(IN_CONST_HANDLE h)
+{
+    UNREFERENCED_PARAMETER(h);
+    dbg_line("RestartFromTimeout");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_COLLECTDBGINFO d3dpt_collect_dbg_info;
+static NTSTATUS APIENTRY d3dpt_collect_dbg_info(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_COLLECTDBGINFO c)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(c);
+    dbg_line("CollectDbgInfo");
+    return STATUS_SUCCESS;
+}
 /* ------------------------------------------------------------- VidPN */
 
 /* A mode as the video signal a target and the monitor see: progressive,
@@ -646,7 +1668,9 @@ static NTSTATUS fill_source_modes(const D3DPT_ADAPTER *a, const DXGK_VIDPN_INTER
         m->Format.Graphics.PrimSurfSize.cy = ht;
         m->Format.Graphics.VisibleRegionSize = m->Format.Graphics.PrimSurfSize;
         m->Format.Graphics.Stride = w * 4;
-        m->Format.Graphics.PixelFormat = D3DDDIFMT_X8R8G8B8;
+        /* A8R8G8B8, the format cdd.dll creates the primary in (with X8R8G8B8
+         * here the primary was refused and the desktop never shown) */
+        m->Format.Graphics.PixelFormat = D3DDDIFMT_A8R8G8B8;
         m->Format.Graphics.ColorBasis = D3DKMDT_CB_SRGB;
         m->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
         if (!NT_SUCCESS(si->pfnAddMode(hset, m))) {   /* two refresh rates, one size */
@@ -733,41 +1757,49 @@ static NTSTATUS APIENTRY d3dpt_enum_vidpn_cofunc_modality(IN_CONST_HANDLE h,
         const DXGK_VIDPNTARGETMODESET_INTERFACE *ti;
         const D3DKMDT_VIDPN_SOURCE_MODE *psrc = NULL;
         const D3DKMDT_VIDPN_TARGET_MODE *ptgt = NULL;
+        D3DKMDT_VIDPN_SOURCE_MODE src_pin;
+        D3DKMDT_VIDPN_TARGET_MODE tgt_pin;
+        BOOLEAN has_src = FALSE, has_tgt = FALSE;
         BOOLEAN src_pivot = e->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE &&
                             e->EnumPivot.VidPnSourceId == path->VidPnSourceId;
         BOOLEAN tgt_pivot = e->EnumPivotType == D3DKMDT_EPT_VIDPNTARGET &&
                             e->EnumPivot.VidPnTargetId == path->VidPnTargetId;
 
-        /* what is pinned on either end */
+        /* What is pinned on either end, copied out: a mode set still
+         * acquired cannot be replaced, so every set is released before
+         * the new ones are assigned. */
         if (NT_SUCCESS(vi->pfnAcquireSourceModeSet(e->hConstrainingVidPn, path->VidPnSourceId, &hsrc, &si))) {
-            si->pfnAcquirePinnedModeInfo(hsrc, &psrc);
-        } else {
-            hsrc = NULL;
-        }
-        if (NT_SUCCESS(vi->pfnAcquireTargetModeSet(e->hConstrainingVidPn, path->VidPnTargetId, &htgt, &ti))) {
-            ti->pfnAcquirePinnedModeInfo(htgt, &ptgt);
-        } else {
-            htgt = NULL;
-        }
-
-        if (!psrc && !src_pivot) {
-            fill_source_modes(a, vi, e->hConstrainingVidPn, path->VidPnSourceId, ptgt);
-        }
-        if (!ptgt && !tgt_pivot) {
-            fill_target_modes(a, vi, e->hConstrainingVidPn, path->VidPnTargetId, psrc);
-        }
-
-        if (psrc) {
-            si->pfnReleaseModeInfo(hsrc, psrc);
-        }
-        if (hsrc) {
+            if (NT_SUCCESS(si->pfnAcquirePinnedModeInfo(hsrc, &psrc)) && psrc) {
+                src_pin = *psrc;
+                has_src = TRUE;
+                si->pfnReleaseModeInfo(hsrc, psrc);
+            }
             vi->pfnReleaseSourceModeSet(e->hConstrainingVidPn, hsrc);
         }
-        if (ptgt) {
-            ti->pfnReleaseModeInfo(htgt, ptgt);
-        }
-        if (htgt) {
+        if (NT_SUCCESS(vi->pfnAcquireTargetModeSet(e->hConstrainingVidPn, path->VidPnTargetId, &htgt, &ti))) {
+            if (NT_SUCCESS(ti->pfnAcquirePinnedModeInfo(htgt, &ptgt)) && ptgt) {
+                tgt_pin = *ptgt;
+                has_tgt = TRUE;
+                ti->pfnReleaseModeInfo(htgt, ptgt);
+            }
             vi->pfnReleaseTargetModeSet(e->hConstrainingVidPn, htgt);
+        }
+
+        if (!has_src && !src_pivot) {
+            NTSTATUS fs = fill_source_modes(a, vi, e->hConstrainingVidPn, path->VidPnSourceId,
+                                            has_tgt ? &tgt_pin : NULL);
+            if (!NT_SUCCESS(fs)) {
+                dbg_hex("d3dptkmd: cofunc: source modes ", (ULONG)fs);
+                dbg_puts("\n");
+            }
+        }
+        if (!has_tgt && !tgt_pivot) {
+            NTSTATUS ft = fill_target_modes(a, vi, e->hConstrainingVidPn, path->VidPnTargetId,
+                                            has_src ? &src_pin : NULL);
+            if (!NT_SUCCESS(ft)) {
+                dbg_hex("d3dptkmd: cofunc: target modes ", (ULONG)ft);
+                dbg_puts("\n");
+            }
         }
 
         /* identity scaling and rotation, where not pinned yet */
@@ -789,7 +1821,12 @@ static NTSTATUS APIENTRY d3dpt_enum_vidpn_cofunc_modality(IN_CONST_HANDLE h,
         topi->pfnReleasePathInfo(top, path);
         path = next;
     }
-    return st == STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET ? STATUS_SUCCESS : st;
+    if (st != STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET) {
+        dbg_hex("d3dptkmd: EnumVidPnCofuncModality -> ", (ULONG)st);
+        dbg_puts("\n");
+        return st;
+    }
+    return STATUS_SUCCESS;
 }
 
 /* One source, one target, any of the table's modes: whatever dxgkrnl
@@ -799,6 +1836,7 @@ static NTSTATUS APIENTRY d3dpt_is_supported_vidpn(IN_CONST_HANDLE h, INOUT_PDXGK
 {
     UNREFERENCED_PARAMETER(h);
     s->IsVidPnSupported = TRUE;
+    dbg_line("IsSupportedVidPn: yes");
     return STATUS_SUCCESS;
 }
 
@@ -808,6 +1846,7 @@ static NTSTATUS APIENTRY d3dpt_recommend_functional_vidpn(IN_CONST_HANDLE h,
 {
     UNREFERENCED_PARAMETER(h);
     UNREFERENCED_PARAMETER(r);
+    dbg_line("RecommendFunctionalVidPn: none");
     return STATUS_GRAPHICS_NO_RECOMMENDED_FUNCTIONAL_VIDPN;
 }
 
@@ -817,6 +1856,7 @@ static NTSTATUS APIENTRY d3dpt_recommend_vidpn_topology(IN_CONST_HANDLE h,
 {
     UNREFERENCED_PARAMETER(h);
     UNREFERENCED_PARAMETER(r);
+    dbg_line("RecommendVidPnTopology: none");
     return STATUS_GRAPHICS_NO_RECOMMENDED_VIDPN_TOPOLOGY;
 }
 
@@ -922,16 +1962,11 @@ static NTSTATUS APIENTRY d3dpt_get_scan_line(IN_CONST_HANDLE h, INOUT_PDXGKARG_G
 }
 STUB2(DXGKDDI_STOPCAPTURE, d3dpt_stop_capture, IN_CONST_HANDLE, IN_CONST_PDXGKARG_STOPCAPTURE)
 STUB2(DXGKDDI_CREATEOVERLAY, d3dpt_create_overlay, IN_CONST_HANDLE, INOUT_PDXGKARG_CREATEOVERLAY)
-STUB1(DXGKDDI_DESTROYDEVICE, d3dpt_destroy_device, IN_CONST_HANDLE)
-STUB2(DXGKDDI_OPENALLOCATIONINFO, d3dpt_open_allocation, IN_CONST_HANDLE, IN_CONST_PDXGKARG_OPENALLOCATION)
-STUB2(DXGKDDI_CLOSEALLOCATION, d3dpt_close_allocation, IN_CONST_HANDLE, IN_CONST_PDXGKARG_CLOSEALLOCATION)
+/* a user-mode driver's command buffers: none exists yet (plan step 6) */
 STUB2(DXGKDDI_RENDER, d3dpt_render, IN_CONST_HANDLE, INOUT_PDXGKARG_RENDER)
-STUB2(DXGKDDI_PRESENT, d3dpt_present, IN_CONST_HANDLE, INOUT_PDXGKARG_PRESENT)
 STUB2(DXGKDDI_UPDATEOVERLAY, d3dpt_update_overlay, IN_CONST_HANDLE, IN_CONST_PDXGKARG_UPDATEOVERLAY)
 STUB2(DXGKDDI_FLIPOVERLAY, d3dpt_flip_overlay, IN_CONST_HANDLE, IN_CONST_PDXGKARG_FLIPOVERLAY)
 STUB1(DXGKDDI_DESTROYOVERLAY, d3dpt_destroy_overlay, IN_CONST_HANDLE)
-STUB2(DXGKDDI_CREATECONTEXT, d3dpt_create_context, IN_CONST_HANDLE, INOUT_PDXGKARG_CREATECONTEXT)
-STUB1(DXGKDDI_DESTROYCONTEXT, d3dpt_destroy_context, IN_CONST_HANDLE)
 STUB2(DXGKDDI_SETDISPLAYPRIVATEDRIVERFORMAT, d3dpt_set_display_private_driver_format, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETDISPLAYPRIVATEDRIVERFORMAT)
 STUB2(DXGKDDI_QUERYVIDPNHWCAPABILITY, d3dpt_query_vidpn_hw_capability, IN_CONST_HANDLE, INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY)
 

@@ -148,10 +148,47 @@ device's half is plain QEMU C and builds anywhere.
      EnumVidPnCofuncModality rounds over every pivot, then CreateDevice,
      a stub, three times, and QueryInterface for another interface.
      Windows stays on its boot screen.
-   Next: CreateDevice / DestroyDevice, CreateContext, allocations
-   (Create/Destroy/Describe/GetStandardAllocationDriverData), the paging
-   buffer, SubmitCommand with fences, Present for cdd.dll, and why no
-   CommitVidPn came before CreateDevice.
+   - **The desktop through the WDDM driver** (2026-10-02, 640x480, no
+     user-mode driver, so no DWM): GDI draws into dxgkrnl's shadow
+     surface and cdd.dll presents it to the primary. The "GPU" is the
+     CPU: the DMA buffers carry the driver's own packets (transfer, fill,
+     blit, color fill, flip, aperture map/unmap), run at SubmitCommand
+     through a kernel mapping of the segment, and the fence is reported
+     done right there, the way an interrupt would
+     (`DxgkCbSynchronizeExecution` → `DxgkCbNotifyInterrupt(DMA_COMPLETED)`
+     → `DxgkCbQueueDpc` → `DxgkCbNotifyDpc`): the device raises no
+     interrupt yet. What it took, each one a boot that stopped short:
+     - **CreateDevice's `pInfo`.** `DXGKARG_CREATEDEVICE` puts `Flags` and
+       `pInfo` in one union; Windows 7 passes a pointer there (a kernel
+       address) and reads the DMA buffer and list sizes the driver writes
+       through it. Unfilled, the device was made three times and dropped.
+     - **Release every mode set before assigning new ones** in
+       EnumVidPnCofuncModality (the pinned modes copied out first): with
+       the old set still acquired, dxgkrnl enumerated 87 times and never
+       committed a VidPN.
+     - **Source modes in A8R8G8B8**, the format cdd.dll creates the
+       primary in (with X8R8G8B8 the primary was dropped right after its
+       first paging fill).
+     - **Patch locations from Present.** The header marks
+       `pPatchLocationListOut` "Not used", but without entries the shadow
+       surface stayed in system memory (segment 0, address 0) and every
+       blit had no source. With one per surface dxgkrnl pages the shadow
+       into VRAM and calls Patch, which re-reads the allocation list into
+       the packets.
+     - An aperture segment (segment 2, 64 MiB at GPU address 0x80000000,
+       MAP/UNMAP_APERTURE_SEGMENT kept as kernel mappings of the pages)
+       went in on the way; the shadow lands in VRAM, so it is not
+       exercised yet.
+     Trace and boot loop: `w7test.sh` in the session scratchpad (a
+     throwaway overlay on a frozen base where the driver is installed but
+     disabled, so Windows boots to its VGA desktop; the CD with the
+     build, the driver copied and enabled from an elevated console, a
+     reboot). A boot that hangs costs nothing.
+   Next: the mode the desktop starts in (640x480: no EDID, so a monitor
+   descriptor or a preferred mode it honours), the hardware cursor
+   (SetPointerShape/Position on the CURSOR registers), the vertical-blank
+   interrupt (ControlInterrupt, flips), then step 6, the user-mode driver
+   that DWM needs.
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the
