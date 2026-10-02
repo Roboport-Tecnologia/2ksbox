@@ -31,3 +31,7 @@ image = { version = "0.25", default-features = false, features = ["bmp"] }
 
 [build-dependencies]
 cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }
+# The one the line above already uses, named for `QResourceFile`, which
+# cxx-qt-build does not re-export: a resource from outside the crate
+# needs an alias, or its `..` lands in the `qrc:` path.
+qt-build-utils = { version = "0.10", default-features = false }

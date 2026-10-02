@@ -9,6 +9,7 @@
 //! launcher has no `qml/` directory beside it.
 
 use cxx_qt_build::{CxxQtBuilder, QmlModule};
+use qt_build_utils::QResourceFile;
 
 include!("../packaging/windows/win-icon.rs");
 
@@ -58,6 +59,8 @@ fn main() {
         // neither a QML module URI nor a D-Bus name may start with one.
         QmlModule::new("com._2ksbox.launcher").qml_files([
             "qml/Main.qml",
+            "qml/AboutWindow.qml",
+            "qml/MacMenu.qml",
             "qml/Disclosure.qml",
             "qml/FirstRunDialog.qml",
             "qml/FirstRunResultDialog.qml",
@@ -93,7 +96,11 @@ fn main() {
     // ones the QML imports pull in.
     .cpp_file("src/appearance.cpp")
     .qt_module("QuickControls2")
+    // The About window's picture, at the module's own `qrc:` prefix as
+    // `icon/2ksbox-128.png`.
+    .qrc_resources([QResourceFile::new("../packaging/icon/2ksbox-128.png").alias("icon/2ksbox-128.png")])
     .files([
+        "src/qt/about.rs",
         "src/qt/diag.rs",
         "src/qt/browse.rs",
         "src/qt/clone_machine.rs",

@@ -126,6 +126,14 @@ ApplicationWindow {
                 ToolTip.text: machines.status
                 HoverHandler { id: statusHover }
             }
+            ToolButton {
+                text: "?"
+                font.bold: true
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("About 2ksbox")
+                ToolTip.delay: 500
+                onClicked: aboutWindow.show()
+            }
         }
     }
 
@@ -406,6 +414,20 @@ ApplicationWindow {
         onChanged: { wizard.refreshProfiles(); machines.refresh() }
     }
 
+    AboutWindow { id: aboutWindow }
+
+    // The Mac's menu bar (`MacMenu.qml`), made here rather than declared
+    // so that only macOS loads the module it imports.
+    Component.onCompleted: {
+        if (Qt.platform.os !== "osx" && Qt.platform.os !== "macos")
+            return
+        const menu = Qt.createComponent("MacMenu.qml").createObject(root, { window: root })
+        if (menu)
+            menu.aboutRequested.connect(aboutWindow.show)
+        else
+            diag.note("the macOS menu bar did not load")
+    }
+
     ShaderEditorWindow {
         id: shaderEditorWindow
         editor: editor
@@ -428,7 +450,7 @@ ApplicationWindow {
         // (see the note on `grabTimer` below). Its `firstrun` probe
         // screen prints what it holds instead of photographing it.
         const windows = [wizardWindow, cloneWindow, discShelfWindow, snapshotsWindow,
-                         shaderWindow, shaderEditorWindow]
+                         shaderWindow, shaderEditorWindow, aboutWindow]
         for (const d of windows)
             if (d.visible && d.grabItem)
                 return d.grabItem
@@ -659,6 +681,10 @@ ApplicationWindow {
                 snapshotsWindow.show(); break
             case "profiles":
                 profiles.refresh(); shaderWindow.show(); break
+            case "about":
+                aboutWindow.show()
+                diag.note("about: " + aboutWindow.report())
+                break
             case "saveprofile":
                 // `LAUNCHER_QT_ARG=<preset path>`: the flow a person
                 // does. The profile list open, New profile…, a name, a

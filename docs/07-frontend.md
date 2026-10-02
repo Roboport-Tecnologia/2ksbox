@@ -60,6 +60,16 @@ player line runs a machine with nothing else.
   machine, Disc shelf, Shader profiles and the status line; no button
   label there ends in "…" (user). The Qt
   window keeps its grid until the flip.
+- **About 2ksbox** (2026-10-02) shows the version, the licence and
+  the projects 2ksbox is built on, grouped by what they do for it, each
+  a link with its licence. The list is `launcher_core::about` (the
+  projects the app runs or ships, plus Wine; a library one of them pulls
+  in is theirs to credit), and `launcherx --about` prints it. Qt opens
+  it from a "?" at the end of the toolbar and, on macOS, from the
+  application menu: `MacMenu.qml` is a `Qt.labs.platform` menu bar whose
+  item carries `AboutRole` (Quick Controls' own `MenuBar` has no roles),
+  created from `Main.qml` only on macOS so no other platform resolves
+  that import. `qt-about` checks the window lists every credit.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Play is logged with the line it ran**, quoted to paste back

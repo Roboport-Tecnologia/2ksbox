@@ -1044,6 +1044,21 @@ qtesc_check() { # Esc reaches the shader editor opened from the profile list (do
     || { echo "Esc in the editor is not one armed shortcut in the focused window: $o"; return 1; }
   return 0
 }
+qtabout_check() { # the About window shows every credit `launcher_core::about` lists (doc 07)
+  local dir="$OUT/qtabout" bin="launcher-qt/target/release/launcher-qt" o want
+  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" QT_QPA_PLATFORM=offscreen
+  want="$("$bin" --about | grep -c '^  ')"
+  [ "$want" -gt 0 ] || { echo "--about listed no credits"; return 1; }
+  o="$(timeout 120 env LAUNCHER_QT_SCREEN=about LAUNCHER_QT_DELAY=250 "$bin" 2>&1 \
+       | sed -n 's/^\[diag\] about: //p')"
+  [ -n "$o" ] || { echo "the probe printed no about line"; return 1; }
+  printf '  %s\n' "$o"
+  printf '%s' "$o" | grep -q "^heading '2ksbox  [0-9]" || { echo "no name and version in the heading"; return 1; }
+  printf '%s' "$o" | grep -q "credits $want\$" || { echo "the window does not show the $want credits --about lists"; return 1; }
+  return 0
+}
 qtprofilesclose_check() { # closing the profile list must not bring the wizard back (doc 07)
   local dir="$OUT/qtprofilesclose" bin="launcher-qt/target/release/launcher-qt" o
   rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles"
@@ -2531,6 +2546,7 @@ host_stage() {
     run_check qt-close qt-close.log qtclose_check || true
     run_check qt-esc qt-esc.log qtesc_check || true
     run_check qt-profilesclose qt-profilesclose.log qtprofilesclose_check || true
+    run_check qt-about qt-about.log qtabout_check || true
     run_check qt-profile qt-profile.log qtprofile_check || true
     run_check qt-shelf qt-shelf.log qtshelf_check || true
     run_check qt-firstrun qt-firstrun.log qtfirstrun_check || true
@@ -2545,6 +2561,7 @@ host_stage() {
     skip qt-close "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
     skip qt-esc "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
     skip qt-profilesclose "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
+    skip qt-about "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
     skip qt-profile "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
     skip qt-shelf "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"
     skip qt-firstrun "needs launcher-qt/target/release/launcher-qt (scripts/build.sh qt)"

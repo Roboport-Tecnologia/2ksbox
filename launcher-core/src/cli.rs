@@ -152,6 +152,10 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             print!("{}", crate::host_gpu::report_text(&probe));
             return Some(if probe.gpu.pass_through_available() { 0 } else { 1 });
         }
+        "--about" => {
+            // The About window's words and credits (`about.rs`).
+            print!("{}", crate::about::text());
+        }
         "--paths" => {
             // Every companion a launcher would reach for, and where it
             // found it (`paths.rs`). `scripts/package-linux.sh` checks a

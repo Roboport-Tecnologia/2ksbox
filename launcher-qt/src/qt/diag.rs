@@ -27,7 +27,7 @@ pub mod ffi {
         #[qproperty(QString, shot_path)]
         /// "", "wizard", "optall", "closebox", "wizardscroll", "create",
         /// "clone", "adddisc", "pickdisc", "discs", "snapshots",
-        /// "profiles", "saveprofile", "firstrun", "escfocus", "editor"
+        /// "profiles", "saveprofile", "firstrun", "escfocus", "editor", "about"
         /// (`Main.qml`).
         #[qproperty(QString, screen)]
         #[qproperty(QString, arg)]

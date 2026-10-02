@@ -37,6 +37,7 @@
 //!   every debug verb that needs no toolkit, so both binaries answer the
 //!   same ones identically.
 
+pub mod about;
 pub mod browse;
 pub mod bundle;
 pub mod cli;

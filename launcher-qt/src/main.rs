@@ -41,6 +41,7 @@
 mod preview;
 
 mod qt {
+    pub mod about;
     pub mod browse;
     pub mod clone_machine;
     pub mod diag;
