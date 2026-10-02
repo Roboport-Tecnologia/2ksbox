@@ -29,10 +29,11 @@ The roadmap is doc 08.
 | 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted |
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
-| 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18 |
+| 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18; amended 2026-10-02 (the WDK's headers, built on Windows) |
 | 023 | The launcher moves to mitsuami | accepted; done 2026-10-02 (every package ships it, `launcher-qt` deleted) |
 | 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
 | 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22 |
+| 026 | Windows builds natively with MSVC; QEMU and the old guests stay on mingw | accepted; the WDDM driver first (M18), the host build later |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -765,6 +766,19 @@ to start, but it ties the driver to a Windows build machine and to the
 WDK's licence. Stretching the XP-model driver: no path to DWM exists
 there.
 
+**Amendment (2026-10-02, user decision).** The driver builds on Windows
+with MSVC and the WDK's own headers, reversing "our own headers" and the
+rejection above. The WDK's licence forbids redistributing its headers,
+not building with them: the build reads them from the WDK installed on
+the build machine, and nothing of the WDK is committed. Hand-written
+headers would turn a wrong struct layout into a blue screen instead of a
+compile error, and WDDM's structs are large and versioned. The Windows
+host build moves to MSVC anyway (ADR-026), so tying the driver to a
+Windows machine costs nothing new. 32-bit Windows 7 first still holds.
+Open: which WDK still targets 32-bit Windows 7 (recent ones dropped
+Windows 7 as a target, and possibly 32-bit kernel drivers), checked
+first in M18 step 2.
+
 
 ## ADR-023: The launcher moves to mitsuami, native widgets on every platform (2026-09-27)
 
@@ -883,3 +897,57 @@ mitsuami needs (ADR-023). The keyboard grab mitsuami gives is weaker on
 Windows and macOS than the winit player's capture (doc 03 "Input path"),
 so those hosts wait for it to match.
 
+
+## ADR-026: Windows builds natively with MSVC; QEMU and the old guests stay on mingw (2026-10-02)
+
+**Status.** Accepted (user: "we will switch windows builds to use msvc
+wholesale", then "natively on windows"). The WDDM driver goes first
+(track M18, ADR-022's amendment); the host build follows. Until it does,
+the Windows package is still the cross build `docs/build-windows.md`
+describes.
+
+**Decision.** Windows binaries build on a Windows machine with Visual
+Studio's MSVC tools, not cross-compiled from Linux:
+
+- the players, the launchers and our tools as Rust's
+  `x86_64-pc-windows-msvc`;
+- Qt, while `launcher-qt` ships, as Qt's own MSVC build;
+- the Direct3D executor;
+- the WDDM display driver (kernel and user mode) with the WDK.
+
+Two things cannot move, and stay on mingw:
+
+- **QEMU** and what links into it (`libqemu-embed-*.dll`, and the Rust
+  static libraries inside it, `libdisc` and `libsynth`, so the
+  `x86_64-pc-windows-gnu` target stays too).
+  Upstream QEMU builds on Windows only in a mingw environment, so it
+  stays on mingw clang (patch 68) in MSYS2, on the same PC. The player
+  reaches it through the DLL's C API, which becomes the boundary between
+  two C runtimes: nothing allocated on one side is freed on the other,
+  and no `FILE *` or file descriptor crosses it.
+- **The Windows 98 / XP guest programs and drivers.** Modern MSVC cannot
+  target Windows 9x, and XP only through a deprecated toolset. They stay
+  i686 mingw, msvcrt, `-march=pentium3`, built wherever the ISO is.
+
+DXVK is loaded by name, so it may stay on mingw; decided when the host
+build moves.
+
+**Why.** mitsuami needs MSVC and the Windows App Runtime on Windows
+(ADR-023, ADR-025) and the WDDM driver needs the WDK (ADR-022 as
+amended), so a native MSVC build was coming regardless. One toolchain for
+everything that can use it beats a Linux container plus a Windows build
+beside it. Qt's MSVC build is its usual one on Windows, and the msvcrt
+destructor-order trouble in `docs/build-windows.md` goes with it.
+
+**Rejected.** Cross-compiling MSVC binaries from Linux (`xwin` for the
+CRT and SDK, then clang-cl and lld-link): it keeps the Linux build, but
+the Windows App Runtime and the WDK are unproven there (user: natively).
+Keeping mingw for everything but the launcher: two Windows toolchains
+indefinitely.
+
+**Costs.** Windows packages come only from a Windows machine, today the
+user's PC. `scripts/build-windows.sh` and `package-windows.sh` are
+rewritten, and `win-cross.sh` with its container retires once the native
+build packages. The PC needs MSYS2 (for QEMU) beside Visual Studio, and
+both Rust Windows targets. The embed API's C runtime boundary has to be
+audited before the player moves.

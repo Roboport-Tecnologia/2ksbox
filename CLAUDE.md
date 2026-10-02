@@ -202,7 +202,10 @@ knobs, `QEMU_PYTHON` and the macOS floor: `docs/development.md`,
 `docs/build-macos.md` ("The floor"). `README.md` is for end users and
 carries no developer content.
 
-Windows is a **cross build from Linux** (`scripts/win-cross.sh`,
+Windows is moving to **native MSVC builds on Windows** (ADR-026: QEMU
+stays mingw clang under MSYS2, the 9x/XP guest code i686 mingw; the WDDM
+driver first, track M18). Until the host build moves, Windows is a
+**cross build from Linux** (`scripts/win-cross.sh`,
 `scripts/build-windows.sh`) into `build/win/` and
 `target/x86_64-pc-windows-gnu/`, never over native artefacts, except
 the launcher (WinUI 3, MSVC), which builds only on Windows, so the

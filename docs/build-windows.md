@@ -8,6 +8,12 @@ Windows PC ("Building on Windows" below), with gdb. The launcher,
 **only** there, so the portable zip is rolled on the PC too, with no
 container, checked by Windows itself rather than wine.
 
+**This is changing (ADR-026, 2026-10-02):** Windows builds move to MSVC,
+natively on Windows; QEMU stays on mingw clang under MSYS2, and the
+Windows 98 / XP guest programs on i686 mingw. The WDDM driver goes first
+(track M18). Until the host build moves, this doc is the build that
+ships.
+
 The package runs on the user's PC (Ryzen 9 5900X, RTX 3090), 3D guests
 included; what has run there is in `docs/tracks/m11-windows-host.md`.
 Names and the install layout are in doc 07.
