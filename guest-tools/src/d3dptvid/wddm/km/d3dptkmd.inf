@@ -32,6 +32,15 @@ CopyFiles=d3dpt.Miniport
 [d3dpt.Miniport]
 d3dptkmd.sys
 
+; dxgkrnl reads the user-mode driver's name before it asks the adapter
+; anything (Windows 7 stops the adapter after QueryChildRelations without
+; one), so it is named before that driver exists (plan step 6).
+[d3dpt_Install.SoftwareSettings]
+AddReg=d3dpt_SoftwareDeviceSettings
+
+[d3dpt_SoftwareDeviceSettings]
+HKR,,UserModeDriverName,%REG_MULTI_SZ%,d3dptumd.dll
+
 [d3dpt_Install.Services]
 AddService=d3dptkmd, 0x00000002, d3dpt_Service_Inst
 
@@ -43,6 +52,7 @@ LoadOrderGroup=Video
 ServiceBinary=%12%\d3dptkmd.sys
 
 [Strings]
+REG_MULTI_SZ=0x00010000
 Provider="2ksbox"
 Mfg="2ksbox"
 DiskId="2ksbox guest tools"

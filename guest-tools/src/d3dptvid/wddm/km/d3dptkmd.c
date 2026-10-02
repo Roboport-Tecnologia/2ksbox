@@ -16,6 +16,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
+/* The DDI's structures at Windows 7's sizes. The kit's headers default to
+ * WDDM 2.7 whatever TargetVersion says, and dxgkrnl on Windows 7 passes
+ * its own, smaller ones (DXGK_DRIVERCAPS: 0x208 bytes), which a driver
+ * checking OutputDataSize against the larger sizeof then refuses. */
+#define DXGKDDI_INTERFACE_VERSION DXGKDDI_INTERFACE_VERSION_WIN7
 #include <ntddk.h>
 #include <dispmprt.h>
 #include "../../../../../d3dpt/d3dpt_fb.h"
@@ -32,6 +37,10 @@ typedef struct D3DPT_ADAPTER {
     PHYSICAL_ADDRESS regs_phys;       /* BAR 1 */
     ULONG regs_len;
     volatile ULONG *regs;             /* BAR 1 mapped (kernel VA) */
+    ULONG seg_size;                   /* VRAM below the Direct3D command window */
+    struct { ULONG w, h, hz; } modes[64];   /* the host's 32-bpp modes (MODE_*) */
+    ULONG nmodes;
+    ULONG cur_w, cur_h, cur_pitch, cur_hz;  /* what CommitVidPn programmed */
 } D3DPT_ADAPTER;
 
 /* The DEBUG register of the adapter that started last: stubs called with
@@ -148,6 +157,36 @@ static NTSTATUS find_bars(D3DPT_ADAPTER *a)
     return found == 3 ? STATUS_SUCCESS : STATUS_DEVICE_CONFIGURATION_ERROR;
 }
 
+/* The host's mode table (the player decides what the guest can pick, as
+ * for the XP driver), 32 bpp only: the desktop's primary is X8R8G8B8. A
+ * mode whose frame does not fit the segment is left out. */
+static void read_modes(D3DPT_ADAPTER *a)
+{
+    volatile ULONG *r = a->regs;
+    ULONG n = r[D3DPT_FB_REG_MODE_COUNT / 4], i;
+
+    a->nmodes = 0;
+    for (i = 0; i < n && a->nmodes < RTL_NUMBER_OF(a->modes); i++) {
+        ULONG w, h, bpp, hz;
+
+        r[D3DPT_FB_REG_MODE_SEL / 4] = i;
+        w = r[D3DPT_FB_REG_MODE_W / 4];
+        h = r[D3DPT_FB_REG_MODE_H / 4];
+        bpp = r[D3DPT_FB_REG_MODE_BPP / 4];
+        hz = r[D3DPT_FB_REG_MODE_HZ / 4];
+        if (bpp != 32 || !w || !h || w * h * 4 > a->seg_size) {
+            continue;
+        }
+        a->modes[a->nmodes].w = w;
+        a->modes[a->nmodes].h = h;
+        a->modes[a->nmodes].hz = hz ? hz : 60;
+        a->nmodes++;
+    }
+    dbg_hex("d3dptkmd: modes ", a->nmodes);
+    dbg_hex(" of ", n);
+    dbg_puts("\n");
+}
+
 static DXGKDDI_START_DEVICE d3dpt_start_device;
 static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start,
                                    IN_PDXGKRNL_INTERFACE dxgk, OUT_PULONG sources,
@@ -195,6 +234,16 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
         a->regs = NULL;
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
+
+    /* The memory segment is VRAM up to the command window the executor
+     * reads (its top 64 MiB, d3dpt_fb.h); a device with no window gives
+     * all of it. */
+    a->seg_size = a->regs[D3DPT_FB_REG_CMD_OFFSET / 4];
+    if (a->seg_size == 0 || a->seg_size > a->vram_len) {
+        a->seg_size = a->vram_len;
+    }
+
+    read_modes(a);
 
     /* one scanout, one monitor */
     *sources = 1;
@@ -244,15 +293,75 @@ static VOID d3dpt_unload(VOID)
 
 /* ---------------------------------------------- what dxgkrnl asks next */
 
+/* What the adapter can do, as dxgkrnl asks right after StartDevice: a
+ * WDDM 1.0 GPU with one engine, 32-bit addresses, no overlays, no swizzling
+ * and, for now, no hardware cursor (the XP driver's CURSOR registers come
+ * with the VidPN work). */
+static NTSTATUS driver_caps(DXGK_DRIVERCAPS *c)
+{
+    RtlZeroMemory(c, sizeof(*c));
+    c->HighestAcceptableAddress.QuadPart = 0xffffffffull;
+    c->MaxAllocationListSlotId = 16;
+    c->MaxQueuedFlipOnVSync = 1;
+    c->GpuEngineTopology.NbAsymetricProcessingNodes = 1;
+    c->WDDMVersion = DXGKDDI_WDDMv1;
+    return STATUS_SUCCESS;
+}
+
+/* One memory segment: VRAM below the command window, linear and CPU
+ * visible (BAR 0). Its GPU address is the VRAM offset itself, so an
+ * allocation's segment address is what the OFFSET register takes. The
+ * paging buffer is in system memory (segment 0). */
+static NTSTATUS query_segment(const D3DPT_ADAPTER *a, const DXGKARG_QUERYADAPTERINFO *q)
+{
+    DXGK_QUERYSEGMENTOUT *o = (DXGK_QUERYSEGMENTOUT *)q->pOutputData;
+    DXGK_SEGMENTDESCRIPTOR *d;
+
+    if (q->OutputDataSize < sizeof(*o)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!o->pSegmentDescriptor) {               /* the first call asks how many */
+        o->NbSegment = 1;
+        return STATUS_SUCCESS;
+    }
+    d = o->pSegmentDescriptor;
+    RtlZeroMemory(d, sizeof(*d));
+    d->BaseAddress.QuadPart = 0;
+    d->CpuTranslatedAddress = a->vram_phys;
+    d->Size = a->seg_size;
+    d->CommitLimit = a->seg_size;
+    d->Flags.CpuVisible = 1;
+    o->NbSegment = 1;
+    o->PagingBufferSegmentId = 0;
+    o->PagingBufferSize = 64 * 1024;
+    o->PagingBufferPrivateDataSize = 0;
+    return STATUS_SUCCESS;
+}
+
 static DXGKDDI_QUERYADAPTERINFO d3dpt_query_adapter_info;
 static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
                                                   IN_CONST_PDXGKARG_QUERYADAPTERINFO q)
 {
-    UNREFERENCED_PARAMETER(h);
+    const D3DPT_ADAPTER *a = (const D3DPT_ADAPTER *)h;
+    NTSTATUS st;
+
+    switch (q->Type) {
+    case DXGKQAITYPE_DRIVERCAPS:
+        st = q->OutputDataSize < sizeof(DXGK_DRIVERCAPS)
+             ? STATUS_INVALID_PARAMETER : driver_caps((DXGK_DRIVERCAPS *)q->pOutputData);
+        break;
+    case DXGKQAITYPE_QUERYSEGMENT:
+        st = query_segment(a, q);
+        break;
+    default:                                    /* the user-mode driver's private data, later */
+        st = STATUS_NOT_SUPPORTED;
+        break;
+    }
     dbg_hex("d3dptkmd: QueryAdapterInfo type=", (ULONG)q->Type);
     dbg_hex(" out=", q->OutputDataSize);
+    dbg_hex(" -> ", (ULONG)st);
     dbg_puts("\n");
-    return STATUS_NOT_SUPPORTED;
+    return st;
 }
 
 static DXGKDDI_INTERRUPT_ROUTINE d3dpt_interrupt;
@@ -314,14 +423,31 @@ static NTSTATUS d3dpt_dispatch_io_request(IN_CONST_PVOID ctx, IN_ULONG source,
 }
 
 static DXGKDDI_QUERY_CHILD_RELATIONS d3dpt_query_child_relations;
+/* One child: the video output the player's window is, always connected.
+ * Its UID is the video present target's ID in the VidPN. */
 static NTSTATUS d3dpt_query_child_relations(IN_CONST_PVOID ctx,
                                             PDXGK_CHILD_DESCRIPTOR rel, ULONG size)
 {
     UNREFERENCED_PARAMETER(ctx);
-    UNREFERENCED_PARAMETER(rel);
-    UNREFERENCED_PARAMETER(size);
-    dbg_line("QueryChildRelations");
-    return STATUS_NOT_SUPPORTED;
+    dbg_hex("d3dptkmd: QueryChildRelations size=", size);
+    dbg_hex(" each=", (ULONG)sizeof(*rel));
+    dbg_puts("\n");
+    if (!rel || size < sizeof(*rel)) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    RtlZeroMemory(rel, size);
+    rel[0].ChildDeviceType = TypeVideoOutput;
+    /* a VGA connector, as VirtualBox's WDDM driver reports its outputs on
+     * Windows 7 (D3DKMDT_VOT_OTHER: StopDevice right after this) */
+    rel[0].ChildCapabilities.Type.VideoOutput.InterfaceTechnology = D3DKMDT_VOT_HD15;
+    rel[0].ChildCapabilities.Type.VideoOutput.MonitorOrientationAwareness = D3DKMDT_MOA_NONE;
+    rel[0].ChildCapabilities.Type.VideoOutput.SupportsSdtvModes = FALSE;
+    /* not AlwaysConnected, which dxgkrnl keeps for integrated panels: the
+     * Basic Display Driver's choice, connected through QueryChildStatus */
+    rel[0].ChildCapabilities.HpdAwareness = HpdAwarenessInterruptible;
+    rel[0].AcpiUid = 0;
+    rel[0].ChildUid = 0;
+    return STATUS_SUCCESS;
 }
 
 static DXGKDDI_QUERY_CHILD_STATUS d3dpt_query_child_status;
@@ -329,12 +455,23 @@ static NTSTATUS d3dpt_query_child_status(IN_CONST_PVOID ctx, INOUT_PDXGK_CHILD_S
                                          IN_BOOLEAN non_destructive)
 {
     UNREFERENCED_PARAMETER(ctx);
-    UNREFERENCED_PARAMETER(st);
     UNREFERENCED_PARAMETER(non_destructive);
-    dbg_line("QueryChildStatus");
-    return STATUS_NOT_SUPPORTED;
+    dbg_hex("d3dptkmd: QueryChildStatus type=", (ULONG)st->Type);
+    dbg_puts("\n");
+    switch (st->Type) {
+    case StatusConnection:
+        st->HotPlug.Connected = TRUE;
+        return STATUS_SUCCESS;
+    case StatusRotation:
+        st->Rotation.Angle = 0;
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
 }
 
+/* No EDID yet: the monitor's modes come from RecommendMonitorModes, out of
+ * the host's mode table (the XP driver's list). */
 static DXGKDDI_QUERY_DEVICE_DESCRIPTOR d3dpt_query_device_descriptor;
 static NTSTATUS d3dpt_query_device_descriptor(IN_CONST_PVOID ctx, IN_ULONG uid,
                                               INOUT_PDXGK_DEVICE_DESCRIPTOR desc)
@@ -343,7 +480,7 @@ static NTSTATUS d3dpt_query_device_descriptor(IN_CONST_PVOID ctx, IN_ULONG uid,
     UNREFERENCED_PARAMETER(uid);
     UNREFERENCED_PARAMETER(desc);
     dbg_line("QueryDeviceDescriptor");
-    return STATUS_MONITOR_NO_MORE_DESCRIPTOR_DATA;
+    return STATUS_MONITOR_NO_DESCRIPTOR;
 }
 
 static DXGKDDI_SET_POWER_STATE d3dpt_set_power_state;
@@ -414,16 +551,375 @@ STUB1(DXGKDDI_RESTARTFROMTIMEOUT, d3dpt_restart_from_timeout, IN_CONST_HANDLE)
 STUB2(DXGKDDI_ESCAPE, d3dpt_escape, IN_CONST_HANDLE, IN_CONST_PDXGKARG_ESCAPE)
 STUB2(DXGKDDI_COLLECTDBGINFO, d3dpt_collect_dbg_info, IN_CONST_HANDLE, IN_CONST_PDXGKARG_COLLECTDBGINFO)
 STUB2(DXGKDDI_QUERYCURRENTFENCE, d3dpt_query_current_fence, IN_CONST_HANDLE, INOUT_PDXGKARG_QUERYCURRENTFENCE)
-STUB2(DXGKDDI_ISSUPPORTEDVIDPN, d3dpt_is_supported_vidpn, IN_CONST_HANDLE, INOUT_PDXGKARG_ISSUPPORTEDVIDPN)
-STUB2(DXGKDDI_RECOMMENDFUNCTIONALVIDPN, d3dpt_recommend_functional_vidpn, IN_CONST_HANDLE, IN_CONST_PDXGKARG_RECOMMENDFUNCTIONALVIDPN_CONST)
-STUB2(DXGKDDI_ENUMVIDPNCOFUNCMODALITY, d3dpt_enum_vidpn_cofunc_modality, IN_CONST_HANDLE, IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST)
-STUB2(DXGKDDI_SETVIDPNSOURCEADDRESS, d3dpt_set_vidpn_source_address, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESS)
-STUB2(DXGKDDI_SETVIDPNSOURCEVISIBILITY, d3dpt_set_vidpn_source_visibility, IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETVIDPNSOURCEVISIBILITY)
-STUB2(DXGKDDI_COMMITVIDPN, d3dpt_commit_vidpn, IN_CONST_HANDLE, IN_CONST_PDXGKARG_COMMITVIDPN_CONST)
-STUB2(DXGKDDI_UPDATEACTIVEVIDPNPRESENTPATH, d3dpt_update_active_vidpn_present_path, IN_CONST_HANDLE, IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST)
-STUB2(DXGKDDI_RECOMMENDMONITORMODES, d3dpt_recommend_monitor_modes, IN_CONST_HANDLE, IN_CONST_PDXGKARG_RECOMMENDMONITORMODES_CONST)
-STUB2(DXGKDDI_RECOMMENDVIDPNTOPOLOGY, d3dpt_recommend_vidpn_topology, IN_CONST_HANDLE, IN_CONST_PDXGKARG_RECOMMENDVIDPNTOPOLOGY_CONST)
-STUB2(DXGKDDI_GETSCANLINE, d3dpt_get_scan_line, IN_CONST_HANDLE, INOUT_PDXGKARG_GETSCANLINE)
+/* ------------------------------------------------------------- VidPN */
+
+/* A mode as the video signal a target and the monitor see: progressive,
+ * no blanking (the player shows the active area as it is). */
+static void signal_info(D3DKMDT_VIDEO_SIGNAL_INFO *s, ULONG w, ULONG h, ULONG hz)
+{
+    s->VideoStandard = D3DKMDT_VSS_OTHER;
+    s->TotalSize.cx = w;
+    s->TotalSize.cy = h;
+    s->ActiveSize = s->TotalSize;
+    s->VSyncFreq.Numerator = hz;
+    s->VSyncFreq.Denominator = 1;
+    s->HSyncFreq.Numerator = hz * h;
+    s->HSyncFreq.Denominator = 1;
+    s->PixelRate = (SIZE_T)w * h * hz;
+    s->ScanLineOrdering = D3DDDI_VSSLO_PROGRESSIVE;
+}
+
+/* the mode the desktop starts in: 1024x768 where the host offers it */
+static BOOLEAN preferred(const D3DPT_ADAPTER *a, ULONG i)
+{
+    ULONG k;
+
+    for (k = 0; k < a->nmodes; k++) {
+        if (a->modes[k].w == 1024 && a->modes[k].h == 768) {
+            return k == i;
+        }
+    }
+    return i == 0;
+}
+
+static DXGKDDI_RECOMMENDMONITORMODES d3dpt_recommend_monitor_modes;
+static NTSTATUS APIENTRY d3dpt_recommend_monitor_modes(IN_CONST_HANDLE h,
+                                                       IN_CONST_PDXGKARG_RECOMMENDMONITORMODES_CONST r)
+{
+    const D3DPT_ADAPTER *a = (const D3DPT_ADAPTER *)h;
+    const DXGK_MONITORSOURCEMODESET_INTERFACE *mi = r->pMonitorSourceModeSetInterface;
+    ULONG i, added = 0;
+
+    for (i = 0; i < a->nmodes; i++) {
+        D3DKMDT_MONITOR_SOURCE_MODE *m;
+
+        if (!NT_SUCCESS(mi->pfnCreateNewModeInfo(r->hMonitorSourceModeSet, &m))) {
+            break;
+        }
+        signal_info(&m->VideoSignalInfo, a->modes[i].w, a->modes[i].h, a->modes[i].hz);
+        m->ColorBasis = D3DKMDT_CB_SRGB;
+        m->ColorCoeffDynamicRanges.FirstChannel = 8;
+        m->ColorCoeffDynamicRanges.SecondChannel = 8;
+        m->ColorCoeffDynamicRanges.ThirdChannel = 8;
+        m->ColorCoeffDynamicRanges.FourthChannel = 8;
+        m->Origin = D3DKMDT_MCO_DRIVER;
+        m->Preference = preferred(a, i) ? D3DKMDT_MP_PREFERRED : D3DKMDT_MP_NOTPREFERRED;
+        if (NT_SUCCESS(mi->pfnAddMode(r->hMonitorSourceModeSet, m))) {
+            added++;
+        } else {                                /* a mode the set has already */
+            mi->pfnReleaseModeInfo(r->hMonitorSourceModeSet, m);
+        }
+    }
+    dbg_hex("d3dptkmd: RecommendMonitorModes added ", added);
+    dbg_puts("\n");
+    return STATUS_SUCCESS;
+}
+
+/* Every mode of the table on a source, or only the one whose size the
+ * target has pinned. */
+static NTSTATUS fill_source_modes(const D3DPT_ADAPTER *a, const DXGK_VIDPN_INTERFACE *vi,
+                                  D3DKMDT_HVIDPN hvidpn, D3DDDI_VIDEO_PRESENT_SOURCE_ID src,
+                                  const D3DKMDT_VIDPN_TARGET_MODE *pinned_target)
+{
+    D3DKMDT_HVIDPNSOURCEMODESET hset;
+    const DXGK_VIDPNSOURCEMODESET_INTERFACE *si;
+    NTSTATUS st;
+    ULONG i;
+
+    st = vi->pfnCreateNewSourceModeSet(hvidpn, src, &hset, &si);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    for (i = 0; i < a->nmodes; i++) {
+        D3DKMDT_VIDPN_SOURCE_MODE *m;
+        ULONG w = a->modes[i].w, ht = a->modes[i].h;
+
+        if (pinned_target && (pinned_target->VideoSignalInfo.ActiveSize.cx != w ||
+                              pinned_target->VideoSignalInfo.ActiveSize.cy != ht)) {
+            continue;
+        }
+        if (!NT_SUCCESS(si->pfnCreateNewModeInfo(hset, &m))) {
+            break;
+        }
+        m->Type = D3DKMDT_RMT_GRAPHICS;
+        m->Format.Graphics.PrimSurfSize.cx = w;
+        m->Format.Graphics.PrimSurfSize.cy = ht;
+        m->Format.Graphics.VisibleRegionSize = m->Format.Graphics.PrimSurfSize;
+        m->Format.Graphics.Stride = w * 4;
+        m->Format.Graphics.PixelFormat = D3DDDIFMT_X8R8G8B8;
+        m->Format.Graphics.ColorBasis = D3DKMDT_CB_SRGB;
+        m->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
+        if (!NT_SUCCESS(si->pfnAddMode(hset, m))) {   /* two refresh rates, one size */
+            si->pfnReleaseModeInfo(hset, m);
+        }
+    }
+    st = vi->pfnAssignSourceModeSet(hvidpn, src, hset);
+    if (!NT_SUCCESS(st)) {
+        vi->pfnReleaseSourceModeSet(hvidpn, hset);
+    }
+    return st;
+}
+
+/* Every mode on a target, or only the pinned source's size. */
+static NTSTATUS fill_target_modes(const D3DPT_ADAPTER *a, const DXGK_VIDPN_INTERFACE *vi,
+                                  D3DKMDT_HVIDPN hvidpn, D3DDDI_VIDEO_PRESENT_TARGET_ID tgt,
+                                  const D3DKMDT_VIDPN_SOURCE_MODE *pinned_source)
+{
+    D3DKMDT_HVIDPNTARGETMODESET hset;
+    const DXGK_VIDPNTARGETMODESET_INTERFACE *ti;
+    NTSTATUS st;
+    ULONG i;
+
+    st = vi->pfnCreateNewTargetModeSet(hvidpn, tgt, &hset, &ti);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    for (i = 0; i < a->nmodes; i++) {
+        D3DKMDT_VIDPN_TARGET_MODE *m;
+
+        if (pinned_source && (pinned_source->Format.Graphics.PrimSurfSize.cx != a->modes[i].w ||
+                              pinned_source->Format.Graphics.PrimSurfSize.cy != a->modes[i].h)) {
+            continue;
+        }
+        if (!NT_SUCCESS(ti->pfnCreateNewModeInfo(hset, &m))) {
+            break;
+        }
+        signal_info(&m->VideoSignalInfo, a->modes[i].w, a->modes[i].h, a->modes[i].hz);
+        m->Preference = preferred(a, i) ? D3DKMDT_MP_PREFERRED : D3DKMDT_MP_NOTPREFERRED;
+        if (!NT_SUCCESS(ti->pfnAddMode(hset, m))) {
+            ti->pfnReleaseModeInfo(hset, m);
+        }
+    }
+    st = vi->pfnAssignTargetModeSet(hvidpn, tgt, hset);
+    if (!NT_SUCCESS(st)) {
+        vi->pfnReleaseTargetModeSet(hvidpn, hset);
+    }
+    return st;
+}
+
+/*
+ * The modes each path can take given what is pinned already. For every
+ * path: a source mode set unless the source's mode is pinned (or the
+ * source is the pivot dxgkrnl is enumerating around), the same for the
+ * target, and the path's scaling and rotation, identity only, unless
+ * already pinned. One source and one target, so no cross-path rules.
+ */
+static DXGKDDI_ENUMVIDPNCOFUNCMODALITY d3dpt_enum_vidpn_cofunc_modality;
+static NTSTATUS APIENTRY d3dpt_enum_vidpn_cofunc_modality(IN_CONST_HANDLE h,
+                                                          IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST e)
+{
+    const D3DPT_ADAPTER *a = (const D3DPT_ADAPTER *)h;
+    const DXGK_VIDPN_INTERFACE *vi;
+    const DXGK_VIDPNTOPOLOGY_INTERFACE *topi;
+    D3DKMDT_HVIDPNTOPOLOGY top;
+    const D3DKMDT_VIDPN_PRESENT_PATH *path, *next;
+    NTSTATUS st;
+
+    dbg_hex("d3dptkmd: EnumVidPnCofuncModality pivot=", (ULONG)e->EnumPivotType);
+    dbg_puts("\n");
+    st = a->dxgk.DxgkCbQueryVidPnInterface(e->hConstrainingVidPn, DXGK_VIDPN_INTERFACE_VERSION_V1, &vi);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    st = vi->pfnGetTopology(e->hConstrainingVidPn, &top, &topi);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    st = topi->pfnAcquireFirstPathInfo(top, &path);
+    while (st == STATUS_SUCCESS) {
+        D3DKMDT_HVIDPNSOURCEMODESET hsrc;
+        D3DKMDT_HVIDPNTARGETMODESET htgt;
+        const DXGK_VIDPNSOURCEMODESET_INTERFACE *si;
+        const DXGK_VIDPNTARGETMODESET_INTERFACE *ti;
+        const D3DKMDT_VIDPN_SOURCE_MODE *psrc = NULL;
+        const D3DKMDT_VIDPN_TARGET_MODE *ptgt = NULL;
+        BOOLEAN src_pivot = e->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE &&
+                            e->EnumPivot.VidPnSourceId == path->VidPnSourceId;
+        BOOLEAN tgt_pivot = e->EnumPivotType == D3DKMDT_EPT_VIDPNTARGET &&
+                            e->EnumPivot.VidPnTargetId == path->VidPnTargetId;
+
+        /* what is pinned on either end */
+        if (NT_SUCCESS(vi->pfnAcquireSourceModeSet(e->hConstrainingVidPn, path->VidPnSourceId, &hsrc, &si))) {
+            si->pfnAcquirePinnedModeInfo(hsrc, &psrc);
+        } else {
+            hsrc = NULL;
+        }
+        if (NT_SUCCESS(vi->pfnAcquireTargetModeSet(e->hConstrainingVidPn, path->VidPnTargetId, &htgt, &ti))) {
+            ti->pfnAcquirePinnedModeInfo(htgt, &ptgt);
+        } else {
+            htgt = NULL;
+        }
+
+        if (!psrc && !src_pivot) {
+            fill_source_modes(a, vi, e->hConstrainingVidPn, path->VidPnSourceId, ptgt);
+        }
+        if (!ptgt && !tgt_pivot) {
+            fill_target_modes(a, vi, e->hConstrainingVidPn, path->VidPnTargetId, psrc);
+        }
+
+        if (psrc) {
+            si->pfnReleaseModeInfo(hsrc, psrc);
+        }
+        if (hsrc) {
+            vi->pfnReleaseSourceModeSet(e->hConstrainingVidPn, hsrc);
+        }
+        if (ptgt) {
+            ti->pfnReleaseModeInfo(htgt, ptgt);
+        }
+        if (htgt) {
+            vi->pfnReleaseTargetModeSet(e->hConstrainingVidPn, htgt);
+        }
+
+        /* identity scaling and rotation, where not pinned yet */
+        if (e->EnumPivotType != D3DKMDT_EPT_SCALING && e->EnumPivotType != D3DKMDT_EPT_ROTATION &&
+            (path->ContentTransformation.Scaling == D3DKMDT_VPPS_UNPINNED ||
+             path->ContentTransformation.Rotation == D3DKMDT_VPPR_UNPINNED)) {
+            D3DKMDT_VIDPN_PRESENT_PATH upd = *path;
+
+            RtlZeroMemory(&upd.ContentTransformation.ScalingSupport,
+                          sizeof(upd.ContentTransformation.ScalingSupport));
+            upd.ContentTransformation.ScalingSupport.Identity = 1;
+            RtlZeroMemory(&upd.ContentTransformation.RotationSupport,
+                          sizeof(upd.ContentTransformation.RotationSupport));
+            upd.ContentTransformation.RotationSupport.Identity = 1;
+            topi->pfnUpdatePathSupportInfo(top, &upd);
+        }
+
+        st = topi->pfnAcquireNextPathInfo(top, path, &next);
+        topi->pfnReleasePathInfo(top, path);
+        path = next;
+    }
+    return st == STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET ? STATUS_SUCCESS : st;
+}
+
+/* One source, one target, any of the table's modes: whatever dxgkrnl
+ * proposes from what EnumVidPnCofuncModality offered is supported. */
+static DXGKDDI_ISSUPPORTEDVIDPN d3dpt_is_supported_vidpn;
+static NTSTATUS APIENTRY d3dpt_is_supported_vidpn(IN_CONST_HANDLE h, INOUT_PDXGKARG_ISSUPPORTEDVIDPN s)
+{
+    UNREFERENCED_PARAMETER(h);
+    s->IsVidPnSupported = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_RECOMMENDFUNCTIONALVIDPN d3dpt_recommend_functional_vidpn;
+static NTSTATUS APIENTRY d3dpt_recommend_functional_vidpn(IN_CONST_HANDLE h,
+                                                          IN_CONST_PDXGKARG_RECOMMENDFUNCTIONALVIDPN_CONST r)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(r);
+    return STATUS_GRAPHICS_NO_RECOMMENDED_FUNCTIONAL_VIDPN;
+}
+
+static DXGKDDI_RECOMMENDVIDPNTOPOLOGY d3dpt_recommend_vidpn_topology;
+static NTSTATUS APIENTRY d3dpt_recommend_vidpn_topology(IN_CONST_HANDLE h,
+                                                        IN_CONST_PDXGKARG_RECOMMENDVIDPNTOPOLOGY_CONST r)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(r);
+    return STATUS_GRAPHICS_NO_RECOMMENDED_VIDPN_TOPOLOGY;
+}
+
+/* The mode the functional VidPN pinned on the source: the scanout's size
+ * and pitch, as the XP driver's mode switch programs them. ENABLE waits
+ * for SetVidPnSourceVisibility, OFFSET for SetVidPnSourceAddress. */
+static DXGKDDI_COMMITVIDPN d3dpt_commit_vidpn;
+static NTSTATUS APIENTRY d3dpt_commit_vidpn(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_COMMITVIDPN_CONST c)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    const DXGK_VIDPN_INTERFACE *vi;
+    D3DKMDT_HVIDPNSOURCEMODESET hsrc;
+    const DXGK_VIDPNSOURCEMODESET_INTERFACE *si;
+    const D3DKMDT_VIDPN_SOURCE_MODE *m = NULL;
+    D3DDDI_VIDEO_PRESENT_SOURCE_ID src = c->AffectedVidPnSourceId == D3DDDI_ID_ALL ? 0 : c->AffectedVidPnSourceId;
+    NTSTATUS st;
+
+    st = a->dxgk.DxgkCbQueryVidPnInterface(c->hFunctionalVidPn, DXGK_VIDPN_INTERFACE_VERSION_V1, &vi);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    st = vi->pfnAcquireSourceModeSet(c->hFunctionalVidPn, src, &hsrc, &si);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    si->pfnAcquirePinnedModeInfo(hsrc, &m);
+    if (m && m->Type == D3DKMDT_RMT_GRAPHICS) {
+        ULONG w = m->Format.Graphics.PrimSurfSize.cx, ht = m->Format.Graphics.PrimSurfSize.cy, i;
+
+        a->cur_w = w;
+        a->cur_h = ht;
+        a->cur_pitch = m->Format.Graphics.Stride;
+        a->cur_hz = 60;
+        for (i = 0; i < a->nmodes; i++) {
+            if (a->modes[i].w == w && a->modes[i].h == ht) {
+                a->cur_hz = a->modes[i].hz;
+                break;
+            }
+        }
+        a->regs[D3DPT_FB_REG_WIDTH / 4] = w;
+        a->regs[D3DPT_FB_REG_HEIGHT / 4] = ht;
+        a->regs[D3DPT_FB_REG_BPP / 4] = 32;
+        a->regs[D3DPT_FB_REG_PITCH / 4] = a->cur_pitch;
+        a->regs[D3DPT_FB_REG_HZ / 4] = a->cur_hz;
+        dbg_hex("d3dptkmd: CommitVidPn ", w);
+        dbg_hex(" x ", ht);
+        dbg_hex(" pitch ", a->cur_pitch);
+        dbg_puts("\n");
+        si->pfnReleaseModeInfo(hsrc, m);
+    } else {
+        dbg_line("CommitVidPn: no pinned source mode (the source is off)");
+    }
+    vi->pfnReleaseSourceModeSet(c->hFunctionalVidPn, hsrc);
+    return STATUS_SUCCESS;
+}
+
+/* The primary's address in segment 1 (VRAM) is the scanout's offset. */
+static DXGKDDI_SETVIDPNSOURCEADDRESS d3dpt_set_vidpn_source_address;
+static NTSTATUS APIENTRY d3dpt_set_vidpn_source_address(IN_CONST_HANDLE h,
+                                                        IN_CONST_PDXGKARG_SETVIDPNSOURCEADDRESS s)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+
+    if (s->PrimarySegment == 1) {
+        a->regs[D3DPT_FB_REG_OFFSET / 4] = s->PrimaryAddress.LowPart;
+    }
+    dbg_hex("d3dptkmd: SetVidPnSourceAddress segment ", s->PrimarySegment);
+    dbg_hex(" at ", s->PrimaryAddress.LowPart);
+    dbg_puts("\n");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_SETVIDPNSOURCEVISIBILITY d3dpt_set_vidpn_source_visibility;
+static NTSTATUS APIENTRY d3dpt_set_vidpn_source_visibility(IN_CONST_HANDLE h,
+                                                           IN_CONST_PDXGKARG_SETVIDPNSOURCEVISIBILITY v)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+
+    a->regs[D3DPT_FB_REG_ENABLE / 4] = v->Visible ? 1 : 0;
+    dbg_hex("d3dptkmd: SetVidPnSourceVisibility ", (ULONG)v->Visible);
+    dbg_puts("\n");
+    return STATUS_SUCCESS;
+}
+
+static DXGKDDI_UPDATEACTIVEVIDPNPRESENTPATH d3dpt_update_active_vidpn_present_path;
+static NTSTATUS APIENTRY d3dpt_update_active_vidpn_present_path(IN_CONST_HANDLE h,
+    IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST u)
+{
+    UNREFERENCED_PARAMETER(h);
+    UNREFERENCED_PARAMETER(u);
+    return STATUS_SUCCESS;
+}
+
+/* Where the scanout is, from the device's vertical-blank counter clock
+ * (FRAMES is whole frames; inside one, nothing finer yet). */
+static DXGKDDI_GETSCANLINE d3dpt_get_scan_line;
+static NTSTATUS APIENTRY d3dpt_get_scan_line(IN_CONST_HANDLE h, INOUT_PDXGKARG_GETSCANLINE g)
+{
+    UNREFERENCED_PARAMETER(h);
+    g->InVerticalBlank = FALSE;
+    g->ScanLine = 0;
+    return STATUS_SUCCESS;
+}
 STUB2(DXGKDDI_STOPCAPTURE, d3dpt_stop_capture, IN_CONST_HANDLE, IN_CONST_PDXGKARG_STOPCAPTURE)
 STUB2(DXGKDDI_CREATEOVERLAY, d3dpt_create_overlay, IN_CONST_HANDLE, INOUT_PDXGKARG_CREATEOVERLAY)
 STUB1(DXGKDDI_DESTROYDEVICE, d3dpt_destroy_device, IN_CONST_HANDLE)

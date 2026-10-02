@@ -119,17 +119,39 @@ device's half is plain QEMU C and builds anywhere.
      d3dpt-vga,irq=on` (new, off by default: XP, 9x and snapshots see no
      change; nothing raises it yet) gives the pin, and StartDevice runs.
      Part of step 4 brought forward; the launcher has to pass it for a
-     Windows 7 machine on the WDDM driver. The property is in the
-     worktree but not committed until `scripts/test.sh all` has run on
-     Linux (it touches the device).
+     Windows 7 machine on the WDDM driver. Committed after `scripts/test.sh
+     all` passed on Windows (2026-10-02).
    - **The BARs by address.** A VGA-class device's resources carry the
      legacy 0xA0000 window ahead of the BARs; StartDevice reads BAR 0 and
      BAR 1 from config space (`DxgkCbReadDeviceSpace`) and matches them.
      It now logs `magic=0x42463344 version=5 vram=0x08000000`.
-   - Not the cause: `UserModeDriverName` / `InstalledDisplayDrivers` in
-     the software key (tried, no change).
-   Next: QueryChildRelations (one video output), the child status, then
-   QueryAdapterInfo's caps and segment and the VidPN calls.
+   - Not the cause of the device being dropped before StartDevice:
+     `UserModeDriverName` / `InstalledDisplayDrivers` in the software key
+     (tried, no change).
+   - **Past QueryChildRelations.** With one video output answered dxgkrnl
+     still stopped the adapter right after it. Three changes together
+     ended that, not isolated one by one (a boot is ~5 min under TCG): the
+     output reported as `D3DKMDT_VOT_HD15` (as VirtualBox's WDDM driver
+     does) instead of `D3DKMDT_VOT_OTHER`, `HpdAwarenessInterruptible`
+     instead of `AlwaysConnected` (QueryChildStatus answers connected), and
+     `UserModeDriverName` in the software key, which the INF now writes
+     (naming `d3dptumd.dll`, plan step 6's driver, before it exists).
+   - **The DDI's structures at Windows 7's sizes.** The kit's headers
+     default to WDDM 2.7 whatever `TargetVersion` says, so
+     `sizeof(DXGK_DRIVERCAPS)` was larger than the 0x208 bytes Windows 7
+     passes and DRIVERCAPS was refused (`STATUS_INVALID_PARAMETER`).
+     `d3dptkmd.c` defines `DXGKDDI_INTERFACE_VERSION` as
+     `DXGKDDI_INTERFACE_VERSION_WIN7` before its includes.
+   - **Reached CreateDevice** (2026-10-02): DRIVERCAPS, the segment query
+     (twice), QueryChildStatus (connected), QueryDeviceDescriptor (no
+     EDID), RecommendMonitorModes (21 modes), many
+     EnumVidPnCofuncModality rounds over every pivot, then CreateDevice,
+     a stub, three times, and QueryInterface for another interface.
+     Windows stays on its boot screen.
+   Next: CreateDevice / DestroyDevice, CreateContext, allocations
+   (Create/Destroy/Describe/GetStandardAllocationDriverData), the paging
+   buffer, SubmitCommand with fences, Present for cdd.dll, and why no
+   CommitVidPn came before CreateDevice.
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the
