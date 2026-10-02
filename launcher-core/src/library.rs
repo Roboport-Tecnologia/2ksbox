@@ -87,6 +87,11 @@ pub fn scan(dir: &Path) -> Vec<LibraryEntry> {
             }
         })
         .collect();
-    entries.sort_by(|a, b| a.machine.name.cmp(&b.machine.name));
+    // By name, ignoring case ("doom" beside "Diablo", not after "Zork");
+    // names equal but for case keep a fixed order.
+    entries.sort_by(|a, b| {
+        let (a, b) = (&a.machine.name, &b.machine.name);
+        a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
+    });
     entries
 }

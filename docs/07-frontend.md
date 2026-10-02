@@ -46,6 +46,8 @@ player line runs a machine with nothing else.
   spawns a player. "Running" is the launcher's own child *or* a
   listening monitor socket, so a player started by `--play` counts too.
   The launcher only observes (`try_wait`); a spawned player outlives it.
+  Machines are in name order, ignoring case (`library::scan`, user,
+  2026-10-02).
 - **On mitsuami the library is a list beside the chosen machine's
   details**, as UTM and VirtualBox lay theirs out (user, 2026-10-01).
   The machines run down the leading side, each with its name and
