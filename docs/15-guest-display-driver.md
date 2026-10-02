@@ -144,6 +144,7 @@ is checked.
 | `exec=wine` | the executor in a Wine process on the host (ADR-018, M15, doc 14) |
 | `fb-version=N` | the register set version reported |
 | `full-frames=on` | whole-frame conversion every refresh |
+| `irq=on` | an interrupt pin (INTA) for Windows 7's WDDM driver (M18), which dxgkrnl will not start without one; nothing raises it yet, and off (the default) keeps the PCI config XP, 9x and snapshots know |
 
 The executor properties model hosts, not devices. The adapter only hands
 them to the loader (`d3dpt/hw/d3dpt_exec_load.c`).

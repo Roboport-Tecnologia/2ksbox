@@ -67,6 +67,9 @@ struct D3dptVgaState {
     uint32_t flips_last;        /* flips at the last rate report */
     int64_t flips_ns;           /* and when it was made */
     uint32_t ddflags;           /* property: test knob read by the guest driver */
+    bool irq;                   /* property: an interrupt pin (INTA). dxgkrnl will not
+                                   start a WDDM adapter without one (M18); off keeps
+                                   XP, 9x and snapshots unchanged */
     bool no_exec;               /* property: act as a host with no Vulkan 1.3 device
                                    (ADR-013's floor unmet); D3D_STATUS then reads
                                    NO_EXEC and the guest driver offers DirectDraw only */
@@ -977,6 +980,9 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
 
     pci_register_bar(dev, 0, PCI_BASE_ADDRESS_MEM_PREFETCH, &vga->vram);
     pci_register_bar(dev, 1, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->regs);
+    if (s->irq) {
+        dev->config[PCI_INTERRUPT_PIN] = 1;
+    }
 
     /* the command window takes the top 64 MiB when at least as much is
      * left below it for the frame buffer and the DirectDraw heap */
@@ -1046,6 +1052,9 @@ static const Property d3dpt_vga_properties[] = {
      * 3DMark 99 loading screen on the PC). On means the pixels in VRAM are
      * right and this device's incremental path is what lost them. */
     DEFINE_PROP_BOOL("full-frames", D3dptVgaState, full_frames, false),
+    /* an interrupt pin for the WDDM driver (M18, Windows 7); nothing
+     * raises it yet */
+    DEFINE_PROP_BOOL("irq", D3dptVgaState, irq, false),
 };
 
 static void d3dpt_vga_class_init(ObjectClass *klass, const void *data)
