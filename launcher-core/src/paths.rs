@@ -168,9 +168,17 @@ pub fn checkout(rel: &str) -> PathBuf {
 /// OneDrive, and untouched by an uninstall. The zip's library is not
 /// adopted (a rename out of a virtualised directory is not a rename);
 /// `docs/build-windows.md` "The Store package" says what to copy.
+///
+/// `LAUNCHER_DATA_DIR` overrides all of it (an empty value is unset). It
+/// is how `scripts/package-windows.sh` keeps its checks out of the user's
+/// own library on Windows, where Windows' known folders, not the
+/// environment, place `%APPDATA%`, and no wine prefix stands in between.
 pub fn data_dir() -> Option<&'static Path> {
     static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
     DIR.get_or_init(|| {
+        if let Some(dir) = std::env::var_os("LAUNCHER_DATA_DIR").filter(|d| !d.is_empty()) {
+            return Some(PathBuf::from(dir));
+        }
         if packaged() {
             return Some(directories::BaseDirs::new()?.home_dir().join(NAME));
         }

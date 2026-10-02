@@ -61,6 +61,7 @@ On the PC, in MSYS2's MINGW64 shell (setup in `docs/build-windows.md`
 
 ```sh
 scripts/build-windows.sh              # natively
+scripts/package-windows.sh            # the zip, checked by Windows itself (no podman, no wine)
 scripts/win-run.sh launcher           # the launcher out of the checkout
 GDB=1 scripts/win-run.sh player ...   # the [player] line from launcher.log
 build/win/d3dpt-dp2-test.exe                  # with D3DPT_D3D9=dxvk and =system

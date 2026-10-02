@@ -132,6 +132,13 @@ live in its track doc; fixed things leave this list.
   Kepler and TeraScale drivers; next is a real title on such a host with
   `D3DPT_D3D9=system`.
 
+- **The executor on the RTX 3090's own d3d9 fails one record**
+  (2026-10-02, found by `package-windows.sh` run natively): the display
+  driver's host test's autogen texture reads `0x7f7f00` after
+  `GENERATEMIPSUBLEVELS` where `0x0000ff` is wanted, with
+  `D3DPT_D3D9=system` only (127 checks pass on DXVK). The native package
+  check fails on it until it is fixed.
+
 - **Win98's ACPI standby does not come back** (doc 19 §41). Standby
   suspends the VM, input piles up in the embed queue (512 events, 151
   dropped, 20 s late on the user's run), and on wake nothing reprograms

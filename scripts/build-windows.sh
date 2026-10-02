@@ -9,12 +9,13 @@
 # debugging on the PC. They use the cross image's compilers, C runtime and
 # Rust target, so a native build is the build that ships. The guest-tools
 # ISO builds there too, with MSYS2's i686 toolchain
-# (guest-tools/msys2-i686.sh). Packaging stays on Linux. Run what was
+# (guest-tools/msys2-i686.sh), and so does the package
+# (scripts/package-windows.sh, checked on Windows itself). Run what was
 # built with scripts/win-run.sh.
 #
 #   scripts/build-windows.sh                everything this host can build
 #   scripts/build-windows.sh qemu rust      only those stages
-#   scripts/build-windows.sh --package      ... and then roll the zip (Linux)
+#   scripts/build-windows.sh --package      ... and then roll the zip
 #   scripts/build-windows.sh --msys2-deps   (Windows) install what the build needs
 #
 # Stages, in the order they must run:
@@ -109,7 +110,6 @@ else
 fi
 
 if [ -n "$NATIVE" ]; then
-  [ -z "$PACKAGE" ] || { echo "build-windows.sh: --package runs on Linux (wine checks, the cross image's sysroot)" >&2; exit 2; }
   # A checkout with CRLF line endings fails far from here: every patch of
   # the queue "does not apply". Git for Windows converts by default.
   if [ -f qemu/configure ] && grep -q $'\r' qemu/configure; then
@@ -340,6 +340,7 @@ fi
 echo
 if [ -n "$NATIVE" ]; then
   echo "    next: scripts/win-run.sh launcher   (or player / qemu; GDB=1 runs it under gdb)"
+  echo "          scripts/package-windows.sh    (the zip, checked on this PC)"
 else
   echo "    next: scripts/package-windows.sh   (the zip, checked under wine)"
 fi

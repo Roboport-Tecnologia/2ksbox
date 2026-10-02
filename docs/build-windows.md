@@ -4,7 +4,8 @@ The Windows package is a **cross build from Linux**: QEMU with a mingw
 toolchain, Rust for `x86_64-pc-windows-gnu`, the Qt launcher and the
 Direct3D executor, rolled into a portable zip. The same stages also
 build **natively under MSYS2** for debugging with gdb on a Windows PC
-("Building on Windows" below); the package still comes from Linux.
+("Building on Windows" below), and the package rolls there too, with no
+container, checked by Windows itself rather than wine.
 
 The package runs on the user's PC (Ryzen 9 5900X, RTX 3090), 3D guests
 included; what has run there is in `docs/tracks/m11-windows-host.md`.
@@ -18,6 +19,10 @@ scripts/build-windows.sh          # qemu, rust, qt, exec, guest-tools
 scripts/package-windows.sh        # the zip, checked under wine
 scripts/package-windows.sh --msix # ... and the Store's MSIX layout ("The Store package")
 ```
+
+Or on the PC, in MSYS2's MINGW64 shell, after a native
+`scripts/build-windows.sh`: the same `scripts/package-windows.sh`, no
+podman (below, "Packaging on Windows").
 
 The artefact is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
 Windows output goes to `build/win/` and `target/x86_64-pc-windows-gnu/`,
@@ -153,6 +158,28 @@ outside the checkout with an empty environment:
 
 Wine is not the target, so a failure there is investigated, not
 believed; but a package that fails these is broken on every Windows.
+
+### Packaging on Windows
+
+In MSYS2's MINGW64 shell the script needs no container and no wine.
+The mingw runtime, Qt's plugins and QML trees and the binutils are
+MSYS2's own (`/mingw64/bin`, `/mingw64/share/qt6`, `objdump`, `strip`),
+the ones the native build linked against. The DLL closure is the same
+walk; Windows' Vulkan loader is never staged although `/mingw64/bin`
+carries one (`vulkan-1.dll` must be the GPU driver's).
+
+The checks run the package itself, from its folder, with `PATH` holding
+only `%SystemRoot%`'s directories, so a DLL missing from the package
+fails here instead of being found in MSYS2. `LAUNCHER_DATA_DIR` points
+the launcher's data (library, `launcher.log`, the check's machine) at a
+scratch directory, because Windows' known folders, not the environment,
+place `%APPDATA%`. The `LAUNCHER_PACKAGED=1` check has to see the real
+`%USERPROFILE%\2ksbox`; a run leaves it as it found it.
+
+This is the target, so two reports become verdicts: the offscreen window
+grab must write its PNG, and the display driver's host test must pass
+on the PC's own `system32\d3d9.dll` (`D3DPT_D3D9=system`) as well as on
+DXVK. `wgl-probe` answers for the PC's real GL.
 
 ## Which Direct3D 9 the executor runs on
 
@@ -457,7 +484,8 @@ For a fault that shows only on real Windows, `scripts/build-windows.sh`
 runs all its stages in **MSYS2's MINGW64 shell** with no container, and
 `scripts/win-run.sh` runs the result out of the checkout. Every stage
 builds on the user's PC and the launcher runs there; the ISO this build
-makes has not yet been booted in a guest. The package stays on Linux.
+makes has not yet been booted in a guest. `scripts/package-windows.sh`
+rolls and checks the zip there too ("Packaging on Windows").
 
 **MINGW64, not UCRT64 or CLANG64**: it is the cross image's ABI (msvcrt,
 GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`), so a fault
