@@ -782,7 +782,8 @@ impl Boot {
 pub enum Accel {
     /// Hardware acceleration when the host has it, emulation otherwise.
     /// QEMU itself picks from the `kvm:tcg` (Windows: `whpx:tcg`) list,
-    /// so no host probing here can get it wrong.
+    /// so no host probing here can get it wrong. On Windows and macOS an
+    /// era machine is emulation (`Machine::accel_args`).
     #[default]
     Auto,
     /// Hardware acceleration only: the machine refuses to start without
@@ -1581,24 +1582,28 @@ impl Machine {
     fn accel_args(&self) -> Vec<String> {
         let mut tcg = "tcg".to_string();
         tcg.push_str(&self.optimization_props(Knob::Tcg));
-        // A Mac's hypervisor runs only a guest of its own architecture,
-        // and QEMU builds `hvf` only into that target: Windows 11 on Arm
-        // on Apple Silicon (M20 step 4). Never the era's i386, whose
-        // QEMU would warn on every boot that it has no such accelerator.
-        let hvf = cfg!(target_os = "macos") && self.qemu_target() == Arch::native().qemu_target();
+        // A Mac's and a Windows host's hypervisor is asked for only on
+        // the host's own target, Windows 11's, since QEMU builds `hvf`
+        // and (since 11.1) `whpx` only into that one (M20 step 4, M21
+        // step 4). The era's i386 is emulated there (user, 2026-10-02:
+        // "leave era machines to emulation only"); asking its QEMU for
+        // either would print "invalid accelerator" on every boot.
+        let hyp = (cfg!(target_os = "macos") || cfg!(target_os = "windows"))
+            && self.qemu_target() == Arch::native().qemu_target();
+        let hyp_name = if cfg!(target_os = "windows") { "whpx" } else { "hvf" };
         match self.effective_accel() {
             // "Hardware acceleration, required", spelled the way this
             // host spells it (`whpx` on Windows, `hvf` on a Mac), so a
             // machine directory copied between hosts keeps its meaning.
-            Accel::Kvm if cfg!(target_os = "windows") => vec!["-accel".into(), "whpx".into()],
-            Accel::Kvm if cfg!(target_os = "macos") => vec!["-accel".into(), "hvf".into()],
+            // An era machine set to it there does not start, as the
+            // wizard's note says.
+            Accel::Kvm if cfg!(target_os = "windows") || cfg!(target_os = "macos") => {
+                vec!["-accel".into(), hyp_name.into()]
+            }
             Accel::Kvm => vec!["-accel".into(), "kvm".into()],
-            Accel::Auto if hvf => vec!["-accel".into(), "hvf".into(), "-accel".into(), tcg],
+            Accel::Auto if hyp => vec!["-accel".into(), hyp_name.into(), "-accel".into(), tcg],
             Accel::Auto if cfg!(target_os = "linux") => {
                 vec!["-accel".into(), "kvm".into(), "-accel".into(), tcg]
-            }
-            Accel::Auto if cfg!(target_os = "windows") => {
-                vec!["-accel".into(), "whpx".into(), "-accel".into(), tcg]
             }
             Accel::Auto | Accel::Tcg => vec!["-accel".into(), tcg],
         }

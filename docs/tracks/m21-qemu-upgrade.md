@@ -522,11 +522,13 @@ What the scripts needed:
 ("WHPX: Unexpected VP exit code 4", EIP 0x6f0c, flat 32-bit code in low
 RAM) with every CPU model, while `qemu-system-x86_64` under WHPX reaches
 SeaBIOS's idle loop as TCG does, on `pc-i440fx-11.1` and `q35`. So the
-patch was withdrawn: the i386 target is TCG only on Windows. Auto's
-`whpx:tcg` prints "invalid accelerator whpx" and runs TCG; "hardware
-acceleration required" does not start. User's call: XP on the x86_64
-target on Windows, the launcher stops offering WHPX for i386 machines,
-or a fix to i386 WHPX.
+patch was withdrawn: the i386 target is TCG only on Windows. **User
+(2026-10-02): "leave era machines to emulation only".** The launcher
+treats Windows as it treats macOS: the hypervisor is Windows 11's alone,
+an era machine's Automatic is `-accel tcg` (no "invalid accelerator"
+line), the picker offers no hardware entry for it, and the note says
+"WHPX runs only Windows 11 here" (`Machine::accel_args`,
+`Form::hw_accel`).
 
 ### 5. Merge
 
@@ -558,7 +560,6 @@ Still open after the merge:
   never compiled, the Windows cross build and package (the native
   `qemu` and `rust` stages build, above), the Linux package and the
   Flatpak.
-- WHPX for the i386 target on Windows (step 4 above). User's call.
 - A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
   so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
   (`Machine::board`) does not cover it. User's call.

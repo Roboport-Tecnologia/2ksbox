@@ -409,11 +409,12 @@ under Store terms is the same question ADR-019 leaves to the user.
 ## Acceleration
 
 Windows' hardware acceleration is **WHPX** (Windows Hypervisor
-Platform). **Since QEMU 11.1 it is not in `qemu-system-i386`**, the
-target the package ships: upstream builds it for x86_64 only, and put
-back for i386 it dies in SeaBIOS (track M21, step 4). So every era
-machine runs TCG on Windows for now; what follows is the launcher's
-side, unchanged. `Accel::Auto` is `whpx:tcg`, "hardware
+Platform), for **Windows 11 machines only**. Era machines are emulated
+(user, 2026-10-02): QEMU 11.1 builds WHPX into x86_64 only, not the
+`qemu-system-i386` the era runs on, and put back for i386 it dies in
+SeaBIOS (track M21, step 4). So an era machine's `Accel::Auto` is
+`tcg` and the picker offers no hardware entry for it, as on macOS. A
+Windows 11 machine's `Accel::Auto` is `whpx:tcg`, "hardware
 acceleration required" is `whpx`, and the wizard's hint asks
 `WHvGetCapability`, because the feature can be installed and still off
 (Hyper-V or WSL2 may hold the root partition). Turn it on with:

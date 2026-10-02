@@ -195,7 +195,11 @@ The fields, and why each is what it is:
   under the note that it won't start. `launcherx --kvm [machine.toml]`
   prints the list. The Qt window still lists all three. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
   `whpx` then `tcg` on Windows), not a probe of ours that could be stale
-  by spawn time; on macOS it is TCG. `player::hw_accel_available()`
+  by spawn time. On macOS and Windows the hypervisor is Windows 11's
+  alone and an era machine is emulated (`-accel tcg`; user, 2026-10-02:
+  "leave era machines to emulation only", since QEMU 11.1 builds WHPX
+  into x86_64 only), and the note says the hypervisor "runs only
+  Windows 11 here" rather than that the host has none. `player::hw_accel_available()`
   backs only the hint beside the picker: Linux opens `/dev/kvm` for
   *writing* (a bare `exists()` misses a user outside the `kvm` group),
   Windows asks `WHvGetCapability` (the feature can be installed and
@@ -972,8 +976,9 @@ screenshots) needs somewhere to host them.
   (`scripts/package-windows.sh`, `docs/build-windows.md`), and the same
   tree as an MSIX for the Microsoft Store (`scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`; `build-windows.md` "The Store
-  package"). Hardware acceleration is WHPX, stated beside the picker,
-  with TCG as the fallback.
+  package"). Hardware acceleration is WHPX for Windows 11 machines,
+  stated beside the picker, with TCG as the fallback; era machines are
+  emulated.
 
 **Open:** Flathub (hosted screenshots on 2ksbox.com, and the manifest's
 sources as git rather than a local directory), the AppImage (asked for,
