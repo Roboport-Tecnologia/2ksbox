@@ -49,6 +49,10 @@ struct Player {
     /// Raw moves have come while locked: `Motion` is then ignored, or the
     /// guest would get each move twice.
     raw_motion: bool,
+    /// The part of the relative motion not yet sent: the guest takes whole
+    /// counts, and raw motion can come in fractions (Wayland's relative
+    /// pointer), so rounding each move would lose every slow one.
+    motion_rest: (f32, f32),
     /// The modifiers of the last key: a close request with Alt held came
     /// from the keyboard (Alt+F4).
     modifiers: Modifiers,
@@ -111,6 +115,7 @@ fn main() {
             guest_cursor_seq: 0,
             cursor_applied: HostCursor::Default,
             raw_motion: false,
+            motion_rest: (0.0, 0.0),
             modifiers: Modifiers::default(),
             asking: false,
         })
@@ -187,6 +192,14 @@ fn content(w: Window_) -> impl View {
             loop {
                 wake.next().await;
                 on_wake(w);
+                // Let the input in. mitsuami's executor polls until no task
+                // is ready, and QEMU's next wake comes while a draw waits
+                // for its drawable (16 ms on macOS, whose surface has no
+                // Mailbox), so without a turn here the redraws ran back to
+                // back and the mouse reached the guest every 300 ms in a
+                // burst. A timer wakes the task only on the run loop's next
+                // turn, after the queued input.
+                sleep(Duration::from_millis(1)).await;
             }
         });
     }
@@ -407,6 +420,12 @@ fn on_wake(w: Window_) {
     draw(w);
 }
 
+/// Milliseconds since the first call, for the input log.
+fn t_ms() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
 /// One frame: the newest picture through the chain onto the surface.
 fn draw(w: Window_) {
     let sprite = !host_cursor_possible(w);
@@ -522,7 +541,7 @@ fn apply_cursor(w: Window_) {
 /// pointer.
 fn on_input(w: Window_, input: SurfaceInput) {
     if std::env::var_os("PLAYER_INPUT_LOG").is_some() {
-        eprintln!("[input] {input:?} (locked {}, grabbed {})", w.locked.get_untracked(), w.grabbed.get_untracked());
+        eprintln!("[input] {:.1} {input:?} (locked {}, grabbed {})", t_ms(), w.locked.get_untracked(), w.grabbed.get_untracked());
     }
     if with(|p| p.asking).unwrap_or(true) {
         return;
@@ -580,7 +599,7 @@ fn on_input(w: Window_, input: SurfaceInput) {
             }
             let Some(vm) = vm() else { return };
             if pressed && !w.locked.get_untracked() && !vm.mouse_is_absolute() {
-                with(|p| p.raw_motion = false);
+                with(|p| (p.raw_motion, p.motion_rest) = (false, (0.0, 0.0)));
                 w.locked.set(true);
             }
             let b = match button {
@@ -615,10 +634,15 @@ fn on_input(w: Window_, input: SurfaceInput) {
         // The guest accelerates a relative mouse itself, so it gets the
         // device's own counts where the platform has them, and the
         // cursor's moves only where it has none (X11 without XInput 2).
-        SurfaceInput::RawMotion { dx, dy } => {
+        // Except on macOS: there the raw counts are `GCMouse`'s, which
+        // ignore the pointer's speed setting (the speed felt off, and a
+        // drag with the trackpad pressed much faster, user), so the guest
+        // gets the cursor's moves, as the winit player does.
+        SurfaceInput::RawMotion { dx, dy } if !cfg!(target_os = "macos") => {
             with(|p| p.raw_motion = true);
             relative(w, dx, dy);
         }
+        SurfaceInput::RawMotion { .. } => {}
         SurfaceInput::Motion { dx, dy } => {
             if !with(|p| p.raw_motion).unwrap_or(false) {
                 relative(w, dx, dy);
@@ -635,8 +659,18 @@ fn relative(w: Window_, dx: f32, dy: f32) {
     if vm.mouse_is_absolute() {
         return;
     }
-    vm.mouse_rel(dx.round() as i32, dy.round() as i32);
-    vm.input_flush();
+    let Some((x, y)) = with(|p| {
+        let (x, y) = (p.motion_rest.0 + dx, p.motion_rest.1 + dy);
+        let (sx, sy) = (x.trunc(), y.trunc());
+        p.motion_rest = (x - sx, y - sy);
+        (sx as i32, sy as i32)
+    }) else {
+        return;
+    };
+    if x != 0 || y != 0 {
+        vm.mouse_rel(x, y);
+        vm.input_flush();
+    }
 }
 
 /// The winit player's chords, for when the keyboard is grabbed and the

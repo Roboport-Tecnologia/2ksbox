@@ -141,6 +141,18 @@ embed library, as for the winit player, into a target dir of its own:
    off). Either mitsuami takes the player's ways, or `kbcapture`'s halves
    move into `player-core` on the surface's raw handle. Windows also needs
    the native MSVC build mitsuami requires (ADR-023's cost).
+   **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
+   and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
+   back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and
+   the queued moves let in once per ~300 ms. mitsuami's executor polls
+   until no task is ready, and QEMU's next wake lands during each draw, so
+   the wake task never let the tick reach its events. The task now sleeps
+   1 ms after each draw, which ends the poll and puts the input first. The
+   fix that belongs in mitsuami is a poll of only the tasks ready when it
+   began. With that, the speed was off and a drag with the trackpad
+   pressed much faster: `GCMouse`'s raw counts ignore the pointer speed,
+   so on macOS the guest gets `Motion` (AppKit's deltas), as the winit
+   player does. The user: "now it works".
 5. **What a player window can show now that it has a toolkit:** the disc
    shelf for the drive and the shader profile, from `launcher-core`
    (the player then needs the bundle it was started for).
