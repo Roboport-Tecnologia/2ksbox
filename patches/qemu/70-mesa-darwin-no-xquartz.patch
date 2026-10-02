@@ -21,22 +21,8 @@ backend's. Linux is unchanged: GLX stays the native backend there.
 -framework OpenGL stays on the link line, so a stray gl* call made by
 link binds to Apple's GL, not a GLX library.
 
-diff --git a/meson.build b/meson.build
---- a/meson.build
-+++ b/meson.build
-@@ -4178,8 +4178,9 @@ foreach target : target_dirs
-     link_args += ['-ldl', '-lX11', '-lXxf86vm', '-lGL']
-   endif
-   if host_os == 'darwin'
--    c_args += ['-I/opt/X11/include']
--    link_args += ['-L/opt/X11/lib', '-lX11', '-lXxf86vm', '-lGL', '-Wl,-framework,OpenGL']
-+    # 2ksbox: no XQuartz. hw/mesa's Darwin backend is not GLX (patch 70),
-+    # and every GL call is dlsym'd from OpenGL.framework's handle.
-+    link_args += ['-Wl,-framework,OpenGL']
-   endif
-   if target.endswith('-softmmu')
-     target_type='system'
 diff --git a/hw/mesa/mglcntx_linux.c b/hw/mesa/mglcntx_linux.c
+index a14acd80b5..4110b9c326 100644
 --- a/hw/mesa/mglcntx_linux.c
 +++ b/hw/mesa/mglcntx_linux.c
 @@ -33,10 +33,13 @@
@@ -197,3 +183,19 @@ diff --git a/hw/mesa/mglcntx_linux.c b/hw/mesa/mglcntx_linux.c
 +#endif /* CONFIG_LINUX */
 +
  #endif //CONFIG_LINUX
+diff --git a/meson.build b/meson.build
+index 7b4bc19c3c..eec3015f6e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -4317,8 +4317,9 @@ foreach target : target_dirs
+     link_args += ['-ldl', '-lX11', '-lXxf86vm', '-lGL']
+   endif
+   if host_os == 'darwin'
+-    c_args += ['-I/opt/X11/include']
+-    link_args += ['-L/opt/X11/lib', '-lX11', '-lXxf86vm', '-lGL', '-Wl,-framework,OpenGL']
++    # 2ksbox: no XQuartz. hw/mesa's Darwin backend is not GLX (patch 70),
++    # and every GL call is dlsym'd from OpenGL.framework's handle.
++    link_args += ['-Wl,-framework,OpenGL']
+   endif
+   if target.endswith('-softmmu')
+     target_type='system'

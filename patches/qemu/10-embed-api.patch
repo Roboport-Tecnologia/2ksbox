@@ -11,9 +11,11 @@ static library is shared object-for-object with this shared library, and
 the embed library brings its own window-less backend. See patch 31 for
 why weak symbols do not do this job on COFF.
 
+diff --git a/meson.build b/meson.build
+index cf78c54596..2a5da02834 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -4232,6 +4232,22 @@
+@@ -4415,6 +4415,40 @@ foreach target : target_dirs
                   c_args: c_args,
                   build_by_default: false)
  
@@ -33,15 +35,6 @@ why weak symbols do not do this job on COFF.
 +                   install: true)
 +  endif
 +
-   if target.endswith('-softmmu')
-     execs = [{
-       'name': 'qemu-system-' + target_name,
---- a/meson.build
-+++ b/meson.build
-@@ -4269,6 +4269,24 @@
-                    install: true)
-   endif
- 
 +  # 2ksbox: the Mesa pass-through's WGL backend, for the emulators only.
 +  # `lib` above is shared object-for-object with libqemu-embed, which
 +  # brings its own window-less backend (embed/mglcntx_embed.c), so the two
@@ -63,7 +56,7 @@ why weak symbols do not do this job on COFF.
    if target.endswith('-softmmu')
      execs = [{
        'name': 'qemu-system-' + target_name,
-@@ -4311,7 +4329,7 @@
+@@ -4457,7 +4491,7 @@ foreach target : target_dirs
                 install: true,
                 c_args: c_args,
                 dependencies: arch_deps + exe['dependencies'],

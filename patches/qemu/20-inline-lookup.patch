@@ -17,28 +17,32 @@ as before); the helper is also kept when exec logging or nochain is on,
 one-insn-per-tb, CF_NO_GOTO_PTR, a 32-bit host, the x86-64 target's CS64.
 Tests: the DOS batteries and the XP guest stage, unchanged.
 
+diff --git a/accel/tcg/internal-common.h b/accel/tcg/internal-common.h
+index a865238012..d1564279f7 100644
 --- a/accel/tcg/internal-common.h
 +++ b/accel/tcg/internal-common.h
-@@ -18,6 +18,8 @@
+@@ -20,6 +20,8 @@ extern int64_t max_advance;
  extern bool one_insn_per_tb;
  /* a store that leaves a code page's bytes unchanged invalidates no TB (patch 18) */
  extern bool tcg_smc_same_value;
 +/* the jump-cache probe of indirect branches emitted as TCG ops (patch 20) */
 +extern bool tcg_inline_lookup;
  
- /*
-  * Return true if CS is not running in parallel with other cpus, either
+ extern bool icount_align_option;
+ 
+diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
+index 9c6bdd0136..a8217ad05e 100644
 --- a/accel/tcg/tcg-all.c
 +++ b/accel/tcg/tcg-all.c
-@@ -100,6 +100,7 @@
- bool mttcg_enabled;
+@@ -84,6 +84,7 @@ static void tcg_accel_instance_init(Object *obj)
+ 
  bool one_insn_per_tb;
  bool tcg_smc_same_value = true;
 +bool tcg_inline_lookup = true;
  
- static int tcg_init_machine(MachineState *ms)
- {
-@@ -210,6 +211,16 @@
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -259,6 +260,16 @@ static void tcg_set_smc_same_value(Object *obj, bool value, Error **errp)
      tcg_smc_same_value = value;
  }
  
@@ -55,38 +59,40 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
  static void tcg_set_one_insn_per_tb(Object *obj, bool value, Error **errp)
  {
      TCGState *s = TCG_STATE(obj);
-@@ -262,6 +273,11 @@
-         tcg_get_smc_same_value, tcg_set_smc_same_value);
+@@ -297,6 +308,11 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
      object_class_property_set_description(oc, "smc-same-value",
          "A store that leaves a code page's bytes unchanged invalidates no translated block");
-+
+ 
 +    object_class_property_add_bool(oc, "inline-lookup",
 +        tcg_get_inline_lookup, tcg_set_inline_lookup);
 +    object_class_property_set_description(oc, "inline-lookup",
 +        "Probe the jump cache inline at indirect branches instead of calling the lookup helper");
- 
++
      object_class_property_add_bool(oc, "one-insn-per-tb",
                                     tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/accel/tcg/translator.c b/accel/tcg/translator.c
+index 57daded60f..11d1046dc6 100644
 --- a/accel/tcg/translator.c
 +++ b/accel/tcg/translator.c
-@@ -16,7 +16,11 @@
+@@ -17,9 +17,13 @@
+ #include "exec/translator.h"
  #include "exec/plugin-gen.h"
- #include "exec/cpu_ldst.h"
  #include "tcg/tcg-op-common.h"
 +#include "tcg/tcg-temp-internal.h"
- #include "internal-target.h"
-+#include "internal-common.h"
+ #include "internal-common.h"
+ #include "disas/disas.h"
+ #include "tb-internal.h"
 +#include "tb-jmp-cache.h"
 +#include "tb-hash.h"
- #include "disas/disas.h"
++#include "qemu/log.h"
  
  static void set_can_do_io(DisasContextBase *db, bool val)
-@@ -25,6 +29,95 @@
-     tcg_gen_st8_i32(tcg_constant_i32(val), tcg_env,
-                     offsetof(ArchCPU, parent_obj.neg.can_do_io) -
-                     offsetof(ArchCPU, env));
-+}
-+
+ {
+@@ -28,6 +32,96 @@ static void set_can_do_io(DisasContextBase *db, bool val)
+                     offsetof(CPUState, neg.can_do_io) - sizeof(CPUState));
+ }
+ 
 +void translator_lookup_and_goto_ptr(TCGv_i64 pc, TCGv_i64 cs_base,
 +                                    TCGv_i32 flags)
 +{
@@ -104,13 +110,13 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
 +    }
 +
 +    /*
-+     * Branch-free on purpose: a brcond ends a TCG basic block, where every
-+     * live TB temporary is spilled to the stack and reloaded after it. The
-+     * probe accumulates a mismatch word instead and decides once, at the
-+     * goto_ptr. A null jump-cache entry is replaced by the TB being
-+     * translated so the loads are safe; its nullness is part of the word.
-+     */
-+#define CPU_OFF(f) (offsetof(ArchCPU, parent_obj.f) - offsetof(ArchCPU, env))
++    * Branch-free on purpose: a brcond ends a TCG basic block, where every
++    * live TB temporary is spilled to the stack and reloaded after it. The
++    * probe accumulates a mismatch word instead and decides once, at the
++    * goto_ptr. A null jump-cache entry is replaced by the TB being
++    * translated so the loads are safe; its nullness is part of the word.
++    */
++#define CPU_OFF(f) (offsetof(CPUState, f) - (ptrdiff_t)sizeof(CPUState))
 +    tmp = tcg_temp_ebb_new_i64();
 +    hash = tcg_temp_ebb_new_i64();
 +    entry = tcg_temp_ebb_new_i64();
@@ -158,8 +164,9 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
 +    tcg_gen_or_i32(f, f, c);
 +    tcg_gen_ld_i32(c, tcg_env, CPU_OFF(tcg_cflags));
 +    tcg_gen_xor_i32(f, f, c);      /* (tb->cflags ^ cpu->tcg_cflags) folded */
-+    QEMU_BUILD_BUG_ON(sizeof_field(CPUState, singlestep_enabled) != 4);
-+    tcg_gen_ld_i32(c, tcg_env, CPU_OFF(singlestep_enabled));
++    QEMU_BUILD_BUG_ON(sizeof_field(CPUState, singlestep_flags) != 4);
++    tcg_gen_ld_i32(c, tcg_env, CPU_OFF(singlestep_flags));
++    tcg_gen_andi_i32(c, c, SSTEP_ENABLE);       /* cpu_single_stepping() */
 +    tcg_gen_or_i32(f, f, c);
 +    tcg_gen_extu_i32_i64(tmp, f);
 +    tcg_gen_or_i64(m, m, tmp);
@@ -174,24 +181,19 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
 +#else
 +    tcg_gen_lookup_and_goto_ptr();
 +#endif
- }
- 
++}
++
  bool translator_io_start(DisasContextBase *db)
+ {
+     /*
+diff --git a/include/exec/translator.h b/include/exec/translator.h
+index 978dee25ad..cdc533bf4f 100644
 --- a/include/exec/translator.h
 +++ b/include/exec/translator.h
-@@ -20,6 +20,7 @@
- 
- #include "qemu/bswap.h"
- #include "exec/vaddr.h"
-+#include "tcg/tcg.h"
- 
- /**
-  * gen_intermediate_code
-@@ -181,6 +182,27 @@
-  * Otherwise return false.
+@@ -171,6 +171,27 @@ bool translator_use_goto_tb(DisasContextBase *db, vaddr dest);
   */
  bool translator_io_start(DisasContextBase *db);
-+
+ 
 +/**
 + * translator_lookup_and_goto_ptr() - the jump-cache probe as TCG ops
 + * @pc: the target's virtual pc, as cpu_get_tb_cpu_state() computes it
@@ -212,12 +214,15 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
 + */
 +void translator_lookup_and_goto_ptr(TCGv_i64 pc, TCGv_i64 cs_base,
 +                                    TCGv_i32 flags);
- 
++
  /*
   * Translator Load Functions
+  *
+diff --git a/include/tcg/tcg-op-common.h b/include/tcg/tcg-op-common.h
+index 5250185748..4e013961a4 100644
 --- a/include/tcg/tcg-op-common.h
 +++ b/include/tcg/tcg-op-common.h
-@@ -74,6 +74,15 @@
+@@ -85,6 +85,15 @@ void tcg_gen_goto_tb(unsigned idx);
   */
  void tcg_gen_lookup_and_goto_ptr(void);
  
@@ -233,9 +238,11 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
  void tcg_gen_plugin_cb(unsigned from);
  void tcg_gen_plugin_mem_cb(TCGv_i64 addr, unsigned meminfo);
  
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 349401e948..abda72163f 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -2376,6 +2376,53 @@
+@@ -2109,6 +2109,52 @@ static void gen_bnd_jmp(DisasContext *s)
   * single step traps, resetting the RF flag, and handling the interrupt
   * shadow.
   */
@@ -265,10 +272,9 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
 +    tcg_gen_ld8u_i32(t, tcg_env, offsetof(CPUX86State, x87_fast_mode));
 +    tcg_gen_shli_i32(t, t, TB_FLAG_X87_MODE_SHIFT);
 +    tcg_gen_or_i32(flags, flags, t);
-+    QEMU_BUILD_BUG_ON(sizeof_field(CPUX86State,
-+                                   sse_status.float_exception_flags) != 2);
-+    tcg_gen_ld16u_i32(t, tcg_env,
-+                      offsetof(CPUX86State, sse_status.float_exception_flags));
++    /* the 16-bit bit-field float_exception_flags, as in sses_state() */
++    QEMU_BUILD_BUG_ON(HOST_BIG_ENDIAN);
++    tcg_gen_ld16u_i32(t, tcg_env, offsetof(CPUX86State, sse_status));
 +    tcg_gen_andi_i32(t, t, float_flag_inexact);
 +    tcg_gen_setcondi_i32(TCG_COND_NE, t, t, 0);
 +    tcg_gen_ld8u_i32(u, tcg_env, offsetof(CPUX86State, sse_fast_mode));
@@ -289,7 +295,7 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
  static void
  gen_eob(DisasContext *s, int mode)
  {
-@@ -2404,7 +2451,7 @@
+@@ -2137,7 +2183,7 @@ gen_eob(DisasContext *s, int mode)
      } else if (mode == DISAS_JUMP &&
                 /* give irqs a chance to happen */
                 !inhibit_reset) {
@@ -298,15 +304,17 @@ Tests: the DOS batteries and the XP guest stage, unchanged.
      } else {
          tcg_gen_exit_tb(NULL, 0);
      }
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index c637957e78..4bf607b1f7 100644
 --- a/tcg/tcg-op.c
 +++ b/tcg/tcg-op.c
-@@ -3457,6 +3457,11 @@
-     tcg_gen_op1i(INDEX_op_goto_tb, idx);
+@@ -2747,6 +2747,11 @@ void tcg_gen_goto_tb(unsigned idx)
+     tcg_gen_op1i(INDEX_op_goto_tb, 0, idx);
  }
  
 +void tcg_gen_goto_ptr(TCGv_ptr ptr)
 +{
-+    tcg_gen_op1i(INDEX_op_goto_ptr, tcgv_ptr_arg(ptr));
++    tcg_gen_op1i(INDEX_op_goto_ptr, TCG_TYPE_PTR, tcgv_ptr_arg(ptr));
 +}
 +
  void tcg_gen_lookup_and_goto_ptr(void)

@@ -4,14 +4,14 @@ opens. Until M16 step 7 this also put a SysBus Direct3D device (doc 14)
 on the pc machine for the retired D3D8/D3D9 guest DLLs.
 
 diff --git a/meson.build b/meson.build
-index 07aa7b7..e9d8ee2 100644
+index e6f03be1f6..caff03a6d2 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3700,6 +3700,7 @@ if have_system or have_user
+@@ -3808,6 +3808,7 @@ if have_system or have_user
+   subdir('gdbstub')
    subdir('target')
-   subdir('hw/3dfx')
    subdir('hw/mesa')
 +  subdir('hw/d3dpt')
  endif
  
- subdir('audio')
+ if have_block

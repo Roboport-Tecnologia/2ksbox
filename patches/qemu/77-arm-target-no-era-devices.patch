@@ -15,7 +15,7 @@ target of ours that is not a PC. Two things the queue adds assumed one:
   only; `embed/libqemu_embed.c` registers the provider only there.
 
 diff --git a/hw/audio/meson.build b/hw/audio/meson.build
-index a245403..5258f63 100644
+index 3c5f6a93d2..1647247e90 100644
 --- a/hw/audio/meson.build
 +++ b/hw/audio/meson.build
 @@ -15,7 +15,7 @@ system_ss.add(when: 'CONFIG_SB16', if_true: files('sb16.c'))
@@ -28,10 +28,10 @@ index a245403..5258f63 100644
  system_ss.add(when: 'CONFIG_WM8750', if_true: files('wm8750.c'))
  system_ss.add(when: ['CONFIG_VIRTIO_SND', 'CONFIG_VIRTIO'], if_true: files('virtio-snd.c'))
 diff --git a/meson.build b/meson.build
-index d893bae..6b3600a 100644
+index 1fef327717..bd88a04943 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -4306,7 +4306,10 @@ foreach target : target_dirs
+@@ -4476,7 +4476,10 @@ foreach target : target_dirs
    # win98-xp-virt: QEMU as an embeddable shared library (embed/libqemu_embed.h)
    if target.endswith('-softmmu')
      shared_library('qemu-embed-' + target_name,

@@ -5,14 +5,14 @@ meson.build builds 86Box's rasterizer as a static library against the
 shim of 86Box's headers and adds the QEMU device to the i386 sourceset.
 
 diff --git a/meson.build b/meson.build
-index cb7dba1..d1e0f2a 100644
+index 17bae9d379..7b4bc19c3c 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3701,6 +3701,7 @@ if have_system or have_user
-   subdir('hw/3dfx')
+@@ -3849,6 +3849,7 @@ if have_system or have_user
+   subdir('target')
    subdir('hw/mesa')
    subdir('hw/d3dpt')
 +  subdir('hw/voodoo')
  endif
  
- subdir('audio')
+ if have_block

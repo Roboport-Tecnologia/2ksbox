@@ -36,10 +36,10 @@ unchanged, scripts/test.sh all 57/57.
 Behind inline-lookup, like the function it changes.
 
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 19598b9..2c901c7 100644
+index 5da03d8661..60b381f648 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -2508,7 +2508,6 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2221,7 +2221,6 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
  #else
      TCGv_i32 flags = tcg_temp_new_i32();
      TCGv_i32 t = tcg_temp_new_i32();
@@ -47,17 +47,16 @@ index 19598b9..2c901c7 100644
      TCGv_i64 pc = tcg_temp_new_i64();
      TCGv_i64 cs_base = tcg_temp_new_i64();
  
-@@ -2516,35 +2515,30 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
+@@ -2229,34 +2228,30 @@ static void gen_lookup_and_goto_ptr(DisasContext *s)
      tcg_gen_ld_i32(t, tcg_env, offsetof(CPUX86State, eflags));
      tcg_gen_andi_i32(t, t, IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK);
      tcg_gen_or_i32(flags, flags, t);
 -    tcg_gen_ld8u_i32(t, tcg_env, offsetof(CPUX86State, x87_fast_mode));
 -    tcg_gen_shli_i32(t, t, TB_FLAG_X87_MODE_SHIFT);
 -    tcg_gen_or_i32(flags, flags, t);
--    QEMU_BUILD_BUG_ON(sizeof_field(CPUX86State,
--                                   sse_status.float_exception_flags) != 2);
--    tcg_gen_ld16u_i32(t, tcg_env,
--                      offsetof(CPUX86State, sse_status.float_exception_flags));
+-    /* the 16-bit bit-field float_exception_flags, as in sses_state() */
+-    QEMU_BUILD_BUG_ON(HOST_BIG_ENDIAN);
+-    tcg_gen_ld16u_i32(t, tcg_env, offsetof(CPUX86State, sse_status));
 -    tcg_gen_andi_i32(t, t, float_flag_inexact);
 -    tcg_gen_setcondi_i32(TCG_COND_NE, t, t, 0);
 -    tcg_gen_ld8u_i32(u, tcg_env, offsetof(CPUX86State, sse_fast_mode));

@@ -25,81 +25,11 @@ Test: tools/sse-guest-test.py (DOS program, 61 sequences x every pair
 of 47 single / 33 double edge values x 3 MXCSR settings, 333,875 result
 lines identical on/off on the M1 Air). Register-only bench: packed 12x,
 scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
---- a/include/tcg/tcg-opc.h
-+++ b/include/tcg/tcg-opc.h
-@@ -201,6 +201,26 @@
- DEF(sqrt_f64, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
- DEF(cvt_f64_f32, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
- DEF(cvt_f32_f64, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+/*
-+ * Scalar IEEE binary32 on the host FPU, raw bit patterns in i32 temps
-+ * (target/i386 sse-fast.c.inc); same rules as the f64 set.
-+ */
-+DEF(add_f32, 1, 2, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(sub_f32, 1, 2, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(mul_f32, 1, 2, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(div_f32, 1, 2, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(sqrt_f32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
-+/*
-+ * int32 <-> binary32/binary64. cvt_i32_*: round to nearest even.
-+ * cvt_*_i32 rounds to nearest even, cvtt_*_i32 truncates; NaN and
-+ * out-of-range inputs give a host-defined integer.
-+ */
-+DEF(cvt_i32_f32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvt_i32_f64, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvt_f32_i32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvtt_f32_i32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvt_f64_i32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvtt_f64_i32, 1, 1, 0, IMPL(TCG_TARGET_HAS_f64))
- 
- #define DATA64_ARGS  (TCG_TARGET_REG_BITS == 64 ? 1 : 2)
- 
-@@ -313,6 +333,30 @@
- DEF(bitsel_vec, 1, 3, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_bitsel_vec))
- DEF(cmpsel_vec, 1, 4, 1, IMPLVEC | IMPL(TCG_TARGET_HAS_cmpsel_vec))
- 
-+/*
-+ * IEEE binary32/binary64 lanes (vece MO_32 / MO_64) on the host vector
-+ * unit, round to nearest even, flags unobservable (target/i386 sse-fast).
-+ */
-+DEF(fadd_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_vec))
-+DEF(fsub_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_vec))
-+DEF(fmul_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_vec))
-+DEF(fdiv_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_vec))
-+DEF(fsqrt_vec, 1, 1, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_vec))
-+/*
-+ * IEEE binary32/binary64 minps/maxps/cmpps semantics (operand-order
-+ * tie-break, no total-order transform): only meaningful once the
-+ * caller has already excluded NaN operands (target/i386 sse-fast), so
-+ * unlike fadd_vec.. these carry no portable software fallback -- the
-+ * caller must check tcg_fp_minmax_vec_supported() / tcg_fp_cmp_vec_supported()
-+ * itself and keep its own fallback (target/i386 doesn't gate these
-+ * behind IMPL: aarch64 leaves both macros 0, no codegen emitted there).
-+ * fcmp_vec's third arg is the CMPPS/CMPPD predicate immediate, 0..7,
-+ * passed straight through (same encoding as the guest instruction).
-+ */
-+DEF(fmin_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_minmax_vec))
-+DEF(fmax_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_minmax_vec))
-+DEF(fcmp_vec, 1, 2, 1, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_cmp_vec))
-+
- DEF(last_generic, 0, 0, 0, TCG_OPF_NOT_PRESENT)
- 
- #if TCG_TARGET_MAYBE_vec
---- a/include/tcg/tcg.h
-+++ b/include/tcg/tcg.h
-@@ -156,6 +156,9 @@
- #define TCG_TARGET_HAS_bitsel_vec       0
- #define TCG_TARGET_HAS_cmpsel_vec       0
- #define TCG_TARGET_HAS_tst_vec          0
-+#define TCG_TARGET_HAS_fp_vec           0
-+#define TCG_TARGET_HAS_fp_minmax_vec    0
-+#define TCG_TARGET_HAS_fp_cmp_vec       0
- #else
- #define TCG_TARGET_MAYBE_vec            1
- #endif
+diff --git a/include/tcg/tcg-op-common.h b/include/tcg/tcg-op-common.h
+index ae4a6940d2..8ee3cf5edd 100644
 --- a/include/tcg/tcg-op-common.h
 +++ b/include/tcg/tcg-op-common.h
-@@ -253,6 +253,23 @@
+@@ -270,6 +270,23 @@ void tcg_gen_sqrt_f64(TCGv_i64 ret, TCGv_i64 a);
  void tcg_gen_cvt_f64_f32(TCGv_i64 ret, TCGv_i64 a);
  /* binary32 in the low 32 bits of a (high bits ignored) -> binary64, exact */
  void tcg_gen_cvt_f32_f64(TCGv_i64 ret, TCGv_i64 a);
@@ -123,7 +53,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  void tcg_gen_mulsu2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2);
  void tcg_gen_not_i64(TCGv_i64 ret, TCGv_i64 arg);
  void tcg_gen_ext8s_i64(TCGv_i64 ret, TCGv_i64 arg);
-@@ -474,6 +491,27 @@
+@@ -499,6 +516,27 @@ void tcg_gen_bitsel_vec(unsigned vece, TCGv_vec r, TCGv_vec a,
  void tcg_gen_cmpsel_vec(TCGCond cond, unsigned vece, TCGv_vec r,
                          TCGv_vec a, TCGv_vec b, TCGv_vec c, TCGv_vec d);
  
@@ -151,558 +81,101 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  void tcg_gen_ld_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset);
  void tcg_gen_st_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset);
  void tcg_gen_stl_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset, TCGType t);
---- a/tcg/tcg-op.c
-+++ b/tcg/tcg-op.c
-@@ -3119,6 +3119,72 @@
-     tcg_gen_op2_i64(INDEX_op_cvt_f32_f64, ret, a);
- }
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 490233bdde..2c830af38c 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -117,6 +117,27 @@ DEF(fmsub_f64, 1, 3, 0, TCG_OPF_INT)
+ DEF(sqrt_f64, 1, 1, 0, TCG_OPF_INT)
+ DEF(cvt_f64_f32, 1, 1, 0, TCG_OPF_INT)
+ DEF(cvt_f32_f64, 1, 1, 0, TCG_OPF_INT)
++/*
++ * 2ksbox (patch 11): scalar IEEE binary32 on the host FPU, raw bit patterns
++ * in i32 temps (target/i386 sse-fast.c.inc); same rules as the f64 set.
++ */
++DEF(add_f32, 1, 2, 0, TCG_OPF_INT)
++DEF(sub_f32, 1, 2, 0, TCG_OPF_INT)
++DEF(mul_f32, 1, 2, 0, TCG_OPF_INT)
++DEF(div_f32, 1, 2, 0, TCG_OPF_INT)
++DEF(sqrt_f32, 1, 1, 0, TCG_OPF_INT)
++/*
++ * int32 <-> binary32/binary64. cvt_i32_*: round to nearest even.
++ * cvt_*_i32 rounds to nearest even, cvtt_*_i32 truncates; NaN and
++ * out-of-range inputs give a host-defined integer. The op's type is its
++ * output's: cvt_i32_f64 is I64, cvt(t)_f64_i32 are I32.
++ */
++DEF(cvt_i32_f32, 1, 1, 0, TCG_OPF_INT)
++DEF(cvt_i32_f64, 1, 1, 0, TCG_OPF_INT)
++DEF(cvt_f32_i32, 1, 1, 0, TCG_OPF_INT)
++DEF(cvtt_f32_i32, 1, 1, 0, TCG_OPF_INT)
++DEF(cvt_f64_i32, 1, 1, 0, TCG_OPF_INT)
++DEF(cvtt_f64_i32, 1, 1, 0, TCG_OPF_INT)
  
-+void tcg_gen_add_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i32(INDEX_op_add_f32, ret, a, b);
-+}
-+
-+void tcg_gen_sub_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i32(INDEX_op_sub_f32, ret, a, b);
-+}
-+
-+void tcg_gen_mul_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i32(INDEX_op_mul_f32, ret, a, b);
-+}
-+
-+void tcg_gen_div_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i32(INDEX_op_div_f32, ret, a, b);
-+}
-+
-+void tcg_gen_sqrt_f32(TCGv_i32 ret, TCGv_i32 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i32(INDEX_op_sqrt_f32, ret, a);
-+}
-+
-+void tcg_gen_cvt_i32_f32(TCGv_i32 ret, TCGv_i32 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i32(INDEX_op_cvt_i32_f32, ret, a);
-+}
-+
-+void tcg_gen_cvt_i32_f64(TCGv_i64 ret, TCGv_i32 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2(INDEX_op_cvt_i32_f64, tcgv_i64_arg(ret), tcgv_i32_arg(a));
-+}
-+
-+void tcg_gen_cvt_f32_i32(TCGv_i32 ret, TCGv_i32 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i32(INDEX_op_cvt_f32_i32, ret, a);
-+}
-+
-+void tcg_gen_cvtt_f32_i32(TCGv_i32 ret, TCGv_i32 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i32(INDEX_op_cvtt_f32_i32, ret, a);
-+}
-+
-+void tcg_gen_cvt_f64_i32(TCGv_i32 ret, TCGv_i64 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2(INDEX_op_cvt_f64_i32, tcgv_i32_arg(ret), tcgv_i64_arg(a));
-+}
-+
-+void tcg_gen_cvtt_f64_i32(TCGv_i32 ret, TCGv_i64 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2(INDEX_op_cvtt_f64_i32, tcgv_i32_arg(ret), tcgv_i64_arg(a));
-+}
-+
- void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2)
- {
-     if (TCG_TARGET_HAS_muls2_i64) {
---- a/tcg/tcg-op-vec.c
-+++ b/tcg/tcg-op-vec.c
-@@ -586,6 +586,80 @@
-     do_op3_nofail(vece, r, a, b, INDEX_op_add_vec);
- }
+ /* size changing ops */
+ DEF(ext_i32_i64, 1, 1, 0, 0)
+@@ -193,6 +214,31 @@ DEF(cmp_vec, 1, 2, 1, TCG_OPF_VECTOR)
+ DEF(bitsel_vec, 1, 3, 0, TCG_OPF_VECTOR)
+ DEF(cmpsel_vec, 1, 4, 1, TCG_OPF_VECTOR)
  
-+bool tcg_fp_vec_supported(unsigned vece)
-+{
-+    return TCG_TARGET_HAS_fp_vec
-+        && tcg_can_emit_vec_op(INDEX_op_fadd_vec, TCG_TYPE_V128, vece) > 0;
-+}
++/*
++ * IEEE binary32/binary64 lanes (vece MO_32 / MO_64) on the host vector
++ * unit, round to nearest even, flags unobservable (target/i386 sse-fast).
++ */
++DEF(fadd_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fsub_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fmul_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fdiv_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fsqrt_vec, 1, 1, 0, TCG_OPF_VECTOR)
++/*
++ * IEEE binary32/binary64 minps/maxps/cmpps semantics (operand-order
++ * tie-break, no total-order transform): only meaningful once the
++ * caller has already excluded NaN operands (target/i386 sse-fast), so
++ * unlike fadd_vec.. these carry no portable software fallback -- the
++ * caller must check tcg_fp_minmax_vec_supported() / tcg_fp_cmp_vec_supported()
++ * itself and keep its own fallback (target/i386 doesn't gate these
++ * behind tcg_op_supported: aarch64 leaves both macros 0, no codegen
++ * emitted there).
++ * fcmp_vec's third arg is the CMPPS/CMPPD predicate immediate, 0..7,
++ * passed straight through (same encoding as the guest instruction).
++ */
++DEF(fmin_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fmax_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(fcmp_vec, 1, 2, 1, TCG_OPF_VECTOR)
 +
-+void tcg_gen_fadd_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fadd_vec);
-+}
-+
-+void tcg_gen_fsub_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fsub_vec);
-+}
-+
-+void tcg_gen_fmul_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fmul_vec);
-+}
-+
-+void tcg_gen_fdiv_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fdiv_vec);
-+}
-+
-+bool tcg_fp_minmax_vec_supported(unsigned vece)
-+{
-+    return TCG_TARGET_HAS_fp_minmax_vec
-+        && tcg_can_emit_vec_op(INDEX_op_fmin_vec, TCG_TYPE_V128, vece) > 0
-+        && tcg_can_emit_vec_op(INDEX_op_fmax_vec, TCG_TYPE_V128, vece) > 0;
-+}
-+
-+void tcg_gen_fmin_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fmin_vec);
-+}
-+
-+void tcg_gen_fmax_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_fmax_vec);
-+}
-+
-+bool tcg_fp_cmp_vec_supported(unsigned vece)
-+{
-+    return TCG_TARGET_HAS_fp_cmp_vec
-+        && tcg_can_emit_vec_op(INDEX_op_fcmp_vec, TCG_TYPE_V128, vece) > 0;
-+}
-+
-+void tcg_gen_fcmp_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b, int pred)
-+{
-+    TCGTemp *rt = tcgv_vec_temp(r);
-+    TCGTemp *at = tcgv_vec_temp(a);
-+    TCGTemp *bt = tcgv_vec_temp(b);
-+    TCGType type = rt->base_type;
-+
-+    tcg_debug_assert(at->base_type >= type);
-+    tcg_debug_assert(bt->base_type >= type);
-+    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_fcmp_vec, type, vece) > 0);
-+    vec_gen_4(INDEX_op_fcmp_vec, type, vece,
-+             temp_arg(rt), temp_arg(at), temp_arg(bt), pred);
-+}
-+
-+void tcg_gen_fsqrt_vec(unsigned vece, TCGv_vec r, TCGv_vec a)
-+{
-+    TCGTemp *rt = tcgv_vec_temp(r);
-+    TCGTemp *at = tcgv_vec_temp(a);
-+    TCGType type = rt->base_type;
-+
-+    tcg_debug_assert(at->base_type >= type);
-+    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_fsqrt_vec, type, vece) > 0);
-+    vec_gen_2(INDEX_op_fsqrt_vec, type, vece, temp_arg(rt), temp_arg(at));
-+}
-+
- void tcg_gen_sub_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
- {
-     do_op3_nofail(vece, r, a, b, INDEX_op_sub_vec);
---- a/tcg/tcg.c
-+++ b/tcg/tcg.c
-@@ -2172,6 +2172,17 @@
-     case INDEX_op_sqrt_f64:
-     case INDEX_op_cvt_f64_f32:
-     case INDEX_op_cvt_f32_f64:
-+    case INDEX_op_add_f32:
-+    case INDEX_op_sub_f32:
-+    case INDEX_op_mul_f32:
-+    case INDEX_op_div_f32:
-+    case INDEX_op_sqrt_f32:
-+    case INDEX_op_cvt_i32_f32:
-+    case INDEX_op_cvt_i32_f64:
-+    case INDEX_op_cvt_f32_i32:
-+    case INDEX_op_cvtt_f32_i32:
-+    case INDEX_op_cvt_f64_i32:
-+    case INDEX_op_cvtt_f64_i32:
-         return TCG_TARGET_HAS_f64;
+ DEF(last_generic, 0, 0, 0, TCG_OPF_NOT_PRESENT)
  
-     case INDEX_op_mov_vec:
-@@ -2179,6 +2190,17 @@
-     case INDEX_op_dupm_vec:
-     case INDEX_op_ld_vec:
-     case INDEX_op_st_vec:
-+    case INDEX_op_fadd_vec:
-+    case INDEX_op_fsub_vec:
-+    case INDEX_op_fmul_vec:
-+    case INDEX_op_fdiv_vec:
-+    case INDEX_op_fsqrt_vec:
-+        return have_vec && TCG_TARGET_HAS_fp_vec;
-+    case INDEX_op_fmin_vec:
-+    case INDEX_op_fmax_vec:
-+        return have_vec && TCG_TARGET_HAS_fp_minmax_vec;
-+    case INDEX_op_fcmp_vec:
-+        return have_vec && TCG_TARGET_HAS_fp_cmp_vec;
-     case INDEX_op_add_vec:
-     case INDEX_op_sub_vec:
-     case INDEX_op_and_vec:
---- a/tcg/aarch64/tcg-target.h
-+++ b/tcg/aarch64/tcg-target.h
-@@ -169,6 +169,11 @@
- #define TCG_TARGET_HAS_bitsel_vec       1
- #define TCG_TARGET_HAS_cmpsel_vec       0
- #define TCG_TARGET_HAS_tst_vec          1
-+#define TCG_TARGET_HAS_fp_vec           1
-+/* minps/maxps/cmpps: not implemented here, the key-transform path
-+ * (target/i386/tcg/sse-fast.c.inc) covers min/max/cmp on this host. */
-+#define TCG_TARGET_HAS_fp_minmax_vec    0
-+#define TCG_TARGET_HAS_fp_cmp_vec       0
- 
- #define TCG_TARGET_DEFAULT_MO (0)
- #define TCG_TARGET_NEED_LDST_LABELS
---- a/tcg/aarch64/tcg-target-con-set.h
-+++ b/tcg/aarch64/tcg-target-con-set.h
-@@ -15,6 +15,7 @@
- C_O0_I2(w, r)
- C_O0_I3(rZ, rZ, r)
- C_O1_I1(r, r)
-+C_O1_I1(r, w)
- C_O1_I1(w, r)
- C_O1_I1(w, w)
- C_O1_I1(w, wr)
---- a/tcg/aarch64/tcg-target.c.inc
-+++ b/tcg/aarch64/tcg-target.c.inc
-@@ -534,6 +534,26 @@
-     I3F_FCVTSD      = 0x1e624000,   /* Sd = Dn */
-     I3F_FCVTDS      = 0x1e22c000,   /* Dd = Sn */
- 
-+    /* Scalar binary32 FP and int32 conversions (sse-fast.c.inc). */
-+    I3F_FADDS       = 0x1e202800,
-+    I3F_FSUBS       = 0x1e203800,
-+    I3F_FMULS       = 0x1e200800,
-+    I3F_FDIVS       = 0x1e201800,
-+    I3F_FSQRTS      = 0x1e21c000,
-+    I3F_SCVTFS      = 0x1e220000,   /* Sd = Wn */
-+    I3F_SCVTFD      = 0x1e620000,   /* Dd = Wn */
-+    I3F_FCVTNSS     = 0x1e200000,   /* Wd = Sn, round to nearest even */
-+    I3F_FCVTNSD     = 0x1e600000,   /* Wd = Dn */
-+    I3F_FCVTZSS     = 0x1e380000,   /* Wd = Sn, round toward zero */
-+    I3F_FCVTZSD     = 0x1e780000,   /* Wd = Dn */
-+
-+    /* Vector FP, sz (bit 22) selects S/D lanes, Q (bit 30) the width. */
-+    I3FV_FADD       = 0x0e20d400,
-+    I3FV_FSUB       = 0x0ea0d400,
-+    I3FV_FMUL       = 0x2e20dc00,
-+    I3FV_FDIV       = 0x2e20fc00,
-+    I3FV_FSQRT      = 0x2ea1f800,
-+
-     /* Logical shifted register instructions (without a shift).  */
-     I3510_AND       = 0x0a000000,
-     I3510_BIC       = 0x0a200000,
-@@ -822,6 +842,13 @@
-     tcg_out32(s, insn | (rm & 0x1f) << 16 | (rn & 0x1f) << 5 | (rd & 0x1f));
- }
- 
-+static void tcg_out_fpv(TCGContext *s, AArch64Insn insn, bool q,
-+                        unsigned vece, TCGReg rd, TCGReg rn, TCGReg rm)
-+{
-+    tcg_out32(s, insn | q << 30 | (vece == MO_64) << 22 | (rm & 0x1f) << 16
-+              | (rn & 0x1f) << 5 | (rd & 0x1f));
-+}
-+
- static void tcg_out_fp4(TCGContext *s, AArch64Insn insn,
-                         TCGReg rd, TCGReg rn, TCGReg rm, TCGReg ra)
- {
-@@ -2548,6 +2575,40 @@
-         tcg_out32(s, I3F_FCVTDS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-         break;
- 
-+    case INDEX_op_add_f32:
-+        tcg_out_fp3(s, I3F_FADDS, a0, a1, a2);
-+        break;
-+    case INDEX_op_sub_f32:
-+        tcg_out_fp3(s, I3F_FSUBS, a0, a1, a2);
-+        break;
-+    case INDEX_op_mul_f32:
-+        tcg_out_fp3(s, I3F_FMULS, a0, a1, a2);
-+        break;
-+    case INDEX_op_div_f32:
-+        tcg_out_fp3(s, I3F_FDIVS, a0, a1, a2);
-+        break;
-+    case INDEX_op_sqrt_f32:
-+        tcg_out32(s, I3F_FSQRTS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvt_i32_f32:
-+        tcg_out32(s, I3F_SCVTFS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvt_i32_f64:
-+        tcg_out32(s, I3F_SCVTFD | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvt_f32_i32:
-+        tcg_out32(s, I3F_FCVTNSS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvtt_f32_i32:
-+        tcg_out32(s, I3F_FCVTZSS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvt_f64_i32:
-+        tcg_out32(s, I3F_FCVTNSD | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvtt_f64_i32:
-+        tcg_out32(s, I3F_FCVTZSD | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+
-     case INDEX_op_mb:
-         tcg_out_mb(s, a0);
-         break;
-@@ -2631,6 +2692,21 @@
-     case INDEX_op_dupm_vec:
-         tcg_out_dupm_vec(s, type, vece, a0, a1, a2);
-         break;
-+    case INDEX_op_fadd_vec:
-+        tcg_out_fpv(s, I3FV_FADD, is_q, vece, a0, a1, a2);
-+        break;
-+    case INDEX_op_fsub_vec:
-+        tcg_out_fpv(s, I3FV_FSUB, is_q, vece, a0, a1, a2);
-+        break;
-+    case INDEX_op_fmul_vec:
-+        tcg_out_fpv(s, I3FV_FMUL, is_q, vece, a0, a1, a2);
-+        break;
-+    case INDEX_op_fdiv_vec:
-+        tcg_out_fpv(s, I3FV_FDIV, is_q, vece, a0, a1, a2);
-+        break;
-+    case INDEX_op_fsqrt_vec:
-+        tcg_out_fpv(s, I3FV_FSQRT, is_q, vece, a0, a1, 0);
-+        break;
-     case INDEX_op_add_vec:
-         if (is_scalar) {
-             tcg_out_insn(s, 3611, ADD, vece, a0, a1, a2);
-@@ -2940,6 +3016,13 @@
-     case INDEX_op_umax_vec:
-     case INDEX_op_umin_vec:
-         return vece < MO_64;
-+    case INDEX_op_fadd_vec:
-+    case INDEX_op_fsub_vec:
-+    case INDEX_op_fmul_vec:
-+    case INDEX_op_fdiv_vec:
-+    case INDEX_op_fsqrt_vec:
-+        /* S lanes in either width, D lanes only as .2D */
-+        return vece == MO_32 || (vece == MO_64 && type == TCG_TYPE_V128);
- 
-     default:
-         return 0;
-@@ -3033,6 +3116,27 @@
-     case INDEX_op_sqrt_f64:
-     case INDEX_op_cvt_f64_f32:
-     case INDEX_op_cvt_f32_f64:
-+    case INDEX_op_sqrt_f32:
-+        return C_O1_I1(w, w);
-+    case INDEX_op_add_f32:
-+    case INDEX_op_sub_f32:
-+    case INDEX_op_mul_f32:
-+    case INDEX_op_div_f32:
-+        return C_O1_I2(w, w, w);
-+    case INDEX_op_cvt_i32_f32:
-+    case INDEX_op_cvt_i32_f64:
-+        return C_O1_I1(w, r);
-+    case INDEX_op_cvt_f32_i32:
-+    case INDEX_op_cvtt_f32_i32:
-+    case INDEX_op_cvt_f64_i32:
-+    case INDEX_op_cvtt_f64_i32:
-+        return C_O1_I1(r, w);
-+    case INDEX_op_fadd_vec:
-+    case INDEX_op_fsub_vec:
-+    case INDEX_op_fmul_vec:
-+    case INDEX_op_fdiv_vec:
-+        return C_O1_I2(w, w, w);
-+    case INDEX_op_fsqrt_vec:
-         return C_O1_I1(w, w);
- 
-     case INDEX_op_ld8u_i32:
---- a/tcg/i386/tcg-target.h
-+++ b/tcg/i386/tcg-target.h
-@@ -228,6 +228,9 @@
- #define TCG_TARGET_HAS_bitsel_vec       have_avx512vl
- #define TCG_TARGET_HAS_cmpsel_vec       1
- #define TCG_TARGET_HAS_tst_vec          have_avx512bw
-+#define TCG_TARGET_HAS_fp_vec           have_avx1
-+#define TCG_TARGET_HAS_fp_minmax_vec    have_avx1
-+#define TCG_TARGET_HAS_fp_cmp_vec       have_avx1
- 
- #define TCG_TARGET_deposit_i32_valid(ofs, len) \
-     (((ofs) == 0 && ((len) == 8 || (len) == 16)) || \
---- a/tcg/i386/tcg-target-con-set.h
-+++ b/tcg/i386/tcg-target-con-set.h
-@@ -31,6 +31,7 @@
- C_O1_I1(r, L)
- C_O1_I1(r, q)
- C_O1_I1(r, r)
-+C_O1_I1(r, x)
- C_O1_I1(x, r)
- C_O1_I1(x, x)
- C_O1_I2(q, 0, qi)
---- a/tcg/i386/tcg-target.c.inc
-+++ b/tcg/i386/tcg-target.c.inc
-@@ -419,6 +419,33 @@
- #define OPC_VSQRTSD     (0x51 | P_EXT | P_SIMDF2)
- #define OPC_VCVTSD2SS   (0x5a | P_EXT | P_SIMDF2)
- #define OPC_VCVTSS2SD   (0x5a | P_EXT | P_SIMDF3)
-+#define OPC_VADDSS      (0x58 | P_EXT | P_SIMDF3)
-+#define OPC_VSUBSS      (0x5c | P_EXT | P_SIMDF3)
-+#define OPC_VMULSS      (0x59 | P_EXT | P_SIMDF3)
-+#define OPC_VDIVSS      (0x5e | P_EXT | P_SIMDF3)
-+#define OPC_VSQRTSS     (0x51 | P_EXT | P_SIMDF3)
-+#define OPC_VCVTSI2SS   (0x2a | P_EXT | P_SIMDF3)
-+#define OPC_VCVTSI2SD   (0x2a | P_EXT | P_SIMDF2)
-+#define OPC_VCVTSS2SI   (0x2d | P_EXT | P_SIMDF3)
-+#define OPC_VCVTSD2SI   (0x2d | P_EXT | P_SIMDF2)
-+#define OPC_VCVTTSS2SI  (0x2c | P_EXT | P_SIMDF3)
-+#define OPC_VCVTTSD2SI  (0x2c | P_EXT | P_SIMDF2)
-+#define OPC_VADDPS      (0x58 | P_EXT)
-+#define OPC_VADDPD      (0x58 | P_EXT | P_DATA16)
-+#define OPC_VSUBPS      (0x5c | P_EXT)
-+#define OPC_VSUBPD      (0x5c | P_EXT | P_DATA16)
-+#define OPC_VMULPS      (0x59 | P_EXT)
-+#define OPC_VMULPD      (0x59 | P_EXT | P_DATA16)
-+#define OPC_VDIVPS      (0x5e | P_EXT)
-+#define OPC_VDIVPD      (0x5e | P_EXT | P_DATA16)
-+#define OPC_VSQRTPS     (0x51 | P_EXT)
-+#define OPC_VSQRTPD     (0x51 | P_EXT | P_DATA16)
-+#define OPC_VMINPS      (0x5d | P_EXT)
-+#define OPC_VMINPD      (0x5d | P_EXT | P_DATA16)
-+#define OPC_VMAXPS      (0x5f | P_EXT)
-+#define OPC_VMAXPD      (0x5f | P_EXT | P_DATA16)
-+#define OPC_VCMPPS      (0xc2 | P_EXT)
-+#define OPC_VCMPPD      (0xc2 | P_EXT | P_DATA16)
- #define OPC_VPBLENDD    (0x02 | P_EXT3A | P_DATA16)
- #define OPC_VPBLENDVB   (0x4c | P_EXT3A | P_DATA16)
- #define OPC_VPBLENDMB   (0x66 | P_EXT38 | P_DATA16 | P_EVEX)
-@@ -3075,6 +3102,41 @@
-         tcg_out_vex_modrm(s, OPC_VCVTSS2SD, a0, a0, a1);
-         break;
- 
-+    case INDEX_op_add_f32:
-+        tcg_out_vex_modrm(s, OPC_VADDSS, a0, a1, a2);
-+        break;
-+    case INDEX_op_sub_f32:
-+        tcg_out_vex_modrm(s, OPC_VSUBSS, a0, a1, a2);
-+        break;
-+    case INDEX_op_mul_f32:
-+        tcg_out_vex_modrm(s, OPC_VMULSS, a0, a1, a2);
-+        break;
-+    case INDEX_op_div_f32:
-+        tcg_out_vex_modrm(s, OPC_VDIVSS, a0, a1, a2);
-+        break;
-+    case INDEX_op_sqrt_f32:
-+        tcg_out_vex_modrm(s, OPC_VSQRTSS, a0, a0, a1);
-+        break;
-+    case INDEX_op_cvt_i32_f32:
-+        /* a1 is a general register (constraint r) in the r/m field */
-+        tcg_out_vex_modrm(s, OPC_VCVTSI2SS, a0, a0, a1);
-+        break;
-+    case INDEX_op_cvt_i32_f64:
-+        tcg_out_vex_modrm(s, OPC_VCVTSI2SD, a0, a0, a1);
-+        break;
-+    case INDEX_op_cvt_f32_i32:
-+        tcg_out_vex_modrm(s, OPC_VCVTSS2SI, a0, 0, a1);
-+        break;
-+    case INDEX_op_cvtt_f32_i32:
-+        tcg_out_vex_modrm(s, OPC_VCVTTSS2SI, a0, 0, a1);
-+        break;
-+    case INDEX_op_cvt_f64_i32:
-+        tcg_out_vex_modrm(s, OPC_VCVTSD2SI, a0, 0, a1);
-+        break;
-+    case INDEX_op_cvtt_f64_i32:
-+        tcg_out_vex_modrm(s, OPC_VCVTTSD2SI, a0, 0, a1);
-+        break;
-+
-     case INDEX_op_mb:
-         tcg_out_mb(s, a0);
-         break;
-@@ -3507,6 +3569,33 @@
-         a2 = a1;
-         a1 = 0;
-         goto gen_simd;
-+    case INDEX_op_fadd_vec:
-+        insn = vece == MO_64 ? OPC_VADDPD : OPC_VADDPS;
-+        goto gen_simd;
-+    case INDEX_op_fsub_vec:
-+        insn = vece == MO_64 ? OPC_VSUBPD : OPC_VSUBPS;
-+        goto gen_simd;
-+    case INDEX_op_fmul_vec:
-+        insn = vece == MO_64 ? OPC_VMULPD : OPC_VMULPS;
-+        goto gen_simd;
-+    case INDEX_op_fdiv_vec:
-+        insn = vece == MO_64 ? OPC_VDIVPD : OPC_VDIVPS;
-+        goto gen_simd;
-+    case INDEX_op_fsqrt_vec:
-+        insn = vece == MO_64 ? OPC_VSQRTPD : OPC_VSQRTPS;
-+        a2 = a1;
-+        a1 = 0;
-+        goto gen_simd;
-+    case INDEX_op_fmin_vec:
-+        insn = vece == MO_64 ? OPC_VMINPD : OPC_VMINPS;
-+        goto gen_simd;
-+    case INDEX_op_fmax_vec:
-+        insn = vece == MO_64 ? OPC_VMAXPD : OPC_VMAXPS;
-+        goto gen_simd;
-+    case INDEX_op_fcmp_vec:
-+        insn = vece == MO_64 ? OPC_VCMPPD : OPC_VCMPPS;
-+        sub = args[3];
-+        goto gen_simd_imm8;
-     gen_simd:
-         tcg_debug_assert(insn != OPC_UD2);
-         tcg_out_vex_modrm_type(s, insn, a0, a1, a2, type);
-@@ -3660,6 +3749,30 @@
-     case INDEX_op_sqrt_f64:
-     case INDEX_op_cvt_f64_f32:
-     case INDEX_op_cvt_f32_f64:
-+    case INDEX_op_sqrt_f32:
-+        return C_O1_I1(x, x);
-+    case INDEX_op_add_f32:
-+    case INDEX_op_sub_f32:
-+    case INDEX_op_mul_f32:
-+    case INDEX_op_div_f32:
-+        return C_O1_I2(x, x, x);
-+    case INDEX_op_cvt_i32_f32:
-+    case INDEX_op_cvt_i32_f64:
-+        return C_O1_I1(x, r);
-+    case INDEX_op_cvt_f32_i32:
-+    case INDEX_op_cvtt_f32_i32:
-+    case INDEX_op_cvt_f64_i32:
-+    case INDEX_op_cvtt_f64_i32:
-+        return C_O1_I1(r, x);
-+    case INDEX_op_fadd_vec:
-+    case INDEX_op_fsub_vec:
-+    case INDEX_op_fmul_vec:
-+    case INDEX_op_fdiv_vec:
-+    case INDEX_op_fmin_vec:
-+    case INDEX_op_fmax_vec:
-+    case INDEX_op_fcmp_vec:
-+        return C_O1_I2(x, x, x);
-+    case INDEX_op_fsqrt_vec:
-         return C_O1_I1(x, x);
- 
-     case INDEX_op_ld8u_i32:
-@@ -3934,6 +4047,15 @@
-     case INDEX_op_not_vec:
-     case INDEX_op_bitsel_vec:
-         return 1;
-+    case INDEX_op_fadd_vec:
-+    case INDEX_op_fsub_vec:
-+    case INDEX_op_fmul_vec:
-+    case INDEX_op_fdiv_vec:
-+    case INDEX_op_fsqrt_vec:
-+    case INDEX_op_fmin_vec:
-+    case INDEX_op_fmax_vec:
-+    case INDEX_op_fcmp_vec:
-+        return vece >= MO_32;
-     case INDEX_op_cmp_vec:
-     case INDEX_op_cmpsel_vec:
-         return -1;
+ #include "tcg-target-opc.h.inc"
+diff --git a/target/i386/cpu-dump.c b/target/i386/cpu-dump.c
+index 9e290c0b9b..12889c6dbd 100644
+--- a/target/i386/cpu-dump.c
++++ b/target/i386/cpu-dump.c
+@@ -522,6 +522,9 @@ void x86_cpu_dump_state(CPUState *cs, FILE *f, int flags)
+                      env->fpstt,
+                      fptag,
+                      env->mxcsr);
++        qemu_fprintf(f, "SSE-fast slow paths: guard=%" PRIu64 " handover=%" PRIu64
++                     " helper=%" PRIu64 " cvt/comis=%" PRIu64 "\n",
++                     env->sses_stat[0], env->sses_stat[1], env->sses_stat[2], env->sses_stat[3]);
+         for(i=0;i<8;i++) {
+             CPU_LDoubleU u;
+             u.d = env->fpregs[i].d;
+diff --git a/target/i386/cpu.c b/target/i386/cpu.c
+index bfb976e350..8b3dac6c9c 100644
+--- a/target/i386/cpu.c
++++ b/target/i386/cpu.c
+@@ -10791,6 +10791,7 @@ static const Property x86_cpu_properties[] = {
+     DEFINE_PROP_BOOL("check", X86CPU, check_cpuid, true),
+     DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
+     DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
++    DEFINE_PROP_BOOL("sse-fast", X86CPU, sse_fast, true),
+     DEFINE_PROP_BOOL("x-force-features", X86CPU, force_features, false),
+     DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
+     DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index eb5b59460c..eb257cd4b2 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -1794,6 +1794,16 @@
+@@ -2047,6 +2047,16 @@ typedef struct CPUArchState {
       * 0 otherwise. Derived from fpuc by update_fp_status(), not migrated.
       */
      uint8_t x87_fast_mode;
@@ -719,7 +192,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      /* shadow doubles of the x87 stack, relative slots (tcg/x87-shadow.c.inc) */
      uint64_t x87_sd[8];
  
-@@ -2103,6 +2113,8 @@
+@@ -2367,6 +2377,8 @@ struct ArchCPU {
      bool enforce_cpuid;
      /* x87 host-FPU fast path (target/i386/tcg/x87-fast.h) */
      bool x87_fast;
@@ -728,7 +201,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      /*
       * Force features to be enabled even if the host doesn't support them.
       * This is dangerous and should be done only for testing CPUID
-@@ -2544,6 +2556,9 @@
+@@ -2855,6 +2867,9 @@ static inline bool is_mmu_index_32(int mmu_index)
  /* TB flags (not hflags): x87 inline mode, env->x87_fast_mode (0, 1, 2) */
  #define TB_FLAG_X87_MODE_SHIFT  29
  #define TB_FLAG_X87_MODE_MASK   (3u << TB_FLAG_X87_MODE_SHIFT)
@@ -736,141 +209,26 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +#define TB_FLAG_SSE_FAST_SHIFT  31
 +#define TB_FLAG_SSE_FAST_MASK   (1u << TB_FLAG_SSE_FAST_SHIFT)
  
- static inline void cpu_get_tb_cpu_state(CPUX86State *env, vaddr *pc,
-                                         uint64_t *cs_base, uint32_t *flags)
-@@ -2551,6 +2566,10 @@
-     *flags = env->hflags |
-         (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK)) |
-         ((uint32_t)env->x87_fast_mode << TB_FLAG_X87_MODE_SHIFT);
-+    if (env->sse_fast_mode
-+        && (env->sse_status.float_exception_flags & float_flag_inexact)) {
-+        *flags |= TB_FLAG_SSE_FAST_MASK;
-+    }
-     if (env->hflags & HF_CS64_MASK) {
-         *cs_base = 0;
-         *pc = env->eip;
---- a/target/i386/cpu.c
-+++ b/target/i386/cpu.c
-@@ -8496,6 +8496,7 @@
-     DEFINE_PROP_BOOL("check", X86CPU, check_cpuid, true),
-     DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
-     DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
-+    DEFINE_PROP_BOOL("sse-fast", X86CPU, sse_fast, true),
-     DEFINE_PROP_BOOL("x-force-features", X86CPU, force_features, false),
-     DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
-     DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),
---- a/target/i386/cpu-dump.c
-+++ b/target/i386/cpu-dump.c
-@@ -496,6 +496,9 @@
-                      env->fpstt,
-                      fptag,
-                      env->mxcsr);
-+        qemu_fprintf(f, "SSE-fast slow paths: guard=%" PRIu64 " handover=%" PRIu64
-+                     " helper=%" PRIu64 " cvt/comis=%" PRIu64 "\n",
-+                     env->sses_stat[0], env->sses_stat[1], env->sses_stat[2], env->sses_stat[3]);
-         for(i=0;i<8;i++) {
-             CPU_LDoubleU u;
-             u.d = env->fpregs[i].d;
---- a/target/i386/tcg/fpu_helper.c
-+++ b/target/i386/tcg/fpu_helper.c
-@@ -3480,6 +3480,11 @@
+ void do_cpu_init(X86CPU *cpu);
  
-     /* set flush to zero */
-     set_flush_to_zero((mxcsr & SSE_FZ) ? 1 : 0, &env->sse_status);
-+
-+    /* tcg/sse-fast.c.inc: the host FPU can run this MXCSR verbatim */
-+    env->sse_fast_mode = env_archcpu(env)->sse_fast
-+        && (mxcsr & (SSE_RC_MASK | SSE_DAZ | SSE_FZ)) == 0
-+        && (mxcsr & 0x1f80) == 0x1f80;
- }
- 
- void update_mxcsr_from_sse_status(CPUX86State *env)
---- a/target/i386/tcg/translate.c
-+++ b/target/i386/tcg/translate.c
-@@ -99,6 +99,11 @@
-     bool cc_op_dirty;
-     TCGv fdp_addr;
-     int fdp_seg;
-+    /* SSE inline path (sse-fast.c.inc) */
-+    void *fn;                   /* helper to run out of line */
-+    uint8_t nargs;
-+    uint8_t reg_ot, reg_n;      /* integer destination (cvtss2si) */
-+    int off[3];                 /* env offsets of the vector operands */
- } X87SlowBlock;
- #define X87S_MAX_SLOW 96
- #define X87S_MAX_TMPS 96
-@@ -164,6 +169,11 @@
-     TCGv x87_fdp_addr;          /* last x87 memory operand (FDP), or NULL */
-     int x87_fdp_seg;
- 
-+    /* SSE inline state (sse-fast.c.inc); slow blocks share x87s_slow[] */
-+    bool sses_on;               /* TB translated with TB_FLAG_SSE_FAST */
-+    bool sses_guarded;          /* runtime guard emitted */
-+    bool sses_pending;          /* hand-over check due at the end of the insn */
-+
-     /* TCG local temps */
-     TCGv cc_srcT;
-     TCGv A0;
-@@ -298,6 +308,7 @@
- static void x87s_boundary(DisasContext *s);
- static void x87s_emit_slow_blocks(DisasContext *s);
- static void gen_x87_fip_fdp(DisasContext *s);
-+static void sses_emit_slow_block(DisasContext *s, struct X87SlowBlock *b);
- static void gen_jmp_rel_csize(DisasContext *s, int diff, int tb_num);
- static void gen_exception_gpf(DisasContext *s);
- 
-@@ -2459,8 +2470,27 @@
-     tcg_gen_qemu_st_i128(t, s->tmp0, mem_index, mop);
- }
- 
-+/* sse-fast.c.inc, used by emit.c.inc */
-+static bool sses_arith(DisasContext *s, X86DecodedInsn *decode, int op,
-+                       void *pd, void *ps, void *sd, void *ss);
-+static bool sses_cmp(DisasContext *s, X86DecodedInsn *decode, void *fn);
-+static bool sses_comis(DisasContext *s, X86DecodedInsn *decode, void *fn);
-+static bool sses_cvtsi2s(DisasContext *s, X86DecodedInsn *decode, TCGv_i32 in);
-+static bool sses_cvts2si(DisasContext *s, X86DecodedInsn *decode, bool trunc,
-+                         void *ss2si, void *sd2si);
-+static bool sses_cvt_ss_sd(DisasContext *s, X86DecodedInsn *decode,
-+                           bool to_double, void *fn);
-+static void sses_helper_done(DisasContext *s);
-+static void sses_emit_pending(DisasContext *s);
-+static void sses_end_tb(DisasContext *s);
-+enum {
-+    SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
-+    SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
-+};
-+
- #include "emit.c.inc"
- #include "x87-shadow.c.inc"
-+#include "sse-fast.c.inc"
- 
- static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
- {
-@@ -3837,6 +3867,10 @@
-     dc->x87s_ntmps = 0;
-     x87s_reset(dc);
-     dc->x87_fdp_addr = NULL;
-+    dc->sses_on = (flags & TB_FLAG_SSE_FAST_MASK) && tcg_f64_supported()
-+        && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
-+    dc->sses_guarded = false;
-+    dc->sses_pending = false;
-     /* select memory access functions */
-     dc->mem_index = cpu_mmu_index(cpu, false);
-     dc->cpuid_features = env->features[FEAT_1_EDX];
+diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
+index ff6db02d59..7de74194d8 100644
 --- a/target/i386/tcg/decode-new.c.inc
 +++ b/target/i386/tcg/decode-new.c.inc
-@@ -2885,6 +2885,7 @@
+@@ -3151,6 +3151,8 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
          assert(!!decode.cc_src == !!(cc_live & USES_CC_SRC));
          assert(!!decode.cc_src2 == !!(cc_live & USES_CC_SRC2));
      }
++    sses_track(s, &decode);
 +    sses_emit_pending(s);
  
      return;
   gp_fault:
+diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
+index a097e517d7..188d664008 100644
 --- a/target/i386/tcg/emit.c.inc
 +++ b/target/i386/tcg/emit.c.inc
-@@ -572,9 +572,16 @@
+@@ -561,9 +561,16 @@ static inline void gen_unary_fp_sse(DisasContext *s, X86DecodedInsn *decode,
          fn(tcg_env, OP_PTR0, OP_PTR2);
      }
  }
@@ -888,7 +246,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      gen_unary_fp_sse(s, decode,                                                    \
                       gen_helper_##lname##pd_xmm,                                   \
                       gen_helper_##lname##ps_xmm,                                   \
-@@ -582,8 +589,9 @@
+@@ -571,8 +578,9 @@ static void gen_##uname(DisasContext *s, X86DecodedInsn *decode)
                       gen_helper_##lname##ps_ymm,                                   \
                       gen_helper_##lname##sd,                                       \
                       gen_helper_##lname##ss);                                      \
@@ -899,7 +257,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  
  /*
   * 00 = v*ps Vps, Hps, Wpd
-@@ -611,9 +619,16 @@
+@@ -600,9 +608,16 @@ static inline void gen_fp_sse(DisasContext *s, X86DecodedInsn *decode,
      }
  }
  
@@ -917,7 +275,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      gen_fp_sse(s, decode,                                                          \
                 gen_helper_##lname##pd_xmm,                                         \
                 gen_helper_##lname##ps_xmm,                                         \
-@@ -621,13 +636,14 @@
+@@ -610,13 +625,14 @@ static void gen_##uname(DisasContext *s, X86DecodedInsn *decode)
                 gen_helper_##lname##ps_ymm,                                         \
                 gen_helper_##lname##sd,                                             \
                 gen_helper_##lname##ss);                                            \
@@ -938,7 +296,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  
  #define FMA_SSE_PACKED(uname, ptr0, ptr1, ptr2, even, odd)                         \
  static void gen_##uname##Px(DisasContext *s, X86DecodedInsn *decode)               \
-@@ -717,16 +733,20 @@
+@@ -706,16 +722,20 @@ static inline void gen_unary_fp32_sse(DisasContext *s, X86DecodedInsn *decode,
  illegal_op:
      gen_illegal_opcode(s);
  }
@@ -962,7 +320,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  
  /*
   * 66 = v*pd Vpd, Hpd, Wpd
-@@ -2009,8 +2029,8 @@
+@@ -2042,8 +2062,8 @@ static void gen_FXRSTOR(DisasContext *s, X86DecodedInsn *decode)
      } else {
          x87s_boundary(s);
          gen_helper_fxrstor(tcg_env, s->A0);
@@ -973,15 +331,15 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
          }
      }
  }
-@@ -2355,6 +2375,7 @@
- {
-     tcg_gen_trunc_tl_i32(s->tmp2_i32, s->T0);
-     gen_helper_ldmxcsr(tcg_env, s->tmp2_i32);
+@@ -2372,6 +2392,7 @@ static void gen_LDMXCSR(DisasContext *s, X86DecodedInsn *decode)
+ 
+     tcg_gen_trunc_tl_i32(tmp, s->T0);
+     gen_helper_ldmxcsr(tcg_env, tmp);
 +    sses_end_tb(s);
  }
  
  static void gen_lxx_seg(DisasContext *s, X86DecodedInsn *decode, int seg)
-@@ -4210,6 +4231,9 @@
+@@ -4267,6 +4288,9 @@ static void gen_VCMP(DisasContext *s, X86DecodedInsn *decode)
          s->prefix & PREFIX_REPNZ ? 3 /* sd */ :
          !!(s->prefix & PREFIX_DATA) /* pd */ + (s->vex_l << 2);
  
@@ -991,7 +349,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      gen_helper_cmp_funcs[index][b](tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
  }
  
-@@ -4217,6 +4241,9 @@
+@@ -4274,6 +4298,9 @@ static void gen_VCOMI(DisasContext *s, X86DecodedInsn *decode)
  {
      SSEFunc_0_epp fn;
      fn = s->prefix & PREFIX_DATA ? gen_helper_comisd : gen_helper_comiss;
@@ -1001,7 +359,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      fn(tcg_env, OP_PTR1, OP_PTR2);
      assume_cc_op(s, CC_OP_EFLAGS);
  }
-@@ -4255,11 +4282,18 @@
+@@ -4312,11 +4339,18 @@ static void gen_VCVTPS2PH(DisasContext *s, X86DecodedInsn *decode)
  
  static void gen_VCVTSD2SS(DisasContext *s, X86DecodedInsn *decode)
  {
@@ -1020,7 +378,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      gen_helper_cvtss2sd(tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
  }
  
-@@ -4286,11 +4320,15 @@
+@@ -4343,11 +4377,15 @@ static void gen_VCVTSI2Sx(DisasContext *s, X86DecodedInsn *decode)
      in = s->T1;
  #endif
  
@@ -1036,7 +394,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  }
  
  static inline void gen_VCVTtSx2SI(DisasContext *s, X86DecodedInsn *decode,
-@@ -4314,6 +4352,10 @@
+@@ -4371,6 +4409,10 @@ static inline void gen_VCVTtSx2SI(DisasContext *s, X86DecodedInsn *decode,
  #else
      out = s->T0;
  #endif
@@ -1047,7 +405,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      if (s->prefix & PREFIX_REPNZ) {
          sd2si(out, tcg_env, OP_PTR2);
      } else {
-@@ -4322,6 +4364,7 @@
+@@ -4379,6 +4421,7 @@ static inline void gen_VCVTtSx2SI(DisasContext *s, X86DecodedInsn *decode,
  #ifdef TARGET_X86_64
      tcg_gen_extu_i32_tl(s->T0, out);
  #endif
@@ -1055,7 +413,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
  }
  
  #ifndef TARGET_X86_64
-@@ -4604,6 +4647,9 @@
+@@ -4682,6 +4725,9 @@ static void gen_VUCOMI(DisasContext *s, X86DecodedInsn *decode)
  {
      SSEFunc_0_epp fn;
      fn = s->prefix & PREFIX_DATA ? gen_helper_ucomisd : gen_helper_ucomiss;
@@ -1065,7 +423,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      fn(tcg_env, OP_PTR1, OP_PTR2);
      assume_cc_op(s, CC_OP_EFLAGS);
  }
-@@ -4734,8 +4780,8 @@
+@@ -4812,8 +4858,8 @@ static void gen_XRSTOR(DisasContext *s, X86DecodedInsn *decode)
      tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
      x87s_boundary(s);
      gen_helper_xrstor(tcg_env, s->A0, features);
@@ -1076,37 +434,325 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
      }
      if (s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_MPX) {
          /*
---- a/target/i386/tcg/x87-shadow.c.inc
-+++ b/target/i386/tcg/x87-shadow.c.inc
-@@ -87,6 +87,13 @@
-     X87S_SLOW_FSQRT,
-     X87S_SLOW_FRNDINT,
-     X87S_SLOW_FILD,
-+    /* sse-fast.c.inc */
-+    SSES_SLOW_FIRST,
-+    SSES_SLOW_GUARD = SSES_SLOW_FIRST,
-+    SSES_SLOW_EXIT_NEXT,
-+    SSES_SLOW_HELPER,
-+    SSES_SLOW_CVT2SI,
-+    SSES_SLOW_COMIS,
- };
+diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
+index 7da73602af..1a2c6ed87e 100644
+--- a/target/i386/tcg/fpu_helper.c
++++ b/target/i386/tcg/fpu_helper.c
+@@ -3522,6 +3522,11 @@ void update_mxcsr_status(CPUX86State *env)
  
- QEMU_BUILD_BUG_ON(sizeof(FPReg) != 16);
-@@ -703,6 +710,11 @@
-             x87s_free_tmps(s);
-             continue;
-         }
-+        if (b->kind >= SSES_SLOW_FIRST) {
-+            sses_emit_slow_block(s, b);
-+            x87s_free_tmps(s);
-+            continue;
+     /* set flush to zero */
+     set_flush_to_zero((mxcsr & SSE_FZ) ? 1 : 0, &env->sse_status);
++
++    /* tcg/sse-fast.c.inc: the host FPU can run this MXCSR verbatim */
++    env->sse_fast_mode = env_archcpu(env)->sse_fast
++        && (mxcsr & (SSE_RC_MASK | SSE_DAZ | SSE_FZ)) == 0
++        && (mxcsr & 0x1f80) == 0x1f80;
+ }
+ 
+ void update_mxcsr_from_sse_status(CPUX86State *env)
+diff --git a/target/i386/tcg/sse-fast-lane.c.inc b/target/i386/tcg/sse-fast-lane.c.inc
+new file mode 100644
+index 0000000000..fcdcb3077c
+--- /dev/null
++++ b/target/i386/tcg/sse-fast-lane.c.inc
+@@ -0,0 +1,291 @@
++/*
++ * SSE inline fast path, per-lane code for one element width.
++ * Included twice from sse-fast.c.inc with W = 32 and W = 64. The
++ * conditions are documented there.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#define TCGv_iW         glue(TCGv_i, W)
++#define TMP()           glue(x87s_tmp_i, W)(s)
++#define OPW(name)       glue(glue(tcg_gen_, name), glue(_i, W))
++#define FPW(name)       glue(glue(tcg_gen_, name), glue(_f, W))
++#define CONSTW(v)       glue(tcg_constant_i, W)(v)
++#define LANEFN(name)    glue(glue(sses_, name), glue(_, W))
++
++#if W == 32
++#define LANE(i)         offsetof(ZMMReg, ZMM_L(i))
++#define NAN_LIMIT       0xff000000u             /* x << 1: >= exp all ones, > NaN */
++#define EXP_MASK        0x7f800000u
++#define EXP_LO          0x01000000u             /* exponent field 2 */
++#define EXP_RANGE       0x7e800000u             /* fields 2 .. 254 */
++#define ONE_BITS        0x3f800000u
++#define TO_I32(d, x)    tcg_gen_mov_i32(d, x)
++#define VIEW            SSES_K_SS
++#else
++#define LANE(i)         offsetof(ZMMReg, ZMM_Q(i))
++#define NAN_LIMIT       0xffe0000000000000ull
++#define EXP_MASK        0x7ff0000000000000ull
++#define EXP_LO          0x0020000000000000ull
++#define EXP_RANGE       0x7fd0000000000000ull   /* fields 2 .. 2046 */
++#define ONE_BITS        0x3ff0000000000000ull
++#define TO_I32(d, x)    tcg_gen_extrl_i64_i32(d, x)
++#define VIEW            SSES_K_SD
++#endif
++
++/*
++ * "r is an acceptable fast-path result": a branch to `slow` if not, or,
++ * with `z`, ok &= it (ok NULL: returned). `z` is nonzero unless the
++ * result is an exact zero for the reason the fast path allows (an operand
++ * of a multiply, the dividend of a divide, is zero); NULL: no such case.
++ */
++static TCGv_iW LANEFN(check)(DisasContext *s, TCGv_iW ok, TCGv_iW r,
++                             TCGv_iW z, bool normal_only, TCGLabel *slow)
++{
++    TCGv_iW e = TMP();
++    TCGv_iW t = TMP();
++    TCGv_iW okl, pz;
++
++    if (!normal_only) {
++        /* exponent field not all ones: no NaN, infinity or overflow */
++        OPW(shli)(e, r, 1);
++        OPW(brcondi)(TCG_COND_GEU, e, NAN_LIMIT, slow);
++        return ok;
++    }
++    /* exponent field in [2, max - 1], or an allowed exact zero */
++    OPW(andi)(e, r, EXP_MASK);
++    OPW(subi)(t, e, EXP_LO);
++    if (!z) {
++        OPW(brcondi)(TCG_COND_GEU, t, EXP_RANGE, slow);
++        return ok;
++    }
++    okl = TMP();
++    pz = TMP();
++    OPW(setcondi)(TCG_COND_LTU, okl, t, EXP_RANGE);
++    OPW(setcondi)(TCG_COND_EQ, pz, z, 0);
++    OPW(setcondi)(TCG_COND_NE, t, e, EXP_MASK);   /* not 0 * inf */
++    OPW(and)(pz, pz, t);
++    OPW(or)(okl, okl, pz);
++    if (ok) {
++        OPW(and)(ok, ok, okl);
++        return ok;
++    }
++    return okl;
++}
++
++/*
++ * To `slow` if x is a denormal: with t = x << 1, t in [1, EXP_LO - 1],
++ * EXP_LO being the first normal exponent field in that space too. Since
++ * QEMU 10.1 softfloat raises DE on a denormal operand. A branch of its
++ * own costs less than a setcond folded into the lane's `ok`.
++ */
++static void LANEFN(denorm_br)(DisasContext *s, TCGv_iW x, TCGLabel *slow)
++{
++    TCGv_iW t = TMP();
++
++    OPW(shli)(t, x, 1);
++    OPW(subi)(t, t, 1);
++    OPW(brcondi)(TCG_COND_LTU, t, EXP_LO - 1, slow);
++}
++
++/* r = a op b (unary ops: b), see the table in sse-fast.c.inc */
++static TCGv_iW LANEFN(arith)(DisasContext *s, int op, TCGv_iW r,
++                             TCGv_iW a, TCGv_iW b, TCGv_iW ok,
++                             TCGLabel *slow)
++{
++    TCGv_iW z = TMP();
++    TCGv_iW t;
++
++    switch (op) {
++    case SSES_ADD:
++        FPW(add)(r, a, b);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
++    case SSES_SUB:
++        FPW(sub)(r, a, b);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
++    case SSES_SQRT:
++        FPW(sqrt)(r, b);
++        return LANEFN(check)(s, ok, r, NULL, false, slow);
++    case SSES_MUL:
++        FPW(mul)(r, a, b);
++        t = TMP();
++        OPW(shli)(z, a, 1);
++        OPW(shli)(t, b, 1);
++        OPW(umin)(z, z, t);                     /* zero iff a or b is zero */
++        return LANEFN(check)(s, ok, r, z, true, slow);
++    case SSES_DIV:
++        FPW(div)(r, a, b);
++        OPW(shli)(z, a, 1);                     /* zero iff the dividend is zero */
++        return LANEFN(check)(s, ok, r, z, true, slow);
++    case SSES_RCP:
++        FPW(div)(r, CONSTW(ONE_BITS), b);
++        return LANEFN(check)(s, ok, r, NULL, true, slow);
++    case SSES_RSQRT:
++        t = TMP();
++        FPW(sqrt)(t, b);
++        FPW(div)(r, CONSTW(ONE_BITS), t);
++        return LANEFN(check)(s, ok, r, NULL, true, slow);
++    default:
++        g_assert_not_reached();
++    }
++}
++
++/* total-order key of a non-NaN value (t = x << 1): -0 -> +0, negatives flipped */
++static void LANEFN(key)(DisasContext *s, TCGv_iW k, TCGv_iW x, TCGv_iW t)
++{
++    TCGv_iW zero = CONSTW(0);
++    TCGv_iW c = TMP();
++    TCGv_iW sgn = TMP();
++
++    OPW(movcond)(TCG_COND_EQ, c, t, zero, zero, x);
++    OPW(sari)(sgn, c, W - 1);
++    OPW(shri)(sgn, sgn, 1);
++    OPW(xor)(k, c, sgn);
++}
++
++/* to `slow` if a or b is a NaN; ka, kb = their keys */
++static void LANEFN(keys)(DisasContext *s, TCGv_iW ka, TCGv_iW kb,
++                         TCGv_iW a, TCGv_iW b, TCGLabel *slow)
++{
++    TCGv_iW ta = TMP();
++    TCGv_iW tb = TMP();
++    TCGv_iW m = TMP();
++
++    OPW(shli)(ta, a, 1);
++    OPW(shli)(tb, b, 1);
++    OPW(umax)(m, ta, tb);
++    OPW(brcondi)(TCG_COND_GTU, m, NAN_LIMIT, slow);
++    LANEFN(key)(s, ka, a, ta);
++    LANEFN(key)(s, kb, b, tb);
++}
++
++/* comis/ucomis: cc = CC_Z (equal) | CC_C (less), other flags clear */
++static void LANEFN(comis)(DisasContext *s, X86DecodedInsn *decode,
++                          TCGv_i32 cc, TCGv_iW a, TCGv_iW b, TCGLabel *slow)
++{
++    TCGv_iW ka = TMP();
++    TCGv_iW kb = TMP();
++    TCGv_iW eq = TMP();
++    TCGv_iW lt = TMP();
++    TCGv_iW t = TMP();
++
++    LANEFN(keys)(s, ka, kb, a, b, slow);
++    for (int i = 1; i <= 2; i++) {
++        if (!sses_known(s, &decode->op[i], VIEW)) {
++            LANEFN(denorm_br)(s, i == 1 ? a : b, slow);
++            sses_mark(s, &decode->op[i], VIEW);
 +        }
-         x87s_flush_code(s);
-         switch (b->kind) {
-         case X87S_SLOW_ARITH_MEM:
++    }
++    s->sses_tracked = true;
++    OPW(setcond)(TCG_COND_EQ, eq, ka, kb);
++    OPW(setcond)(TCG_COND_LT, lt, ka, kb);
++    OPW(movcond)(TCG_COND_NE, t, eq, CONSTW(0), CONSTW(CC_Z), CONSTW(0));
++    OPW(movcond)(TCG_COND_NE, lt, lt, CONSTW(0), CONSTW(CC_C), CONSTW(0));
++    OPW(or)(t, t, lt);
++    TO_I32(cc, t);
++}
++
++/* min: lt(a, b) ? a : b; max: lt(b, a) ? a : b (Intel's operand order rules) */
++static void LANEFN(minmax)(DisasContext *s, bool max, TCGv_iW r,
++                           TCGv_iW a, TCGv_iW b, TCGLabel *slow)
++{
++    TCGv_iW ka = TMP();
++    TCGv_iW kb = TMP();
++    TCGv_iW lt = TMP();
++
++    LANEFN(keys)(s, ka, kb, a, b, slow);
++    if (max) {
++        OPW(setcond)(TCG_COND_LT, lt, kb, ka);
++    } else {
++        OPW(setcond)(TCG_COND_LT, lt, ka, kb);
++    }
++    OPW(movcond)(TCG_COND_NE, r, lt, CONSTW(0), a, b);
++}
++
++/* cmpps predicate 0..7: eq lt le unord neq nlt nle ord -> all-ones / 0 */
++static void LANEFN(cmp)(DisasContext *s, int pred, TCGv_iW r,
++                        TCGv_iW a, TCGv_iW b, TCGLabel *slow)
++{
++    static const TCGCond conds[8] = {
++        TCG_COND_EQ, TCG_COND_LT, TCG_COND_LE, TCG_COND_NEVER,
++        TCG_COND_NE, TCG_COND_GE, TCG_COND_GT, TCG_COND_ALWAYS,
++    };
++    TCGv_iW ka = TMP();
++    TCGv_iW kb = TMP();
++
++    LANEFN(keys)(s, ka, kb, a, b, slow);
++    if (pred == 3) {
++        OPW(movi)(r, 0);
++    } else if (pred == 7) {
++        OPW(movi)(r, -1);
++    } else {
++        OPW(setcond)(conds[pred], r, ka, kb);
++        OPW(neg)(r, r);
++    }
++}
++
++/*
++ * The scalar form of an arithmetic, min/max or compare instruction: lane
++ * 0 of op[0] = op[1] op op[2] (unary: op[2]) in general registers, each
++ * check a branch to the slow block, all before the store.
++ */
++static void LANEFN(scalar)(DisasContext *s, X86DecodedInsn *decode, int op,
++                           int pred, TCGLabel *slow)
++{
++    bool unary = op == SSES_SQRT || op == SSES_RCP || op == SSES_RSQRT;
++    int d = vector_reg_offset(&decode->op[0]);
++    int src = vector_reg_offset(&decode->op[2]);
++    TCGv_iW a = NULL;
++    TCGv_iW b = TMP();
++    TCGv_iW r = TMP();
++    TCGv_iW ok = NULL;
++
++    OPW(ld)(b, tcg_env, src + LANE(0));
++    if (!unary) {
++        a = TMP();
++        OPW(ld)(a, tcg_env, vector_reg_offset(&decode->op[1]) + LANE(0));
++    }
++    switch (op) {
++    case SSES_MIN:
++    case SSES_MAX:
++        LANEFN(minmax)(s, op == SSES_MAX, r, a, b, slow);
++        break;
++    case SSES_CMP:
++        LANEFN(cmp)(s, pred, r, a, b, slow);
++        break;
++    default:
++        ok = LANEFN(arith)(s, op, r, a, b, NULL, slow);
++        break;
++    }
++    if (ok) {
++        OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
++    }
++    if (op != SSES_RCP && op != SSES_RSQRT) {   /* those restore the flags */
++        if (!sses_known(s, &decode->op[2], VIEW)) {
++            LANEFN(denorm_br)(s, b, slow);
++            sses_mark(s, &decode->op[2], VIEW);
++        }
++        if (!unary && !sses_known(s, &decode->op[1], VIEW)) {
++            LANEFN(denorm_br)(s, a, slow);
++            sses_mark(s, &decode->op[1], VIEW);
++        }
++    }
++    sses_dest(s, &decode->op[0], VIEW, op != SSES_ADD && op != SSES_SUB);
++    OPW(st)(r, tcg_env, d + LANE(0));
++}
++
++#undef TCGv_iW
++#undef TMP
++#undef OPW
++#undef FPW
++#undef CONSTW
++#undef LANEFN
++#undef LANE
++#undef NAN_LIMIT
++#undef EXP_MASK
++#undef EXP_LO
++#undef EXP_RANGE
++#undef ONE_BITS
++#undef TO_I32
++#undef VIEW
++#undef W
+diff --git a/target/i386/tcg/sse-fast.c.inc b/target/i386/tcg/sse-fast.c.inc
+new file mode 100644
+index 0000000000..ef978ee014
 --- /dev/null
 +++ b/target/i386/tcg/sse-fast.c.inc
-@@ -0,0 +1,703 @@
+@@ -0,0 +1,866 @@
 +/*
 + * SSE inline fast path: scalar and packed binary32/binary64 arithmetic,
 + * compares and int conversions on the host FPU, emitted inline by TCG
@@ -1131,8 +777,11 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 + * a fast TB re-executes it from a correctly translated block if the
 + * state does not match (it cannot, unless a clearing site was missed).
 + *
-+ * Fast conditions (softfloat with DAZ/FTZ off: denormal operands raise
-+ * nothing and are exact):
++ * Fast conditions (softfloat with DAZ/FTZ off). Denormal operands are
++ * exact, but since QEMU 10.1 (57df511180) softfloat raises DE when it
++ * consumes one, so every operation below but rcp/rsqrt (whose helpers
++ * restore the flags) and the int32 conversions (which raise no DE, as on
++ * the hardware) also needs no denormal operand:
 + *   add, sub, sqrt      result exponent field not all ones (no NaN, inf,
 + *                       overflow); a tiny add/sub result is exact and
 + *                       sqrt cannot underflow
@@ -1152,6 +801,9 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 + *                       rounding; softfloat gives 0x80000000 + IE)
 + *   cvt from int32      always (PE only)
 + *   cvtss2sd            result not NaN/inf (an SNaN input raises IE)
++ * The denormal checks are skipped for a register already known to hold
++ * none (sses_clean): one that passed a check earlier in the TB, or the
++ * result of an instruction that cannot produce one.
 + * Everything else takes the slow block of the instruction: the helper
 + * and a TB exit to the next instruction, as x87-shadow does. Legacy SSE
 + * encodings only (VEX forms take the helpers). The slow blocks share the
@@ -1159,11 +811,6 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 + *
 + * SPDX-License-Identifier: GPL-2.0-or-later
 + */
-+
-+#define W 32
-+#include "sse-fast-lane.c.inc"
-+#define W 64
-+#include "sse-fast-lane.c.inc"
 +
 +/* room for the instruction's slow block and the guard */
 +static bool sses_admissible(DisasContext *s)
@@ -1178,8 +825,13 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +    TCGv_i32 f = x87s_tmp_i32(s);
 +
 +    tcg_gen_ld8u_i32(t, tcg_env, offsetof(CPUX86State, sse_fast_mode));
-+    tcg_gen_ld16u_i32(f, tcg_env,
-+                      offsetof(CPUX86State, sse_status.float_exception_flags));
++    /*
++     * float_exception_flags is a 16-bit bit-field since QEMU 11.1
++     * (8c86fe2451), and the first one of float_status: on a little-endian
++     * host, the low 16 bits at the struct's own offset.
++     */
++    QEMU_BUILD_BUG_ON(HOST_BIG_ENDIAN);
++    tcg_gen_ld16u_i32(f, tcg_env, offsetof(CPUX86State, sse_status));
 +    tcg_gen_shri_i32(f, f, ctz32(float_flag_inexact));
 +    tcg_gen_and_i32(t, t, f);
 +}
@@ -1241,6 +893,110 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +        s->base.is_jmp = DISAS_EOB_NEXT;
 +    }
 +}
++
++/*
++ * Registers known to hold no denormal at this point of the TB, so their
++ * DE checks can be left out: s->sses_clean[k], bit n for xmm n, k one of
++ * the four views below (a full view implies its lane 0). A register gets
++ * a bit when it passes a check (a failure leaves the TB) or receives a
++ * result that cannot be a denormal (mul, div, sqrt, rcp, rsqrt, min, max,
++ * a compare mask, a conversion); any other write clears it (sses_track).
++ */
++enum { SSES_K_PS, SSES_K_SS, SSES_K_PD, SSES_K_SD };
++
++static int sses_view(bool dbl, bool scalar)
++{
++    return (dbl ? SSES_K_PD : SSES_K_PS) + scalar;
++}
++
++static bool sses_is_reg(X86DecodedOp *op)
++{
++    return op->unit == X86_OP_SSE && !op->has_ea;
++}
++
++static bool sses_known(DisasContext *s, X86DecodedOp *op, int k)
++{
++    return sses_is_reg(op) && (s->sses_clean[k] >> op->n & 1);
++}
++
++/* op passed a denormal check in view k */
++static void sses_mark(DisasContext *s, X86DecodedOp *op, int k)
++{
++    if (sses_is_reg(op)) {
++        s->sses_clean[k] |= 1 << op->n;
++        s->sses_clean[k | 1] |= 1 << op->n;
++    }
++}
++
++/*
++ * op (op[0]) written in view k with a result that is `clean` or may be a
++ * denormal. A scalar write keeps the register's other lanes, so its full
++ * view survives a clean lane 0; the other element width changes.
++ */
++static void sses_dest(DisasContext *s, X86DecodedOp *op, int k, bool clean)
++{
++    uint16_t bit = 1 << op->n;
++    int other = k & 2 ? SSES_K_PS : SSES_K_PD;
++
++    assert(sses_is_reg(op));
++    if (clean) {
++        s->sses_clean[k] |= bit;
++        if (!(k & 1)) {
++            s->sses_clean[k | 1] |= bit;
++        }
++    } else {
++        s->sses_clean[k & 2] &= ~bit;
++        s->sses_clean[k | 1] &= ~bit;
++    }
++    s->sses_clean[other] &= ~bit;
++    s->sses_clean[other | 1] &= ~bit;
++    s->sses_tracked = true;
++}
++
++/*
++ * At the end of every instruction: one the fast path did not handle
++ * forgets every register if it has an SSE operand or a VEX prefix
++ * (implicit writes included), except a register-to-register move, which
++ * carries the bits over. Whatever else writes xmm registers (fxrstor,
++ * xrstor) ends the TB.
++ */
++static void sses_track(DisasContext *s, X86DecodedInsn *decode)
++{
++    int i;
++
++    if (s->sses_tracked) {
++        s->sses_tracked = false;
++        return;
++    }
++    if (decode->e.gen == gen_MOVDQ) {
++        X86DecodedOp *d = &decode->op[0], *src = &decode->op[2];
++
++        if (sses_is_reg(d)) {
++            for (i = 0; i < ARRAY_SIZE(s->sses_clean); i++) {
++                s->sses_clean[i] &= ~(1 << d->n);
++                if (sses_is_reg(src)) {
++                    s->sses_clean[i] |= (s->sses_clean[i] >> src->n & 1) << d->n;
++                }
++            }
++        }
++        return;
++    }
++    if (s->prefix & PREFIX_VEX) {
++        memset(s->sses_clean, 0, sizeof(s->sses_clean));
++        return;
++    }
++    for (i = 0; i < 3; i++) {
++        if (decode->op[i].unit == X86_OP_SSE) {
++            memset(s->sses_clean, 0, sizeof(s->sses_clean));
++            return;
++        }
++    }
++}
++
++#define W 32
++#include "sse-fast-lane.c.inc"
++#define W 64
++#include "sse-fast-lane.c.inc"
 +
 +static X87SlowBlock *sses_slow(DisasContext *s, X86DecodedInsn *decode,
 +                               int kind, void *fn, int nargs)
@@ -1319,11 +1075,17 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +/* ------------------------------------------------------------------ */
 +/* vector path: arithmetic, min/max and compares, all lanes or lane 0    */
 +
++/*
++ * The vector checks compare |x| (x with its sign bit cleared, so never
++ * negative) in signed order: hosts have signed vector compares natively,
++ * where an unsigned one costs a bias or a min/max fixup (x86 without
++ * AVX-512 pays three or four extra instructions per compare).
++ */
 +typedef struct SSESVec {
 +    TCGType type;
 +    unsigned vece;
-+    uint64_t nan_limit;         /* x << 1 above this: NaN; at or above: exp all ones */
-+    uint64_t exp_mask, exp_lo, exp_range;   /* fields 2 .. max - 1 */
++    uint64_t abs_mask;          /* every bit but the sign */
++    uint64_t exp_mask, exp_lo;  /* exponent field all ones; field 2 */
 +    uint64_t one;
 +    TCGv_vec tmps[24];
 +    int ntmps;
@@ -1335,17 +1097,15 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +    v->ntmps = 0;
 +    if (dbl) {
 +        v->vece = MO_64;
-+        v->nan_limit = 0xffe0000000000000ull;
++        v->abs_mask = 0x7fffffffffffffffull;
 +        v->exp_mask = 0x7ff0000000000000ull;
 +        v->exp_lo = 0x0020000000000000ull;
-+        v->exp_range = 0x7fd0000000000000ull;
 +        v->one = 0x3ff0000000000000ull;
 +    } else {
 +        v->vece = MO_32;
-+        v->nan_limit = 0xff000000u;
++        v->abs_mask = 0x7fffffffu;
 +        v->exp_mask = 0x7f800000u;
 +        v->exp_lo = 0x01000000u;
-+        v->exp_range = 0x7e800000u;
 +        v->one = 0x3f800000u;
 +    }
 +}
@@ -1374,6 +1134,15 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +    return tcg_constant_vec(v->type, v->vece, c);
 +}
 +
++/* |x| */
++static TCGv_vec sses_vabs(SSESVec *v, TCGv_vec x)
++{
++    TCGv_vec t = sses_vtmp(v);
++
++    tcg_gen_and_vec(v->vece, t, x, sses_vconst(v, v->abs_mask));
++    return t;
++}
++
 +/*
 + * Lanes whose result is acceptable, all ones. `pz`: lanes where an exact
 + * zero result is allowed (a factor / the dividend is zero), or NULL.
@@ -1381,24 +1150,51 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +static TCGv_vec sses_vcheck(SSESVec *v, TCGv_vec r, TCGv_vec pz, bool normal_only)
 +{
 +    unsigned vece = v->vece;
++    TCGv_vec e = sses_vabs(v, r);
 +    TCGv_vec ok = sses_vtmp(v);
-+    TCGv_vec t = sses_vtmp(v);
++    TCGv_vec t;
++    uint64_t k;
 +
 +    if (!normal_only) {
-+        tcg_gen_shli_vec(vece, t, r, 1);
-+        tcg_gen_cmp_vec(TCG_COND_LTU, vece, ok, t, sses_vconst(v, v->nan_limit));
-+    } else {
-+        TCGv_vec e = sses_vtmp(v);
-+
-+        tcg_gen_and_vec(vece, e, r, sses_vconst(v, v->exp_mask));
-+        tcg_gen_sub_vec(vece, t, e, sses_vconst(v, v->exp_lo));
-+        tcg_gen_cmp_vec(TCG_COND_LTU, vece, ok, t, sses_vconst(v, v->exp_range));
-+        if (pz) {
-+            tcg_gen_cmp_vec(TCG_COND_NE, vece, t, e, sses_vconst(v, v->exp_mask));
-+            tcg_gen_and_vec(vece, t, t, pz);
-+            tcg_gen_or_vec(vece, ok, ok, t);
-+        }
++        /* exponent field not all ones: no NaN, infinity or overflow */
++        tcg_gen_cmp_vec(TCG_COND_LT, vece, ok, e, sses_vconst(v, v->exp_mask));
++        return ok;
 +    }
++    /*
++     * |r| in [exp_lo, exp_mask): adding k = sign bit - exp_mask wraps
++     * [exp_mask, sign bit) (infinity, NaN) to negative and leaves the
++     * rest in order, so one compare against exp_lo + k - 1.
++     */
++    t = sses_vtmp(v);
++    k = (1ull << ((8 << vece) - 1)) - v->exp_mask;
++    tcg_gen_add_vec(vece, t, e, sses_vconst(v, k));
++    tcg_gen_cmp_vec(TCG_COND_GT, vece, ok, t, sses_vconst(v, v->exp_lo + k - 1));
++    if (pz) {
++        tcg_gen_cmp_vec(TCG_COND_LT, vece, t, e, sses_vconst(v, v->exp_mask));
++        tcg_gen_and_vec(vece, t, t, pz);        /* not 0 * inf */
++        tcg_gen_or_vec(vece, ok, ok, t);
++    }
++    return ok;
++}
++
++/*
++ * ok with the lanes where x is a denormal cleared. With t = x << 1 a
++ * denormal is t in [1, exp_lo - 1]; adding k = sign bit - exp_lo moves
++ * that range, and only it, above k in signed order (zero lands on k, the
++ * rest wraps to [sign bit, k - 1]): one signed compare, which hosts have
++ * natively, where an unsigned one costs a bias or min/max fixup (x86
++ * without AVX-512).
++ */
++static TCGv_vec sses_vnodenorm(SSESVec *v, TCGv_vec ok, TCGv_vec x)
++{
++    unsigned vece = v->vece;
++    TCGv_vec t = sses_vtmp(v);
++    TCGv_vec k = sses_vconst(v, (1ull << ((8 << vece) - 1)) - v->exp_lo);
++
++    tcg_gen_shli_vec(vece, t, x, 1);
++    tcg_gen_add_vec(vece, t, t, k);
++    tcg_gen_cmp_vec(TCG_COND_GT, vece, t, t, k);
++    tcg_gen_andc_vec(vece, ok, ok, t);
 +    return ok;
 +}
 +
@@ -1431,51 +1227,39 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +    return k;
 +}
 +
-+/* ok = lanes with no NaN operand; keys of both operands */
-+static TCGv_vec sses_vkeys(SSESVec *v, TCGv_vec a, TCGv_vec b,
-+                           TCGv_vec *ka, TCGv_vec *kb)
-+{
-+    unsigned vece = v->vece;
-+    TCGv_vec ta, tb;
-+    TCGv_vec za = sses_vzero(v, a, &ta);
-+    TCGv_vec zb = sses_vzero(v, b, &tb);
-+    TCGv_vec na = sses_vtmp(v);
-+    TCGv_vec nb = sses_vtmp(v);
-+    TCGv_vec ok = sses_vtmp(v);
-+
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, na, ta, sses_vconst(v, v->nan_limit));
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, nb, tb, sses_vconst(v, v->nan_limit));
-+    tcg_gen_or_vec(vece, ok, na, nb);
-+    tcg_gen_not_vec(vece, ok, ok);
-+    *ka = sses_vkey(v, a, za);
-+    *kb = sses_vkey(v, b, zb);
-+    return ok;
-+}
-+
-+/*
-+ * ok = lanes with no NaN operand, without the total-order key transform:
-+ * for use with the native minps/maxps/cmpps opcodes (tcg_fp_minmax_vec_
-+ * supported() / tcg_fp_cmp_vec_supported()), which already implement
-+ * the guest's own -0/+0 tie-break and NaN-operand-selection rules
-+ * exactly (same host ISA as the guest here), so sses_vkeys's key
-+ * computation -- needed only to give cmp_vec's integer compare a
-+ * monotonic float ordering -- is dead weight on this path.
-+ */
++/* ok = lanes with no NaN operand: |a| and |b| at most exp_mask */
 +static TCGv_vec sses_vnan_ok(SSESVec *v, TCGv_vec a, TCGv_vec b)
 +{
 +    unsigned vece = v->vece;
-+    TCGv_vec ta = sses_vtmp(v);
-+    TCGv_vec tb = sses_vtmp(v);
-+    TCGv_vec na = sses_vtmp(v);
-+    TCGv_vec nb = sses_vtmp(v);
-+    TCGv_vec ok = sses_vtmp(v);
++    TCGv_vec lim = sses_vconst(v, v->exp_mask + 1);
++    TCGv_vec ta = sses_vabs(v, a);
++    TCGv_vec tb = sses_vabs(v, b);
 +
-+    tcg_gen_shli_vec(vece, ta, a, 1);
-+    tcg_gen_shli_vec(vece, tb, b, 1);
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, na, ta, sses_vconst(v, v->nan_limit));
-+    tcg_gen_cmp_vec(TCG_COND_GTU, vece, nb, tb, sses_vconst(v, v->nan_limit));
-+    tcg_gen_or_vec(vece, ok, na, nb);
-+    tcg_gen_not_vec(vece, ok, ok);
++    tcg_gen_cmp_vec(TCG_COND_LT, vece, ta, ta, lim);
++    tcg_gen_cmp_vec(TCG_COND_LT, vece, tb, tb, lim);
++    tcg_gen_and_vec(vece, ta, ta, tb);
++    return ta;
++}
++
++/*
++ * ok = lanes with no NaN operand; keys of both operands, for cmp_vec's
++ * integer compare on hosts without the native minps/maxps/cmpps
++ * (tcg_fp_minmax_vec_supported() / tcg_fp_cmp_vec_supported(), which
++ * implement the guest's -0/+0 tie-break and NaN-operand selection exactly
++ * and need no keys).
++ */
++static TCGv_vec sses_vkeys(SSESVec *v, TCGv_vec a, TCGv_vec b,
++                           TCGv_vec *ka, TCGv_vec *kb)
++{
++    TCGv_vec zero = sses_vconst(v, 0);
++    TCGv_vec za = sses_vtmp(v);
++    TCGv_vec zb = sses_vtmp(v);
++    TCGv_vec ok = sses_vnan_ok(v, a, b);
++
++    tcg_gen_cmp_vec(TCG_COND_EQ, v->vece, za, sses_vabs(v, a), zero);
++    tcg_gen_cmp_vec(TCG_COND_EQ, v->vece, zb, sses_vabs(v, b), zero);
++    *ka = sses_vkey(v, a, za);
++    *kb = sses_vkey(v, b, zb);
 +    return ok;
 +}
 +
@@ -1585,6 +1369,20 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +    default:
 +        g_assert_not_reached();
 +    }
++    if (op != SSES_RCP && op != SSES_RSQRT) {   /* those restore the flags */
++        int k = sses_view(dbl, false);
++
++        if (!sses_known(s, &decode->op[2], k)) {
++            ok = sses_vnodenorm(v, ok, b);
++            sses_mark(s, &decode->op[2], k);
++        }
++        if (!unary && !sses_known(s, &decode->op[1], k)) {
++            ok = sses_vnodenorm(v, ok, a);
++            sses_mark(s, &decode->op[1], k);
++        }
++    }
++    sses_dest(s, &decode->op[0], sses_view(dbl, false),
++              op != SSES_ADD && op != SSES_SUB);
 +
 +    tcg_gen_st_vec(ok, tcg_env, scratch);
 +    lo = x87s_tmp_i64(s);
@@ -1675,14 +1473,14 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +
 +        tcg_gen_ld_i64(a, tcg_env, v + offsetof(ZMMReg, ZMM_Q(0)));
 +        tcg_gen_ld_i64(c, tcg_env, src + offsetof(ZMMReg, ZMM_Q(0)));
-+        sses_comis_64(s, cc, a, c, b->label);
++        sses_comis_64(s, decode, cc, a, c, b->label);
 +    } else {
 +        TCGv_i32 a = x87s_tmp_i32(s);
 +        TCGv_i32 c = x87s_tmp_i32(s);
 +
 +        tcg_gen_ld_i32(a, tcg_env, v + offsetof(ZMMReg, ZMM_L(0)));
 +        tcg_gen_ld_i32(c, tcg_env, src + offsetof(ZMMReg, ZMM_L(0)));
-+        sses_comis_32(s, cc, a, c, b->label);
++        sses_comis_32(s, decode, cc, a, c, b->label);
 +    }
 +    tcg_gen_extu_i32_tl(cpu_cc_src, cc);
 +    set_cc_op(s, CC_OP_EFLAGS);
@@ -1710,6 +1508,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +        tcg_gen_cvt_i32_f32(r, in);
 +        tcg_gen_st_i32(r, tcg_env, d + offsetof(ZMMReg, ZMM_L(0)));
 +    }
++    sses_dest(s, &decode->op[0], sses_view(s->prefix & PREFIX_REPNZ, true), true);
 +    x87s_free_tmps(s);
 +    return true;
 +}
@@ -1759,6 +1558,7 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +        }
 +    }
 +    tcg_gen_extu_i32_tl(s->T0, r);
++    s->sses_tracked = true;                     /* no xmm register written */
 +    x87s_free_tmps(s);
 +    return true;
 +}
@@ -1784,6 +1584,10 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +        TCGv_i64 t = x87s_tmp_i64(s);
 +
 +        tcg_gen_ld_i32(a, tcg_env, src + offsetof(ZMMReg, ZMM_L(0)));
++        if (!sses_known(s, &decode->op[2], SSES_K_SS)) {
++            sses_denorm_br_32(s, a, b->label);
++            sses_mark(s, &decode->op[2], SSES_K_SS);
++        }
 +        tcg_gen_extu_i32_i64(a64, a);
 +        tcg_gen_cvt_f32_f64(r, a64);
 +        tcg_gen_shli_i64(t, r, 1);
@@ -1798,277 +1602,779 @@ scalar 3.6x over the helpers. x86-64 backend code is untested (no host).
 +        TCGv_i32 ok;
 +
 +        tcg_gen_ld_i64(a, tcg_env, src + offsetof(ZMMReg, ZMM_Q(0)));
++        if (!sses_known(s, &decode->op[2], SSES_K_SD)) {
++            sses_denorm_br_64(s, a, b->label);
++            sses_mark(s, &decode->op[2], SSES_K_SD);
++        }
 +        tcg_gen_cvt_f64_f32(r64, a);
 +        tcg_gen_extrl_i64_i32(r, r64);
 +        tcg_gen_shli_i64(z64, a, 1);            /* zero iff a is zero */
 +        tcg_gen_setcondi_i64(TCG_COND_NE, z64, z64, 0);
 +        tcg_gen_extrl_i64_i32(z, z64);
-+        ok = sses_check_32(s, NULL, r, z, true);
++        ok = sses_check_32(s, NULL, r, z, true, b->label);
 +        tcg_gen_brcondi_i32(TCG_COND_EQ, ok, 0, b->label);
 +        tcg_gen_st_i32(r, tcg_env, d + offsetof(ZMMReg, ZMM_L(0)));
 +    }
++    sses_dest(s, &decode->op[0], to_double ? SSES_K_SD : SSES_K_SS, true);
 +    x87s_free_tmps(s);
 +    return true;
 +}
---- /dev/null
-+++ b/target/i386/tcg/sse-fast-lane.c.inc
-@@ -0,0 +1,259 @@
+diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
+index 18ad6d235b..cf05c34232 100644
+--- a/target/i386/tcg/tcg-cpu.c
++++ b/target/i386/tcg/tcg-cpu.c
+@@ -59,6 +59,10 @@ static TCGTBCPUState x86_get_tb_cpu_state(CPUState *cs)
+     flags = env->hflags |
+         (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK)) |
+         ((uint32_t)env->x87_fast_mode << TB_FLAG_X87_MODE_SHIFT);
++    if (env->sse_fast_mode
++        && (env->sse_status.float_exception_flags & float_flag_inexact)) {
++        flags |= TB_FLAG_SSE_FAST_MASK;
++    }
+     if (env->hflags & HF_CS64_MASK) {
+         cs_base = 0;
+         pc = env->eip;
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 1eac0ab072..5b54e1e263 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -101,6 +101,11 @@ typedef struct X87SlowBlock {
+     bool cc_op_dirty;
+     TCGv fdp_addr;
+     int fdp_seg;
++    /* SSE inline path (sse-fast.c.inc) */
++    void *fn;                   /* helper to run out of line */
++    uint8_t nargs;
++    uint8_t reg_ot, reg_n;      /* integer destination (cvtss2si) */
++    int off[3];                 /* env offsets of the vector operands */
+ } X87SlowBlock;
+ #define X87S_MAX_SLOW 96
+ #define X87S_MAX_TMPS 96
+@@ -168,6 +173,13 @@ typedef struct DisasContext {
+     TCGv_i64 x87s_t64;
+     int x87_fdp_seg;
+ 
++    /* SSE inline state (sse-fast.c.inc); slow blocks share x87s_slow[] */
++    bool sses_on;               /* TB translated with TB_FLAG_SSE_FAST */
++    bool sses_guarded;          /* runtime guard emitted */
++    bool sses_pending;          /* hand-over check due at the end of the insn */
++    bool sses_tracked;          /* the insn updated sses_clean itself */
++    uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
++
+     /* TCG local temps */
+     TCGv cc_srcT;
+     TCGv A0;
+@@ -295,6 +307,7 @@ static void x87s_flush_code(DisasContext *s);
+ static void x87s_boundary(DisasContext *s);
+ static void x87s_emit_slow_blocks(DisasContext *s);
+ static void gen_x87_fip_fdp(DisasContext *s);
++static void sses_emit_slow_block(DisasContext *s, struct X87SlowBlock *b);
+ static void gen_jmp_rel_csize(DisasContext *s, int diff, int tb_num);
+ static void gen_exception_gpf(DisasContext *s);
+ 
+@@ -2196,8 +2209,28 @@ static void gen_sty_env_A0(DisasContext *s, int offset, bool align)
+     tcg_gen_qemu_st_i128(t, a0_hi, mem_index, mop);
+ }
+ 
++/* sse-fast.c.inc, used by emit.c.inc */
++static bool sses_arith(DisasContext *s, X86DecodedInsn *decode, int op,
++                       void *pd, void *ps, void *sd, void *ss);
++static bool sses_cmp(DisasContext *s, X86DecodedInsn *decode, void *fn);
++static bool sses_comis(DisasContext *s, X86DecodedInsn *decode, void *fn);
++static bool sses_cvtsi2s(DisasContext *s, X86DecodedInsn *decode, TCGv_i32 in);
++static bool sses_cvts2si(DisasContext *s, X86DecodedInsn *decode, bool trunc,
++                         void *ss2si, void *sd2si);
++static bool sses_cvt_ss_sd(DisasContext *s, X86DecodedInsn *decode,
++                           bool to_double, void *fn);
++static void sses_helper_done(DisasContext *s);
++static void sses_emit_pending(DisasContext *s);
++static void sses_end_tb(DisasContext *s);
++static void sses_track(DisasContext *s, X86DecodedInsn *decode);
++enum {
++    SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
++    SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
++};
++
+ #include "emit.c.inc"
+ #include "x87-shadow.c.inc"
++#include "sse-fast.c.inc"
+ 
+ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+ {
+@@ -3566,6 +3599,12 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->x87s_ntmps = 0;
+     x87s_reset(dc);
+     dc->x87_fdp_addr = NULL;
++    dc->sses_on = (flags & TB_FLAG_SSE_FAST_MASK) && tcg_f64_supported()
++        && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
++    dc->sses_guarded = false;
++    dc->sses_pending = false;
++    dc->sses_tracked = false;
++    memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
+     if (dc->x87s_on) {
+         dc->x87s_t32 = tcg_temp_new_i32();
+         dc->x87s_t64 = tcg_temp_new_i64();
+diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
+index 9b923990d8..4d8bb806fc 100644
+--- a/target/i386/tcg/x87-shadow.c.inc
++++ b/target/i386/tcg/x87-shadow.c.inc
+@@ -87,6 +87,13 @@ enum {
+     X87S_SLOW_FSQRT,
+     X87S_SLOW_FRNDINT,
+     X87S_SLOW_FILD,
++    /* sse-fast.c.inc */
++    SSES_SLOW_FIRST,
++    SSES_SLOW_GUARD = SSES_SLOW_FIRST,
++    SSES_SLOW_EXIT_NEXT,
++    SSES_SLOW_HELPER,
++    SSES_SLOW_CVT2SI,
++    SSES_SLOW_COMIS,
+ };
+ 
+ QEMU_BUILD_BUG_ON(sizeof(FPReg) != 16);
+@@ -703,6 +710,11 @@ static void x87s_emit_slow_blocks(DisasContext *s)
+             x87s_free_tmps(s);
+             continue;
+         }
++        if (b->kind >= SSES_SLOW_FIRST) {
++            sses_emit_slow_block(s, b);
++            x87s_free_tmps(s);
++            continue;
++        }
+         x87s_flush_code(s);
+         switch (b->kind) {
+         case X87S_SLOW_ARITH_MEM:
+diff --git a/tcg/aarch64/tcg-target-con-set.h b/tcg/aarch64/tcg-target-con-set.h
+index d0622e65fb..17f5df9a7c 100644
+--- a/tcg/aarch64/tcg-target-con-set.h
++++ b/tcg/aarch64/tcg-target-con-set.h
+@@ -15,6 +15,7 @@ C_O0_I2(rz, r)
+ C_O0_I2(w, r)
+ C_O0_I3(rz, rz, r)
+ C_O1_I1(r, r)
++C_O1_I1(r, w)
+ C_O1_I1(w, r)
+ C_O1_I1(w, w)
+ C_O1_I1(w, wr)
+diff --git a/tcg/aarch64/tcg-target-has.h b/tcg/aarch64/tcg-target-has.h
+index c5d805bcde..980d4c25e9 100644
+--- a/tcg/aarch64/tcg-target-has.h
++++ b/tcg/aarch64/tcg-target-has.h
+@@ -34,6 +34,14 @@
+ 
+ /* 2ksbox (patch 06): the scalar binary64 ops (outop_add_f64) */
+ #define TCG_TARGET_F64
 +/*
-+ * SSE inline fast path, per-lane code for one element width.
-+ * Included twice from sse-fast.c.inc with W = 32 and W = 64. The
-+ * conditions are documented there.
-+ *
-+ * SPDX-License-Identifier: GPL-2.0-or-later
++ * 2ksbox (patch 11): float lanes. minps/maxps/cmpps are not implemented
++ * here: the key-transform path (target/i386/tcg/sse-fast.c.inc) covers
++ * min/max/cmp on this host.
 + */
++#define TCG_TARGET_HAS_fp_vec           1
++#define TCG_TARGET_HAS_fp_minmax_vec    0
++#define TCG_TARGET_HAS_fp_cmp_vec       0
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          1
+diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
+index 2ce5818081..5013200310 100644
+--- a/tcg/aarch64/tcg-target.c.inc
++++ b/tcg/aarch64/tcg-target.c.inc
+@@ -538,6 +538,26 @@ typedef enum {
+     Irrrr_MADD         = 0x1b000000,
+     Irrrr_MSUB         = 0x1b008000,
+ 
++    /* Scalar binary32 FP and int32 conversions (sse-fast.c.inc). */
++    I3F_FADDS       = 0x1e202800,
++    I3F_FSUBS       = 0x1e203800,
++    I3F_FMULS       = 0x1e200800,
++    I3F_FDIVS       = 0x1e201800,
++    I3F_FSQRTS      = 0x1e21c000,
++    I3F_SCVTFS      = 0x1e220000,   /* Sd = Wn */
++    I3F_SCVTFD      = 0x1e620000,   /* Dd = Wn */
++    I3F_FCVTNSS     = 0x1e200000,   /* Wd = Sn, round to nearest even */
++    I3F_FCVTNSD     = 0x1e600000,   /* Wd = Dn */
++    I3F_FCVTZSS     = 0x1e380000,   /* Wd = Sn, round toward zero */
++    I3F_FCVTZSD     = 0x1e780000,   /* Wd = Dn */
 +
-+#define TCGv_iW         glue(TCGv_i, W)
-+#define TMP()           glue(x87s_tmp_i, W)(s)
-+#define OPW(name)       glue(glue(tcg_gen_, name), glue(_i, W))
-+#define FPW(name)       glue(glue(tcg_gen_, name), glue(_f, W))
-+#define CONSTW(v)       glue(tcg_constant_i, W)(v)
-+#define LANEFN(name)    glue(glue(sses_, name), glue(_, W))
++    /* Vector FP, sz (bit 22) selects S/D lanes, Q (bit 30) the width. */
++    I3FV_FADD       = 0x0e20d400,
++    I3FV_FSUB       = 0x0ea0d400,
++    I3FV_FMUL       = 0x2e20dc00,
++    I3FV_FDIV       = 0x2e20fc00,
++    I3FV_FSQRT      = 0x2ea1f800,
 +
-+#if W == 32
-+#define LANE(i)         offsetof(ZMMReg, ZMM_L(i))
-+#define NAN_LIMIT       0xff000000u             /* x << 1: >= exp all ones, > NaN */
-+#define EXP_MASK        0x7f800000u
-+#define EXP_LO          0x01000000u             /* exponent field 2 */
-+#define EXP_RANGE       0x7e800000u             /* fields 2 .. 254 */
-+#define ONE_BITS        0x3f800000u
-+#define TO_I32(d, x)    tcg_gen_mov_i32(d, x)
-+#else
-+#define LANE(i)         offsetof(ZMMReg, ZMM_Q(i))
-+#define NAN_LIMIT       0xffe0000000000000ull
-+#define EXP_MASK        0x7ff0000000000000ull
-+#define EXP_LO          0x0020000000000000ull
-+#define EXP_RANGE       0x7fd0000000000000ull   /* fields 2 .. 2046 */
-+#define ONE_BITS        0x3ff0000000000000ull
-+#define TO_I32(d, x)    tcg_gen_extrl_i64_i32(d, x)
+     /* Logical shifted register instructions (without a shift).  */
+     Ilogic_shift_AND   = 0x0a000000,
+     Ilogic_shift_BIC   = 0x0a200000,
+@@ -2658,7 +2678,6 @@ F64_BINARY(add_f64, F64_FADDD)
+ F64_BINARY(sub_f64, F64_FSUBD)
+ F64_BINARY(mul_f64, F64_FMULD)
+ F64_BINARY(div_f64, F64_FDIVD)
+-#undef F64_BINARY
+ 
+ #define F64_UNARY(NAME, INSN)                                           \
+ static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
+@@ -2672,8 +2691,44 @@ static const TCGOutOpUnary outop_##NAME = {                             \
+ F64_UNARY(sqrt_f64, F64_FSQRTD)
+ F64_UNARY(cvt_f64_f32, F64_FCVTSD)
+ F64_UNARY(cvt_f32_f64, F64_FCVTDS)
++
++/*
++ * 2ksbox (patch 11): scalar binary32 and the int32 conversions; a
++ * conversion's integer side is a general register.
++ */
++F64_BINARY(add_f32, I3F_FADDS)
++F64_BINARY(sub_f32, I3F_FSUBS)
++F64_BINARY(mul_f32, I3F_FMULS)
++F64_BINARY(div_f32, I3F_FDIVS)
++F64_UNARY(sqrt_f32, I3F_FSQRTS)
++#undef F64_BINARY
+ #undef F64_UNARY
+ 
++#define F64_CVT(NAME, INSN, CSET)                                       \
++static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
++{                                                                       \
++    tcg_out32(s, INSN | (a1 & 0x1f) << 5 | (a0 & 0x1f));                \
++}                                                                       \
++static const TCGOutOpUnary outop_##NAME = {                             \
++    .base.static_constraint = CSET,                                     \
++    .out_rr = tgen_##NAME,                                              \
++};
++F64_CVT(cvt_i32_f32, I3F_SCVTFS, C_O1_I1(w, r))
++F64_CVT(cvt_i32_f64, I3F_SCVTFD, C_O1_I1(w, r))
++F64_CVT(cvt_f32_i32, I3F_FCVTNSS, C_O1_I1(r, w))
++F64_CVT(cvtt_f32_i32, I3F_FCVTZSS, C_O1_I1(r, w))
++F64_CVT(cvt_f64_i32, I3F_FCVTNSD, C_O1_I1(r, w))
++F64_CVT(cvtt_f64_i32, I3F_FCVTZSD, C_O1_I1(r, w))
++#undef F64_CVT
++
++/* vector FP: sz (bit 22) selects S/D lanes, Q (bit 30) the width */
++static void tcg_out_fpv(TCGContext *s, AArch64Insn insn, bool q,
++                        unsigned vece, TCGReg rd, TCGReg rn, TCGReg rm)
++{
++    tcg_out32(s, insn | q << 30 | (vece == MO_64) << 22 | (rm & 0x1f) << 16
++              | (rn & 0x1f) << 5 | (rd & 0x1f));
++}
++
+ static void tgen_fmsub_f64(TCGContext *s, TCGType type,
+                            TCGReg a0, TCGReg a1, TCGReg a2, TCGReg a3)
+ {
+@@ -3043,6 +3098,21 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+     case INDEX_op_dupm_vec:
+         tcg_out_dupm_vec(s, type, vece, a0, a1, a2);
+         break;
++    case INDEX_op_fadd_vec:
++        tcg_out_fpv(s, I3FV_FADD, is_q, vece, a0, a1, a2);
++        break;
++    case INDEX_op_fsub_vec:
++        tcg_out_fpv(s, I3FV_FSUB, is_q, vece, a0, a1, a2);
++        break;
++    case INDEX_op_fmul_vec:
++        tcg_out_fpv(s, I3FV_FMUL, is_q, vece, a0, a1, a2);
++        break;
++    case INDEX_op_fdiv_vec:
++        tcg_out_fpv(s, I3FV_FDIV, is_q, vece, a0, a1, a2);
++        break;
++    case INDEX_op_fsqrt_vec:
++        tcg_out_fpv(s, I3FV_FSQRT, is_q, vece, a0, a1, 0);
++        break;
+     case INDEX_op_add_vec:
+         if (is_scalar) {
+             tcg_out_insn(s, rrr_e, ADD, vece, a0, a1, a2);
+@@ -3356,6 +3426,13 @@ int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+     case INDEX_op_umax_vec:
+     case INDEX_op_umin_vec:
+         return vece < MO_64;
++    case INDEX_op_fadd_vec:
++    case INDEX_op_fsub_vec:
++    case INDEX_op_fmul_vec:
++    case INDEX_op_fdiv_vec:
++    case INDEX_op_fsqrt_vec:
++        /* S lanes in either width, D lanes only as .2D */
++        return vece == MO_32 || (vece == MO_64 && type == TCG_TYPE_V128);
+ 
+     default:
+         return 0;
+@@ -3437,6 +3514,13 @@ static TCGConstraintSetIndex
+ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
+ {
+     switch (op) {
++    case INDEX_op_fadd_vec:
++    case INDEX_op_fsub_vec:
++    case INDEX_op_fmul_vec:
++    case INDEX_op_fdiv_vec:
++        return C_O1_I2(w, w, w);
++    case INDEX_op_fsqrt_vec:
++        return C_O1_I1(w, w);
+     case INDEX_op_add_vec:
+     case INDEX_op_sub_vec:
+     case INDEX_op_mul_vec:
+diff --git a/tcg/tcg-has.h b/tcg/tcg-has.h
+index 27771dc7f0..80eae35591 100644
+--- a/tcg/tcg-has.h
++++ b/tcg/tcg-has.h
+@@ -46,4 +46,15 @@
+ #define TCG_TARGET_HAS_v256             0
+ #endif
+ 
++/* 2ksbox (patch 11): float lanes; a backend with them defines these */
++#ifndef TCG_TARGET_HAS_fp_vec
++#define TCG_TARGET_HAS_fp_vec           0
++#endif
++#ifndef TCG_TARGET_HAS_fp_minmax_vec
++#define TCG_TARGET_HAS_fp_minmax_vec    0
++#endif
++#ifndef TCG_TARGET_HAS_fp_cmp_vec
++#define TCG_TARGET_HAS_fp_cmp_vec       0
 +#endif
 +
+ #endif
+diff --git a/tcg/tcg-op-vec.c b/tcg/tcg-op-vec.c
+index 67e837174b..a967c9d757 100644
+--- a/tcg/tcg-op-vec.c
++++ b/tcg/tcg-op-vec.c
+@@ -577,6 +577,80 @@ void tcg_gen_add_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
+     do_op3_nofail(vece, r, a, b, INDEX_op_add_vec);
+ }
+ 
++bool tcg_fp_vec_supported(unsigned vece)
++{
++    return TCG_TARGET_HAS_fp_vec
++        && tcg_can_emit_vec_op(INDEX_op_fadd_vec, TCG_TYPE_V128, vece) > 0;
++}
++
++void tcg_gen_fadd_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fadd_vec);
++}
++
++void tcg_gen_fsub_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fsub_vec);
++}
++
++void tcg_gen_fmul_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fmul_vec);
++}
++
++void tcg_gen_fdiv_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fdiv_vec);
++}
++
++bool tcg_fp_minmax_vec_supported(unsigned vece)
++{
++    return TCG_TARGET_HAS_fp_minmax_vec
++        && tcg_can_emit_vec_op(INDEX_op_fmin_vec, TCG_TYPE_V128, vece) > 0
++        && tcg_can_emit_vec_op(INDEX_op_fmax_vec, TCG_TYPE_V128, vece) > 0;
++}
++
++void tcg_gen_fmin_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fmin_vec);
++}
++
++void tcg_gen_fmax_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_fmax_vec);
++}
++
++bool tcg_fp_cmp_vec_supported(unsigned vece)
++{
++    return TCG_TARGET_HAS_fp_cmp_vec
++        && tcg_can_emit_vec_op(INDEX_op_fcmp_vec, TCG_TYPE_V128, vece) > 0;
++}
++
++void tcg_gen_fcmp_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b, int pred)
++{
++    TCGTemp *rt = tcgv_vec_temp(r);
++    TCGTemp *at = tcgv_vec_temp(a);
++    TCGTemp *bt = tcgv_vec_temp(b);
++    TCGType type = rt->base_type;
++
++    tcg_debug_assert(at->base_type >= type);
++    tcg_debug_assert(bt->base_type >= type);
++    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_fcmp_vec, type, vece) > 0);
++    vec_gen_4(INDEX_op_fcmp_vec, type, vece,
++             temp_arg(rt), temp_arg(at), temp_arg(bt), pred);
++}
++
++void tcg_gen_fsqrt_vec(unsigned vece, TCGv_vec r, TCGv_vec a)
++{
++    TCGTemp *rt = tcgv_vec_temp(r);
++    TCGTemp *at = tcgv_vec_temp(a);
++    TCGType type = rt->base_type;
++
++    tcg_debug_assert(at->base_type >= type);
++    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_fsqrt_vec, type, vece) > 0);
++    vec_gen_2(INDEX_op_fsqrt_vec, type, vece, temp_arg(rt), temp_arg(at));
++}
++
+ void tcg_gen_sub_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
+ {
+     do_op3_nofail(vece, r, a, b, INDEX_op_sub_vec);
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index 1b50793ea5..c637957e78 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -2422,6 +2422,75 @@ void tcg_gen_cvt_f32_f64(TCGv_i64 ret, TCGv_i64 a)
+     tcg_gen_op2_i64(INDEX_op_cvt_f32_f64, ret, a);
+ }
+ 
++void tcg_gen_add_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i32(INDEX_op_add_f32, ret, a, b);
++}
++
++void tcg_gen_sub_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i32(INDEX_op_sub_f32, ret, a, b);
++}
++
++void tcg_gen_mul_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i32(INDEX_op_mul_f32, ret, a, b);
++}
++
++void tcg_gen_div_f32(TCGv_i32 ret, TCGv_i32 a, TCGv_i32 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i32(INDEX_op_div_f32, ret, a, b);
++}
++
++void tcg_gen_sqrt_f32(TCGv_i32 ret, TCGv_i32 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i32(INDEX_op_sqrt_f32, ret, a);
++}
++
++void tcg_gen_cvt_i32_f32(TCGv_i32 ret, TCGv_i32 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i32(INDEX_op_cvt_i32_f32, ret, a);
++}
++
++void tcg_gen_cvt_i32_f64(TCGv_i64 ret, TCGv_i32 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2(INDEX_op_cvt_i32_f64, TCG_TYPE_I64,
++                tcgv_i64_arg(ret), tcgv_i32_arg(a));
++}
++
++void tcg_gen_cvt_f32_i32(TCGv_i32 ret, TCGv_i32 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i32(INDEX_op_cvt_f32_i32, ret, a);
++}
++
++void tcg_gen_cvtt_f32_i32(TCGv_i32 ret, TCGv_i32 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i32(INDEX_op_cvtt_f32_i32, ret, a);
++}
++
++void tcg_gen_cvt_f64_i32(TCGv_i32 ret, TCGv_i64 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2(INDEX_op_cvt_f64_i32, TCG_TYPE_I32,
++                tcgv_i32_arg(ret), tcgv_i64_arg(a));
++}
++
++void tcg_gen_cvtt_f64_i32(TCGv_i32 ret, TCGv_i64 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2(INDEX_op_cvtt_f64_i32, TCG_TYPE_I32,
++                tcgv_i32_arg(ret), tcgv_i64_arg(a));
++}
++
+ void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2)
+ {
+     if (tcg_op_supported(INDEX_op_muls2, TCG_TYPE_I64, 0)) {
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index 2731113bd8..053ee27a78 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -1237,6 +1237,17 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
+     OUTOP(INDEX_op_sqrt_f64, TCGOutOpUnary, outop_sqrt_f64),
+     OUTOP(INDEX_op_cvt_f64_f32, TCGOutOpUnary, outop_cvt_f64_f32),
+     OUTOP(INDEX_op_cvt_f32_f64, TCGOutOpUnary, outop_cvt_f32_f64),
++    OUTOP(INDEX_op_add_f32, TCGOutOpBinary, outop_add_f32),
++    OUTOP(INDEX_op_sub_f32, TCGOutOpBinary, outop_sub_f32),
++    OUTOP(INDEX_op_mul_f32, TCGOutOpBinary, outop_mul_f32),
++    OUTOP(INDEX_op_div_f32, TCGOutOpBinary, outop_div_f32),
++    OUTOP(INDEX_op_sqrt_f32, TCGOutOpUnary, outop_sqrt_f32),
++    OUTOP(INDEX_op_cvt_i32_f32, TCGOutOpUnary, outop_cvt_i32_f32),
++    OUTOP(INDEX_op_cvt_i32_f64, TCGOutOpUnary, outop_cvt_i32_f64),
++    OUTOP(INDEX_op_cvt_f32_i32, TCGOutOpUnary, outop_cvt_f32_i32),
++    OUTOP(INDEX_op_cvtt_f32_i32, TCGOutOpUnary, outop_cvtt_f32_i32),
++    OUTOP(INDEX_op_cvt_f64_i32, TCGOutOpUnary, outop_cvt_f64_i32),
++    OUTOP(INDEX_op_cvtt_f64_i32, TCGOutOpUnary, outop_cvtt_f64_i32),
+ #endif
+ 
+     [INDEX_op_goto_ptr] = &outop_goto_ptr,
+@@ -2411,8 +2422,19 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_sqrt_f64:
+     case INDEX_op_cvt_f64_f32:
+     case INDEX_op_cvt_f32_f64:
++    case INDEX_op_add_f32:
++    case INDEX_op_sub_f32:
++    case INDEX_op_mul_f32:
++    case INDEX_op_div_f32:
++    case INDEX_op_sqrt_f32:
++    case INDEX_op_cvt_i32_f32:
++    case INDEX_op_cvt_i32_f64:
++    case INDEX_op_cvt_f32_i32:
++    case INDEX_op_cvtt_f32_i32:
++    case INDEX_op_cvt_f64_i32:
++    case INDEX_op_cvtt_f64_i32:
+ #ifdef TCG_TARGET_F64
+-        if (type == TCG_TYPE_I64) {
++        if (has_type) {
+             goto do_lookup;
+         }
+ #endif
+@@ -2439,6 +2461,17 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_xor_vec:
+     case INDEX_op_cmp_vec:
+         return has_type;
++    case INDEX_op_fadd_vec:
++    case INDEX_op_fsub_vec:
++    case INDEX_op_fmul_vec:
++    case INDEX_op_fdiv_vec:
++    case INDEX_op_fsqrt_vec:
++        return has_type && TCG_TARGET_HAS_fp_vec;
++    case INDEX_op_fmin_vec:
++    case INDEX_op_fmax_vec:
++        return has_type && TCG_TARGET_HAS_fp_minmax_vec;
++    case INDEX_op_fcmp_vec:
++        return has_type && TCG_TARGET_HAS_fp_cmp_vec;
+     case INDEX_op_not_vec:
+         return has_type && TCG_TARGET_HAS_not_vec;
+     case INDEX_op_neg_vec:
+@@ -5552,6 +5585,10 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+     case INDEX_op_sub_f64:
+     case INDEX_op_mul_f64:
+     case INDEX_op_div_f64:
++    case INDEX_op_add_f32:
++    case INDEX_op_sub_f32:
++    case INDEX_op_mul_f32:
++    case INDEX_op_div_f32:
+         {
+             const TCGOutOpBinary *out =
+                 container_of(all_outop[op->opc], TCGOutOpBinary, base);
+@@ -5621,6 +5658,13 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+     case INDEX_op_sqrt_f64:
+     case INDEX_op_cvt_f64_f32:
+     case INDEX_op_cvt_f32_f64:
++    case INDEX_op_sqrt_f32:
++    case INDEX_op_cvt_i32_f32:
++    case INDEX_op_cvt_i32_f64:
++    case INDEX_op_cvt_f32_i32:
++    case INDEX_op_cvtt_f32_i32:
++    case INDEX_op_cvt_f64_i32:
++    case INDEX_op_cvtt_f64_i32:
+         {
+             const TCGOutOpUnary *out =
+                 container_of(all_outop[op->opc], TCGOutOpUnary, base);
+diff --git a/tcg/x86_64/tcg-target-con-set.h b/tcg/x86_64/tcg-target-con-set.h
+index 458d69c3c0..e6dce0aa89 100644
+--- a/tcg/x86_64/tcg-target-con-set.h
++++ b/tcg/x86_64/tcg-target-con-set.h
+@@ -31,6 +31,7 @@ C_O1_I1(r, 0)
+ C_O1_I1(r, L)
+ C_O1_I1(r, q)
+ C_O1_I1(r, r)
++C_O1_I1(r, x)
+ C_O1_I1(x, r)
+ C_O1_I1(x, x)
+ C_O1_I2(q, 0, qi)
+diff --git a/tcg/x86_64/tcg-target-has.h b/tcg/x86_64/tcg-target-has.h
+index 26dc3a78f3..1456b12b4c 100644
+--- a/tcg/x86_64/tcg-target-has.h
++++ b/tcg/x86_64/tcg-target-has.h
+@@ -41,6 +41,10 @@
+ 
+ /* 2ksbox (patch 06): the scalar binary64 ops, VEX + FMA3 (outop_add_f64) */
+ #define TCG_TARGET_F64
++/* 2ksbox (patch 11): float lanes */
++#define TCG_TARGET_HAS_fp_vec           have_avx1
++#define TCG_TARGET_HAS_fp_minmax_vec    have_avx1
++#define TCG_TARGET_HAS_fp_cmp_vec       have_avx1
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          have_avx512vl
+diff --git a/tcg/x86_64/tcg-target.c.inc b/tcg/x86_64/tcg-target.c.inc
+index f31cd5a844..4f51f65e95 100644
+--- a/tcg/x86_64/tcg-target.c.inc
++++ b/tcg/x86_64/tcg-target.c.inc
+@@ -390,6 +390,33 @@ static bool tcg_target_const_match(int64_t val, int ct,
+ #define OPC_VSQRTSD     (0x51 | P_EXT | P_SIMDF2)
+ #define OPC_VCVTSD2SS   (0x5a | P_EXT | P_SIMDF2)
+ #define OPC_VCVTSS2SD   (0x5a | P_EXT | P_SIMDF3)
++#define OPC_VADDSS      (0x58 | P_EXT | P_SIMDF3)
++#define OPC_VSUBSS      (0x5c | P_EXT | P_SIMDF3)
++#define OPC_VMULSS      (0x59 | P_EXT | P_SIMDF3)
++#define OPC_VDIVSS      (0x5e | P_EXT | P_SIMDF3)
++#define OPC_VSQRTSS     (0x51 | P_EXT | P_SIMDF3)
++#define OPC_VCVTSI2SS   (0x2a | P_EXT | P_SIMDF3)
++#define OPC_VCVTSI2SD   (0x2a | P_EXT | P_SIMDF2)
++#define OPC_VCVTSS2SI   (0x2d | P_EXT | P_SIMDF3)
++#define OPC_VCVTSD2SI   (0x2d | P_EXT | P_SIMDF2)
++#define OPC_VCVTTSS2SI  (0x2c | P_EXT | P_SIMDF3)
++#define OPC_VCVTTSD2SI  (0x2c | P_EXT | P_SIMDF2)
++#define OPC_VADDPS      (0x58 | P_EXT)
++#define OPC_VADDPD      (0x58 | P_EXT | P_DATA16)
++#define OPC_VSUBPS      (0x5c | P_EXT)
++#define OPC_VSUBPD      (0x5c | P_EXT | P_DATA16)
++#define OPC_VMULPS      (0x59 | P_EXT)
++#define OPC_VMULPD      (0x59 | P_EXT | P_DATA16)
++#define OPC_VDIVPS      (0x5e | P_EXT)
++#define OPC_VDIVPD      (0x5e | P_EXT | P_DATA16)
++#define OPC_VSQRTPS     (0x51 | P_EXT)
++#define OPC_VSQRTPD     (0x51 | P_EXT | P_DATA16)
++#define OPC_VMINPS      (0x5d | P_EXT)
++#define OPC_VMINPD      (0x5d | P_EXT | P_DATA16)
++#define OPC_VMAXPS      (0x5f | P_EXT)
++#define OPC_VMAXPD      (0x5f | P_EXT | P_DATA16)
++#define OPC_VCMPPS      (0xc2 | P_EXT)
++#define OPC_VCMPPD      (0xc2 | P_EXT | P_DATA16)
+ #define OPC_VPBLENDD    (0x02 | P_EXT3A | P_DATA16)
+ #define OPC_VPBLENDVB   (0x4c | P_EXT3A | P_DATA16)
+ #define OPC_VPBLENDMB   (0x66 | P_EXT38 | P_DATA16 | P_EVEX)
+@@ -3028,7 +3055,6 @@ F64_BINARY(add_f64, OPC_VADDSD)
+ F64_BINARY(sub_f64, OPC_VSUBSD)
+ F64_BINARY(mul_f64, OPC_VMULSD)
+ F64_BINARY(div_f64, OPC_VDIVSD)
+-#undef F64_BINARY
+ 
+ #define F64_UNARY(NAME, OPC)                                            \
+ static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
+@@ -3043,7 +3069,6 @@ static const TCGOutOpUnary outop_##NAME = {                             \
+ F64_UNARY(sqrt_f64, OPC_VSQRTSD)
+ F64_UNARY(cvt_f64_f32, OPC_VCVTSD2SS)
+ F64_UNARY(cvt_f32_f64, OPC_VCVTSS2SD)
+-#undef F64_UNARY
+ 
+ static void tgen_fmsub_f64(TCGContext *s, TCGType type,
+                            TCGReg a0, TCGReg a1, TCGReg a2, TCGReg a3)
+@@ -3057,6 +3082,47 @@ static const TCGOutOpTernary outop_fmsub_f64 = {
+     .out_rrrr = tgen_fmsub_f64,
+ };
+ 
 +/*
-+ * ok &= "r is an acceptable fast-path result". `z` is nonzero unless the
-+ * result is an exact zero for the reason the fast path allows (an operand
-+ * of a multiply, the dividend of a divide, is zero); NULL: no such case.
++ * 2ksbox (patch 11): scalar binary32 and the int32 conversions. A
++ * conversion's integer side is a general register ("r") in the r/m
++ * field; the op's type is its output's.
 + */
-+static TCGv_iW LANEFN(check)(DisasContext *s, TCGv_iW ok, TCGv_iW r,
-+                             TCGv_iW z, bool normal_only)
++F64_BINARY(add_f32, OPC_VADDSS)
++F64_BINARY(sub_f32, OPC_VSUBSS)
++F64_BINARY(mul_f32, OPC_VMULSS)
++F64_BINARY(div_f32, OPC_VDIVSS)
++F64_UNARY(sqrt_f32, OPC_VSQRTSS)
++#undef F64_BINARY
++#undef F64_UNARY
++
++static TCGConstraintSetIndex cset_f64_from_int(TCGType type, unsigned flags)
 +{
-+    TCGv_iW e = TMP();
-+    TCGv_iW okl = TMP();
-+
-+    if (!normal_only) {
-+        /* exponent field not all ones: no NaN, infinity or overflow */
-+        OPW(shli)(e, r, 1);
-+        OPW(setcondi)(TCG_COND_LTU, okl, e, NAN_LIMIT);
-+    } else {
-+        /* exponent field in [2, max - 1], or an allowed exact zero */
-+        TCGv_iW t = TMP();
-+        TCGv_iW pz = TMP();
-+
-+        OPW(andi)(e, r, EXP_MASK);
-+        OPW(subi)(t, e, EXP_LO);
-+        OPW(setcondi)(TCG_COND_LTU, okl, t, EXP_RANGE);
-+        if (z) {
-+            OPW(setcondi)(TCG_COND_EQ, pz, z, 0);
-+            OPW(setcondi)(TCG_COND_NE, t, e, EXP_MASK);   /* not 0 * inf */
-+            OPW(and)(pz, pz, t);
-+            OPW(or)(okl, okl, pz);
-+        }
-+    }
-+    if (ok) {
-+        OPW(and)(ok, ok, okl);
-+        return ok;
-+    }
-+    return okl;
++    return have_avx1 && have_fma ? C_O1_I1(x, r) : C_NotImplemented;
 +}
 +
-+/* r = a op b (unary ops: b), see the table in sse-fast.c.inc */
-+static TCGv_iW LANEFN(arith)(DisasContext *s, int op, TCGv_iW r,
-+                             TCGv_iW a, TCGv_iW b, TCGv_iW ok)
++static TCGConstraintSetIndex cset_f64_to_int(TCGType type, unsigned flags)
 +{
-+    TCGv_iW z = TMP();
-+    TCGv_iW t;
-+
-+    switch (op) {
-+    case SSES_ADD:
-+        FPW(add)(r, a, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
-+    case SSES_SUB:
-+        FPW(sub)(r, a, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
-+    case SSES_SQRT:
-+        FPW(sqrt)(r, b);
-+        return LANEFN(check)(s, ok, r, NULL, false);
-+    case SSES_MUL:
-+        FPW(mul)(r, a, b);
-+        t = TMP();
-+        OPW(shli)(z, a, 1);
-+        OPW(shli)(t, b, 1);
-+        OPW(umin)(z, z, t);                     /* zero iff a or b is zero */
-+        return LANEFN(check)(s, ok, r, z, true);
-+    case SSES_DIV:
-+        FPW(div)(r, a, b);
-+        OPW(shli)(z, a, 1);                     /* zero iff the dividend is zero */
-+        return LANEFN(check)(s, ok, r, z, true);
-+    case SSES_RCP:
-+        FPW(div)(r, CONSTW(ONE_BITS), b);
-+        return LANEFN(check)(s, ok, r, NULL, true);
-+    case SSES_RSQRT:
-+        t = TMP();
-+        FPW(sqrt)(t, b);
-+        FPW(div)(r, CONSTW(ONE_BITS), t);
-+        return LANEFN(check)(s, ok, r, NULL, true);
-+    default:
-+        g_assert_not_reached();
-+    }
++    return have_avx1 && have_fma ? C_O1_I1(r, x) : C_NotImplemented;
 +}
 +
-+/* total-order key of a non-NaN value (t = x << 1): -0 -> +0, negatives flipped */
-+static void LANEFN(key)(DisasContext *s, TCGv_iW k, TCGv_iW x, TCGv_iW t)
-+{
-+    TCGv_iW zero = CONSTW(0);
-+    TCGv_iW c = TMP();
-+    TCGv_iW sgn = TMP();
++#define F64_CVT(NAME, OPC, V, CSET)                                     \
++static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
++{                                                                       \
++    tcg_out_vex_modrm(s, OPC, a0, V, a1);                               \
++}                                                                       \
++static const TCGOutOpUnary outop_##NAME = {                             \
++    .base.static_constraint = C_Dynamic,                                \
++    .base.dynamic_constraint = CSET,                                    \
++    .out_rr = tgen_##NAME,                                              \
++};
++F64_CVT(cvt_i32_f32, OPC_VCVTSI2SS, a0, cset_f64_from_int)
++F64_CVT(cvt_i32_f64, OPC_VCVTSI2SD, a0, cset_f64_from_int)
++F64_CVT(cvt_f32_i32, OPC_VCVTSS2SI, 0, cset_f64_to_int)
++F64_CVT(cvtt_f32_i32, OPC_VCVTTSS2SI, 0, cset_f64_to_int)
++F64_CVT(cvt_f64_i32, OPC_VCVTSD2SI, 0, cset_f64_to_int)
++F64_CVT(cvtt_f64_i32, OPC_VCVTTSD2SI, 0, cset_f64_to_int)
++#undef F64_CVT
 +
-+    OPW(movcond)(TCG_COND_EQ, c, t, zero, zero, x);
-+    OPW(sari)(sgn, c, W - 1);
-+    OPW(shri)(sgn, sgn, 1);
-+    OPW(xor)(k, c, sgn);
-+}
+ static void tgen_bswap16(TCGContext *s, TCGType type,
+                          TCGReg a0, TCGReg a1, unsigned flags)
+ {
+@@ -3765,6 +3831,34 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+         a2 = a1;
+         a1 = 0;
+         goto gen_simd;
++    /* 2ksbox (patch 11): float lanes, MO_32 = ps, MO_64 = pd */
++    case INDEX_op_fadd_vec:
++        insn = vece == MO_64 ? OPC_VADDPD : OPC_VADDPS;
++        goto gen_simd;
++    case INDEX_op_fsub_vec:
++        insn = vece == MO_64 ? OPC_VSUBPD : OPC_VSUBPS;
++        goto gen_simd;
++    case INDEX_op_fmul_vec:
++        insn = vece == MO_64 ? OPC_VMULPD : OPC_VMULPS;
++        goto gen_simd;
++    case INDEX_op_fdiv_vec:
++        insn = vece == MO_64 ? OPC_VDIVPD : OPC_VDIVPS;
++        goto gen_simd;
++    case INDEX_op_fsqrt_vec:
++        insn = vece == MO_64 ? OPC_VSQRTPD : OPC_VSQRTPS;
++        a2 = a1;
++        a1 = 0;
++        goto gen_simd;
++    case INDEX_op_fmin_vec:
++        insn = vece == MO_64 ? OPC_VMINPD : OPC_VMINPS;
++        goto gen_simd;
++    case INDEX_op_fmax_vec:
++        insn = vece == MO_64 ? OPC_VMAXPD : OPC_VMAXPS;
++        goto gen_simd;
++    case INDEX_op_fcmp_vec:
++        insn = vece == MO_64 ? OPC_VCMPPD : OPC_VCMPPS;
++        sub = args[3];
++        goto gen_simd_imm8;
+     gen_simd:
+         tcg_debug_assert(insn != OPC_UD2);
+         tcg_out_vex_modrm_type(s, insn, a0, a1, a2, type);
+@@ -3914,6 +4008,17 @@ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_dupm_vec:
+         return C_O1_I1(x, r);
+ 
++    case INDEX_op_fadd_vec:
++    case INDEX_op_fsub_vec:
++    case INDEX_op_fmul_vec:
++    case INDEX_op_fdiv_vec:
++    case INDEX_op_fmin_vec:
++    case INDEX_op_fmax_vec:
++    case INDEX_op_fcmp_vec:
++        return C_O1_I2(x, x, x);
++    case INDEX_op_fsqrt_vec:
++        return C_O1_I1(x, x);
 +
-+/* ok &= neither a nor b is a NaN; ka, kb = their keys */
-+static TCGv_iW LANEFN(keys)(DisasContext *s, TCGv_iW ok, TCGv_iW ka,
-+                            TCGv_iW kb, TCGv_iW a, TCGv_iW b)
-+{
-+    TCGv_iW ta = TMP();
-+    TCGv_iW tb = TMP();
-+    TCGv_iW m = TMP();
-+    TCGv_iW okl = TMP();
-+
-+    OPW(shli)(ta, a, 1);
-+    OPW(shli)(tb, b, 1);
-+    OPW(umax)(m, ta, tb);
-+    OPW(setcondi)(TCG_COND_LEU, okl, m, NAN_LIMIT);
-+    LANEFN(key)(s, ka, a, ta);
-+    LANEFN(key)(s, kb, b, tb);
-+    if (ok) {
-+        OPW(and)(ok, ok, okl);
-+        return ok;
-+    }
-+    return okl;
-+}
-+
-+/* comis/ucomis: cc = CC_Z (equal) | CC_C (less), other flags clear */
-+static void LANEFN(comis)(DisasContext *s, TCGv_i32 cc, TCGv_iW a,
-+                          TCGv_iW b, TCGLabel *slow)
-+{
-+    TCGv_iW ka = TMP();
-+    TCGv_iW kb = TMP();
-+    TCGv_iW eq = TMP();
-+    TCGv_iW lt = TMP();
-+    TCGv_iW t = TMP();
-+    TCGv_iW ok;
-+
-+    ok = LANEFN(keys)(s, NULL, ka, kb, a, b);
-+    OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
-+    OPW(setcond)(TCG_COND_EQ, eq, ka, kb);
-+    OPW(setcond)(TCG_COND_LT, lt, ka, kb);
-+    OPW(movcond)(TCG_COND_NE, t, eq, CONSTW(0), CONSTW(CC_Z), CONSTW(0));
-+    OPW(movcond)(TCG_COND_NE, lt, lt, CONSTW(0), CONSTW(CC_C), CONSTW(0));
-+    OPW(or)(t, t, lt);
-+    TO_I32(cc, t);
-+}
-+
-+/* min: lt(a, b) ? a : b; max: lt(b, a) ? a : b (Intel's operand order rules) */
-+static TCGv_iW LANEFN(minmax)(DisasContext *s, bool max, TCGv_iW r,
-+                              TCGv_iW a, TCGv_iW b, TCGv_iW ok)
-+{
-+    TCGv_iW ka = TMP();
-+    TCGv_iW kb = TMP();
-+    TCGv_iW lt = TMP();
-+
-+    ok = LANEFN(keys)(s, ok, ka, kb, a, b);
-+    if (max) {
-+        OPW(setcond)(TCG_COND_LT, lt, kb, ka);
-+    } else {
-+        OPW(setcond)(TCG_COND_LT, lt, ka, kb);
-+    }
-+    OPW(movcond)(TCG_COND_NE, r, lt, CONSTW(0), a, b);
-+    return ok;
-+}
-+
-+/* cmpps predicate 0..7: eq lt le unord neq nlt nle ord -> all-ones / 0 */
-+static TCGv_iW LANEFN(cmp)(DisasContext *s, int pred, TCGv_iW r,
-+                           TCGv_iW a, TCGv_iW b, TCGv_iW ok)
-+{
-+    static const TCGCond conds[8] = {
-+        TCG_COND_EQ, TCG_COND_LT, TCG_COND_LE, TCG_COND_NEVER,
-+        TCG_COND_NE, TCG_COND_GE, TCG_COND_GT, TCG_COND_ALWAYS,
-+    };
-+    TCGv_iW ka = TMP();
-+    TCGv_iW kb = TMP();
-+
-+    ok = LANEFN(keys)(s, ok, ka, kb, a, b);
-+    if (pred == 3) {
-+        OPW(movi)(r, 0);
-+    } else if (pred == 7) {
-+        OPW(movi)(r, -1);
-+    } else {
-+        OPW(setcond)(conds[pred], r, ka, kb);
-+        OPW(neg)(r, r);
-+    }
-+    return ok;
-+}
-+
-+/*
-+ * The scalar form of an arithmetic, min/max or compare instruction: lane
-+ * 0 of op[0] = op[1] op op[2] (unary: op[2]) in general registers, one
-+ * branch to the slow block before the store.
-+ */
-+static void LANEFN(scalar)(DisasContext *s, X86DecodedInsn *decode, int op,
-+                           int pred, TCGLabel *slow)
-+{
-+    bool unary = op == SSES_SQRT || op == SSES_RCP || op == SSES_RSQRT;
-+    int d = vector_reg_offset(&decode->op[0]);
-+    int src = vector_reg_offset(&decode->op[2]);
-+    TCGv_iW a = NULL;
-+    TCGv_iW b = TMP();
-+    TCGv_iW r = TMP();
-+    TCGv_iW ok;
-+
-+    OPW(ld)(b, tcg_env, src + LANE(0));
-+    if (!unary) {
-+        a = TMP();
-+        OPW(ld)(a, tcg_env, vector_reg_offset(&decode->op[1]) + LANE(0));
-+    }
-+    switch (op) {
-+    case SSES_MIN:
-+    case SSES_MAX:
-+        ok = LANEFN(minmax)(s, op == SSES_MAX, r, a, b, NULL);
-+        break;
-+    case SSES_CMP:
-+        ok = LANEFN(cmp)(s, pred, r, a, b, NULL);
-+        break;
-+    default:
-+        ok = LANEFN(arith)(s, op, r, a, b, NULL);
-+        break;
-+    }
-+    OPW(brcondi)(TCG_COND_EQ, ok, 0, slow);
-+    OPW(st)(r, tcg_env, d + LANE(0));
-+}
-+
-+#undef TCGv_iW
-+#undef TMP
-+#undef OPW
-+#undef FPW
-+#undef CONSTW
-+#undef LANEFN
-+#undef LANE
-+#undef NAN_LIMIT
-+#undef EXP_MASK
-+#undef EXP_LO
-+#undef EXP_RANGE
-+#undef ONE_BITS
-+#undef TO_I32
-+#undef W
+     case INDEX_op_st_vec:
+         return C_O0_I2(x, r);
+ 
+@@ -3996,6 +4101,15 @@ int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+     case INDEX_op_not_vec:
+     case INDEX_op_bitsel_vec:
+         return 1;
++    case INDEX_op_fadd_vec:
++    case INDEX_op_fsub_vec:
++    case INDEX_op_fmul_vec:
++    case INDEX_op_fdiv_vec:
++    case INDEX_op_fsqrt_vec:
++    case INDEX_op_fmin_vec:
++    case INDEX_op_fmax_vec:
++    case INDEX_op_fcmp_vec:
++        return vece >= MO_32;
+     case INDEX_op_cmp_vec:
+     case INDEX_op_cmpsel_vec:
+         return -1;

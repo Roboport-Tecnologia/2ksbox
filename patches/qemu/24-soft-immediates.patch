@@ -38,30 +38,73 @@ Moto Racer's race, on the driver's own frame counter: 41 -> 58 fps, the worst
 5 s window 32 -> 45, invalidations 36,500/s -> 1/s.
 
 diff --git a/accel/tcg/meson.build b/accel/tcg/meson.build
-index aef80de967..fc1a4da7d9 100644
+index 002aa8f458..12bfcc69fd 100644
 --- a/accel/tcg/meson.build
 +++ b/accel/tcg/meson.build
-@@ -20,6 +20,7 @@ specific_ss.add_all(when: 'CONFIG_TCG', if_true: tcg_specific_ss)
+@@ -29,6 +29,7 @@ user_ss.add(files(
  
- specific_ss.add(when: ['CONFIG_SYSTEM_ONLY', 'CONFIG_TCG'], if_true: files(
+ system_ss.add(files(
    'cputlb.c',
 +  'tb-softimm.c',
-   'watchpoint.c',
- ))
- 
+   'icount-common.c',
+   'monitor.c',
+   'tcg-accel-ops.c',
 diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
-index dd2c2c433b..662028d15e 100644
+index 22d1d4792d..6b15c9614c 100644
 --- a/accel/tcg/tb-maint.c
 +++ b/accel/tcg/tb-maint.c
-@@ -32,6 +32,7 @@
+@@ -34,6 +34,7 @@
+ #include "tb-hash.h"
  #include "tb-context.h"
  #include "internal-common.h"
- #include "internal-target.h"
 +#include "exec/tb-softimm.h"
+ #ifdef CONFIG_USER_ONLY
+ #include "user/page-protection.h"
+ #define runstate_is_running()  true
+@@ -210,6 +211,18 @@ struct PageDesc {
+      * (two g_tree lookups per write).
+      */
+     uint16_t span_in_end, span_out_lo;
++    /*
++     * Page offsets [lo, hi] that a write was absorbed in (patch 24,
++     * soft_imm_absorbs__locked): the answer depends only on the TBs on the
++     * list, so it holds until the list changes (tb_page_add,
++     * tb_page_remove and the flush empty it). A software renderer patches
++     * the same few immediates per span, and each of those writes walked the
++     * whole list, every TB-flags variant of every block on the page (up to
++     * three per block under Win98's lazy FPU switching, CR0.TS/MP): Blood
++     * spent 30-40 % of QEMU there, ~118 M TB visits a second.
++     */
++    uint16_t absorbed_lo[8], absorbed_hi[8];
++    uint8_t absorbed_n, absorbed_next;
+ };
  
+ void page_table_config_init(void)
+@@ -691,6 +704,7 @@ static void tb_remove_all_1(int level, void **lp)
+         for (i = 0; i < V_L2_SIZE; ++i) {
+             page_lock(&pd[i]);
+             pd[i].first_tb = (uintptr_t)NULL;
++            pd[i].absorbed_n = 0;
+             page_unlock(&pd[i]);
+         }
+     } else {
+@@ -726,6 +740,7 @@ static void tb_page_add(PageDesc *p, TranslationBlock *tb, unsigned int n)
+     tb->page_next[n] = p->first_tb;
+     page_already_protected = p->first_tb != 0;
+     p->first_tb = (uintptr_t)tb | n;
++    p->absorbed_n = 0;
  
- /* List iterators for lists of tagged pointers in TranslationBlock. */
-@@ -819,6 +820,10 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
+     /* the byte range this TB occupies on this page */
+     if (n == 0) {
+@@ -781,6 +796,7 @@ static void tb_page_remove(PageDesc *pd, TranslationBlock *tb)
+     PageForEachNext n1;
+ 
+     assert_page_locked(pd);
++    pd->absorbed_n = 0;
+     pprev = &pd->first_tb;
+     PAGE_FOR_EACH_TB(unused, unused, pd, tb1, n1) {
+         if (tb1 == tb) {
+@@ -830,6 +846,10 @@ void tb_flush__exclusive_or_serial(void)
      tb_remove_all();
  
      tcg_region_reset_all();
@@ -71,19 +114,19 @@ index dd2c2c433b..662028d15e 100644
 +#endif
      /* XXX: flush processor icache at this point if cache flush is expensive */
      qatomic_inc(&tb_ctx.tb_flush_count);
- 
-@@ -1200,6 +1205,10 @@ tb_invalidate_phys_page_range__locked(struct page_collection *pages,
-                 cpu_restore_state_from_tb(current_cpu, current_tb, retaddr);
+     qemu_plugin_flush_cb();
+@@ -1207,6 +1227,10 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
+                 current_tb_modified = true;
+                 cpu_restore_state_from_tb(cpu, current_tb, retaddr);
              }
- #endif /* TARGET_HAS_PRECISE_SMC */
 +            if (retaddr) {
 +                /* a guest write threw this block away: remember where */
 +                soft_imm_note_invalidate(tb);
 +            }
-             tb_phys_invalidate__locked(tb);
+             do_tb_phys_invalidate(tb, true);
          }
      }
-@@ -1264,6 +1273,47 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t last)
+@@ -1269,6 +1293,70 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
      page_collection_unlock(pages);
  }
  
@@ -99,12 +142,26 @@ index dd2c2c433b..662028d15e 100644
 +    TranslationBlock *tb;
 +    PageForEachNext n;
 +    bool any = false;
++    unsigned lo, hi, i;
 +
 +    if (!tcg_soft_imm) {
 +        return false;
 +    }
 +    if (((start ^ last) & TARGET_PAGE_MASK) != 0) {
 +        return false;
++    }
++    lo = start & ~TARGET_PAGE_MASK;
++    hi = last & ~TARGET_PAGE_MASK;
++    for (i = 0; i < p->absorbed_n; i++) {
++        if (lo >= p->absorbed_lo[i] && hi <= p->absorbed_hi[i]) {
++            /*
++             * Inside a range absorbed before: every TB that reaches these
++             * bytes covers them (a part of the range that reaches no TB
++             * would have its walk find nothing to throw away).
++             */
++            trace_soft_imm_absorb(start, (unsigned)(last - start + 1));
++            return true;
++        }
 +    }
 +    PAGE_FOR_EACH_TB(start, last, p, tb, n) {
 +        tb_page_addr_t tb_start, tb_last;
@@ -125,17 +182,26 @@ index dd2c2c433b..662028d15e 100644
 +        }
 +        any = true;
 +    }
++    if (any) {
++        i = p->absorbed_next;
++        p->absorbed_lo[i] = lo;
++        p->absorbed_hi[i] = hi;
++        p->absorbed_next = (i + 1) % ARRAY_SIZE(p->absorbed_lo);
++        if (p->absorbed_n < ARRAY_SIZE(p->absorbed_lo)) {
++            p->absorbed_n++;
++        }
++    }
 +    return any;
 +}
 +
  /*
-  * Call with all @pages in the range [@start, @start + len[ locked.
-  */
-@@ -1307,6 +1357,15 @@ void tb_invalidate_phys_range_fast(ram_addr_t ram_addr,
+  * len must be <= 8 and start must be a multiple of len.
+  * Called via softmmu_template.h when code areas are written to with
+@@ -1294,6 +1382,15 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
          page_unlock(p);
          return;
      }
-+    if (soft_imm_absorbs__locked(p, ram_addr, ram_addr + size - 1)) {
++    if (soft_imm_absorbs__locked(p, start, last)) {
 +        /*
 +         * Every block the write can reach reads those bytes at run time
 +         * (exec/tb-softimm.h): the store is the update, nothing is stale
@@ -144,474 +210,12 @@ index dd2c2c433b..662028d15e 100644
 +        page_unlock(p);
 +        return;
 +    }
-     if (off >= p->span_in_end && off + size - 1 < p->span_out_lo) {
+     if (off >= p->span_in_end && off + len - 1 < p->span_out_lo) {
          /*
           * The common case, nothing the write can hit reaches into another
-diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
-index 3caecde857..ba599b1190 100644
---- a/accel/tcg/tcg-all.c
-+++ b/accel/tcg/tcg-all.c
-@@ -102,6 +102,7 @@ bool mttcg_enabled;
- bool one_insn_per_tb;
- bool tcg_smc_same_value = true;
- bool tcg_inline_lookup = true;
-+bool tcg_soft_imm = true;
- 
- static int tcg_init_machine(MachineState *ms)
- {
-@@ -213,6 +214,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
-     return tcg_inline_lookup;
- }
- 
-+static bool tcg_get_soft_imm(Object *obj, Error **errp)
-+{
-+    return tcg_soft_imm;
-+}
-+
-+static void tcg_set_soft_imm(Object *obj, bool value, Error **errp)
-+{
-+    tcg_soft_imm = value;
-+}
-+
- static bool tcg_get_pinned_regs(Object *obj, Error **errp)
- {
-     return tcg_pin_globals;
-@@ -286,6 +297,11 @@ static void tcg_accel_class_init(ObjectClass *oc, void *data)
-     object_class_property_set_description(oc, "inline-lookup",
-         "Probe the jump cache inline at indirect branches instead of calling the lookup helper");
- 
-+    object_class_property_add_bool(oc, "soft-imm",
-+        tcg_get_soft_imm, tcg_set_soft_imm);
-+    object_class_property_set_description(oc, "soft-imm",
-+        "A block whose code keeps being patched reads those operands from the guest's code at run time");
-+
-     object_class_property_add_bool(oc, "pinned-regs",
-         tcg_get_pinned_regs, tcg_set_pinned_regs);
-     object_class_property_set_description(oc, "pinned-regs",
-diff --git a/accel/tcg/trace-events b/accel/tcg/trace-events
-index 14f638810c..bd2907ee5f 100644
---- a/accel/tcg/trace-events
-+++ b/accel/tcg/trace-events
-@@ -24,3 +24,7 @@ store_atom2_fallback(uint32_t memop, uintptr_t ra) "mop:0x%"PRIx32", ra:0x%"PRIx
- store_atom4_fallback(uint32_t memop, uintptr_t ra) "mop:0x%"PRIx32", ra:0x%"PRIxPTR""
- store_atom8_fallback(uint32_t memop, uintptr_t ra) "mop:0x%"PRIx32", ra:0x%"PRIxPTR""
- store_atom16_fallback(uint32_t memop, uintptr_t ra) "mop:0x%"PRIx32", ra:0x%"PRIxPTR""
-+
-+# tb-softimm.c
-+soft_imm_block(uint64_t pc, unsigned fields) "pc:0x%" PRIx64 ", fields:%u"
-+soft_imm_absorb(uint64_t addr, unsigned size) "addr:0x%" PRIx64 ", size:%u"
-diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
-index 8531a27f1e..3761ee57a4 100644
---- a/accel/tcg/translate-all.c
-+++ b/accel/tcg/translate-all.c
-@@ -63,6 +63,7 @@
- #include "tb-context.h"
- #include "internal-common.h"
- #include "internal-target.h"
-+#include "exec/tb-softimm.h"
- #include "tcg/perf.h"
- #include "tcg/insn-start-words.h"
- 
-@@ -353,6 +354,14 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
- #endif
- 
-  restart_translate:
-+    /*
-+     * A block at a physical address the guest keeps patching is translated
-+     * with its patched operands read from the code bytes at run time
-+     * (exec/tb-softimm.h).  Decided here so a restart re-decides it, and so
-+     * the field list the store side needs starts empty on every attempt.
-+     */
-+    soft_imm_begin(phys_pc, cflags);
-+
-     trace_translate_block(tb, pc, tb->tc.ptr);
- 
-     gen_code_size = setjmp_gen_code(env, tb, pc, host_pc, &max_insns, &ti);
-@@ -427,6 +436,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
-         goto buffer_overflow;
-     }
-     tb->tc.size = gen_code_size;
-+    soft_imm_attach(tb);
- 
-     /*
-      * For CF_PCREL, attribute all executions of the generated code
-diff --git a/include/exec/translation-block.h b/include/exec/translation-block.h
-index a6d1af6e9b..2911f1c795 100644
---- a/include/exec/translation-block.h
-+++ b/include/exec/translation-block.h
-@@ -109,6 +109,14 @@ struct TranslationBlock {
-     /* jmp_lock placed here to fill a 4-byte hole. Its documentation is below */
-     QemuSpin jmp_lock;
- 
-+    /*
-+     * Non-NULL when this block reads some of its own operands from the
-+     * guest's code bytes at run time instead of baking them in: the fields
-+     * it does that for, so that a guest write inside them invalidates
-+     * nothing (exec/tb-softimm.h).
-+     */
-+    struct SoftImmTB *soft_imm;
-+
-     /* The following data are used to directly call another TB from
-      * the code of this one. This can be done either by emitting direct or
-      * indirect native jump instructions. These jumps are reset so that the TB
-diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
-index a9619f97e7..e7fff7bc4e 100644
---- a/target/i386/tcg/decode-new.c.inc
-+++ b/target/i386/tcg/decode-new.c.inc
-@@ -2170,13 +2170,27 @@ static bool decode_op(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode,
-         }
- 
-     case X86_TYPE_I:  /* Immediate */
-+        op->unit = X86_OP_IMM;
-+        op->imm_addr = s->pc;
-+        op->imm_bytes = 1 << op->ot;
-+        op->imm_sign = true;
-+        decode->immediate = op->imm = insn_get_signed(env, s, op->ot);
-+        break;
-+
-     case X86_TYPE_J:  /* Relative offset for a jump */
-+        /*
-+         * Not a candidate for exec/tb-softimm.h: the target decides the
-+         * block's shape, so it stays a constant.
-+         */
-         op->unit = X86_OP_IMM;
-         decode->immediate = op->imm = insn_get_signed(env, s, op->ot);
-         break;
- 
-     case X86_TYPE_I_unsigned:  /* Immediate */
-         op->unit = X86_OP_IMM;
-+        op->imm_addr = s->pc;
-+        op->imm_bytes = 1 << op->ot;
-+        op->imm_sign = false;
-         decode->immediate = op->imm = insn_get(env, s, op->ot);
-         break;
- 
-diff --git a/target/i386/tcg/decode-new.h b/target/i386/tcg/decode-new.h
-index 7f23d373ea..f03ddd4774 100644
---- a/target/i386/tcg/decode-new.h
-+++ b/target/i386/tcg/decode-new.h
-@@ -309,6 +309,16 @@ typedef struct X86DecodedOp {
-     bool has_ea;
-     int offset;   /* For MMX and SSE */
- 
-+    /*
-+     * Where the immediate came from, so that a block whose code the guest
-+     * keeps patching can read it from there at run time instead of baking
-+     * it in (exec/tb-softimm.h).  imm_bytes 0 = not an immediate, or one
-+     * that must stay a constant.
-+     */
-+    target_ulong imm_addr;
-+    uint8_t imm_bytes;
-+    bool imm_sign;
-+
-     union {
- 	target_ulong imm;
-         /*
-@@ -325,6 +335,10 @@ typedef struct AddressParts {
-     int index;
-     int scale;
-     target_long disp;
-+    /* the displacement's own bytes in the instruction stream; see above */
-+    target_ulong disp_addr;
-+    uint8_t disp_bytes;
-+    bool disp_sign;
- } AddressParts;
- 
- struct X86DecodedInsn {
-diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
-index 1755a92..2fb7c4d 100644
---- a/target/i386/tcg/emit.c.inc
-+++ b/target/i386/tcg/emit.c.inc
-@@ -253,6 +253,9 @@ static bool sse_needs_alignment(DisasContext *s, X86DecodedInsn *decode, MemOp o
-     }
- }
- 
-+/* the instructions whose immediate may be read at run time; see below */
-+static bool insn_soft_imm_ok(const X86DecodedInsn *decode);
-+
- static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
- {
-     X86DecodedOp *op = &decode->op[opn];
-@@ -307,7 +310,10 @@ static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
-         }
-         break;
-     case X86_OP_IMM:
--        tcg_gen_movi_tl(v, op->imm);
-+        if (!(op->imm_bytes && s->soft_imm && insn_soft_imm_ok(decode) &&
-+              gen_soft_field(s, v, op->imm_addr, op->imm_bytes, op->imm_sign))) {
-+            tcg_gen_movi_tl(v, op->imm);
-+        }
-         break;
- 
-     case X86_OP_MMX:
-@@ -3304,6 +3310,26 @@ static MemOp gen_shift_count_1(DisasContext *s, X86DecodedInsn *decode,
-         break;
- 
-     case X86_OP_IMM:
-+        /*
-+         * A count the guest keeps patching into its own code
-+         * (exec/tb-softimm.h) is read from its byte at run time, the way the
-+         * CL form reads ECX, so the patch invalidates nothing: Build's column
-+         * loops (Blood) rewrite their shift and rotate counts per wall
-+         * texture.  Not where the count is reduced modulo 9 or 17 here --
-+         * RCL/RCR on 8 and 16-bit operands -- and not the SHLD/SHRD count,
-+         * which the decoder reads without recording where it is.
-+         */
-+        if (s->soft_imm && mod >= mask && decode->op[2].unit == X86_OP_IMM &&
-+            decode->op[2].imm_bytes == 1) {
-+            TCGv soft = tcg_temp_new();
-+
-+            if (gen_soft_field(s, soft, decode->op[2].imm_addr, 1, false)) {
-+                tcg_gen_andi_tl(soft, soft, mask);
-+                *count = soft;
-+                *can_be_zero = true;
-+                break;
-+            }
-+        }
-         decode->immediate &= mask;
-         if (mod < mask) {
-             decode->immediate %= mod;
-@@ -4836,3 +4862,23 @@ static void gen_XSAVEOPT(DisasContext *s, X86DecodedInsn *decode)
-     x87s_boundary(s);
-     gen_helper_xsave(tcg_env, s->A0, features);
- }
-+
-+/*
-+ * Whose immediate may be read from the guest's code at run time
-+ * (exec/tb-softimm.h): the instructions a self-modifying rasterizer patches,
-+ * and only those whose emitter takes the immediate through gen_load and
-+ * nowhere else -- an emitter that also reads decode->immediate directly (the
-+ * shifts, the jumps, the SSE lane selectors, INT, RET) would keep the value
-+ * this block was translated with, and the field must then stay a constant.
-+ * The group-1 table spells CMP as gen_SUB and TEST as gen_AND, so both are in;
-+ * IMUL3 multiplies by what gen_load left in T1.  The shift and rotate counts
-+ * have their own path, gen_shift_count_1.
-+ */
-+static bool insn_soft_imm_ok(const X86DecodedInsn *decode)
-+{
-+    X86GenFunc gen = decode->e.gen;
-+
-+    return gen == gen_ADD || gen == gen_OR  || gen == gen_ADC ||
-+           gen == gen_SBB || gen == gen_AND || gen == gen_SUB ||
-+           gen == gen_XOR || gen == gen_MOV || gen == gen_IMUL3;
-+}
-diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index fbf9a39a2a..fdf6121d9e 100644
---- a/target/i386/tcg/translate.c
-+++ b/target/i386/tcg/translate.c
-@@ -24,6 +24,7 @@
- #include "tcg/tcg-op.h"
- #include "tcg/tcg-op-gvec.h"
- #include "exec/translator.h"
-+#include "exec/tb-softimm.h"
- #include "fpu/softfloat.h"
- 
- #include "exec/helper-proto.h"
-@@ -111,6 +112,13 @@ typedef struct X87SlowBlock {
- typedef struct DisasContext {
-     DisasContextBase base;
- 
-+    /*
-+     * This block's own code keeps being patched by the guest, so its
-+     * immediates and displacements are read from the code bytes at run time
-+     * rather than baked in (exec/tb-softimm.h).
-+     */
-+    bool soft_imm;
-+
-     target_ulong pc;       /* pc = eip + cs_base */
-     target_ulong cs_base;  /* base of CS segment */
-     target_ulong pc_save;
-@@ -1811,6 +1819,10 @@ static AddressParts gen_lea_modrm_0(CPUX86State *env, DisasContext *s,
-     int def_seg, base, index, scale, mod, rm;
-     target_long disp;
-     bool havesib;
-+    /* where the displacement's own bytes are, for exec/tb-softimm.h */
-+    target_ulong disp_addr = 0;
-+    uint8_t disp_bytes = 0;
-+    bool disp_sign = true;
- 
-     def_seg = R_DS;
-     index = -1;
-@@ -1846,18 +1858,25 @@ static AddressParts gen_lea_modrm_0(CPUX86State *env, DisasContext *s,
-         case 0:
-             if ((base & 7) == 5) {
-                 base = -1;
-+                disp_addr = s->pc;
-+                disp_bytes = 4;
-                 disp = (int32_t)x86_ldl_code(env, s);
-                 if (CODE64(s) && !havesib) {
-                     base = -2;
-                     disp += s->pc + s->rip_offset;
-+                    disp_bytes = 0;     /* folded with the program counter */
-                 }
-             }
-             break;
-         case 1:
-+            disp_addr = s->pc;
-+            disp_bytes = 1;
-             disp = (int8_t)x86_ldub_code(env, s);
-             break;
-         default:
-         case 2:
-+            disp_addr = s->pc;
-+            disp_bytes = 4;
-             disp = (int32_t)x86_ldl_code(env, s);
-             break;
-         }
-@@ -1865,6 +1884,7 @@ static AddressParts gen_lea_modrm_0(CPUX86State *env, DisasContext *s,
-         /* For correct popl handling with esp.  */
-         if (base == R_ESP && s->popl_esp_hack) {
-             disp += s->popl_esp_hack;
-+            disp_bytes = 0;             /* no longer the bytes in the stream */
-         }
-         if (base == R_EBP || base == R_ESP) {
-             def_seg = R_SS;
-@@ -1875,12 +1895,19 @@ static AddressParts gen_lea_modrm_0(CPUX86State *env, DisasContext *s,
-         if (mod == 0) {
-             if (rm == 6) {
-                 base = -1;
-+                disp_addr = s->pc;
-+                disp_bytes = 2;
-+                disp_sign = false;
-                 disp = x86_lduw_code(env, s);
-                 break;
-             }
-         } else if (mod == 1) {
-+            disp_addr = s->pc;
-+            disp_bytes = 1;
-             disp = (int8_t)x86_ldub_code(env, s);
-         } else {
-+            disp_addr = s->pc;
-+            disp_bytes = 2;
-             disp = (int16_t)x86_lduw_code(env, s);
-         }
- 
-@@ -1925,13 +1952,95 @@ static AddressParts gen_lea_modrm_0(CPUX86State *env, DisasContext *s,
-     }
- 
-  done:
--    return (AddressParts){ def_seg, base, index, scale, disp };
-+    return (AddressParts){ def_seg, base, index, scale, disp,
-+                           disp_addr, disp_bytes, disp_sign };
-+}
-+
-+/*
-+ * Load into @dest the operand whose bytes are at @addr in the instruction
-+ * stream, from the guest's own code at run time instead of materializing it
-+ * as a constant, so that the guest patching it invalidates nothing
-+ * (exec/tb-softimm.h).  False when this block is not translated that way, or
-+ * the field is not on its first page -- the caller then keeps the constant,
-+ * and the field is not registered, so no use of it can be left stale.
-+ */
-+static bool gen_soft_field(DisasContext *s, TCGv dest, target_ulong addr,
-+                           unsigned bytes, bool sign)
-+{
-+    TCGv_ptr base;
-+    target_ulong off;
-+
-+    if (!s->soft_imm || bytes == 0 || bytes > 4 || !s->base.host_addr[0]) {
-+        return false;
-+    }
-+    /*
-+     * The load is a host load of guest *code* bytes: it reads them in host
-+     * byte order and at whatever alignment the instruction stream gives, so
-+     * this wants a little-endian host that allows unaligned loads.  The two
-+     * this is built for qualify; anywhere else the constant stays.
-+     */
-+    if (HOST_BIG_ENDIAN) {
-+        return false;
-+    }
-+#if !defined(__aarch64__) && !defined(__x86_64__)
-+    return false;
-+#endif
-+    if (addr < s->base.pc_first ||
-+        (addr & TARGET_PAGE_MASK) != (s->base.pc_first & TARGET_PAGE_MASK) ||
-+        ((addr + bytes - 1) & TARGET_PAGE_MASK) != (addr & TARGET_PAGE_MASK)) {
-+        return false;
-+    }
-+
-+    off = addr - s->base.pc_first;
-+    /* taken before the load is emitted: an unrecorded load buys nothing */
-+    if (!soft_imm_field(off, bytes)) {
-+        return false;
-+    }
-+    base = tcg_constant_ptr((uintptr_t)s->base.host_addr[0] + off);
-+
-+    switch (bytes) {
-+    case 1:
-+        if (sign) {
-+            tcg_gen_ld8s_tl(dest, base, 0);
-+        } else {
-+            tcg_gen_ld8u_tl(dest, base, 0);
-+        }
-+        break;
-+    case 2:
-+        if (sign) {
-+            tcg_gen_ld16s_tl(dest, base, 0);
-+        } else {
-+            tcg_gen_ld16u_tl(dest, base, 0);
-+        }
-+        break;
-+    default:
-+#if TARGET_LONG_BITS == 64
-+        if (sign) {
-+            tcg_gen_ld32s_tl(dest, base, 0);
-+        } else {
-+            tcg_gen_ld32u_tl(dest, base, 0);
-+        }
-+#else
-+        tcg_gen_ld_tl(dest, base, 0);
-+#endif
-+        break;
-+    }
-+
-+    return true;
- }
- 
- /* Compute the address, with a minimum number of TCG ops.  */
- static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
- {
-     TCGv ea = NULL;
-+    TCGv disp = NULL;
-+
-+    if (a.disp_bytes && s->soft_imm) {
-+        TCGv t = tcg_temp_new();
-+        if (gen_soft_field(s, t, a.disp_addr, a.disp_bytes, a.disp_sign)) {
-+            disp = t;
-+        }
-+    }
- 
-     if (a.index >= 0 && !is_vsib) {
-         if (a.scale == 0) {
-@@ -1951,10 +2060,16 @@ static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
-         if (tb_cflags(s->base.tb) & CF_PCREL && a.base == -2) {
-             /* With cpu_eip ~= pc_save, the expression is pc-relative. */
-             tcg_gen_addi_tl(s->A0, cpu_eip, a.disp - s->pc_save);
-+        } else if (disp) {
-+            tcg_gen_mov_tl(s->A0, disp);
-         } else {
-             tcg_gen_movi_tl(s->A0, a.disp);
-         }
-         ea = s->A0;
-+    } else if (disp) {
-+        /* a zero displacement can be patched into a non-zero one */
-+        tcg_gen_add_tl(s->A0, ea, disp);
-+        ea = s->A0;
-     } else if (a.disp != 0) {
-         tcg_gen_addi_tl(s->A0, ea, a.disp);
-         ea = s->A0;
-@@ -3985,6 +4100,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
-     dc->cs_base = dc->base.tb->cs_base;
-     dc->pc_save = dc->base.pc_next;
-     dc->flags = flags;
-+    /* decided per block in tb_gen_code, from how often a write threw it away */
-+    dc->soft_imm = soft_imm_active();
- #ifndef CONFIG_USER_ONLY
-     dc->cpl = cpl;
-     dc->iopl = iopl;
 diff --git a/accel/tcg/tb-softimm.c b/accel/tcg/tb-softimm.c
 new file mode 100644
-index 0000000..7bd8872
+index 0000000000..201251991f
 --- /dev/null
 +++ b/accel/tcg/tb-softimm.c
 @@ -0,0 +1,258 @@
@@ -625,7 +229,7 @@ index 0000000..7bd8872
 +#include "qemu/osdep.h"
 +#include "qemu/thread.h"
 +#include "qemu/units.h"
-+#include "exec/exec-all.h"
++#include "exec/translation-block.h"
 +#include "exec/tb-softimm.h"
 +#include "trace.h"
 +
@@ -873,6 +477,94 @@ index 0000000..7bd8872
 +{
 +    qemu_mutex_init(&soft_imm_arena_lock);
 +}
+diff --git a/accel/tcg/tcg-all.c b/accel/tcg/tcg-all.c
+index a8217ad05e..b80ebdac62 100644
+--- a/accel/tcg/tcg-all.c
++++ b/accel/tcg/tcg-all.c
+@@ -85,6 +85,7 @@ static void tcg_accel_instance_init(Object *obj)
+ bool one_insn_per_tb;
+ bool tcg_smc_same_value = true;
+ bool tcg_inline_lookup = true;
++bool tcg_soft_imm = true;
+ 
+ #ifndef CONFIG_USER_ONLY
+ static void tcg_vm_change_state(void *opaque, bool running, RunState state)
+@@ -265,6 +266,16 @@ static bool tcg_get_inline_lookup(Object *obj, Error **errp)
+     return tcg_inline_lookup;
+ }
+ 
++static bool tcg_get_soft_imm(Object *obj, Error **errp)
++{
++    return tcg_soft_imm;
++}
++
++static void tcg_set_soft_imm(Object *obj, bool value, Error **errp)
++{
++    tcg_soft_imm = value;
++}
++
+ static void tcg_set_inline_lookup(Object *obj, bool value, Error **errp)
+ {
+     tcg_inline_lookup = value;
+@@ -313,6 +324,11 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "inline-lookup",
+         "Probe the jump cache inline at indirect branches instead of calling the lookup helper");
+ 
++    object_class_property_add_bool(oc, "soft-imm",
++        tcg_get_soft_imm, tcg_set_soft_imm);
++    object_class_property_set_description(oc, "soft-imm",
++        "A block whose code keeps being patched reads those operands from the guest's code at run time");
++
+     object_class_property_add_bool(oc, "one-insn-per-tb",
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
+diff --git a/accel/tcg/trace-events b/accel/tcg/trace-events
+index 0816cafd33..c38083d81e 100644
+--- a/accel/tcg/trace-events
++++ b/accel/tcg/trace-events
+@@ -28,3 +28,7 @@ store_atom16_fallback(uint32_t memop, uintptr_t ra) "mop:0x%"PRIx32", ra:0x%"PRI
+ 
+ # tb-maint.c
+ tb_flush(void) ""
++
++# tb-softimm.c
++soft_imm_block(uint64_t pc, unsigned fields) "pc:0x%" PRIx64 ", fields:%u"
++soft_imm_absorb(uint64_t addr, unsigned size) "addr:0x%" PRIx64 ", size:%u"
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index 328d96aba3..a3a1419abd 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -35,6 +35,7 @@
+ #include "tb-hash.h"
+ #include "tb-context.h"
+ #include "internal-common.h"
++#include "exec/tb-softimm.h"
+ #include "tcg/perf.h"
+ #include "tcg/insn-start-words.h"
+ 
+@@ -319,6 +320,14 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
+     tcg_ctx->guest_mo = cpu->cc->tcg_ops->guest_default_memory_order;
+ 
+  restart_translate:
++    /*
++     * A block at a physical address the guest keeps patching is translated
++     * with its patched operands read from the code bytes at run time
++     * (exec/tb-softimm.h).  Decided here so a restart re-decides it, and so
++     * the field list the store side needs starts empty on every attempt.
++     */
++    soft_imm_begin(phys_pc, s.cflags);
++
+     trace_translate_block(tb, s.pc, tb->tc.ptr);
+ 
+     gen_code_size = setjmp_gen_code(env, tb, s.pc, host_pc, &max_insns, &ti);
+@@ -395,6 +404,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
+         goto buffer_overflow;
+     }
+     tb->tc.size = gen_code_size;
++    soft_imm_attach(tb);
+ 
+     /*
+      * For CF_PCREL, attribute all executions of the generated code
 diff --git a/include/exec/tb-softimm.h b/include/exec/tb-softimm.h
 new file mode 100644
 index 0000000000..fb7d480525
@@ -954,3 +646,381 @@ index 0000000000..fb7d480525
 +#endif /* !CONFIG_USER_ONLY */
 +
 +#endif
+diff --git a/include/exec/translation-block.h b/include/exec/translation-block.h
+index 7c42c57cca..535685597a 100644
+--- a/include/exec/translation-block.h
++++ b/include/exec/translation-block.h
+@@ -116,6 +116,14 @@ struct TranslationBlock {
+     /* jmp_lock placed here to fill a 4-byte hole. Its documentation is below */
+     QemuSpin jmp_lock;
+ 
++    /*
++     * Non-NULL when this block reads some of its own operands from the
++     * guest's code bytes at run time instead of baking them in: the fields
++     * it does that for, so that a guest write inside them invalidates
++     * nothing (exec/tb-softimm.h).
++     */
++    struct SoftImmTB *soft_imm;
++
+     /* The following data are used to directly call another TB from
+      * the code of this one. This can be done either by emitting direct or
+      * indirect native jump instructions. These jumps are reset so that the TB
+diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
+index 8f854d20e4..3be415620e 100644
+--- a/target/i386/tcg/decode-new.c.inc
++++ b/target/i386/tcg/decode-new.c.inc
+@@ -2032,6 +2032,10 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
+     int index = -1;
+     int scale = 0;
+     target_ulong disp = 0;
++    /* where the displacement's own bytes are, for exec/tb-softimm.h */
++    target_ulong disp_addr = 0;
++    uint8_t disp_bytes = 0;
++    bool disp_sign = true;
+ 
+     switch (s->aflag) {
+     case MO_64:
+@@ -2050,18 +2054,25 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
+         case 0:
+             if ((base & 7) == 5) {
+                 base = -1;
++                disp_addr = s->pc;
++                disp_bytes = 4;
+                 disp = (int32_t)x86_ldl_code(env, s);
+                 if (CODE64(s) && sib == -1) {
+                     base = -2;
+                     disp += s->pc + s->rip_offset;
++                    disp_bytes = 0;     /* folded with the program counter */
+                 }
+             }
+             break;
+         case 1:
++            disp_addr = s->pc;
++            disp_bytes = 1;
+             disp = (int8_t)x86_ldub_code(env, s);
+             break;
+         default:
+         case 2:
++            disp_addr = s->pc;
++            disp_bytes = 4;
+             disp = (int32_t)x86_ldl_code(env, s);
+             break;
+         }
+@@ -2069,6 +2080,7 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
+         /* For correct popl handling with esp.  */
+         if (base == R_ESP && s->popl_esp_hack) {
+             disp += s->popl_esp_hack;
++            disp_bytes = 0;             /* no longer the bytes in the stream */
+         }
+         if (base == R_EBP || base == R_ESP) {
+             def_seg = R_SS;
+@@ -2079,12 +2091,19 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
+         if (mod == 0) {
+             if (rm == 6) {
+                 base = -1;
++                disp_addr = s->pc;
++                disp_bytes = 2;
++                disp_sign = false;
+                 disp = x86_lduw_code(env, s);
+                 break;
+             }
+         } else if (mod == 1) {
++            disp_addr = s->pc;
++            disp_bytes = 1;
+             disp = (int8_t)x86_ldub_code(env, s);
+         } else {
++            disp_addr = s->pc;
++            disp_bytes = 2;
+             disp = (int16_t)x86_lduw_code(env, s);
+         }
+ 
+@@ -2130,7 +2149,8 @@ static void decode_modrm(DisasContext *s, CPUX86State *env,
+ 
+     op->has_ea = true;
+     op->n = -1;
+-    decode->mem = (AddressParts){ def_seg, base, index, scale, disp };
++    decode->mem = (AddressParts){ def_seg, base, index, scale, disp,
++                                  disp_addr, disp_bytes, disp_sign };
+ }
+ 
+ static bool decode_op_size(DisasContext *s, X86OpEntry *e, X86OpSize size, MemOp *ot)
+@@ -2390,13 +2410,27 @@ static bool decode_op(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode,
+         }
+ 
+     case X86_TYPE_I:  /* Immediate */
++        op->unit = X86_OP_IMM;
++        op->imm_addr = s->pc;
++        op->imm_bytes = 1 << op->ot;
++        op->imm_sign = true;
++        decode->immediate = op->imm = insn_get_signed(env, s, op->ot);
++        break;
++
+     case X86_TYPE_J:  /* Relative offset for a jump */
++        /*
++         * Not a candidate for exec/tb-softimm.h: the target decides the
++         * block's shape, so it stays a constant.
++         */
+         op->unit = X86_OP_IMM;
+         decode->immediate = op->imm = insn_get_signed(env, s, op->ot);
+         break;
+ 
+     case X86_TYPE_I_unsigned:  /* Immediate */
+         op->unit = X86_OP_IMM;
++        op->imm_addr = s->pc;
++        op->imm_bytes = 1 << op->ot;
++        op->imm_sign = false;
+         decode->immediate = op->imm = insn_get(env, s, op->ot);
+         break;
+ 
+diff --git a/target/i386/tcg/decode-new.h b/target/i386/tcg/decode-new.h
+index 9282296900..91945ff8d5 100644
+--- a/target/i386/tcg/decode-new.h
++++ b/target/i386/tcg/decode-new.h
+@@ -311,6 +311,16 @@ typedef struct X86DecodedOp {
+     bool has_ea;
+     int offset;   /* For MMX and SSE */
+ 
++    /*
++     * Where the immediate came from, so that a block whose code the guest
++     * keeps patching can read it from there at run time instead of baking
++     * it in (exec/tb-softimm.h).  imm_bytes 0 = not an immediate, or one
++     * that must stay a constant.
++     */
++    target_ulong imm_addr;
++    uint8_t imm_bytes;
++    bool imm_sign;
++
+     union {
+ 	target_ulong imm;
+         /*
+@@ -327,6 +337,10 @@ typedef struct AddressParts {
+     int index;
+     int scale;
+     target_long disp;
++    /* the displacement's own bytes in the instruction stream; see above */
++    target_ulong disp_addr;
++    uint8_t disp_bytes;
++    bool disp_sign;
+ } AddressParts;
+ 
+ struct X86DecodedInsn {
+diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
+index 236ced8fca..bae6bec8cc 100644
+--- a/target/i386/tcg/emit.c.inc
++++ b/target/i386/tcg/emit.c.inc
+@@ -239,6 +239,9 @@ static bool sse_needs_alignment(DisasContext *s, X86DecodedInsn *decode, MemOp o
+     }
+ }
+ 
++/* the instructions whose immediate may be read at run time; see below */
++static bool insn_soft_imm_ok(const X86DecodedInsn *decode);
++
+ static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
+ {
+     X86DecodedOp *op = &decode->op[opn];
+@@ -294,7 +297,10 @@ static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
+         }
+         break;
+     case X86_OP_IMM:
+-        tcg_gen_movi_tl(v, op->imm);
++        if (!(op->imm_bytes && s->soft_imm && insn_soft_imm_ok(decode) &&
++              gen_soft_field(s, v, op->imm_addr, op->imm_bytes, op->imm_sign))) {
++            tcg_gen_movi_tl(v, op->imm);
++        }
+         break;
+ 
+     case X86_OP_MMX:
+@@ -3329,6 +3335,26 @@ static MemOp gen_shift_count_1(DisasContext *s, X86DecodedInsn *decode,
+         break;
+ 
+     case X86_OP_IMM:
++        /*
++         * A count the guest keeps patching into its own code
++         * (exec/tb-softimm.h) is read from its byte at run time, the way the
++         * CL form reads ECX, so the patch invalidates nothing: Build's column
++         * loops (Blood) rewrite their shift and rotate counts per wall
++         * texture.  Not where the count is reduced modulo 9 or 17 here --
++         * RCL/RCR on 8 and 16-bit operands -- and not the SHLD/SHRD count,
++         * which the decoder reads without recording where it is.
++         */
++        if (s->soft_imm && mod >= mask && decode->op[2].unit == X86_OP_IMM &&
++            decode->op[2].imm_bytes == 1) {
++            TCGv soft = tcg_temp_new();
++
++            if (gen_soft_field(s, soft, decode->op[2].imm_addr, 1, false)) {
++                tcg_gen_andi_tl(soft, soft, mask);
++                *count = soft;
++                *can_be_zero = true;
++                break;
++            }
++        }
+         decode->immediate &= mask;
+         if (mod < mask) {
+             decode->immediate %= mod;
+@@ -4914,3 +4940,23 @@ static void gen_XSAVEOPT(DisasContext *s, X86DecodedInsn *decode)
+     x87s_boundary(s);
+     gen_helper_xsave(tcg_env, s->A0, features);
+ }
++
++/*
++ * Whose immediate may be read from the guest's code at run time
++ * (exec/tb-softimm.h): the instructions a self-modifying rasterizer patches,
++ * and only those whose emitter takes the immediate through gen_load and
++ * nowhere else -- an emitter that also reads decode->immediate directly (the
++ * shifts, the jumps, the SSE lane selectors, INT, RET) would keep the value
++ * this block was translated with, and the field must then stay a constant.
++ * The group-1 table spells CMP as gen_SUB and TEST as gen_AND, so both are in;
++ * IMUL3 multiplies by what gen_load left in T1.  The shift and rotate counts
++ * have their own path, gen_shift_count_1.
++ */
++static bool insn_soft_imm_ok(const X86DecodedInsn *decode)
++{
++    X86GenFunc gen = decode->e.gen;
++
++    return gen == gen_ADD || gen == gen_OR  || gen == gen_ADC ||
++           gen == gen_SBB || gen == gen_AND || gen == gen_SUB ||
++           gen == gen_XOR || gen == gen_MOV || gen == gen_IMUL3;
++}
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index abda72163f..a1bbb30346 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -25,6 +25,7 @@
+ #include "tcg/tcg-op.h"
+ #include "tcg/tcg-op-gvec.h"
+ #include "exec/translator.h"
++#include "exec/tb-softimm.h"
+ #include "exec/target_page.h"
+ #include "fpu/softfloat.h"
+ 
+@@ -113,6 +114,13 @@ typedef struct X87SlowBlock {
+ typedef struct DisasContext {
+     DisasContextBase base;
+ 
++    /*
++     * This block's own code keeps being patched by the guest, so its
++     * immediates and displacements are read from the code bytes at run time
++     * rather than baked in (exec/tb-softimm.h).
++     */
++    bool soft_imm;
++
+     target_ulong pc;       /* pc = eip + cs_base */
+     target_ulong cs_base;  /* base of CS segment */
+     target_ulong pc_save;
+@@ -1752,9 +1760,90 @@ static TCGv gen_shiftd_rm_T1(DisasContext *s, MemOp ot,
+ }
+ 
+ /* Compute the address, with a minimum number of TCG ops.  */
++/*
++ * Load into @dest the operand whose bytes are at @addr in the instruction
++ * stream, from the guest's own code at run time instead of materializing it
++ * as a constant, so that the guest patching it invalidates nothing
++ * (exec/tb-softimm.h).  False when this block is not translated that way, or
++ * the field is not on its first page -- the caller then keeps the constant,
++ * and the field is not registered, so no use of it can be left stale.
++ */
++static bool gen_soft_field(DisasContext *s, TCGv dest, target_ulong addr,
++                           unsigned bytes, bool sign)
++{
++    TCGv_ptr base;
++    target_ulong off;
++
++    if (!s->soft_imm || bytes == 0 || bytes > 4 || !s->base.host_addr[0]) {
++        return false;
++    }
++    /*
++     * The load is a host load of guest *code* bytes: it reads them in host
++     * byte order and at whatever alignment the instruction stream gives, so
++     * this wants a little-endian host that allows unaligned loads.  The two
++     * this is built for qualify; anywhere else the constant stays.
++     */
++    if (HOST_BIG_ENDIAN) {
++        return false;
++    }
++#if !defined(__aarch64__) && !defined(__x86_64__)
++    return false;
++#endif
++    if (addr < s->base.pc_first ||
++        (addr & TARGET_PAGE_MASK) != (s->base.pc_first & TARGET_PAGE_MASK) ||
++        ((addr + bytes - 1) & TARGET_PAGE_MASK) != (addr & TARGET_PAGE_MASK)) {
++        return false;
++    }
++
++    off = addr - s->base.pc_first;
++    /* taken before the load is emitted: an unrecorded load buys nothing */
++    if (!soft_imm_field(off, bytes)) {
++        return false;
++    }
++    base = tcg_constant_ptr((uintptr_t)s->base.host_addr[0] + off);
++
++    switch (bytes) {
++    case 1:
++        if (sign) {
++            tcg_gen_ld8s_tl(dest, base, 0);
++        } else {
++            tcg_gen_ld8u_tl(dest, base, 0);
++        }
++        break;
++    case 2:
++        if (sign) {
++            tcg_gen_ld16s_tl(dest, base, 0);
++        } else {
++            tcg_gen_ld16u_tl(dest, base, 0);
++        }
++        break;
++    default:
++#if TARGET_LONG_BITS == 64
++        if (sign) {
++            tcg_gen_ld32s_tl(dest, base, 0);
++        } else {
++            tcg_gen_ld32u_tl(dest, base, 0);
++        }
++#else
++        tcg_gen_ld_tl(dest, base, 0);
++#endif
++        break;
++    }
++
++    return true;
++}
++
+ static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
+ {
+     TCGv ea = NULL;
++    TCGv disp = NULL;
++
++    if (a.disp_bytes && s->soft_imm) {
++        TCGv t = tcg_temp_new();
++        if (gen_soft_field(s, t, a.disp_addr, a.disp_bytes, a.disp_sign)) {
++            disp = t;
++        }
++    }
+ 
+     if (a.index >= 0 && !is_vsib) {
+         if (a.scale == 0) {
+@@ -1774,10 +1863,16 @@ static TCGv gen_lea_modrm_1(DisasContext *s, AddressParts a, bool is_vsib)
+         if (tb_cflags(s->base.tb) & CF_PCREL && a.base == -2) {
+             /* With cpu_eip ~= pc_save, the expression is pc-relative. */
+             tcg_gen_addi_tl(s->A0, cpu_eip, a.disp - s->pc_save);
++        } else if (disp) {
++            tcg_gen_mov_tl(s->A0, disp);
+         } else {
+             tcg_gen_movi_tl(s->A0, a.disp);
+         }
+         ea = s->A0;
++    } else if (disp) {
++        /* a zero displacement can be patched into a non-zero one */
++        tcg_gen_add_tl(s->A0, ea, disp);
++        ea = s->A0;
+     } else if (a.disp != 0) {
+         tcg_gen_addi_tl(s->A0, ea, a.disp);
+         ea = s->A0;
+@@ -3706,6 +3801,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->cs_base = dc->base.tb->cs_base;
+     dc->pc_save = dc->base.pc_next;
+     dc->flags = flags;
++    /* decided per block in tb_gen_code, from how often a write threw it away */
++    dc->soft_imm = soft_imm_active();
+ #ifndef CONFIG_USER_ONLY
+     dc->cpl = cpl;
+     dc->iopl = iopl;

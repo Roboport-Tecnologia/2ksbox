@@ -38,45 +38,24 @@ rounded through a binary32 conversion (correct for 24-bit operands, since
 53 >= 2*24+2). m64 operands round to 24 bits with PE, as softfloat does;
 an fild m32 wider than 24 bits takes the helper. Same guest test, all
 seven control words identical on/off.
---- a/include/tcg/tcg-opc.h
-+++ b/include/tcg/tcg-opc.h
-@@ -187,6 +187,20 @@
- DEF(muls2_i64, 2, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_muls2_i64))
- DEF(muluh_i64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_muluh_i64))
- DEF(mulsh_i64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_mulsh_i64))
-+
-+/*
-+ * Scalar IEEE binary64 arithmetic on the host FPU, operands are the raw
-+ * bit patterns in i64 temps. Round-to-nearest-even, host default
-+ * exception handling (no flags observable). fmsub_f64: a*b - c, fused.
-+ */
-+DEF(add_f64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(sub_f64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(mul_f64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(div_f64, 1, 2, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(fmsub_f64, 1, 3, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(sqrt_f64, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvt_f64_f32, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
-+DEF(cvt_f32_f64, 1, 1, 0, IMPL64 | IMPL(TCG_TARGET_HAS_f64))
- 
- #define DATA64_ARGS  (TCG_TARGET_REG_BITS == 64 ? 1 : 2)
- 
---- a/include/tcg/tcg.h
-+++ b/include/tcg/tcg.h
-@@ -162,6 +162,9 @@
- #ifndef TCG_TARGET_HAS_v64
- #define TCG_TARGET_HAS_v64              0
- #endif
-+#ifndef TCG_TARGET_HAS_f64
-+#define TCG_TARGET_HAS_f64              0
-+#endif
- #ifndef TCG_TARGET_HAS_v128
- #define TCG_TARGET_HAS_v128             0
- #endif
+diff --git a/host/include/x86_64/host/cpuinfo.h b/host/include/x86_64/host/cpuinfo.h
+index 93d029d499..b6f6df2e26 100644
+--- a/host/include/x86_64/host/cpuinfo.h
++++ b/host/include/x86_64/host/cpuinfo.h
+@@ -16,6 +16,7 @@
+ #define CPUINFO_BMI1            (1u << 5)
+ #define CPUINFO_BMI2            (1u << 6)
+ #define CPUINFO_SSE2            (1u << 7)
++#define CPUINFO_FMA             (1u << 8)
+ #define CPUINFO_AVX1            (1u << 9)
+ #define CPUINFO_AVX2            (1u << 10)
+ #define CPUINFO_AVX512F         (1u << 11)
+diff --git a/include/tcg/tcg-op-common.h b/include/tcg/tcg-op-common.h
+index c7d1529c4f..ae4a6940d2 100644
 --- a/include/tcg/tcg-op-common.h
 +++ b/include/tcg/tcg-op-common.h
-@@ -240,6 +240,19 @@
-                       TCGv_i64 ah, TCGv_i64 bl, TCGv_i64 bh);
+@@ -257,6 +257,19 @@ void tcg_gen_addcio_i64(TCGv_i64 r, TCGv_i64 co,
+ void tcg_gen_addN_i64(int n, TCGv_i64 *r, TCGv_i64 *a, TCGv_i64 *b);
  void tcg_gen_mulu2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2);
  void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2);
 +
@@ -95,347 +74,37 @@ seven control words identical on/off.
  void tcg_gen_mulsu2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2);
  void tcg_gen_not_i64(TCGv_i64 ret, TCGv_i64 arg);
  void tcg_gen_ext8s_i64(TCGv_i64 ret, TCGv_i64 arg);
---- a/tcg/tcg-op.c
-+++ b/tcg/tcg-op.c
-@@ -3064,8 +3064,61 @@
-         tcg_gen_mov_i64(rl, t0);
-         tcg_temp_free_i64(t0);
-     }
-+}
-+
-+bool tcg_f64_supported(void)
-+{
-+    return TCG_TARGET_REG_BITS == 64 && TCG_TARGET_HAS_f64;
-+}
-+
-+void tcg_gen_add_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i64(INDEX_op_add_f64, ret, a, b);
-+}
-+
-+void tcg_gen_sub_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i64(INDEX_op_sub_f64, ret, a, b);
- }
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 61f1c28858..490233bdde 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -103,6 +103,21 @@ DEF(subb1o, 1, 2, 0, TCG_OPF_INT | TCG_OPF_CARRY_OUT)
+ DEF(subbi, 1, 2, 0, TCG_OPF_INT | TCG_OPF_CARRY_IN)
+ DEF(subbio, 1, 2, 0, TCG_OPF_INT | TCG_OPF_CARRY_IN | TCG_OPF_CARRY_OUT)
  
-+void tcg_gen_mul_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i64(INDEX_op_mul_f64, ret, a, b);
-+}
++/*
++ * 2ksbox (patch 06): scalar IEEE binary64 arithmetic on the host FPU, on
++ * the raw bit patterns in i64 temps. Round-to-nearest-even, host default
++ * exception handling (no flags observable). fmsub_f64: a*b - c, fused.
++ * Only where tcg_f64_supported(): a backend that defines TCG_TARGET_F64.
++ */
++DEF(add_f64, 1, 2, 0, TCG_OPF_INT)
++DEF(sub_f64, 1, 2, 0, TCG_OPF_INT)
++DEF(mul_f64, 1, 2, 0, TCG_OPF_INT)
++DEF(div_f64, 1, 2, 0, TCG_OPF_INT)
++DEF(fmsub_f64, 1, 3, 0, TCG_OPF_INT)
++DEF(sqrt_f64, 1, 1, 0, TCG_OPF_INT)
++DEF(cvt_f64_f32, 1, 1, 0, TCG_OPF_INT)
++DEF(cvt_f32_f64, 1, 1, 0, TCG_OPF_INT)
 +
-+void tcg_gen_div_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op3_i64(INDEX_op_div_f64, ret, a, b);
-+}
-+
-+void tcg_gen_fmsub_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b, TCGv_i64 c)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op4_i64(INDEX_op_fmsub_f64, ret, a, b, c);
-+}
-+
-+void tcg_gen_sqrt_f64(TCGv_i64 ret, TCGv_i64 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i64(INDEX_op_sqrt_f64, ret, a);
-+}
-+
-+void tcg_gen_cvt_f64_f32(TCGv_i64 ret, TCGv_i64 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i64(INDEX_op_cvt_f64_f32, ret, a);
-+}
-+
-+void tcg_gen_cvt_f32_f64(TCGv_i64 ret, TCGv_i64 a)
-+{
-+    tcg_debug_assert(tcg_f64_supported());
-+    tcg_gen_op2_i64(INDEX_op_cvt_f32_f64, ret, a);
-+}
-+
- void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2)
- {
-     if (TCG_TARGET_HAS_muls2_i64) {
---- a/tcg/tcg.c
-+++ b/tcg/tcg.c
-@@ -2163,6 +2163,16 @@
-         return TCG_TARGET_HAS_muluh_i64;
-     case INDEX_op_mulsh_i64:
-         return TCG_TARGET_HAS_mulsh_i64;
-+
-+    case INDEX_op_add_f64:
-+    case INDEX_op_sub_f64:
-+    case INDEX_op_mul_f64:
-+    case INDEX_op_div_f64:
-+    case INDEX_op_fmsub_f64:
-+    case INDEX_op_sqrt_f64:
-+    case INDEX_op_cvt_f64_f32:
-+    case INDEX_op_cvt_f32_f64:
-+        return TCG_TARGET_HAS_f64;
- 
-     case INDEX_op_mov_vec:
-     case INDEX_op_dup_vec:
---- a/host/include/i386/host/cpuinfo.h
-+++ b/host/include/i386/host/cpuinfo.h
-@@ -16,6 +16,7 @@
- #define CPUINFO_BMI1            (1u << 5)
- #define CPUINFO_BMI2            (1u << 6)
- #define CPUINFO_SSE2            (1u << 7)
-+#define CPUINFO_FMA             (1u << 8)
- #define CPUINFO_AVX1            (1u << 9)
- #define CPUINFO_AVX2            (1u << 10)
- #define CPUINFO_AVX512F         (1u << 11)
---- a/util/cpuinfo-i386.c
-+++ b/util/cpuinfo-i386.c
-@@ -49,6 +49,7 @@
- 
-             if ((bv & 6) == 6) {
-                 info |= CPUINFO_AVX1;
-+                info |= (c & bit_FMA ? CPUINFO_FMA : 0);
-                 info |= (b7 & bit_AVX2 ? CPUINFO_AVX2 : 0);
- 
-                 if ((bv & 0xe0) == 0xe0) {
---- a/tcg/i386/tcg-target.h
-+++ b/tcg/i386/tcg-target.h
-@@ -113,6 +113,7 @@
- #define have_bmi1         (cpuinfo & CPUINFO_BMI1)
- #define have_popcnt       (cpuinfo & CPUINFO_POPCNT)
- #define have_avx1         (cpuinfo & CPUINFO_AVX1)
-+#define have_fma          (cpuinfo & CPUINFO_FMA)
- #define have_avx2         (cpuinfo & CPUINFO_AVX2)
- #define have_movbe        (cpuinfo & CPUINFO_MOVBE)
- 
-@@ -202,6 +203,8 @@
- 
- /* We do not support older SSE systems, only beginning with AVX1.  */
- #define TCG_TARGET_HAS_v64              have_avx1
-+/* scalar binary64 on the host FPU (VEX encodings + FMA3 for fmsub) */
-+#define TCG_TARGET_HAS_f64              (have_avx1 && have_fma)
- #define TCG_TARGET_HAS_v128             have_avx1
- #define TCG_TARGET_HAS_v256             have_avx2
- 
---- a/tcg/i386/tcg-target.c.inc
-+++ b/tcg/i386/tcg-target.c.inc
-@@ -411,6 +411,14 @@
- #define OPC_TESTL	(0x85)
- #define OPC_TZCNT       (0xbc | P_EXT | P_SIMDF3)
- #define OPC_UD2         (0x0b | P_EXT)
-+#define OPC_VADDSD      (0x58 | P_EXT | P_SIMDF2)
-+#define OPC_VSUBSD      (0x5c | P_EXT | P_SIMDF2)
-+#define OPC_VMULSD      (0x59 | P_EXT | P_SIMDF2)
-+#define OPC_VDIVSD      (0x5e | P_EXT | P_SIMDF2)
-+#define OPC_VFMSUB213SD (0xab | P_EXT38 | P_DATA16 | P_VEXW)
-+#define OPC_VSQRTSD     (0x51 | P_EXT | P_SIMDF2)
-+#define OPC_VCVTSD2SS   (0x5a | P_EXT | P_SIMDF2)
-+#define OPC_VCVTSS2SD   (0x5a | P_EXT | P_SIMDF3)
- #define OPC_VPBLENDD    (0x02 | P_EXT3A | P_DATA16)
- #define OPC_VPBLENDVB   (0x4c | P_EXT3A | P_DATA16)
- #define OPC_VPBLENDMB   (0x66 | P_EXT38 | P_DATA16 | P_EVEX)
-@@ -3039,7 +3047,33 @@
-         /* Note that SHRD outputs to the r/m operand.  */
-         tcg_out_modrm(s, OPC_SHRD_Ib + rexw, a2, a0);
-         tcg_out8(s, args[3]);
-+        break;
-+
-+    case INDEX_op_add_f64:
-+        tcg_out_vex_modrm(s, OPC_VADDSD, a0, a1, a2);
-+        break;
-+    case INDEX_op_sub_f64:
-+        tcg_out_vex_modrm(s, OPC_VSUBSD, a0, a1, a2);
-+        break;
-+    case INDEX_op_mul_f64:
-+        tcg_out_vex_modrm(s, OPC_VMULSD, a0, a1, a2);
-+        break;
-+    case INDEX_op_div_f64:
-+        tcg_out_vex_modrm(s, OPC_VDIVSD, a0, a1, a2);
-+        break;
-+    case INDEX_op_fmsub_f64:
-+        /* a0 == a1 (constraint "0"): a0 = a2 * a0 - a3 */
-+        tcg_out_vex_modrm(s, OPC_VFMSUB213SD, a0, a2, args[3]);
-         break;
-+    case INDEX_op_sqrt_f64:
-+        tcg_out_vex_modrm(s, OPC_VSQRTSD, a0, a0, a1);
-+        break;
-+    case INDEX_op_cvt_f64_f32:
-+        tcg_out_vex_modrm(s, OPC_VCVTSD2SS, a0, a0, a1);
-+        break;
-+    case INDEX_op_cvt_f32_f64:
-+        tcg_out_vex_modrm(s, OPC_VCVTSS2SD, a0, a0, a1);
-+        break;
- 
-     case INDEX_op_mb:
-         tcg_out_mb(s, a0);
-@@ -3615,6 +3649,18 @@
-     switch (op) {
-     case INDEX_op_goto_ptr:
-         return C_O0_I1(r);
-+
-+    case INDEX_op_add_f64:
-+    case INDEX_op_sub_f64:
-+    case INDEX_op_mul_f64:
-+    case INDEX_op_div_f64:
-+        return C_O1_I2(x, x, x);
-+    case INDEX_op_fmsub_f64:
-+        return C_O1_I3(x, 0, x, x);
-+    case INDEX_op_sqrt_f64:
-+    case INDEX_op_cvt_f64_f32:
-+    case INDEX_op_cvt_f32_f64:
-+        return C_O1_I1(x, x);
- 
-     case INDEX_op_ld8u_i32:
-     case INDEX_op_ld8u_i64:
---- a/tcg/aarch64/tcg-target.h
-+++ b/tcg/aarch64/tcg-target.h
-@@ -145,6 +145,7 @@
- #define TCG_TARGET_HAS_tst              1
- 
- #define TCG_TARGET_HAS_v64              1
-+#define TCG_TARGET_HAS_f64              1
- #define TCG_TARGET_HAS_v128             1
- #define TCG_TARGET_HAS_v256             0
- 
---- a/tcg/aarch64/tcg-target.c.inc
-+++ b/tcg/aarch64/tcg-target.c.inc
-@@ -523,6 +523,16 @@
-     /* Data-processing (3 source) instructions.  */
-     I3509_MADD      = 0x1b000000,
-     I3509_MSUB      = 0x1b008000,
-+
-+    /* Scalar binary64 FP (Vd/Vn/Vm/Va are the low 5 bits of TCG_REG_Vn). */
-+    I3F_FADDD       = 0x1e602800,
-+    I3F_FSUBD       = 0x1e603800,
-+    I3F_FMULD       = 0x1e600800,
-+    I3F_FDIVD       = 0x1e601800,
-+    I3F_FNMSUBD     = 0x1f608000,   /* Dd = Dn * Dm - Da */
-+    I3F_FSQRTD      = 0x1e61c000,
-+    I3F_FCVTSD      = 0x1e624000,   /* Sd = Dn */
-+    I3F_FCVTDS      = 0x1e22c000,   /* Dd = Sn */
- 
-     /* Logical shifted register instructions (without a shift).  */
-     I3510_AND       = 0x0a000000,
-@@ -806,6 +816,19 @@
-     tcg_out32(s, insn | ext << 31 | rm << 16 | ra << 10 | rn << 5 | rd);
- }
- 
-+static void tcg_out_fp3(TCGContext *s, AArch64Insn insn,
-+                        TCGReg rd, TCGReg rn, TCGReg rm)
-+{
-+    tcg_out32(s, insn | (rm & 0x1f) << 16 | (rn & 0x1f) << 5 | (rd & 0x1f));
-+}
-+
-+static void tcg_out_fp4(TCGContext *s, AArch64Insn insn,
-+                        TCGReg rd, TCGReg rn, TCGReg rm, TCGReg ra)
-+{
-+    tcg_out32(s, insn | (rm & 0x1f) << 16 | (ra & 0x1f) << 10
-+              | (rn & 0x1f) << 5 | (rd & 0x1f));
-+}
-+
- static void tcg_out_insn_3605(TCGContext *s, AArch64Insn insn, bool q,
-                               TCGReg rd, TCGReg rn, int dst_idx, int src_idx)
- {
-@@ -1091,7 +1114,20 @@
-     switch (type) {
-     case TCG_TYPE_I32:
-     case TCG_TYPE_I64:
--        tcg_debug_assert(rd < 32);
-+        if (rd >= 32) {
-+            /*
-+             * An integer temp allocated to a vector register (f64 ops
-+             * with a constant operand, e.g. fld1 then fmul): build the
-+             * value in the scratch register and INS Vd.D[0], Xtmp
-+             * (encoding checked against llvm-mc: 4e08 1c00 | Rn<<5 | Rd).
-+             */
-+            if (type == TCG_TYPE_I32) {
-+                value = (uint32_t)value;
-+            }
-+            tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP0, value);
-+            tcg_out_insn(s, 3605, INS, 0, rd, TCG_REG_TMP0, 8, 0);
-+            return;
-+        }
-         break;
-     default:
-         g_assert_not_reached();
-@@ -1221,7 +1257,12 @@
-             tcg_out_movr(s, type, ret, arg);
-             break;
-         } else if (ret < 32) {
--            tcg_out_insn(s, 3605, UMOV, type, ret, arg, 0, 0);
-+            /*
-+             * UMOV Xd, Vn.D[0] / Wd, Vn.S[0]: imm5 encodes the element
-+             * size (01000 for D, 00100 for S); 0 is an unallocated
-+             * encoding (SIGILL). Upstream never emitted this move.
-+             */
-+            tcg_out_insn(s, 3605, UMOV, type, ret, arg, 4 << type, 0);
-             break;
-         } else if (arg < 32) {
-             tcg_out_insn(s, 3605, INS, 0, ret, arg, 4 << type, 0);
-@@ -2480,7 +2521,32 @@
-         break;
-     case INDEX_op_mulsh_i64:
-         tcg_out_insn(s, 3508, SMULH, TCG_TYPE_I64, a0, a1, a2);
-+        break;
-+
-+    case INDEX_op_add_f64:
-+        tcg_out_fp3(s, I3F_FADDD, a0, a1, a2);
-+        break;
-+    case INDEX_op_sub_f64:
-+        tcg_out_fp3(s, I3F_FSUBD, a0, a1, a2);
-+        break;
-+    case INDEX_op_mul_f64:
-+        tcg_out_fp3(s, I3F_FMULD, a0, a1, a2);
-+        break;
-+    case INDEX_op_div_f64:
-+        tcg_out_fp3(s, I3F_FDIVD, a0, a1, a2);
-+        break;
-+    case INDEX_op_fmsub_f64:
-+        tcg_out_fp4(s, I3F_FNMSUBD, a0, a1, a2, args[3]);
-+        break;
-+    case INDEX_op_sqrt_f64:
-+        tcg_out32(s, I3F_FSQRTD | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-         break;
-+    case INDEX_op_cvt_f64_f32:
-+        tcg_out32(s, I3F_FCVTSD | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-+    case INDEX_op_cvt_f32_f64:
-+        tcg_out32(s, I3F_FCVTDS | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
- 
-     case INDEX_op_mb:
-         tcg_out_mb(s, a0);
-@@ -2957,6 +3023,18 @@
-     case INDEX_op_goto_ptr:
-         return C_O0_I1(r);
- 
-+    case INDEX_op_add_f64:
-+    case INDEX_op_sub_f64:
-+    case INDEX_op_mul_f64:
-+    case INDEX_op_div_f64:
-+        return C_O1_I2(w, w, w);
-+    case INDEX_op_fmsub_f64:
-+        return C_O1_I3(w, w, w, w);
-+    case INDEX_op_sqrt_f64:
-+    case INDEX_op_cvt_f64_f32:
-+    case INDEX_op_cvt_f32_f64:
-+        return C_O1_I1(w, w);
-+
-     case INDEX_op_ld8u_i32:
-     case INDEX_op_ld8s_i32:
-     case INDEX_op_ld16u_i32:
+ /* size changing ops */
+ DEF(ext_i32_i64, 1, 1, 0, 0)
+ DEF(extu_i32_i64, 1, 1, 0, 0)
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index 1571920c0f..eb5b59460c 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -1527,7 +1527,7 @@
- #define MAX_FIXED_COUNTERS 3
- #define MAX_GP_COUNTERS    (MSR_IA32_PERF_STATUS - MSR_P6_EVNTSEL0)
- 
--#define TARGET_INSN_START_EXTRA_WORDS 1
-+#define TARGET_INSN_START_EXTRA_WORDS 2
- 
- #define NB_OPMASK_REGS 8
- 
-@@ -1788,6 +1788,14 @@
+@@ -2041,6 +2041,14 @@ typedef struct CPUArchState {
      /* emulator internal variables */
      float_status fp_status;
      floatx80 ft0;
@@ -450,28 +119,157 @@ seven control words identical on/off.
  
      float_status mmx_status; /* for 3DNow! float ops */
      float_status sse_status;
-@@ -2532,12 +2540,17 @@
- #if !defined(CONFIG_USER_ONLY)
+@@ -2844,6 +2852,10 @@ static inline bool is_mmu_index_32(int mmu_index)
  #include "hw/i386/apic.h"
  #endif
-+
+ 
 +/* TB flags (not hflags): x87 inline mode, env->x87_fast_mode (0, 1, 2) */
 +#define TB_FLAG_X87_MODE_SHIFT  29
 +#define TB_FLAG_X87_MODE_MASK   (3u << TB_FLAG_X87_MODE_SHIFT)
++
+ void do_cpu_init(X86CPU *cpu);
  
- static inline void cpu_get_tb_cpu_state(CPUX86State *env, vaddr *pc,
-                                         uint64_t *cs_base, uint32_t *flags)
+ #define MCE_INJECT_BROADCAST    1
+diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
+index da41c97e57..ff6db02d59 100644
+--- a/target/i386/tcg/decode-new.c.inc
++++ b/target/i386/tcg/decode-new.c.inc
+@@ -3097,6 +3097,7 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
+ 
+     if (decode.e.special == X86_SPECIAL_MMX &&
+         !(s->prefix & (PREFIX_REPZ | PREFIX_REPNZ | PREFIX_DATA))) {
++        x87s_boundary(s);
+         gen_helper_enter_mmx(tcg_env);
+     }
+ 
+diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
+index 473f415766..a097e517d7 100644
+--- a/target/i386/tcg/emit.c.inc
++++ b/target/i386/tcg/emit.c.inc
+@@ -519,6 +519,7 @@ static void gen_3dnow(DisasContext *s, X86DecodedInsn *decode)
+         return;
+     }
+ 
++    x87s_boundary(s);
+     gen_helper_enter_mmx(tcg_env);
+     if (fn == FN_3DNOW_MOVE) {
+         TCGv_i64 t = tcg_temp_new_i64();
+@@ -1921,6 +1922,7 @@ static void gen_CRC32(DisasContext *s, X86DecodedInsn *decode)
+ 
+ static void gen_CVTPI2Px(DisasContext *s, X86DecodedInsn *decode)
  {
-     *flags = env->hflags |
--        (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK));
-+        (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK)) |
-+        ((uint32_t)env->x87_fast_mode << TB_FLAG_X87_MODE_SHIFT);
-     if (env->hflags & HF_CS64_MASK) {
-         *cs_base = 0;
-         *pc = env->eip;
++    x87s_boundary(s);
+     gen_helper_enter_mmx(tcg_env);
+     if (s->prefix & PREFIX_DATA) {
+         gen_helper_cvtpi2pd(tcg_env, OP_PTR0, OP_PTR2);
+@@ -1931,6 +1933,7 @@ static void gen_CVTPI2Px(DisasContext *s, X86DecodedInsn *decode)
+ 
+ static void gen_CVTPx2PI(DisasContext *s, X86DecodedInsn *decode)
+ {
++    x87s_boundary(s);
+     gen_helper_enter_mmx(tcg_env);
+     if (s->prefix & PREFIX_DATA) {
+         gen_helper_cvtpd2pi(tcg_env, OP_PTR0, OP_PTR2);
+@@ -1941,6 +1944,7 @@ static void gen_CVTPx2PI(DisasContext *s, X86DecodedInsn *decode)
+ 
+ static void gen_CVTTPx2PI(DisasContext *s, X86DecodedInsn *decode)
+ {
++    x87s_boundary(s);
+     gen_helper_enter_mmx(tcg_env);
+     if (s->prefix & PREFIX_DATA) {
+         gen_helper_cvttpd2pi(tcg_env, OP_PTR0, OP_PTR2);
+@@ -2036,7 +2040,11 @@ static void gen_FXRSTOR(DisasContext *s, X86DecodedInsn *decode)
+     if ((s->flags & HF_EM_MASK) || (s->flags & HF_TS_MASK)) {
+         gen_NM_exception(s);
+     } else {
++        x87s_boundary(s);
+         gen_helper_fxrstor(tcg_env, s->A0);
++        if (s->x87s_on) {
++            s->base.is_jmp = DISAS_EOB_NEXT;    /* control word may change */
++        }
+     }
+ }
+ 
+@@ -2045,6 +2053,7 @@ static void gen_FXSAVE(DisasContext *s, X86DecodedInsn *decode)
+     if ((s->flags & HF_EM_MASK) || (s->flags & HF_TS_MASK)) {
+         gen_NM_exception(s);
+     } else {
++        x87s_boundary(s);
+         gen_helper_fxsave(tcg_env, s->A0);
+     }
+ }
+@@ -2054,6 +2063,7 @@ static void gen_HLT(DisasContext *s, X86DecodedInsn *decode)
+ #ifdef CONFIG_SYSTEM_ONLY
+     gen_update_cc_op(s);
+     gen_update_eip_next(s);
++    x87s_flush_code(s);
+     gen_helper_hlt(tcg_env);
+     s->base.is_jmp = DISAS_NORETURN;
+ #endif
+@@ -2253,6 +2263,7 @@ static void gen_INT1(DisasContext *s, X86DecodedInsn *decode)
+ {
+     gen_update_cc_op(s);
+     gen_update_eip_next(s);
++    x87s_flush_code(s);
+     gen_helper_icebp(tcg_env);
+     s->base.is_jmp = DISAS_NORETURN;
+ }
+@@ -2607,6 +2618,7 @@ static void gen_MOVQ(DisasContext *s, X86DecodedInsn *decode)
+ 
+ static void gen_MOVq_dq(DisasContext *s, X86DecodedInsn *decode)
+ {
++    x87s_boundary(s);
+     gen_helper_enter_mmx(tcg_env);
+     /* Otherwise the same as any other movq.  */
+     return gen_MOVQ(s, decode);
+@@ -2810,6 +2822,7 @@ static void gen_PAUSE(DisasContext *s, X86DecodedInsn *decode)
+ {
+     gen_update_cc_op(s);
+     gen_update_eip_next(s);
++    x87s_flush_code(s);
+     gen_helper_pause(tcg_env);
+     s->base.is_jmp = DISAS_NORETURN;
+ }
+@@ -3575,6 +3588,7 @@ static void gen_RDPMC(DisasContext *s, X86DecodedInsn *decode)
+     gen_update_cc_op(s);
+     gen_update_eip_cur(s);
+     translator_io_start(&s->base);
++    x87s_flush_code(s);
+     gen_helper_rdpmc(tcg_env);
+     s->base.is_jmp = DISAS_NORETURN;
+ }
+@@ -4796,7 +4810,11 @@ static void gen_XRSTOR(DisasContext *s, X86DecodedInsn *decode)
+     TCGv_i64 features = tcg_temp_new_i64();
+ 
+     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
++    x87s_boundary(s);
+     gen_helper_xrstor(tcg_env, s->A0, features);
++    if (s->x87s_on) {
++        s->base.is_jmp = DISAS_EOB_NEXT;        /* control word may change */
++    }
+     if (s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_MPX) {
+         /*
+          * XRSTOR is how MPX is enabled, which changes how
+@@ -4811,6 +4829,7 @@ static void gen_XSAVE(DisasContext *s, X86DecodedInsn *decode)
+     TCGv_i64 features = tcg_temp_new_i64();
+ 
+     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
++    x87s_boundary(s);
+     gen_helper_xsave(tcg_env, s->A0, features);
+ }
+ 
+@@ -4819,5 +4838,6 @@ static void gen_XSAVEOPT(DisasContext *s, X86DecodedInsn *decode)
+     TCGv_i64 features = tcg_temp_new_i64();
+ 
+     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
++    x87s_boundary(s);
+     gen_helper_xsave(tcg_env, s->A0, features);
+ }
+diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
+index 4b75384963..7da73602af 100644
 --- a/target/i386/tcg/fpu_helper.c
 +++ b/target/i386/tcg/fpu_helper.c
-@@ -148,7 +148,7 @@
+@@ -148,7 +148,7 @@ static inline int x87_fast_rnd(CPUX86State *env)
      return env->fp_status.float_rounding_mode;
  }
  
@@ -480,16 +278,7 @@ seven control words identical on/off.
                                   floatx80 a, floatx80 b)
  {
      int prec = x87_fast_prec(env);
-@@ -264,7 +264,7 @@
-     return old_flags;
- }
- 
--static void merge_exception_flags(CPUX86State *env, uint8_t old_flags)
-+static inline __attribute__((always_inline)) void merge_exception_flags(CPUX86State *env, uint8_t old_flags)
- {
-     uint8_t new_flags = get_float_exception_flags(&env->fp_status);
-     float_raise(old_flags, &env->fp_status);
-@@ -976,6 +976,17 @@
+@@ -1004,6 +1004,17 @@ void update_fp_status(CPUX86State *env)
          break;
      }
      set_floatx80_rounding_precision(rnd_prec, &env->fp_status);
@@ -507,425 +296,30 @@ seven control words identical on/off.
  }
  
  void helper_fldcw(CPUX86State *env, uint32_t val)
---- a/target/i386/tcg/translate.c
-+++ b/target/i386/tcg/translate.c
-@@ -79,7 +79,30 @@
- static TCGv cpu_seg_base[6];
- static TCGv_i64 cpu_bndl[4];
- static TCGv_i64 cpu_bndu[4];
-+/* x87 shadow doubles (x87-shadow.c.inc), relative stack slots */
-+static TCGv_i64 cpu_x87_sd[8];
- 
-+/* x87 shadow-double translation: one out-of-line slow block (x87-shadow.c.inc) */
-+typedef struct X87SlowBlock {
-+    TCGLabel *label;
-+    uint8_t kind;
-+    uint8_t op1, opreg, pops;
-+    bool m64, m16, pop, stn, eflags, quiet, zero_operand;
-+    TCGv_i64 m;                 /* memory operand */
-+    TCGv a0;                    /* store address */
-+    TCGv cond;                  /* fcmov condition */
-+    TCGv_i32 top;               /* frame's entry top */
-+    uint8_t state[8];
-+    uint8_t delta;
-+    target_ulong pc_insn, pc_next, pc_save;
-+    int cc_op;
-+    bool cc_op_dirty;
-+    TCGv fdp_addr;
-+    int fdp_seg;
-+} X87SlowBlock;
-+#define X87S_MAX_SLOW 96
-+#define X87S_MAX_TMPS 96
-+
- typedef struct DisasContext {
-     DisasContextBase base;
- 
-@@ -127,6 +150,21 @@
-     int cpuid_7_1_eax_features;
-     int cpuid_xsave_features;
- 
-+    /* x87 shadow-double state (x87-shadow.c.inc) */
-+    bool x87s_on;               /* TB translated in inline mode */
-+    int x87s_mode;              /* env->x87_fast_mode this TB is for */
-+    bool x87s_prec24;           /* mode 2: PC=24, shadows hold 24-bit values */
-+    bool x87s_guarded;          /* runtime mode guard emitted */
-+    TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
-+    int x87s_delta;             /* current top = (entry top + delta) & 7 */
-+    uint8_t x87s_state[8];      /* per relative slot */
-+    X87SlowBlock x87s_slow[X87S_MAX_SLOW];
-+    int x87s_nslow;
-+    TCGTemp *x87s_tmps[X87S_MAX_TMPS];  /* EBB temps of the current insn */
-+    int x87s_ntmps;
-+    TCGv x87_fdp_addr;          /* last x87 memory operand (FDP), or NULL */
-+    int x87_fdp_seg;
-+
-     /* TCG local temps */
-     TCGv cc_srcT;
-     TCGv A0;
-@@ -257,6 +295,10 @@
- #endif
- 
- static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num);
-+static void x87s_flush_code(DisasContext *s);
-+static void x87s_boundary(DisasContext *s);
-+static void x87s_emit_slow_blocks(DisasContext *s);
-+static void gen_x87_fip_fdp(DisasContext *s);
- static void gen_jmp_rel_csize(DisasContext *s, int diff, int tb_num);
- static void gen_exception_gpf(DisasContext *s);
- 
-@@ -1406,6 +1448,7 @@
- 
- static void gen_exception(DisasContext *s, int trapno)
- {
-+    x87s_flush_code(s);
-     gen_update_cc_op(s);
-     gen_update_eip_cur(s);
-     gen_helper_raise_exception(tcg_env, tcg_constant_i32(trapno));
-@@ -2109,6 +2152,7 @@
-    privilege checks */
- static void gen_interrupt(DisasContext *s, uint8_t intno)
- {
-+    x87s_flush_code(s);
-     gen_update_cc_op(s);
-     gen_update_eip_cur(s);
-     gen_helper_raise_interrupt(tcg_env, tcg_constant_i32(intno),
-@@ -2179,6 +2223,7 @@
- {
-     bool inhibit_reset;
- 
-+    x87s_flush_code(s);
-     gen_update_cc_op(s);
- 
-     /* If several instructions disable interrupts, only the first does it.  */
-@@ -2218,6 +2263,7 @@
-     target_ulong new_eip = new_pc - s->cs_base;
- 
-     assert(!s->cc_op_dirty);
-+    x87s_flush_code(s);
- 
-     /* In 64-bit mode, operand size is fixed at 64 bits. */
-     if (!CODE64(s)) {
-@@ -2339,6 +2385,7 @@
- }
- 
- #include "emit.c.inc"
-+#include "x87-shadow.c.inc"
- 
- static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
- {
-@@ -2356,15 +2403,38 @@
-     mod = (modrm >> 6) & 3;
-     rm = modrm & 7;
-     op = ((b & 7) << 3) | ((modrm >> 3) & 7);
-+    s->x87_fdp_addr = NULL;
-     if (mod != 3) {
-         /* memory op */
-         TCGv ea = gen_lea_modrm_1(s, decode->mem, false);
-         TCGv last_addr = tcg_temp_new();
--        bool update_fdp = true;
- 
-         tcg_gen_mov_tl(last_addr, ea);
-         gen_lea_v_seg(s, ea, decode->mem.def_seg, s->override);
-+        s->x87_fdp_addr = last_addr;
-+        s->x87_fdp_seg = s->override >= 0 ? s->override : decode->mem.def_seg;
-+    }
-+
-+    if (s->x87s_on) {
-+        if (gen_x87s_insn(s, op, mod, rm)) {
-+            gen_x87_fip_fdp(s);
-+            return;
-+        }
-+        if (gen_x87s_needs_boundary(op, mod, rm)) {
-+            x87s_boundary(s);
-+        }
-+    }
-+    /*
-+     * A control word change may switch the x87 inline mode either way, and
-+     * the mode is a TB flag: end the block after it in both modes.
-+     */
-+    if (tcg_f64_supported() && gen_x87s_ends_tb(op, mod, rm)) {
-+        s->base.is_jmp = DISAS_EOB_NEXT;
-+    }
- 
-+    if (mod != 3) {
-+        bool update_fdp = true;
-+
-         switch (op) {
-         case 0x00 ... 0x07: /* fxxxs */
-         case 0x10 ... 0x17: /* fixxxl */
-@@ -2556,16 +2626,8 @@
-             goto illegal_op;
-         }
- 
--        if (update_fdp) {
--            int last_seg = s->override >= 0 ? s->override : decode->mem.def_seg;
--
--            tcg_gen_ld_i32(s->tmp2_i32, tcg_env,
--                           offsetof(CPUX86State,
--                                    segs[last_seg].selector));
--            tcg_gen_st16_i32(s->tmp2_i32, tcg_env,
--                             offsetof(CPUX86State, fpds));
--            tcg_gen_st_tl(last_addr, tcg_env,
--                          offsetof(CPUX86State, fpdp));
-+        if (!update_fdp) {
-+            s->x87_fdp_addr = NULL;
-         }
-     } else {
-         /* register float ops */
-@@ -2889,17 +2951,31 @@
-     }
- 
-     if (update_fip) {
--        tcg_gen_ld_i32(s->tmp2_i32, tcg_env,
--                       offsetof(CPUX86State, segs[R_CS].selector));
--        tcg_gen_st16_i32(s->tmp2_i32, tcg_env,
--                         offsetof(CPUX86State, fpcs));
--        tcg_gen_st_tl(eip_cur_tl(s),
--                      tcg_env, offsetof(CPUX86State, fpip));
-+        gen_x87_fip_fdp(s);
-     }
-     return;
- 
-  illegal_op:
-     gen_illegal_opcode(s);
-+}
-+
-+/* FIP/FCS and, for memory operands, FDP/FDS of the current instruction. */
-+static void gen_x87_fip_fdp(DisasContext *s)
-+{
-+    if (s->x87_fdp_addr) {
-+        tcg_gen_ld_i32(s->tmp2_i32, tcg_env,
-+                       offsetof(CPUX86State, segs[s->x87_fdp_seg].selector));
-+        tcg_gen_st16_i32(s->tmp2_i32, tcg_env,
-+                         offsetof(CPUX86State, fpds));
-+        tcg_gen_st_tl(s->x87_fdp_addr, tcg_env,
-+                      offsetof(CPUX86State, fpdp));
-+    }
-+    tcg_gen_ld_i32(s->tmp2_i32, tcg_env,
-+                   offsetof(CPUX86State, segs[R_CS].selector));
-+    tcg_gen_st16_i32(s->tmp2_i32, tcg_env,
-+                     offsetof(CPUX86State, fpcs));
-+    tcg_gen_st_tl(eip_cur_tl(s),
-+                  tcg_env, offsetof(CPUX86State, fpip));
- }
- 
- static void gen_multi0F(DisasContext *s, X86DecodedInsn *decode)
-@@ -3055,6 +3131,7 @@
-             if (!(s->cpuid_ext_features & CPUID_EXT_MONITOR) || CPL(s) != 0) {
-                 goto illegal_op;
-             }
-+            x87s_flush_code(s);
-             gen_update_cc_op(s);
-             gen_update_eip_cur(s);
-             gen_helper_mwait(tcg_env, cur_insn_len_i32(s));
-@@ -3130,6 +3207,7 @@
-             if (!check_cpl0(s)) {
-                 break;
-             }
-+            x87s_flush_code(s);
-             gen_update_cc_op(s);
-             gen_update_eip_cur(s);
-             /*
-@@ -3147,6 +3225,7 @@
-             if (!SVME(s)) {
-                 goto illegal_op;
-             }
-+            x87s_flush_code(s);
-             gen_update_cc_op(s);
-             gen_update_eip_cur(s);
-             gen_helper_vmmcall(tcg_env);
-@@ -3619,6 +3698,15 @@
-             = tcg_global_mem_new(tcg_env,
-                                  offsetof(CPUX86State, segs[i].base),
-                                  seg_base_names[i]);
-+    }
-+
-+    for (i = 0; i < 8; ++i) {
-+        static const char sd_names[8][4] = {
-+            "sd0", "sd1", "sd2", "sd3", "sd4", "sd5", "sd6", "sd7"
-+        };
-+        cpu_x87_sd[i] = tcg_global_mem_new_i64(tcg_env,
-+                                               offsetof(CPUX86State, x87_sd[i]),
-+                                               sd_names[i]);
-     }
- 
-     for (i = 0; i < 4; ++i) {
-@@ -3665,6 +3753,15 @@
- 
-     dc->cc_op = CC_OP_DYNAMIC;
-     dc->cc_op_dirty = false;
-+    dc->x87s_mode = (flags & TB_FLAG_X87_MODE_MASK) >> TB_FLAG_X87_MODE_SHIFT;
-+    dc->x87s_on = dc->x87s_mode != 0 && tcg_f64_supported()
-+        && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
-+    dc->x87s_prec24 = dc->x87s_mode == 2;
-+    dc->x87s_guarded = false;
-+    dc->x87s_nslow = 0;
-+    dc->x87s_ntmps = 0;
-+    x87s_reset(dc);
-+    dc->x87_fdp_addr = NULL;
-     /* select memory access functions */
-     dc->mem_index = cpu_mmu_index(cpu, false);
-     dc->cpuid_features = env->features[FEAT_1_EDX];
-@@ -3718,7 +3815,7 @@
-     if (tb_cflags(dcbase->tb) & CF_PCREL) {
-         pc_arg &= ~TARGET_PAGE_MASK;
-     }
--    tcg_gen_insn_start(pc_arg, dc->cc_op);
-+    tcg_gen_insn_start(pc_arg, dc->cc_op, x87s_insn_word(dc));
- }
- 
- static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
-@@ -3817,6 +3914,7 @@
-     default:
-         g_assert_not_reached();
-     }
-+    x87s_emit_slow_blocks(dc);
- }
- 
- static const TranslatorOps i386_tr_ops = {
---- a/target/i386/tcg/emit.c.inc
-+++ b/target/i386/tcg/emit.c.inc
-@@ -532,6 +532,7 @@
-         return;
-     }
- 
-+    x87s_boundary(s);
-     gen_helper_enter_mmx(tcg_env);
-     if (fn == FN_3DNOW_MOVE) {
-        tcg_gen_ld_i64(s->tmp1_i64, tcg_env, decode->op[1].offset);
-@@ -1893,6 +1894,7 @@
- 
- static void gen_CVTPI2Px(DisasContext *s, X86DecodedInsn *decode)
- {
-+    x87s_boundary(s);
-     gen_helper_enter_mmx(tcg_env);
-     if (s->prefix & PREFIX_DATA) {
-         gen_helper_cvtpi2pd(tcg_env, OP_PTR0, OP_PTR2);
-@@ -1903,6 +1905,7 @@
- 
- static void gen_CVTPx2PI(DisasContext *s, X86DecodedInsn *decode)
- {
-+    x87s_boundary(s);
-     gen_helper_enter_mmx(tcg_env);
-     if (s->prefix & PREFIX_DATA) {
-         gen_helper_cvtpd2pi(tcg_env, OP_PTR0, OP_PTR2);
-@@ -1913,6 +1916,7 @@
- 
- static void gen_CVTTPx2PI(DisasContext *s, X86DecodedInsn *decode)
- {
-+    x87s_boundary(s);
-     gen_helper_enter_mmx(tcg_env);
-     if (s->prefix & PREFIX_DATA) {
-         gen_helper_cvttpd2pi(tcg_env, OP_PTR0, OP_PTR2);
-@@ -2007,7 +2011,11 @@
-     if ((s->flags & HF_EM_MASK) || (s->flags & HF_TS_MASK)) {
-         gen_NM_exception(s);
-     } else {
-+        x87s_boundary(s);
-         gen_helper_fxrstor(tcg_env, s->A0);
-+        if (s->x87s_on) {
-+            s->base.is_jmp = DISAS_EOB_NEXT;    /* control word may change */
-+        }
-     }
- }
- 
-@@ -2016,6 +2024,7 @@
-     if ((s->flags & HF_EM_MASK) || (s->flags & HF_TS_MASK)) {
-         gen_NM_exception(s);
-     } else {
-+        x87s_boundary(s);
-         gen_helper_fxsave(tcg_env, s->A0);
-     }
- }
-@@ -2025,6 +2034,7 @@
- #ifdef CONFIG_SYSTEM_ONLY
-     gen_update_cc_op(s);
-     gen_update_eip_next(s);
-+    x87s_flush_code(s);
-     gen_helper_hlt(tcg_env);
-     s->base.is_jmp = DISAS_NORETURN;
- #endif
-@@ -2246,6 +2256,7 @@
- {
-     gen_update_cc_op(s);
-     gen_update_eip_next(s);
-+    x87s_flush_code(s);
-     gen_helper_icebp(tcg_env);
-     s->base.is_jmp = DISAS_NORETURN;
- }
-@@ -2596,6 +2607,7 @@
- 
- static void gen_MOVq_dq(DisasContext *s, X86DecodedInsn *decode)
- {
-+    x87s_boundary(s);
-     gen_helper_enter_mmx(tcg_env);
-     /* Otherwise the same as any other movq.  */
-     return gen_MOVQ(s, decode);
-@@ -2803,6 +2815,7 @@
- {
-     gen_update_cc_op(s);
-     gen_update_eip_next(s);
-+    x87s_flush_code(s);
-     gen_helper_pause(tcg_env);
-     s->base.is_jmp = DISAS_NORETURN;
- }
-@@ -3555,6 +3568,7 @@
-     gen_update_cc_op(s);
-     gen_update_eip_cur(s);
-     translator_io_start(&s->base);
-+    x87s_flush_code(s);
-     gen_helper_rdpmc(tcg_env);
-     s->base.is_jmp = DISAS_NORETURN;
- }
-@@ -4737,7 +4751,11 @@
-     TCGv_i64 features = tcg_temp_new_i64();
- 
-     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
-+    x87s_boundary(s);
-     gen_helper_xrstor(tcg_env, s->A0, features);
-+    if (s->x87s_on) {
-+        s->base.is_jmp = DISAS_EOB_NEXT;        /* control word may change */
-+    }
-     if (s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_MPX) {
-         /*
-          * XRSTOR is how MPX is enabled, which changes how
-@@ -4752,6 +4770,7 @@
-     TCGv_i64 features = tcg_temp_new_i64();
- 
-     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
-+    x87s_boundary(s);
-     gen_helper_xsave(tcg_env, s->A0, features);
- }
- 
-@@ -4760,5 +4779,6 @@
-     TCGv_i64 features = tcg_temp_new_i64();
- 
-     tcg_gen_concat_tl_i64(features, cpu_regs[R_EAX], cpu_regs[R_EDX]);
-+    x87s_boundary(s);
-     gen_helper_xsave(tcg_env, s->A0, features);
- }
---- a/target/i386/tcg/decode-new.c.inc
-+++ b/target/i386/tcg/decode-new.c.inc
-@@ -2822,6 +2822,7 @@
- 
-     if (decode.e.special == X86_SPECIAL_MMX &&
-         !(s->prefix & (PREFIX_REPZ | PREFIX_REPNZ | PREFIX_DATA))) {
-+        x87s_boundary(s);
-         gen_helper_enter_mmx(tcg_env);
-     }
- 
+diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
+index 6f5dc06b3b..18ad6d235b 100644
 --- a/target/i386/tcg/tcg-cpu.c
 +++ b/target/i386/tcg/tcg-cpu.c
-@@ -24,6 +24,8 @@
- #include "hw/core/accel-cpu.h"
- 
+@@ -26,6 +26,8 @@
+ #include "exec/target_page.h"
+ #include "accel/tcg/cpu-ops.h"
  #include "tcg-cpu.h"
 +#include "fpu/softfloat-types.h"
 +#include "x87-fast.h"
  
  /* Frob eflags into and out of the CPU temporary format.  */
  
-@@ -91,6 +93,25 @@
+@@ -55,7 +57,8 @@ static TCGTBCPUState x86_get_tb_cpu_state(CPUState *cs)
+     vaddr pc;
+ 
+     flags = env->hflags |
+-        (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK));
++        (env->eflags & (IOPL_MASK | TF_MASK | RF_MASK | VM_MASK | AC_MASK)) |
++        ((uint32_t)env->x87_fast_mode << TB_FLAG_X87_MODE_SHIFT);
+     if (env->hflags & HF_CS64_MASK) {
+         cs_base = 0;
+         pc = env->eip;
+@@ -112,6 +115,25 @@ static void x86_restore_state_to_opc(CPUState *cs,
      if (cc_op != CC_OP_DYNAMIC) {
          env->cc_op = cc_op;
      }
@@ -950,10 +344,305 @@ seven control words identical on/off.
 +    }
  }
  
- #ifndef CONFIG_USER_ONLY
+ int x86_mmu_index_pl(CPUX86State *env, unsigned pl)
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 1cd4affc75..1eac0ab072 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -81,6 +81,29 @@ static TCGv cpu_regs[CPU_NB_REGS];
+ static TCGv cpu_seg_base[6];
+ static TCGv_i64 cpu_bndl[4];
+ static TCGv_i64 cpu_bndu[4];
++/* x87 shadow doubles (x87-shadow.c.inc), relative stack slots */
++static TCGv_i64 cpu_x87_sd[8];
++
++/* x87 shadow-double translation: one out-of-line slow block (x87-shadow.c.inc) */
++typedef struct X87SlowBlock {
++    TCGLabel *label;
++    uint8_t kind;
++    uint8_t op1, opreg, pops;
++    bool m64, m16, pop, stn, eflags, quiet, zero_operand;
++    TCGv_i64 m;                 /* memory operand */
++    TCGv a0;                    /* store address */
++    TCGv cond;                  /* fcmov condition */
++    TCGv_i32 top;               /* frame's entry top */
++    uint8_t state[8];
++    uint8_t delta;
++    target_ulong pc_insn, pc_next, pc_save;
++    int cc_op;
++    bool cc_op_dirty;
++    TCGv fdp_addr;
++    int fdp_seg;
++} X87SlowBlock;
++#define X87S_MAX_SLOW 96
++#define X87S_MAX_TMPS 96
+ 
+ typedef struct DisasContext {
+     DisasContextBase base;
+@@ -128,6 +151,23 @@ typedef struct DisasContext {
+     int cpuid_7_1_eax_features;
+     int cpuid_xsave_features;
+ 
++    /* x87 shadow-double state (x87-shadow.c.inc) */
++    bool x87s_on;               /* TB translated in inline mode */
++    int x87s_mode;              /* env->x87_fast_mode this TB is for */
++    bool x87s_prec24;           /* mode 2: PC=24, shadows hold 24-bit values */
++    bool x87s_guarded;          /* runtime mode guard emitted */
++    TCGv_i32 x87s_top;          /* entry top of stack, NULL: no frame */
++    int x87s_delta;             /* current top = (entry top + delta) & 7 */
++    uint8_t x87s_state[8];      /* per relative slot */
++    X87SlowBlock x87s_slow[X87S_MAX_SLOW];
++    int x87s_nslow;
++    TCGTemp *x87s_tmps[X87S_MAX_TMPS];  /* EBB temps of the current insn */
++    int x87s_ntmps;
++    TCGv x87_fdp_addr;          /* last x87 memory operand (FDP), or NULL */
++    TCGv_i32 x87s_t32;          /* the shadow's scratch across its helpers */
++    TCGv_i64 x87s_t64;
++    int x87_fdp_seg;
++
+     /* TCG local temps */
+     TCGv cc_srcT;
+     TCGv A0;
+@@ -251,6 +291,10 @@ STUB_HELPER(write_crN, TCGv_env env, TCGv_i32 reg, TCGv val)
+ #endif
+ 
+ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num);
++static void x87s_flush_code(DisasContext *s);
++static void x87s_boundary(DisasContext *s);
++static void x87s_emit_slow_blocks(DisasContext *s);
++static void gen_x87_fip_fdp(DisasContext *s);
+ static void gen_jmp_rel_csize(DisasContext *s, int diff, int tb_num);
+ static void gen_exception_gpf(DisasContext *s);
+ 
+@@ -1513,6 +1557,7 @@ static void gen_helper_fp_arith_STN_ST0(int op, int opreg)
+ 
+ static void gen_exception(DisasContext *s, int trapno)
+ {
++    x87s_flush_code(s);
+     gen_update_cc_op(s);
+     gen_update_eip_cur(s);
+     gen_helper_raise_exception(tcg_env, tcg_constant_i32(trapno));
+@@ -1953,6 +1998,7 @@ static void gen_leave(DisasContext *s)
+    privilege checks */
+ static void gen_interrupt(DisasContext *s, uint8_t intno)
+ {
++    x87s_flush_code(s);
+     gen_update_cc_op(s);
+     gen_update_eip_cur(s);
+     gen_helper_raise_interrupt(tcg_env, tcg_constant_i32(intno),
+@@ -1983,6 +2029,7 @@ gen_eob(DisasContext *s, int mode)
+ {
+     bool inhibit_reset;
+ 
++    x87s_flush_code(s);
+     gen_update_cc_op(s);
+ 
+     /* If several instructions disable interrupts, only the first does it.  */
+@@ -2022,6 +2069,7 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
+     target_ulong new_eip = new_pc - s->cs_base;
+ 
+     assert(!s->cc_op_dirty);
++    x87s_flush_code(s);
+ 
+     /* In 64-bit mode, operand size is fixed at 64 bits. */
+     if (!CODE64(s)) {
+@@ -2149,6 +2197,7 @@ static void gen_sty_env_A0(DisasContext *s, int offset, bool align)
+ }
+ 
+ #include "emit.c.inc"
++#include "x87-shadow.c.inc"
+ 
+ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+ {
+@@ -2166,16 +2215,39 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+     mod = (modrm >> 6) & 3;
+     rm = modrm & 7;
+     op = ((b & 7) << 3) | ((modrm >> 3) & 7);
++    s->x87_fdp_addr = NULL;
+     if (mod != 3) {
+         /* memory op */
+         TCGv ea = gen_lea_modrm_1(s, decode->mem, false);
+         TCGv last_addr = tcg_temp_new();
+-        bool update_fdp = true;
+-        TCGv_i32 t32;
+-        TCGv_i64 t64;
+ 
+         tcg_gen_mov_tl(last_addr, ea);
+         gen_lea_v_seg(s, ea, decode->mem.def_seg, s->override);
++        s->x87_fdp_addr = last_addr;
++        s->x87_fdp_seg = s->override >= 0 ? s->override : decode->mem.def_seg;
++    }
++
++    if (s->x87s_on) {
++        if (gen_x87s_insn(s, op, mod, rm)) {
++            gen_x87_fip_fdp(s);
++            return;
++        }
++        if (gen_x87s_needs_boundary(op, mod, rm)) {
++            x87s_boundary(s);
++        }
++    }
++    /*
++     * A control word change may switch the x87 inline mode either way, and
++     * the mode is a TB flag: end the block after it in both modes.
++     */
++    if (tcg_f64_supported() && gen_x87s_ends_tb(op, mod, rm)) {
++        s->base.is_jmp = DISAS_EOB_NEXT;
++    }
++
++    if (mod != 3) {
++        bool update_fdp = true;
++        TCGv_i32 t32;
++        TCGv_i64 t64;
+ 
+         switch (op) {
+         case 0x00 ... 0x07: /* fxxxs */
+@@ -2366,17 +2438,8 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+             goto illegal_op;
+         }
+ 
+-        if (update_fdp) {
+-            int last_seg = s->override >= 0 ? s->override : decode->mem.def_seg;
+-
+-            t32 = tcg_temp_new_i32();
+-            tcg_gen_ld_i32(t32, tcg_env,
+-                           offsetof(CPUX86State,
+-                                    segs[last_seg].selector));
+-            tcg_gen_st16_i32(t32, tcg_env,
+-                             offsetof(CPUX86State, fpds));
+-            tcg_gen_st_tl(last_addr, tcg_env,
+-                          offsetof(CPUX86State, fpdp));
++        if (!update_fdp) {
++            s->x87_fdp_addr = NULL;
+         }
+     } else {
+         /* register float ops */
+@@ -2679,13 +2742,7 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+     }
+ 
+     if (update_fip) {
+-        TCGv_i32 t32 = tcg_temp_new_i32();
+-        tcg_gen_ld_i32(t32, tcg_env,
+-                       offsetof(CPUX86State, segs[R_CS].selector));
+-        tcg_gen_st16_i32(t32, tcg_env,
+-                         offsetof(CPUX86State, fpcs));
+-        tcg_gen_st_tl(eip_cur_tl(s),
+-                      tcg_env, offsetof(CPUX86State, fpip));
++        gen_x87_fip_fdp(s);
+     }
+     return;
+ 
+@@ -2693,6 +2750,27 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+     gen_illegal_opcode(s);
+ }
+ 
++/* FIP/FCS and, for memory operands, FDP/FDS of the current instruction. */
++static void gen_x87_fip_fdp(DisasContext *s)
++{
++    TCGv_i32 t32 = tcg_temp_new_i32();
++
++    if (s->x87_fdp_addr) {
++        tcg_gen_ld_i32(t32, tcg_env,
++                       offsetof(CPUX86State, segs[s->x87_fdp_seg].selector));
++        tcg_gen_st16_i32(t32, tcg_env,
++                         offsetof(CPUX86State, fpds));
++        tcg_gen_st_tl(s->x87_fdp_addr, tcg_env,
++                      offsetof(CPUX86State, fpdp));
++    }
++    tcg_gen_ld_i32(t32, tcg_env,
++                   offsetof(CPUX86State, segs[R_CS].selector));
++    tcg_gen_st16_i32(t32, tcg_env,
++                     offsetof(CPUX86State, fpcs));
++    tcg_gen_st_tl(eip_cur_tl(s),
++                  tcg_env, offsetof(CPUX86State, fpip));
++}
++
+ static void gen_multi0F(DisasContext *s, X86DecodedInsn *decode)
+ {
+     int prefixes = s->prefix;
+@@ -2850,6 +2928,7 @@ static void gen_multi0F(DisasContext *s, X86DecodedInsn *decode)
+             if (!(s->cpuid_ext_features & CPUID_EXT_MONITOR) || CPL(s) != 0) {
+                 goto illegal_op;
+             }
++            x87s_flush_code(s);
+             gen_update_cc_op(s);
+             gen_update_eip_cur(s);
+             gen_helper_mwait(tcg_env, cur_insn_len_i32(s));
+@@ -2929,6 +3008,7 @@ static void gen_multi0F(DisasContext *s, X86DecodedInsn *decode)
+             if (!check_cpl0(s)) {
+                 break;
+             }
++            x87s_flush_code(s);
+             gen_update_cc_op(s);
+             gen_update_eip_cur(s);
+             /*
+@@ -2946,6 +3026,7 @@ static void gen_multi0F(DisasContext *s, X86DecodedInsn *decode)
+             if (!SVME(s)) {
+                 goto illegal_op;
+             }
++            x87s_flush_code(s);
+             gen_update_cc_op(s);
+             gen_update_eip_cur(s);
+             gen_helper_vmmcall(tcg_env);
+@@ -3423,6 +3504,15 @@ void tcg_x86_init(void)
+                                  seg_base_names[i]);
+     }
+ 
++    for (i = 0; i < 8; ++i) {
++        static const char sd_names[8][4] = {
++            "sd0", "sd1", "sd2", "sd3", "sd4", "sd5", "sd6", "sd7"
++        };
++        cpu_x87_sd[i] = tcg_global_mem_new_i64(tcg_env,
++                                               offsetof(CPUX86State, x87_sd[i]),
++                                               sd_names[i]);
++    }
++
+     for (i = 0; i < 4; ++i) {
+         cpu_bndl[i]
+             = tcg_global_mem_new_i64(tcg_env,
+@@ -3467,6 +3557,19 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+ 
+     dc->cc_op = CC_OP_DYNAMIC;
+     dc->cc_op_dirty = false;
++    dc->x87s_mode = (flags & TB_FLAG_X87_MODE_MASK) >> TB_FLAG_X87_MODE_SHIFT;
++    dc->x87s_on = dc->x87s_mode != 0 && tcg_f64_supported()
++        && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
++    dc->x87s_prec24 = dc->x87s_mode == 2;
++    dc->x87s_guarded = false;
++    dc->x87s_nslow = 0;
++    dc->x87s_ntmps = 0;
++    x87s_reset(dc);
++    dc->x87_fdp_addr = NULL;
++    if (dc->x87s_on) {
++        dc->x87s_t32 = tcg_temp_new_i32();
++        dc->x87s_t64 = tcg_temp_new_i64();
++    }
+     /* select memory access functions */
+     dc->mem_index = cpu_mmu_index(cpu, false);
+     dc->cpuid_features = env->features[FEAT_1_EDX];
+@@ -3501,7 +3604,7 @@ static void i386_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
+     if (tb_cflags(dcbase->tb) & CF_PCREL) {
+         pc_arg &= ~TARGET_PAGE_MASK;
+     }
+-    tcg_gen_insn_start(pc_arg, dc->cc_op, 0);
++    tcg_gen_insn_start(pc_arg, dc->cc_op, x87s_insn_word(dc));
+ }
+ 
+ static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+@@ -3600,6 +3703,7 @@ static void i386_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
+     default:
+         g_assert_not_reached();
+     }
++    x87s_emit_slow_blocks(dc);
+ }
+ 
+ static const TranslatorOps i386_tr_ops = {
+diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
+new file mode 100644
+index 0000000000..9b923990d8
 --- /dev/null
 +++ b/target/i386/tcg/x87-shadow.c.inc
-@@ -0,0 +1,1659 @@
+@@ -0,0 +1,1672 @@
 +/*
 + * x87 shadow-double translation: keep the FPU stack as host doubles
 + * across instructions.
@@ -1909,7 +1598,7 @@ seven control words identical on/off.
 +
 +/*
 + * fxxx ST0, m64/m32 (op1 0,1,4..7) and fcom/fcomp m64/m32 (op1 2,3).
-+ * s->tmp1_i64 holds the raw operand (m32 in the low half).
++ * s->x87s_t64 holds the raw operand (m32 in the low half).
 + */
 +static void gen_x87s_arith_mem(DisasContext *s, int op1, bool m64)
 +{
@@ -1918,7 +1607,7 @@ seven control words identical on/off.
 +    TCGv_i64 v = x87s_tmp_i64(s);
 +    TCGv_i64 a, r;
 +
-+    tcg_gen_mov_i64(m, s->tmp1_i64);
++    tcg_gen_mov_i64(m, s->x87s_t64);
 +    x87s_begin(s);
 +    b = x87s_new_slow(s, X87S_SLOW_ARITH_MEM);
 +    b->m = m;
@@ -1982,14 +1671,14 @@ seven control words identical on/off.
 +    }
 +}
 +
-+/* fld m64 / m32 (raw bits in s->tmp1_i64) */
++/* fld m64 / m32 (raw bits in s->x87s_t64) */
 +static void gen_x87s_fld_mem(DisasContext *s, bool m64)
 +{
 +    X87SlowBlock *b;
 +    TCGv_i64 m = tcg_temp_new_i64();
 +    TCGv_i64 v = x87s_tmp_i64(s);
 +
-+    tcg_gen_mov_i64(m, s->tmp1_i64);
++    tcg_gen_mov_i64(m, s->x87s_t64);
 +    x87s_begin(s);
 +    b = x87s_new_slow(s, X87S_SLOW_FLD_MEM);
 +    b->m = m;
@@ -2004,7 +1693,7 @@ seven control words identical on/off.
 +}
 +
 +/*
-+ * fild m32 / m16: exact. Value sign-extended in s->tmp2_i32. No slow
++ * fild m32 / m16: exact. Value sign-extended in s->x87s_t32. No slow
 + * path, except at PC=24 for an m32 value that needs more than 24 bits
 + * (the helper keeps it exact, but a shadow cannot).
 + */
@@ -2019,9 +1708,9 @@ seven control words identical on/off.
 +    if (s->x87s_prec24 && !m16) {
 +        b = x87s_new_slow(s, X87S_SLOW_FILD);
 +        b->m = tcg_temp_new_i64();
-+        tcg_gen_ext_i32_i64(b->m, s->tmp2_i32);
++        tcg_gen_ext_i32_i64(b->m, s->x87s_t32);
 +    }
-+    tcg_gen_extu_i32_i64(t, s->tmp2_i32);
++    tcg_gen_extu_i32_i64(t, s->x87s_t32);
 +    tcg_gen_xori_i64(t, t, 0x80000000);          /* v + 2^31 as u32 */
 +    tcg_gen_ori_i64(t, t, 0x4330000000000000ULL); /* 2^52 + (v + 2^31) */
 +    tcg_gen_sub_f64(v, t, k);                     /* exact */
@@ -2072,9 +1761,9 @@ seven control words identical on/off.
 +    tcg_gen_setcondi_i64(TCG_COND_GEU, bad, t, lim);
 +    tcg_gen_brcondi_i64(TCG_COND_NE, bad, 0, b->label);
 +    tcg_gen_xori_i64(t, t, xmask);
-+    tcg_gen_extrl_i64_i32(s->tmp2_i32, t);
++    tcg_gen_extrl_i64_i32(s->x87s_t32, t);
 +    x87s_set_pe_ne(s, r, v);
-+    tcg_gen_qemu_st_i32(s->tmp2_i32, s->A0, s->mem_index,
++    tcg_gen_qemu_st_i32(s->x87s_t32, s->A0, s->mem_index,
 +                        m16 ? MO_LEUW : MO_LEUL);
 +    if (pop) {
 +        x87s_pop(s);
@@ -2096,8 +1785,8 @@ seven control words identical on/off.
 +    if (m64) {
 +        tcg_gen_qemu_st_i64(v, s->A0, s->mem_index, MO_LEUQ);
 +    } else {
-+        x87s_f64_to_f32(s, s->tmp2_i32, v, b->label);
-+        tcg_gen_qemu_st_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
++        x87s_f64_to_f32(s, s->x87s_t32, v, b->label);
++        tcg_gen_qemu_st_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
 +    }
 +    if (pop) {
 +        x87s_pop(s);
@@ -2126,6 +1815,21 @@ seven control words identical on/off.
 +    x87s_begin(s);
 +    ra = X87S_SLOT(s, 0);
 +    rb = X87S_SLOT(s, opreg);
++    /*
++     * As helper_fxchg_ST0_STN since QEMU 11.1.2: both registers are tagged
++     * valid (18e276bc72) and C1 is cleared (e0e13147cb), fxch st0 too.
++     */
++    x87s_set_tag(s, ra, 0);
++    if (rb != ra) {
++        x87s_set_tag(s, rb, 0);
++    }
++    {
++        TCGv_i32 fpus = x87s_tmp_i32(s);
++
++        tcg_gen_ld16u_i32(fpus, tcg_env, offsetof(CPUX86State, fpus));
++        tcg_gen_andi_i32(fpus, fpus, ~0x0200);
++        tcg_gen_st16_i32(fpus, tcg_env, offsetof(CPUX86State, fpus));
++    }
 +    if (ra == rb) {
 +        return;
 +    }
@@ -2181,6 +1885,8 @@ seven control words identical on/off.
 +    b->pop = pop;
 +    v = x87s_get(s, 0, b->label);
 +    x87s_set(s, opreg, v);
++    /* ST(i) is tagged valid, as helper_fmov_STN_ST0 since 0df1fa1311 */
++    x87s_set_tag(s, X87S_SLOT(s, opreg), 0);
 +    if (pop) {
 +        x87s_pop(s);
 +    }
@@ -2193,7 +1899,7 @@ seven control words identical on/off.
 +    TCGv_i64 a, v, c64;
 +    TCGv cond = tcg_temp_new();
 +
-+    gen_setcc1(s, op1 ^ 1, cond);           /* op1 is the skip condition */
++    gen_setcc(s, op1 ^ 1, cond);           /* op1 is the skip condition */
 +    x87s_begin(s);
 +    b = x87s_new_slow(s, X87S_SLOW_FCMOV);
 +    b->opreg = opreg;
@@ -2267,13 +1973,9 @@ seven control words identical on/off.
 +    v = zero_operand ? tcg_constant_i64(0) : x87s_get(s, opreg, b->label);
 +    x87s_compare(s, cc, a, v, eflags);
 +    if (eflags) {
-+        TCGv t = tcg_temp_new();
-+
-+        gen_compute_eflags(s);
-+        gen_update_cc_op(s);
-+        tcg_gen_andi_tl(cpu_cc_src, cpu_cc_src, ~(CC_Z | CC_P | CC_C));
-+        tcg_gen_extu_i32_tl(t, cc);
-+        tcg_gen_or_tl(cpu_cc_src, cpu_cc_src, t);
++        /* OF, SF and AF are cleared unconditionally (upstream 0924d9d3db36) */
++        tcg_gen_extu_i32_tl(cpu_cc_src, cc);
++        set_cc_op(s, CC_OP_EFLAGS);
 +    } else {
 +        x87s_fpus_cc(s, cc);
 +    }
@@ -2385,29 +2087,29 @@ seven control words identical on/off.
 +    if (mod != 3) {
 +        switch (op) {
 +        case 0x00 ... 0x07: /* fxxxs */
-+            tcg_gen_qemu_ld_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
-+            tcg_gen_extu_i32_i64(s->tmp1_i64, s->tmp2_i32);
++            tcg_gen_qemu_ld_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
++            tcg_gen_extu_i32_i64(s->x87s_t64, s->x87s_t32);
 +            gen_x87s_arith_mem(s, op1, false);
 +            return true;
 +        case 0x20 ... 0x27: /* fxxxl */
-+            tcg_gen_qemu_ld_i64(s->tmp1_i64, s->A0, s->mem_index, MO_LEUQ);
++            tcg_gen_qemu_ld_i64(s->x87s_t64, s->A0, s->mem_index, MO_LEUQ);
 +            gen_x87s_arith_mem(s, op1, true);
 +            return true;
 +        case 0x08: /* flds */
-+            tcg_gen_qemu_ld_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
-+            tcg_gen_extu_i32_i64(s->tmp1_i64, s->tmp2_i32);
++            tcg_gen_qemu_ld_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
++            tcg_gen_extu_i32_i64(s->x87s_t64, s->x87s_t32);
 +            gen_x87s_fld_mem(s, false);
 +            return true;
 +        case 0x28: /* fldl */
-+            tcg_gen_qemu_ld_i64(s->tmp1_i64, s->A0, s->mem_index, MO_LEUQ);
++            tcg_gen_qemu_ld_i64(s->x87s_t64, s->A0, s->mem_index, MO_LEUQ);
 +            gen_x87s_fld_mem(s, true);
 +            return true;
 +        case 0x18: /* fildl */
-+            tcg_gen_qemu_ld_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LEUL);
++            tcg_gen_qemu_ld_i32(s->x87s_t32, s->A0, s->mem_index, MO_LEUL);
 +            gen_x87s_fild(s, false);
 +            return true;
 +        case 0x38: /* filds */
-+            tcg_gen_qemu_ld_i32(s->tmp2_i32, s->A0, s->mem_index, MO_LESW);
++            tcg_gen_qemu_ld_i32(s->x87s_t32, s->A0, s->mem_index, MO_LESW);
 +            gen_x87s_fild(s, true);
 +            return true;
 +        case 0x0a: /* fsts */
@@ -2547,8 +2249,8 @@ seven control words identical on/off.
 +        if (rm != 0) {
 +            return false;
 +        }
-+        gen_x87s_fnstsw(s, s->tmp2_i32);
-+        tcg_gen_extu_i32_tl(s->T0, s->tmp2_i32);
++        gen_x87s_fnstsw(s, s->x87s_t32);
++        tcg_gen_extu_i32_tl(s->T0, s->x87s_t32);
 +        gen_op_mov_reg_v(s, MO_16, R_EAX, s->T0);
 +        return true;
 +    case 0x10 ... 0x13: /* fcmovxx */
@@ -2613,3 +2315,406 @@ seven control words identical on/off.
 +    }
 +    return op == 0x1c && rm == 3;
 +}
+diff --git a/tcg/aarch64/tcg-target-has.h b/tcg/aarch64/tcg-target-has.h
+index 69e83efb69..c5d805bcde 100644
+--- a/tcg/aarch64/tcg-target-has.h
++++ b/tcg/aarch64/tcg-target-has.h
+@@ -32,6 +32,9 @@
+ #define TCG_TARGET_HAS_v128             1
+ #define TCG_TARGET_HAS_v256             0
+ 
++/* 2ksbox (patch 06): the scalar binary64 ops (outop_add_f64) */
++#define TCG_TARGET_F64
++
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          1
+ #define TCG_TARGET_HAS_nand_vec         0
+diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
+index cc9c2a5158..2ce5818081 100644
+--- a/tcg/aarch64/tcg-target.c.inc
++++ b/tcg/aarch64/tcg-target.c.inc
+@@ -1113,7 +1113,20 @@ static void tcg_out_movi(TCGContext *s, TCGType type, TCGReg rd,
+     switch (type) {
+     case TCG_TYPE_I32:
+     case TCG_TYPE_I64:
+-        tcg_debug_assert(rd < 32);
++        if (rd >= 32) {
++            /*
++             * An integer temp allocated to a vector register (f64 ops
++             * with a constant operand, e.g. fld1 then fmul): build the
++             * value in the scratch register and INS Vd.D[0], Xtmp
++             * (encoding checked against llvm-mc: 4e08 1c00 | Rn<<5 | Rd).
++             */
++            if (type == TCG_TYPE_I32) {
++                value = (uint32_t)value;
++            }
++            tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP0, value);
++            tcg_out_insn(s, simd_copy, INS, 0, rd, TCG_REG_TMP0, 8, 0);
++            return;
++        }
+         break;
+     default:
+         g_assert_not_reached();
+@@ -1240,7 +1253,13 @@ static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
+             tcg_out_movr(s, type, ret, arg);
+             break;
+         } else if (ret < 32) {
+-            tcg_out_insn(s, simd_copy, UMOV, type, ret, arg, 0, 0);
++            /*
++             * 2ksbox (patch 06): UMOV Xd, Vn.D[0] / Wd, Vn.S[0]: imm5
++             * encodes the element size (01000 for D, 00100 for S); 0 is
++             * an unallocated encoding (SIGILL). Upstream never emits
++             * this move; the f64 ops do.
++             */
++            tcg_out_insn(s, simd_copy, UMOV, type, ret, arg, 4 << type, 0);
+             break;
+         } else if (arg < 32) {
+             tcg_out_insn(s, simd_copy, INS, 0, ret, arg, 4 << type, 0);
+@@ -2610,6 +2629,63 @@ static const TCGOutOpBinary outop_xor = {
+     .out_rri = tgen_xori,
+ };
+ 
++/*
++ * 2ksbox (patch 06): scalar binary64 on the host FPU. The i64 temps live
++ * in vector registers ("w"); Dd/Dn/Dm/Da are their low 5 bits.
++ */
++enum {
++    F64_FADDD   = 0x1e602800,
++    F64_FSUBD   = 0x1e603800,
++    F64_FMULD   = 0x1e600800,
++    F64_FDIVD   = 0x1e601800,
++    F64_FNMSUBD = 0x1f608000,   /* Dd = Dn * Dm - Da */
++    F64_FSQRTD  = 0x1e61c000,
++    F64_FCVTSD  = 0x1e624000,   /* Sd = Dn */
++    F64_FCVTDS  = 0x1e22c000,   /* Dd = Sn */
++};
++
++#define F64_BINARY(NAME, INSN)                                          \
++static void tgen_##NAME(TCGContext *s, TCGType type,                    \
++                        TCGReg a0, TCGReg a1, TCGReg a2)                \
++{                                                                       \
++    tcg_out32(s, INSN | (a2 & 0x1f) << 16 | (a1 & 0x1f) << 5 | (a0 & 0x1f)); \
++}                                                                       \
++static const TCGOutOpBinary outop_##NAME = {                            \
++    .base.static_constraint = C_O1_I2(w, w, w),                         \
++    .out_rrr = tgen_##NAME,                                             \
++};
++F64_BINARY(add_f64, F64_FADDD)
++F64_BINARY(sub_f64, F64_FSUBD)
++F64_BINARY(mul_f64, F64_FMULD)
++F64_BINARY(div_f64, F64_FDIVD)
++#undef F64_BINARY
++
++#define F64_UNARY(NAME, INSN)                                           \
++static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
++{                                                                       \
++    tcg_out32(s, INSN | (a1 & 0x1f) << 5 | (a0 & 0x1f));                \
++}                                                                       \
++static const TCGOutOpUnary outop_##NAME = {                             \
++    .base.static_constraint = C_O1_I1(w, w),                            \
++    .out_rr = tgen_##NAME,                                              \
++};
++F64_UNARY(sqrt_f64, F64_FSQRTD)
++F64_UNARY(cvt_f64_f32, F64_FCVTSD)
++F64_UNARY(cvt_f32_f64, F64_FCVTDS)
++#undef F64_UNARY
++
++static void tgen_fmsub_f64(TCGContext *s, TCGType type,
++                           TCGReg a0, TCGReg a1, TCGReg a2, TCGReg a3)
++{
++    tcg_out32(s, F64_FNMSUBD | (a2 & 0x1f) << 16 | (a3 & 0x1f) << 10
++              | (a1 & 0x1f) << 5 | (a0 & 0x1f));
++}
++
++static const TCGOutOpTernary outop_fmsub_f64 = {
++    .base.static_constraint = C_O1_I3(w, w, w, w),
++    .out_rrrr = tgen_fmsub_f64,
++};
++
+ static void tgen_bswap16(TCGContext *s, TCGType type,
+                          TCGReg a0, TCGReg a1, unsigned flags)
+ {
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index 4d15d1abbd..1b50793ea5 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -2369,6 +2369,59 @@ void tcg_gen_mulu2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2)
+     }
+ }
+ 
++bool tcg_f64_supported(void)
++{
++    return tcg_op_supported(INDEX_op_add_f64, TCG_TYPE_I64, 0);
++}
++
++void tcg_gen_add_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i64(INDEX_op_add_f64, ret, a, b);
++}
++
++void tcg_gen_sub_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i64(INDEX_op_sub_f64, ret, a, b);
++}
++
++void tcg_gen_mul_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i64(INDEX_op_mul_f64, ret, a, b);
++}
++
++void tcg_gen_div_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op3_i64(INDEX_op_div_f64, ret, a, b);
++}
++
++void tcg_gen_fmsub_f64(TCGv_i64 ret, TCGv_i64 a, TCGv_i64 b, TCGv_i64 c)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op4_i64(INDEX_op_fmsub_f64, ret, a, b, c);
++}
++
++void tcg_gen_sqrt_f64(TCGv_i64 ret, TCGv_i64 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i64(INDEX_op_sqrt_f64, ret, a);
++}
++
++void tcg_gen_cvt_f64_f32(TCGv_i64 ret, TCGv_i64 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i64(INDEX_op_cvt_f64_f32, ret, a);
++}
++
++void tcg_gen_cvt_f32_f64(TCGv_i64 ret, TCGv_i64 a)
++{
++    tcg_debug_assert(tcg_f64_supported());
++    tcg_gen_op2_i64(INDEX_op_cvt_f32_f64, ret, a);
++}
++
+ void tcg_gen_muls2_i64(TCGv_i64 rl, TCGv_i64 rh, TCGv_i64 arg1, TCGv_i64 arg2)
+ {
+     if (tcg_op_supported(INDEX_op_muls2, TCG_TYPE_I64, 0)) {
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index db43589fa2..2731113bd8 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -1071,6 +1071,13 @@ typedef struct TCGOutOpUnary {
+     void (*out_rr)(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1);
+ } TCGOutOpUnary;
+ 
++/* 2ksbox (patch 06): fmsub_f64, one output and three register inputs */
++typedef struct TCGOutOpTernary {
++    TCGOutOp base;
++    void (*out_rrrr)(TCGContext *s, TCGType type,
++                     TCGReg a0, TCGReg a1, TCGReg a2, TCGReg a3);
++} TCGOutOpTernary;
++
+ typedef struct TCGOutOpSetcond {
+     TCGOutOp base;
+     void (*out_rrr)(TCGContext *s, TCGType type, TCGCond cond,
+@@ -1221,6 +1228,17 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
+     OUTOP(INDEX_op_subb1o, TCGOutOpAddSubCarry, outop_subbio),
+     OUTOP(INDEX_op_xor, TCGOutOpBinary, outop_xor),
+ 
++#ifdef TCG_TARGET_F64
++    OUTOP(INDEX_op_add_f64, TCGOutOpBinary, outop_add_f64),
++    OUTOP(INDEX_op_sub_f64, TCGOutOpBinary, outop_sub_f64),
++    OUTOP(INDEX_op_mul_f64, TCGOutOpBinary, outop_mul_f64),
++    OUTOP(INDEX_op_div_f64, TCGOutOpBinary, outop_div_f64),
++    OUTOP(INDEX_op_fmsub_f64, TCGOutOpTernary, outop_fmsub_f64),
++    OUTOP(INDEX_op_sqrt_f64, TCGOutOpUnary, outop_sqrt_f64),
++    OUTOP(INDEX_op_cvt_f64_f32, TCGOutOpUnary, outop_cvt_f64_f32),
++    OUTOP(INDEX_op_cvt_f32_f64, TCGOutOpUnary, outop_cvt_f32_f64),
++#endif
++
+     [INDEX_op_goto_ptr] = &outop_goto_ptr,
+ 
+     OUTOP(INDEX_op_bswap64, TCGOutOpUnary, outop_bswap64),
+@@ -2385,6 +2403,21 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_xor:
+         return has_type;
+ 
++    case INDEX_op_add_f64:
++    case INDEX_op_sub_f64:
++    case INDEX_op_mul_f64:
++    case INDEX_op_div_f64:
++    case INDEX_op_fmsub_f64:
++    case INDEX_op_sqrt_f64:
++    case INDEX_op_cvt_f64_f32:
++    case INDEX_op_cvt_f32_f64:
++#ifdef TCG_TARGET_F64
++        if (type == TCG_TYPE_I64) {
++            goto do_lookup;
++        }
++#endif
++        return false;
++
+     case INDEX_op_ld32u:
+     case INDEX_op_ld32s:
+     case INDEX_op_st32:
+@@ -5515,6 +5548,10 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+     case INDEX_op_shl:
+     case INDEX_op_shr:
+     case INDEX_op_xor:
++    case INDEX_op_add_f64:
++    case INDEX_op_sub_f64:
++    case INDEX_op_mul_f64:
++    case INDEX_op_div_f64:
+         {
+             const TCGOutOpBinary *out =
+                 container_of(all_outop[op->opc], TCGOutOpBinary, base);
+@@ -5581,6 +5618,9 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+     case INDEX_op_ctpop:
+     case INDEX_op_neg:
+     case INDEX_op_not:
++    case INDEX_op_sqrt_f64:
++    case INDEX_op_cvt_f64_f32:
++    case INDEX_op_cvt_f32_f64:
+         {
+             const TCGOutOpUnary *out =
+                 container_of(all_outop[op->opc], TCGOutOpUnary, base);
+@@ -5688,6 +5728,16 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
+         }
+         break;
+ 
++    case INDEX_op_fmsub_f64:
++        {
++            const TCGOutOpTernary *out =
++                container_of(all_outop[op->opc], TCGOutOpTernary, base);
++
++            out->out_rrrr(s, type, new_args[0], new_args[1],
++                          new_args[2], new_args[3]);
++        }
++        break;
++
+     case INDEX_op_st32:
+         /* Use tcg_op_st w/ I32. */
+         type = TCG_TYPE_I32;
+diff --git a/tcg/x86_64/tcg-target-has.h b/tcg/x86_64/tcg-target-has.h
+index d249c1b3e7..26dc3a78f3 100644
+--- a/tcg/x86_64/tcg-target-has.h
++++ b/tcg/x86_64/tcg-target-has.h
+@@ -12,6 +12,7 @@
+ #define have_bmi1         (cpuinfo & CPUINFO_BMI1)
+ #define have_popcnt       (cpuinfo & CPUINFO_POPCNT)
+ #define have_avx1         (cpuinfo & CPUINFO_AVX1)
++#define have_fma          (cpuinfo & CPUINFO_FMA)
+ #define have_avx2         (cpuinfo & CPUINFO_AVX2)
+ #define have_movbe        (cpuinfo & CPUINFO_MOVBE)
+ 
+@@ -38,6 +39,9 @@
+ #define TCG_TARGET_HAS_v128             have_avx1
+ #define TCG_TARGET_HAS_v256             have_avx2
+ 
++/* 2ksbox (patch 06): the scalar binary64 ops, VEX + FMA3 (outop_add_f64) */
++#define TCG_TARGET_F64
++
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          have_avx512vl
+ #define TCG_TARGET_HAS_nand_vec         have_avx512vl
+diff --git a/tcg/x86_64/tcg-target.c.inc b/tcg/x86_64/tcg-target.c.inc
+index 1fc45e4ec6..f31cd5a844 100644
+--- a/tcg/x86_64/tcg-target.c.inc
++++ b/tcg/x86_64/tcg-target.c.inc
+@@ -382,6 +382,14 @@ static bool tcg_target_const_match(int64_t val, int ct,
+ #define OPC_TESTL	(0x85)
+ #define OPC_TZCNT       (0xbc | P_EXT | P_SIMDF3)
+ #define OPC_UD2         (0x0b | P_EXT)
++#define OPC_VADDSD      (0x58 | P_EXT | P_SIMDF2)
++#define OPC_VSUBSD      (0x5c | P_EXT | P_SIMDF2)
++#define OPC_VMULSD      (0x59 | P_EXT | P_SIMDF2)
++#define OPC_VDIVSD      (0x5e | P_EXT | P_SIMDF2)
++#define OPC_VFMSUB213SD (0xab | P_EXT38 | P_DATA16 | P_VEXW)
++#define OPC_VSQRTSD     (0x51 | P_EXT | P_SIMDF2)
++#define OPC_VCVTSD2SS   (0x5a | P_EXT | P_SIMDF2)
++#define OPC_VCVTSS2SD   (0x5a | P_EXT | P_SIMDF3)
+ #define OPC_VPBLENDD    (0x02 | P_EXT3A | P_DATA16)
+ #define OPC_VPBLENDVB   (0x4c | P_EXT3A | P_DATA16)
+ #define OPC_VPBLENDMB   (0x66 | P_EXT38 | P_DATA16 | P_EVEX)
+@@ -2985,6 +2993,70 @@ static const TCGOutOpBinary outop_xor = {
+     .out_rri = tgen_xori,
+ };
+ 
++/*
++ * 2ksbox (patch 06): scalar binary64 on the host FPU, VEX encodings and
++ * FMA3 for fmsub. The i64 temps live in xmm registers ("x").
++ */
++static TCGConstraintSetIndex cset_f64_binary(TCGType type, unsigned flags)
++{
++    return have_avx1 && have_fma ? C_O1_I2(x, x, x) : C_NotImplemented;
++}
++
++static TCGConstraintSetIndex cset_f64_unary(TCGType type, unsigned flags)
++{
++    return have_avx1 && have_fma ? C_O1_I1(x, x) : C_NotImplemented;
++}
++
++static TCGConstraintSetIndex cset_f64_fmsub(TCGType type, unsigned flags)
++{
++    /* a0 == a1: vfmsub213sd computes a0 = a2 * a0 - a3 */
++    return have_avx1 && have_fma ? C_O1_I3(x, 0, x, x) : C_NotImplemented;
++}
++
++#define F64_BINARY(NAME, OPC)                                           \
++static void tgen_##NAME(TCGContext *s, TCGType type,                    \
++                        TCGReg a0, TCGReg a1, TCGReg a2)                \
++{                                                                       \
++    tcg_out_vex_modrm(s, OPC, a0, a1, a2);                              \
++}                                                                       \
++static const TCGOutOpBinary outop_##NAME = {                            \
++    .base.static_constraint = C_Dynamic,                                \
++    .base.dynamic_constraint = cset_f64_binary,                         \
++    .out_rrr = tgen_##NAME,                                             \
++};
++F64_BINARY(add_f64, OPC_VADDSD)
++F64_BINARY(sub_f64, OPC_VSUBSD)
++F64_BINARY(mul_f64, OPC_VMULSD)
++F64_BINARY(div_f64, OPC_VDIVSD)
++#undef F64_BINARY
++
++#define F64_UNARY(NAME, OPC)                                            \
++static void tgen_##NAME(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1) \
++{                                                                       \
++    tcg_out_vex_modrm(s, OPC, a0, a0, a1);                              \
++}                                                                       \
++static const TCGOutOpUnary outop_##NAME = {                             \
++    .base.static_constraint = C_Dynamic,                                \
++    .base.dynamic_constraint = cset_f64_unary,                          \
++    .out_rr = tgen_##NAME,                                              \
++};
++F64_UNARY(sqrt_f64, OPC_VSQRTSD)
++F64_UNARY(cvt_f64_f32, OPC_VCVTSD2SS)
++F64_UNARY(cvt_f32_f64, OPC_VCVTSS2SD)
++#undef F64_UNARY
++
++static void tgen_fmsub_f64(TCGContext *s, TCGType type,
++                           TCGReg a0, TCGReg a1, TCGReg a2, TCGReg a3)
++{
++    tcg_out_vex_modrm(s, OPC_VFMSUB213SD, a0, a2, a3);
++}
++
++static const TCGOutOpTernary outop_fmsub_f64 = {
++    .base.static_constraint = C_Dynamic,
++    .base.dynamic_constraint = cset_f64_fmsub,
++    .out_rrrr = tgen_fmsub_f64,
++};
++
+ static void tgen_bswap16(TCGContext *s, TCGType type,
+                          TCGReg a0, TCGReg a1, unsigned flags)
+ {
+diff --git a/util/cpuinfo-i386.c b/util/cpuinfo-i386.c
+index f4c5b6ff40..41a12c31ab 100644
+--- a/util/cpuinfo-i386.c
++++ b/util/cpuinfo-i386.c
+@@ -49,6 +49,7 @@ unsigned __attribute__((constructor)) cpuinfo_init(void)
+ 
+             if ((bv & 6) == 6) {
+                 info |= CPUINFO_AVX1;
++                info |= (c & bit_FMA ? CPUINFO_FMA : 0);
+                 info |= (b7 & bit_AVX2 ? CPUINFO_AVX2 : 0);
+                 info |= (c7 & bit_GFNI ? CPUINFO_GFNI : 0);
+ 

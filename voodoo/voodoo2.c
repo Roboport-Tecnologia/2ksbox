@@ -47,13 +47,14 @@
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "hw/pci/pci_device.h"
-#include "hw/qdev-properties.h"
+#include "hw/core/qdev-properties.h"
 #include "ui/console.h"
 #include "ui/surface.h"
 #include "qom/object.h"
 #include "hw/core/cpu.h"
-#include "exec/address-spaces.h"
-#include "exec/memory.h"
+#include "exec/target_page.h"
+#include "system/address-spaces.h"
+#include "system/memory.h"
 #include "cpu.h"                /* before the shim: it #defines tsc */
 
 #include "shim/86box/86box.h"
@@ -328,14 +329,16 @@ voodoo2_guest_read(CPUState *cs, vaddr a, void *buf, int len)
      * status register is not free anyway. Every page the read touches is
      * checked. */
     for (vaddr p = a & TARGET_PAGE_MASK; p < a + len; p += TARGET_PAGE_SIZE) {
-        hwaddr        phys = cpu_get_phys_page_debug(cs, p);
+        TranslateForDebugResult t;
+        hwaddr        phys;
         MemoryRegion *mr;
         hwaddr        xlat, plen = 1;
         bool          ram;
 
-        if (phys == -1) {
+        if (!cpu_translate_for_debug(cs, p, &t)) {
             return false;
         }
+        phys = t.physaddr;
         RCU_READ_LOCK_GUARD();
         mr  = address_space_translate(&address_space_memory, phys, &xlat, &plen,
                                       false, MEMTXATTRS_UNSPECIFIED);
@@ -1713,8 +1716,8 @@ voodoo2_set_override(void *opaque, int on)
         /* the VGA draws again: make it start from a full frame, into a
          * surface of its own (ours is freed when it replaces it) */
         s->surface = NULL;
-        graphic_hw_invalidate(con);
-        graphic_hw_update(con);
+        qemu_console_hw_invalidate(con);
+        qemu_console_hw_update(con);
     }
     info_report("voodoo2: display %s", on ? "on (VGA pass-through)" : "off (VGA back)");
 }
@@ -1769,7 +1772,7 @@ voodoo2_present(void *opaque, const bitmap_t *frame, int w, int h)
     if (cur != s->surface || !cur ||
         surface_width(cur) != w || surface_height(cur) != h) {
         s->surface = qemu_create_displaysurface(w, h);
-        dpy_gfx_replace_surface(con, s->surface);
+        qemu_console_set_surface(con, s->surface);
     }
     dst    = surface_data(s->surface);
     stride = surface_stride(s->surface);
@@ -1800,7 +1803,7 @@ voodoo2_present(void *opaque, const bitmap_t *frame, int w, int h)
         }
     }
 done:
-    dpy_gfx_update_full(con);
+    qemu_console_update_full(con);
     s->frames++;
     if (s->v->front_offset != s->shown_front) {
         s->shown_front = s->v->front_offset;
@@ -2184,7 +2187,7 @@ voodoo2_reset(DeviceState *dev)
     voodoo2_fifo_map(s);
 }
 
-static Property voodoo2_properties[] = {
+static const Property voodoo2_properties[] = {
     /* the 8 MB board: 4 MB of frame buffer and 2 MB per TMU. It was the
      * common Voodoo 2, and the 12 MB board's 4 MB TMUs break a game written
      * before it existed: a texture level may not span a 2 MB boundary of
@@ -2210,11 +2213,10 @@ static Property voodoo2_properties[] = {
     /* off: 86Box's own count, a word per write whatever its address (the
      * A/B for Carmageddon's race-start freeze) */
     DEFINE_PROP_BOOL("mmio-holes", Voodoo2State, count_holes, true),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void
-voodoo2_class_init(ObjectClass *klass, void *data)
+voodoo2_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass    *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k  = PCI_DEVICE_CLASS(klass);

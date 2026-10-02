@@ -16,21 +16,11 @@ file. A data sector inside the range and a medium that is gone (changed
 under the disc, ejected) still stop with 0x14, and both now say so as a
 warning. The first eight silent sectors of a drive are warned about.
 
-diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
---- a/include/hw/ide/ide-dev.h
-+++ b/include/hw/ide/ide-dev.h
-@@ -152,6 +152,7 @@
-     uint8_t atapi_ascq;
-     uint32_t atapi_last_lba;
-     uint8_t atapi_audio_status;     /* 0x11 playing 0x12 paused 0x13 completed 0x14 error 0x15 none */
-+    uint32_t atapi_audio_read_errors; /* 2ksbox: unreadable audio sectors played as silence (logged) */
-     uint32_t atapi_play_lba, atapi_play_end, atapi_play_start_lba;
-     int64_t atapi_play_start_ns;
-     uint8_t atapi_audio_port[4], atapi_audio_vol[4];
 diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
+index 5e6da0003f..6c638266d2 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -321,11 +321,32 @@
+@@ -321,11 +321,32 @@ static void atapi_audio_cb(void *opaque, int avail)
              libdisc *disc = atapi_disc(s);
              uint8_t raw[2352];
              LibdiscSectorInfo info;
@@ -64,5 +54,17 @@ diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
 +                warn_report("ide-cd: CD audio stopped at sector %u (%s)", s->atapi_play_lba,
 +                            rc < 0 ? "the disc could not be read" : "not an audio sector");
                  s->atapi_audio_status = 0x14;
-                 AUD_set_active_out(s->atapi_voice, 0);
+                 audio_be_set_active_out(s->atapi_be, s->atapi_voice, 0);
                  return;
+diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
+index da4aa1bf60..086994f721 100644
+--- a/include/hw/ide/ide-dev.h
++++ b/include/hw/ide/ide-dev.h
+@@ -152,6 +152,7 @@ struct IDEState {
+     uint8_t atapi_ascq;
+     uint32_t atapi_last_lba;
+     uint8_t atapi_audio_status;     /* 0x11 playing 0x12 paused 0x13 completed 0x14 error 0x15 none */
++    uint32_t atapi_audio_read_errors; /* 2ksbox: unreadable audio sectors played as silence (logged) */
+     uint32_t atapi_play_lba, atapi_play_end, atapi_play_start_lba;
+     int64_t atapi_play_start_ns;
+     uint8_t atapi_audio_port[4], atapi_audio_vol[4];

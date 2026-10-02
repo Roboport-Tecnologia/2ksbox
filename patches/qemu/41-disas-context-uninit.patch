@@ -20,12 +20,12 @@ switch: it changes no behaviour, only what the compiler's hardening flag
 adds to one stack frame.
 
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 2c901c7..1da6401 100644
+index 2115c5cd24..1cd4affc75 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -4335,7 +4335,19 @@ static const TranslatorOps i386_tr_ops = {
- void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int *max_insns,
-                            vaddr pc, void *host_pc)
+@@ -3613,7 +3613,19 @@ static const TranslatorOps i386_tr_ops = {
+ void x86_translate_code(CPUState *cpu, TranslationBlock *tb,
+                         int *max_insns, vaddr pc, void *host_pc)
  {
 +    /*
 +     * Not zero-filled (patch 41): QEMU builds with
@@ -41,5 +41,5 @@ index 2c901c7..1da6401 100644
      DisasContext dc;
 +#endif
  
-     translator_loop(cpu, tb, max_insns, pc, host_pc, &i386_tr_ops, &dc.base);
- }
+     translator_loop(cpu, tb, max_insns, pc, host_pc, &i386_tr_ops, &dc.base,
+                     TCG_TYPE_VA);

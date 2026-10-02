@@ -12,10 +12,10 @@ the status comes from CDFS. Now the byte is 01h (data), 02h (audio) or
 medium and 71h with the tray open, as a real drive answers.
 
 diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
-index 4438d09..e2c0dfb 100644
+index 6c638266d2..d0a9e05e68 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -1447,6 +1447,45 @@ static void cmd_get_configuration(IDEState *s, uint8_t *buf)
+@@ -1455,6 +1455,45 @@ static void cmd_get_configuration(IDEState *s, uint8_t *buf)
      ide_atapi_cmd_reply(s, len, max_len);
  }
  
@@ -61,7 +61,7 @@ index 4438d09..e2c0dfb 100644
  static void cmd_mode_sense(IDEState *s, uint8_t *buf)
  {
      int action, code;
-@@ -1461,7 +1500,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
+@@ -1469,7 +1508,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
          switch(code) {
          case MODE_PAGE_R_W_ERROR: /* error recovery */
              stw_be_p(&buf[0], 16 - 2);
@@ -70,7 +70,7 @@ index 4438d09..e2c0dfb 100644
              buf[3] = 0;
              buf[4] = 0;
              buf[5] = 0;
-@@ -1480,7 +1519,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
+@@ -1488,7 +1527,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
              break;
          case MODE_PAGE_AUDIO_CTL:
              stw_be_p(&buf[0], 24 - 2);
@@ -79,7 +79,7 @@ index 4438d09..e2c0dfb 100644
              buf[3] = 0;
              buf[4] = 0;
              buf[5] = 0;
-@@ -1510,7 +1549,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
+@@ -1518,7 +1557,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
              break;
          case MODE_PAGE_CAPABILITIES:
              stw_be_p(&buf[0], 30 - 2);

@@ -27,6 +27,11 @@
  */
 #include "qemu/osdep.h"
 #include "qemu/timer.h"
+#ifdef CONFIG_OPENGL
+/* before mesagl_impl.h's own khronos headers, as ui/console.h did up to
+ * QEMU 10.2 (cc47123440 took epoxy out of ui/surface.h) */
+#include <epoxy/gl.h>
+#endif
 #include "ui/console.h"
 #include "hw/mesa/mesagl_impl.h"
 #include "embedfx.h"
@@ -799,7 +804,7 @@ void MGLFuncHandler(const char *name)
 #include <gbm.h>
 #include "qemu/drm.h"
 #include "standard-headers/drm/drm_fourcc.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
 
 static int bufo_accel_en(void)
 {

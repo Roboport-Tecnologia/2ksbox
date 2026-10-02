@@ -23,9 +23,10 @@ floatx80_sqrt's. tools/x87-guest-test.py: 906,713 result lines identical
 with the fast path on and off; tools/x87-fast-test.c: 0 failures.
 
 diff --git a/target/i386/helper.h b/target/i386/helper.h
+index c4b2abfd6f..ce78a1d0a5 100644
 --- a/target/i386/helper.h
 +++ b/target/i386/helper.h
-@@ -122,7 +122,7 @@
+@@ -122,7 +122,7 @@ DEF_HELPER_2(fstt_ST0, void, env, tl)
  DEF_HELPER_1(fpush, void, env)
  DEF_HELPER_1(fpop, void, env)
  /* x87 at PC=64, inline mode 3 (patch 48): pure, on raw x80 values */
@@ -34,30 +35,8 @@ diff --git a/target/i386/helper.h b/target/i386/helper.h
  DEF_HELPER_FLAGS_2(x87x_to_f64, TCG_CALL_NO_RWG_SE, i128, i64, i32)
  DEF_HELPER_FLAGS_2(x87x_to_f32, TCG_CALL_NO_RWG_SE, i64, i64, i32)
  DEF_HELPER_FLAGS_3(x87x_to_int, TCG_CALL_NO_RWG_SE, i64, i64, i32, i32)
-diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
---- a/target/i386/tcg/x87-shadow.c.inc
-+++ b/target/i386/tcg/x87-shadow.c.inc
-@@ -1475,7 +1475,7 @@
-                            TCGLabel *slow)
- {
-     TCGv_i128 res;
--    TCGv_i64 hi;
-+    TCGv_i64 hi, hs;
- 
-     if (op == 1) {
-         x87s_mul_x80(s, r, a, b, slow);
-@@ -1483,7 +1483,9 @@
-     }
-     res = x87s_tmp_i128(s);
-     hi = x87s_tmp_i64(s);
--    gen_helper_x87x_arith(res, tcg_constant_i32(op), a.xl, a.xh, b.xl, b.xh);
-+    hs = x87s_tmp_i64(s);
-+    tcg_gen_concat_i32_i64(hs, b.xh, a.xh);     /* one argument: 4 in all (fpu_helper.c) */
-+    gen_helper_x87x_arith(res, tcg_constant_i32(op), a.xl, b.xl, hs);
-     tcg_gen_extr_i128_i64(r.xl, hi, res);
-     x87s_x80_ok(s, hi, X87S_XF_OK, slow);
-     tcg_gen_extrl_i64_i32(r.xh, hi);
 diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
+index eee8e8a190..001c807ff9 100644
 --- a/target/i386/tcg/fpu_helper.c
 +++ b/target/i386/tcg/fpu_helper.c
 @@ -28,6 +28,8 @@
@@ -69,7 +48,7 @@ diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
  #include "x87-fast.h"
  
  /* float macros */
-@@ -191,9 +193,14 @@
+@@ -191,9 +193,14 @@ static inline __attribute__((always_inline)) floatx80 x87_binop(CPUX86State *env
  #define X87X_INEXACT (1u << 16)
  #define X87X_OK      (1u << 17)
  
@@ -87,9 +66,10 @@ diff --git a/target/i386/tcg/fpu_helper.c b/target/i386/tcg/fpu_helper.c
  
      if (!x87f_binop_x(op, a, b, &r, &inexact)) {
 diff --git a/target/i386/tcg/x87-fast.h b/target/i386/tcg/x87-fast.h
+index e29910bf58..69bb078d53 100644
 --- a/target/i386/tcg/x87-fast.h
 +++ b/target/i386/tcg/x87-fast.h
-@@ -393,6 +393,25 @@
+@@ -393,6 +393,25 @@ static inline bool x87f_add_x(floatx80 a, floatx80 b, bool sub, floatx80 *r, boo
      return x87f_pack_x(sx, ex, (uint64_t)(S >> 64), (uint64_t)S, r, inexact);
  }
  
@@ -115,7 +95,7 @@ diff --git a/target/i386/tcg/x87-fast.h b/target/i386/tcg/x87-fast.h
  static inline bool x87f_div_x(floatx80 a, floatx80 b, floatx80 *r, bool *inexact)
  {
      uint32_t sign = (a.high ^ b.high) & 0x8000;
-@@ -416,8 +435,7 @@
+@@ -416,8 +435,7 @@ static inline bool x87f_div_x(floatx80 a, floatx80 b, floatx80 *r, bool *inexact
          n = (unsigned __int128)a.low << 64;
          e--;
      }
@@ -125,3 +105,27 @@ diff --git a/target/i386/tcg/x87-fast.h b/target/i386/tcg/x87-fast.h
      /* the remainder against half the divisor, as a `rest` for the rounding */
      rest = rem == 0 ? 0 : rem > b.low - rem ? (1ULL << 63) + 1 : rem == b.low - rem ? 1ULL << 63 : 1;
      return x87f_pack_x(sign, e, q, rest, r, inexact);
+diff --git a/target/i386/tcg/x87-shadow.c.inc b/target/i386/tcg/x87-shadow.c.inc
+index ad07831b89..bfcd8aea83 100644
+--- a/target/i386/tcg/x87-shadow.c.inc
++++ b/target/i386/tcg/x87-shadow.c.inc
+@@ -1475,7 +1475,7 @@ static void x87s_binop_x80(DisasContext *s, X87SV r, int op, X87SV a, X87SV b,
+                            TCGLabel *slow)
+ {
+     TCGv_i128 res;
+-    TCGv_i64 hi;
++    TCGv_i64 hi, hs;
+ 
+     if (op == 1) {
+         x87s_mul_x80(s, r, a, b, slow);
+@@ -1483,7 +1483,9 @@ static void x87s_binop_x80(DisasContext *s, X87SV r, int op, X87SV a, X87SV b,
+     }
+     res = x87s_tmp_i128(s);
+     hi = x87s_tmp_i64(s);
+-    gen_helper_x87x_arith(res, tcg_constant_i32(op), a.xl, a.xh, b.xl, b.xh);
++    hs = x87s_tmp_i64(s);
++    tcg_gen_concat_i32_i64(hs, b.xh, a.xh);     /* one argument: 4 in all (fpu_helper.c) */
++    gen_helper_x87x_arith(res, tcg_constant_i32(op), a.xl, b.xl, hs);
+     tcg_gen_extr_i128_i64(r.xl, hi, res);
+     x87s_x80_ok(s, hi, X87S_XF_OK, slow);
+     tcg_gen_extrl_i64_i32(r.xh, hi);

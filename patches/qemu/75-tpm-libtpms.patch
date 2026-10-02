@@ -11,7 +11,7 @@ parses and query-tpm / `info tpm` describe it. Everything sits behind
 CONFIG_TPM, which QEMU 9.2 still refuses on a Windows host.
 
 diff --git a/backends/tpm/meson.build b/backends/tpm/meson.build
-index 0bfa6c4..bcd5c76 100644
+index 0bfa6c422b..bcd5c76b53 100644
 --- a/backends/tpm/meson.build
 +++ b/backends/tpm/meson.build
 @@ -3,4 +3,5 @@ if have_tpm
@@ -21,10 +21,10 @@ index 0bfa6c4..bcd5c76 100644
 +  system_ss.add(when: libtpms, if_true: files('tpm_libtpms.c'))
  endif
 diff --git a/meson.build b/meson.build
-index d31f799..d893bae 100644
+index eec3015f6e..1fef327717 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -1662,6 +1662,19 @@ if not get_option('libssh').auto() or have_block
+@@ -1701,6 +1701,19 @@ if not get_option('libssh').auto() or have_block
                      required: get_option('libssh'))
  endif
  
@@ -44,7 +44,7 @@ index d31f799..d893bae 100644
  libbzip2 = not_found
  if not get_option('bzip2').auto() or have_block
    libbzip2 = cc.find_library('bz2', has_headers: ['bzlib.h'],
-@@ -2529,6 +2542,7 @@ if get_option('tcg').allowed()
+@@ -2540,6 +2553,7 @@ if have_tcg
    config_host_data.set('CONFIG_TCG_INTERPRETER', tcg_arch == 'tci')
  endif
  config_host_data.set('CONFIG_TPM', have_tpm)
@@ -52,29 +52,29 @@ index d31f799..d893bae 100644
  config_host_data.set('CONFIG_TSAN', get_option('tsan'))
  config_host_data.set('CONFIG_USB_LIBUSB', libusb.found())
  config_host_data.set('CONFIG_VDE', vde.found())
-@@ -4888,6 +4902,7 @@ summary_info += {'seccomp support':   seccomp}
- summary_info += {'GlusterFS support': glusterfs}
+@@ -5073,6 +5087,7 @@ endif
+ summary_info += {'seccomp support':   seccomp}
  summary_info += {'hv-balloon support': hv_balloon}
  summary_info += {'TPM support':       have_tpm}
 +summary_info += {'libtpms support':   libtpms}
+ summary_info += {'IGVM support':      igvm}
  summary_info += {'libssh support':    libssh}
  summary_info += {'lzo support':       lzo}
- summary_info += {'cdimage (libdisc)':  libdisc}
 diff --git a/meson_options.txt b/meson_options.txt
-index d3fbf70..c67d722 100644
+index e0bf1015d6..a45e174b3a 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -115,6 +115,8 @@ option('dbus_display', type: 'feature', value: 'auto',
-        description: '-display dbus support')
+@@ -123,6 +123,8 @@ option('qemu_vnc', type: 'feature', value: 'auto',
+        description: 'standalone VNC server over D-Bus')
  option('tpm', type : 'feature', value : 'auto',
         description: 'TPM support')
 +option('libtpms', type : 'feature', value : 'auto',
 +       description: 'TPM 2.0 in process through libtpms (-tpmdev libtpms)')
- 
- # Do not enable it by default even for Mingw32, because it doesn't
- # work on Wine.
+ option('valgrind', type : 'feature', value: 'auto',
+        description: 'valgrind debug support for coroutine stacks')
+ option('igvm', type: 'feature', value: 'auto',
 diff --git a/qapi/tpm.json b/qapi/tpm.json
-index a16a72e..ab32730 100644
+index 3f2850a573..fab535ed56 100644
 --- a/qapi/tpm.json
 +++ b/qapi/tpm.json
 @@ -48,9 +48,13 @@
@@ -92,7 +92,7 @@ index a16a72e..ab32730 100644
    'if': 'CONFIG_TPM' }
  
  ##
-@@ -99,6 +103,18 @@
+@@ -97,6 +101,18 @@
  { 'struct': 'TPMEmulatorOptions', 'data': { 'chardev' : 'str' },
    'if': 'CONFIG_TPM' }
  
@@ -111,7 +111,7 @@ index a16a72e..ab32730 100644
  ##
  # @TPMPassthroughOptionsWrapper:
  #
-@@ -121,6 +137,17 @@
+@@ -119,6 +135,17 @@
    'data': { 'data': 'TPMEmulatorOptions' },
    'if': 'CONFIG_TPM' }
  
@@ -129,7 +129,7 @@ index a16a72e..ab32730 100644
  ##
  # @TpmTypeOptions:
  #
-@@ -132,6 +159,8 @@
+@@ -130,6 +157,8 @@
  #       passthrough type
  #     - 'emulator' The configuration options for TPM emulator backend
  #       type
@@ -138,7 +138,7 @@ index a16a72e..ab32730 100644
  #
  # Since: 1.5
  ##
-@@ -139,7 +168,9 @@
+@@ -137,7 +166,9 @@
    'base': { 'type': 'TpmType' },
    'discriminator': 'type',
    'data': { 'passthrough' : 'TPMPassthroughOptionsWrapper',
@@ -150,10 +150,10 @@ index a16a72e..ab32730 100644
  
  ##
 diff --git a/scripts/meson-buildoptions.sh b/scripts/meson-buildoptions.sh
-index a8066aa..77ead27 100644
+index c003985047..935f934784 100644
 --- a/scripts/meson-buildoptions.sh
 +++ b/scripts/meson-buildoptions.sh
-@@ -144,6 +144,7 @@ meson_options_help() {
+@@ -141,6 +141,7 @@ meson_options_help() {
    printf "%s\n" '  libnfs          libnfs block device driver'
    printf "%s\n" '  libpmem         libpmem support'
    printf "%s\n" '  libssh          ssh block device support'
@@ -161,7 +161,7 @@ index a8066aa..77ead27 100644
    printf "%s\n" '  libudev         Use libudev to enumerate host devices'
    printf "%s\n" '  libusb          libusb support for USB passthrough'
    printf "%s\n" '  libvduse        build VDUSE Library'
-@@ -380,6 +381,8 @@ _meson_option_parse() {
+@@ -378,6 +379,8 @@ _meson_option_parse() {
      --disable-libpmem) printf "%s" -Dlibpmem=disabled ;;
      --enable-libssh) printf "%s" -Dlibssh=enabled ;;
      --disable-libssh) printf "%s" -Dlibssh=disabled ;;
@@ -171,7 +171,7 @@ index a8066aa..77ead27 100644
      --disable-libudev) printf "%s" -Dlibudev=disabled ;;
      --enable-libusb) printf "%s" -Dlibusb=enabled ;;
 diff --git a/system/tpm-hmp-cmds.c b/system/tpm-hmp-cmds.c
-index 9ed6ad6..5f3ae2d 100644
+index 9ed6ad6c4d..5f3ae2d629 100644
 --- a/system/tpm-hmp-cmds.c
 +++ b/system/tpm-hmp-cmds.c
 @@ -19,6 +19,9 @@ void hmp_info_tpm(Monitor *mon, const QDict *qdict)

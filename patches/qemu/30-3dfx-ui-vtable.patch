@@ -14,10 +14,10 @@ the SDL display would mean making its eleven definitions static again and
 registering them the same way (see this patch's history).
 
 diff --git a/include/ui/console.h b/include/ui/console.h
-index 4f0fd0e..4586648 100644
+index 0c6d038f90..7ecc6b32ab 100644
 --- a/include/ui/console.h
 +++ b/include/ui/console.h
-@@ -478,6 +478,34 @@ bool qemu_console_fill_device_address(QemuConsole *con,
+@@ -466,6 +466,34 @@ bool qemu_console_fill_device_address(QemuConsole *con,
                                        size_t size,
                                        Error **errp);
  
@@ -52,9 +52,9 @@ index 4f0fd0e..4586648 100644
  /* glidewnd.c */
  void glide_prepare_window(uint32_t, int, void *, void *);
  void glide_release_window(void *, void *);
-diff --git b/ui/fxui.c b/ui/fxui.c
+diff --git a/ui/fxui.c b/ui/fxui.c
 new file mode 100644
-index 0000000..452f04c
+index 0000000000..25937a438b
 --- /dev/null
 +++ b/ui/fxui.c
 @@ -0,0 +1,214 @@
@@ -165,7 +165,7 @@ index 0000000..452f04c
 +        } else {
 +            memcpy(c->data, data, (width * height * sizeof(uint32_t)));
 +        }
-+        dpy_cursor_define(con, c);
++        qemu_console_set_cursor(con, c);
 +        cursor_unref(c);
 +    }
 +}
@@ -178,7 +178,7 @@ index 0000000..452f04c
 +        int64_t curr_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 +        if (!on || (curr_time >= (last_update + GUI_REFRESH_INTERVAL_DEFAULT))) {
 +            last_update = curr_time;
-+            dpy_mouse_set(con, x, y, on);
++            qemu_console_set_mouse(con, x, y, on);
 +        }
 +    }
 +}
@@ -273,14 +273,14 @@ index 0000000..452f04c
 +    return FX_OP(mesa_gui_fullscreen)(sizev);
 +}
 diff --git a/ui/meson.build b/ui/meson.build
-index 35fb04c..622253d 100644
+index d345f6c70d..debd9715fe 100644
 --- a/ui/meson.build
 +++ b/ui/meson.build
-@@ -8,6 +8,7 @@ system_ss.add(files(
-   'console.c',
-   'cursor.c',
-   'dmabuf.c',
-+  'fxui.c',
-   'input-keymap.c',
-   'input-legacy.c',
-   'input-barrier.c',
+@@ -38,6 +38,7 @@ libui_sources = files(
+     'cursor.c',
+     'dmabuf.c',
+     'display-surface.c',
++    'fxui.c',
+     'input-keymap.c',
+     'kbd-state.c',
+     'keymaps.c',

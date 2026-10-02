@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Prepare the QEMU submodule tree: overlay qemu-3dfx device models, apply the
-# version-matched patch, apply our queue, and stamp the qemu-3dfx commit id.
+# Prepare the QEMU submodule tree: overlay qemu-3dfx's OpenGL device, apply
+# our port of qemu-3dfx's patch (patches/qemu-3dfx), apply our queue, and
+# stamp the qemu-3dfx commit id.
 # Guest wrappers verify that id, so build them from the SAME
 # third_party/qemu-3dfx commit.
 #
@@ -17,14 +18,16 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 QEMU="$ROOT/qemu"
 FX="$ROOT/third_party/qemu-3dfx"
-PATCH="$FX/00-qemu92x-mesa-glide.patch"
+# qemu-3dfx has no patch past QEMU 9.2; this is its 00-qemu92x-mesa-glide
+# ported to 11.1, the OpenGL half only (track M21, ADR-001's amendment).
+PATCH="$ROOT/patches/qemu-3dfx/00-qemu111x-mesa.patch"
 
 [ -f "$QEMU/VERSION" ] || { echo "qemu submodule missing (git submodule update --init)"; exit 1; }
-[ -f "$PATCH" ] || { echo "qemu-3dfx submodule missing (git submodule update --init)"; exit 1; }
+[ -d "$FX/qemu-1/hw/mesa" ] || { echo "qemu-3dfx submodule missing (git submodule update --init)"; exit 1; }
 
 case "$(cat "$QEMU/VERSION")" in
-  9.2.*) ;;
-  *) echo "QEMU $(cat "$QEMU/VERSION") is not 9.2.x — patch/version mismatch"; exit 1 ;;
+  11.1.*) ;;
+  *) echo "QEMU $(cat "$QEMU/VERSION") is not 11.1.x: patch/version mismatch"; exit 1 ;;
 esac
 
 # qemu-3dfx's sign_commit rewrites hw/{3dfx,mesa}/meson.build with sed -i on
@@ -106,7 +109,7 @@ qgit() {
 }
 
 # Deterministic: restore every TRACKED file any patch touches to pristine
-# v9.2.4, then apply the 3dfx patch and our queue fresh. (Overlay files were
+# v11.1.2, then apply the 3dfx patch and our queue fresh. (Overlay files were
 # already refreshed by rsync above.) An "already applied" heuristic let
 # partial states, such as a manual `git checkout meson.build`, slip past
 # and silently drop hunks.

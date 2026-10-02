@@ -1,9 +1,11 @@
 # QEMU patch queue
 
 Every change 2ksbox makes to QEMU. The tree is the pinned submodule
-`qemu/` at v9.2.4 (the newest release qemu-3dfx's `00-qemu92x` patch
-supports), plus qemu-3dfx (`third_party/qemu-3dfx`), plus the patches in
-this directory. The larger patches are designed in the numbered docs
+`qemu/` at v11.1.2, plus qemu-3dfx's OpenGL device (`third_party/qemu-3dfx`)
+wired in by our port of its patch (`patches/qemu-3dfx/`: qemu-3dfx stops
+at 9.2), plus the patches in this directory. Every row was written on 9.2;
+where 11.1 changed a patch's shape, the row says so, and the measurements
+are 9.2's until track M21's step 3 re-takes them. The larger patches are designed in the numbered docs
 (x87 doc 13, SSE doc 16, pinned registers doc 18, CD-ROM doc 17, music
 doc 20, Voodoo 2 doc 21); doc 22 measures the TCG patches as a whole.
 The test tools named here are in `docs/testing.md`.
@@ -14,7 +16,7 @@ The test tools named here are in `docs/testing.md`.
 `scripts/build.sh` skips it while its inputs hash the same (`-f` forces it).
 
 1. **Overlays.** Prepare rsyncs in qemu-3dfx's `hw/3dfx` (copied for
-   `sign_commit`, not built: patch 74) and `hw/mesa`;
+   `sign_commit`, never built) and `hw/mesa`;
    `embed/` → `qemu/embed/`; `d3dpt/hw/` → `hw/d3dpt/` with the protocol
    headers; `voodoo/` → `hw/voodoo/`; `libsynth/qemu/` → `hw/audio/`
    (`opl3.c`, `mpu401.c`); `libdisc/qemu/` → `block/cdimage.c` and
@@ -23,7 +25,8 @@ The test tools named here are in `docs/testing.md`.
    edited in the repo; a patch only wires it into QEMU's build and machines.
 2. **Restore.** Every tracked file any patch touches is checked out
    pristine, and every file a patch creates is deleted.
-3. **Apply.** qemu-3dfx's `00-qemu92x-mesa-glide.patch`, then this queue
+3. **Apply.** Our port of qemu-3dfx's patch,
+   `patches/qemu-3dfx/00-qemu111x-mesa.patch`, then this queue
    in filename order with `git apply`. A patch that does not apply stops
    the run and prints why. Most patches carry a paragraph of what and why
    above their first diff header, which `git apply` ignores.
@@ -130,17 +133,10 @@ qemu-3dfx's shared code uses `GL_CONTEXTALPHA`, defined only under
 fixes it.
 
 ### 01-upstream-i386-lss-tb-exit-fix
-Backport of QEMU `0f1d6606c28d` (issue 2987). 9.2.4 has the LSS /
-interrupt-shadow regression without its fix, and Win98 SE takes
-`exception 0D` on the first boot after setup under TCG. **Drop:** base ≥
-10.1.
+**Dropped in M21** (QEMU 11.1). Upstream since 10.1 (`0f1d6606c2`).
 
 ### 02-3dfx-sdl-optional
-qemu-3dfx makes SDL2 a hard build requirement (`Featuring qemu-3dfx
-required SDL2`) because upstream's only 3D provider is in `ui/sdl2.c`. We
-register the embed library's window-less provider through patch 30's
-vtable and configure with `--disable-sdl --disable-sdl-image`; nothing
-in `hw/3dfx` or `hw/mesa` needs SDL. **Drop:** upstream qemu-3dfx stops requiring SDL.
+**Dropped in M21** (QEMU 11.1). Folded into the qemu-3dfx port, which has no SDL2 requirement.
 
 ### 04-3dfx-graceful-no-display
 With no 3D provider registered, `MGLCreateContext` / `MGLMakeCurrent`
@@ -165,25 +161,16 @@ unusual runs the helper out of line and exits the TB. Bit-exact except
 for empty registers after a pop. DOS loop 21.6 (softfloat) / 10.6 (patch
 05) / 2.9 ns per op; XP Super PI 1M on the Air 9:49 → 1:57. **Switch:**
 `x87-fast`. **Test:** `tools/x87-guest-test.py`. **Drop:** upstream float
-ops in TCG, or an upstream rewrite of the x87 translator.
+ops in TCG, or an upstream rewrite of the x87 translator. **On 11.1:** the eight ops are `TCGOutOp` descriptors (`TCGOutOpBinary`, `TCGOutOpUnary`, and `TCGOutOpTernary` for fmsub, in `tcg/tcg.c`) behind `TCG_TARGET_F64`, x86-64 gated at run time on AVX + FMA; the shadow has its own scratch temps (`x87s_t32`/`x87s_t64`, 11.0 removed `tmp2_i32`/`tmp1_i64`), the third `insn_start` word carries its state, and FXCH and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. It carries 07's and 09's hunks on the shadow.
 
 ### 07-upstream-x87-helper-fixes
-Backports `cf10af6c703d` (pseudo-NaN in FPATAN/FYL2X/FYL2XP1 is Invalid
-with the default NaN) and `0924d9d3db36` (fcomi/fucomi clear OF/SF/AF,
-mirrored in patch 06's inline compare). The denormal / flush-to-zero
-fixes need 10.0's softfloat rework and are skipped. **Drop:** base ≥ 11.1.
+**Dropped in M21** (QEMU 11.1). Upstream since 11.0 and 11.1.1 (`cf10af6c70`, `1621cc4971`). Its hunk on patch 06's inline compare moves into 06.
 
 ### 08-upstream-i386-decoder-fixes
-Backports the 2025–26 decoder fixes that era code trips: the F6/F7 /1
-TEST alias, RCL/RCR count modulo for 8/16-bit, V86 entry only at CPL 0,
-real-mode interrupt stack size, TSS T bit, mov to CS / segments 6–7 as
-#UD, invalid 0F C7 forms. **Drop:** base ≥ 11.1.
+**Dropped in M21** (QEMU 11.1). All seven fixes upstream by 11.1.1.
 
 ### 09-upstream-i386-rep-string
-Backports 10.0's repeated-string series (14 commits). REP/REPZ run
-several iterations per TB with explicit `cc_op` and RF handling; rep
-movs/stos is 12–16 % faster per element (`tools/string-bench.py`).
-**Drop:** base ≥ 10.0.
+**Dropped in M21** (QEMU 11.1). Upstream since 10.0. Its `x87-shadow.c.inc` hunk moves into 06.
 
 ### 10-embed-api
 Meson builds `shared_library('qemu-embed-<target>')` per system target
@@ -203,7 +190,7 @@ fmul/fdiv/fsqrt_vec`, `fmin/fmax_vec`, `fcmp_vec`, which map straight to
 overflow, underflow and divide-by-zero take the helper out of line, and
 `ldmxcsr`/`fxrstor`/`xrstor` end the TB. Packed 7.5–12×, scalar 3.4–3.9×.
 **Switch:** `sse-fast`. **Test:** `tools/sse-guest-test.py` (546,425
-lines identical on/off). **Drop:** upstream float ops in TCG.
+lines identical on/off). **Drop:** upstream float ops in TCG. **On 11.1:** a denormal operand sends the instruction to its slow block, since 10.1's softfloat raises DE on one (`57df511180`; the SSE battery's MXCSR caught it), checked only for registers not already known clean in the TB, and the checks use signed compares (doc 16), which keeps the SSE bench at 9.2's times; the scalar ops are `TCGOutOp` descriptors as in 06, the vector ones stay on the vector path; `float_exception_flags` is a bit-field since 11.1, read as the struct's first 16 bits.
 
 ### 12-simd-inline-tcg
 MMX and SSE integer and permutation instructions inline (doc 16):
@@ -283,7 +270,9 @@ Era software renderers patch their span loops' immediates per span, and
 94 % of Moto Racer's ~700,000 code-page stores a second rewrote the value
 already there; its race went 7.3 → 21.7 fps. **Switch:**
 `smc-same-value`. **Test:** `tools/smc-guest-test.py`. **Drop:** upstream
-takes it (worth sending).
+takes it (worth sending). **On 11.1:** a not-dirty store can land on an
+MMIO page, whose `haddr` is no host pointer, so the comparison refuses
+`TLB_MMIO` pages (a Win98 boot segfaulted in it once in three).
 
 ### 19-tls-hot-paths
 Thread-local reads off the TCG hot paths, which on macOS are calls into
@@ -298,12 +287,15 @@ wrapper (removing it needs a context-taking twin of every `tcg_gen_opN`),
 round-robin with several vCPUs), and `tcg-op-ldst.c`. **Switch:**
 `tls-hot-paths` (patch 29), the RCU half only; the `tcg_ctx` half has no
 reachable behaviour. **Drop:** the RCU part is worth sending upstream;
-the `tcg_ctx` part matters only where TLS is a call.
+the `tcg_ctx` part matters only where TLS is a call. **On 11.1:** the dirty-bitmap API is out of line in `system/physmem.c`, where the `_rcu_locked` twins now live (`include/system/physmem.h`).
 
 ### 20-embed-audio
 Registers the player's `embed` audiodev: the QAPI enum/union entry,
 `audio_template.h`'s per-direction case, and `audio/audio.c`'s
-`audio_create_pdos` case (without it a NULL pdo segfaults). **Drop:** with 10.
+`audio_create_pdos` case (without it a NULL pdo segfaults), and since
+11.1 the `audio_get_pdo_out`/`_in` cases (without them, `abort()`). The
+backend itself is the QOM type `audio-embed` in `embed/embedaudio.c`,
+which is how 11.1 finds `-audiodev embed`. **Drop:** with 10.
 
 ### 20-inline-lookup
 The jump-cache probe of indirect branches (`ret`, `call *`, `jmp *`, a
@@ -318,21 +310,10 @@ cache. These stay on the helper: `CF_NO_GOTO_PTR`, exec/nochain logging,
 `one-insn-per-tb`, 32-bit hosts, the x86-64 target. 7-Zip compress +12 %,
 decompress +7 %. Any new TB flag must be built here too (patch 37).
 **Switch:** `inline-lookup`. **Drop:** upstream grows a generic inline
-probe with a per-target state hook.
+probe with a per-target state hook. **On 11.1:** `translator.c` is built once per mode, so the probe addresses `CPUState` as `offsetof(CPUState, f) - sizeof(CPUState)` and tests `singlestep_flags & SSTEP_ENABLE`.
 
 ### 21-pinned-regs
-The i386 `eip` and eight GPRs pinned in aarch64's callee-saved x20–x28
-for the life of a chain of TBs (doc 18). The prologue loads, the epilogue
-stores, helpers get them stored or reloaded as their flags require, the
-allocator and liveness pass keep pinned temps in place, `op T; mov G, T`
-coalesces, and the aarch64 slow path saves live caller-saved registers
-itself. x86-64 lists no registers. 7-Zip compress +3 %, decompress +15 %.
-Parked (doc 18 "Open"): XP reboots or bugchecks with seven to nine
-registers pinned (`tools/specbench/run.sh <image> pinned`), and a 3 %
-stall at the flags-helper boundary. **Switch:**
-`pinned-regs=on` (off by default, not offered); `QEMU_TCG_PIN_MAX=n`
-caps the count. **Drop:** never (a backend feature); the coalescing and
-slow-path save are worth proposing upstream alone.
+**Dropped in M21** (QEMU 11.1). Not ported (user decision, 2026-10-01): it was off and unoffered, and 10.1's TCG backend rewrite would make the port a rewrite. Doc 18 keeps the design.
 
 ### 22-upstream-apic-reset-cpuid
 **A Win98 guest that restarts freezes on its first frame.** Win98 turns
@@ -367,7 +348,12 @@ on 8/16-bit, not SHLD/SHRD). Jump targets, ports and SSE lane selectors
 stay constants. Needs a little-endian host with unaligned loads and a
 single vCPU; covers only the block's first page. Moto Racer's race
 41 → 58 fps (TB invalidations 36,500/s → 1/s); Blood's corridor
-9.4 → 131 fps. **Switch:** `soft-imm`. **Test:** `tools/smc-guest-test.py`,
+9.4 → 131 fps. Each page remembers up to eight byte ranges a write was
+absorbed in, emptied whenever its TB list changes, so a repeated write
+skips the walk over every block on the page (with Win98's lazy FPU
+switching up to three TB-flags copies of each, CR0.TS/MP): Blood spent
+30-40 % of QEMU in that walk, ~118 M TB visits a second, and went 119 →
+164-182 fps on 11.1 with the cache. **Switch:** `soft-imm`. **Test:** `tools/smc-guest-test.py`,
 which also requires four cases' fields to have been *absorbed*: a right
 answer does not prove the block survived its patches (a `pc >> 2` hash
 once let two blocks two bytes apart share a counter and compute right
@@ -432,8 +418,8 @@ qemu-3dfx's eleven UI entry points (`mesa_*`, `glide_*`) dispatch through
 a `QemuFxUiOps` table (`ui/fxui.c`) any frontend can register; the embed
 library registers its window-less provider (`embed/embedfx.c`). With no
 provider, contexts are refused and the VM keeps running. SDL's half is
-gone with `--disable-sdl`. The `glide_*` entries are unreferenced since
-patch 74 took `hw/3dfx` out of the build; they stay so this patch keeps
+gone with `--disable-sdl`. The `glide_*` entries are unreferenced, since
+the qemu-3dfx port builds no `hw/3dfx`; they stay so this patch keeps
 applying as one piece. **Drop:** upstream qemu-3dfx grows a provider
 seam.
 
@@ -538,7 +524,7 @@ generation bump returns early on a CPU with no jump cache, as upstream's
 clear does: without TCG (qtest, KVM) `loadvm`'s `tlb_flush` still lands
 there, and the i386 QEMU crashed on it (2026-10-01, the `tpm-qtest`
 check on a Mac). **Switch:** `jump-cache-keep`. **Drop:** upstream keys its jump cache by
-physical page.
+physical page. **On 11.1:** whether the cache carries a generation is a run-time `target_long_bits() <= 32` (`TARGET_LONG_BITS` is poisoned in code built once per mode): `qemu-system-i386` keeps it, `qemu-system-x86_64` the clear.
 
 ### 43-eob-chain
 A block ending without a jump (`mov ds/es`, `sti`, `mov ss`, `popf`,
@@ -568,7 +554,7 @@ inbox VGA driver (a VGA window topology flush, then the int10 call's own
 `mov cr3`) ended black or in an empty text mode (2026-09-24;
 `tools/xp-driver-test.sh <image> vesa`). `info jit` prints refills
 and reuses. **Switch:** `tlb-retire`. **Drop:** upstream's TLB keeps
-state across CR3 writes.
+state across CR3 writes. **On 11.1:** the hook is in `include/accel/tcg/cpu-ops.h`, the page-walk record in `target/i386/tcg/system/excp_helper.c`, and `info jit`'s counters in `accel/tcg/tcg-stats.c`.
 
 ### 45-x87-prec24-f32
 At PC=24 (Direct3D's setting, a 3D game's whole frame) the shadows are
@@ -584,14 +570,7 @@ battery sweeps every control word a second time with PE set, because
 upstream has no x87 shadow path.
 
 ### 46-darwin-strchrnul
-`cc.has_function('strchrnul')` links through meson's own prototype, which
-carries no availability, so it succeeded whatever
-`MACOSX_DEPLOYMENT_TARGET` said, and a build for an older macOS called a
-weak symbol that is NULL there (the 15.4 SDK declares it from 15.4). On
-Darwin the check includes `<string.h>` with
-`-Werror=unguarded-availability-new`, so the deployment target decides
-(`docs/build-macos.md`, "The floor"). **Drop:** upstream checks
-availability.
+**Dropped in M21** (QEMU 11.1). Upstream since 10.1 (`a5b30be534`: the check includes `<string.h>`, and our `-Werror=unguarded-availability-new` makes it honour the deployment target). To confirm on the Air in step 4: no `HAVE_STRCHRNUL` in `config-host.h` at the macOS 12 floor.
 
 ### 47-x87-pc64-as-53
 **The one inexact switch, off by default.** Code at PC=64 has no host
@@ -641,7 +620,11 @@ MODE SELECT(10), and CD-DA through `-device ide-cd,audiodev=<id>` (PLAY
 AUDIO, PAUSE/RESUME, STOP PLAY/SCAN and the stop half of START STOP UNIT,
 which is how XP's `mcicda` stops), or a position at 75 sectors/s without
 one; INQUIRY from `model=`. New IDE fields are not migrated.
-`CDIMAGE_TRACE=1` logs packets, replies and sense. **Test:**
+`CDIMAGE_TRACE=1` logs packets, replies and sense. On 11.1 the PIO
+read path reads a whole DRQ burst at once (`1e4ab5af46`); the model
+fills the burst's sectors synchronously and shares the completion half
+(`cd_read_sector_done`), and CD-DA opens its voice on the drive's
+`AudioBackend`. **Test:**
 `tools/atapi-guest-test.py`, `tools/xp-cdimage-test.sh`. **Drop:** never.
 
 ### 52-atapi-disc-shelf
@@ -712,10 +695,11 @@ and `music` checks. **Drop:** never, or an upstream MPU-401.
 ### 61-sb16-mixer-volumes
 QEMU's `sb16` stored the CT1745 mixer's volumes and applied none, so
 Windows' sliders did nothing and effects over CD music clipped. Master ×
-voice now scales the SB16's voice (reapplied after `AUD_open_out`), the
+voice now scales the SB16's voice (reapplied after `audio_be_open_out`), the
 SB Pro registers mirror both ways, and a small registry in the audio core
-(`audio_mixin_attach`/`_detach`/`_set_volume`) lets `opl3` and `ide-cd`'s
-CD audio take the FM and CD levels and output switches. Reset is 0 dB
+(`audio_mixin_attach`/`_detach`/`_set_volume`, in `audio/audio-be.c`;
+each entry keeps its voice's `AudioBackend`, which 11.1's volume call
+needs) lets `opl3` and `ide-cd`'s CD audio take the FM and CD levels and output switches. Reset is 0 dB
 with CD on, so a DOS game that never programs the mixer sounds as
 before; a machine without an SB16 plays every input at unity. **Test:**
 the `sb-mixer` check; `CDVOL=` in `tools/audio-glitch-test.py cd`.
@@ -765,7 +749,7 @@ upstream reinjects coalesced PIT ticks.
 ### 66-passthrough-hides-cursor
 While another card has the monitor (`graphic_hw_passthrough`: the Voodoo
 2, the 3D frontend), the 2D adapter's hardware cursor is reported hidden.
-`dpy_mouse_set` publishes through `dpy_mouse_publish`, which answers
+`qemu_console_set_mouse` (9.2's `dpy_mouse_set`) publishes through `dpy_mouse_publish`, which answers
 hidden in pass-through and republishes when that changes, so Windows'
 arrow no longer draws over a full-screen Glide game. Trace event
 `dpy_mouse_publish`. **Test:** the `voodoo-guest-d3dpt` check. **Drop:**
@@ -779,25 +763,10 @@ through memory, and the helper cost 10.8 % of the vCPU there against
 4.6 % on Linux. **Test:** `tools/x87-guest-test.py`. **Drop:** with 48.
 
 ### 68-windows-clang
-QEMU's Windows build accepts clang, which the package uses. mingw GCC's
-`__thread` is emulated TLS (a call per access, 10.5 ns against 1 ns), and
-QEMU reads `current_cpu`, the BQL flag and RCU state on every device
-access: a VGA register read loop took 121.6 ns against 52.7 on Linux,
-and 63.5 with clang. A Windows compiler without `gcc_struct` gets
-`-mno-ms-bitfields`, and `QEMU_PACKED` drops the attribute under clang.
-`configure-qemu.sh --windows` uses `packaging/windows/clang-mingw-cc`
-with `--disable-plugins` (lld has no `--dynamic-list`); `WIN_QEMU_CC=gcc`
-is the old build. **Test:** the batteries and `package-windows.sh`'s
-checks under wine. **Drop:** upstream drops
-`gcc_struct` (it did, later).
+**Dropped in M21** (QEMU 11.1). Upstream since 10.0 (`8f5a4cfc7e` removed `gcc_struct`, so clang has nothing to refuse). To confirm in step 4 with the Windows cross build and its checks.
 
 ### 69-mkvenv-file-uri
-`mkvenv` hands pip its bundled wheels as `Path(...).as_uri()` instead of
-`f"file://{dir}"`, which on Windows is a URL whose host is `C:`. Python
-3.14 reads that as UNC and configure stops with "could not find a version
-that satisfies requirement pycotap==1.3.1 … configured to operate
-offline". MSYS2's only Python is 3.14. **Drop:** upstream uses
-`as_uri()`.
+**Dropped in M21** (QEMU 11.1). Upstream since 11.0 (`587f4a1805` passes a plain path to `--find-links`). To confirm in step 4 in MSYS2.
 
 ### 70-mesa-darwin-no-xquartz
 **The macOS build needs no XQuartz.** qemu-3dfx's Mesa backend on macOS
@@ -841,14 +810,7 @@ process (ADR-018, doc 14), so the guest's VRAM and command window are the
 bytes that process maps. No change for any other VGA. **Drop:** never.
 
 ### 74-no-glidept
-qemu-3dfx's Glide pass-through device (`hw/3dfx`, a dispatcher to a host
-`libglide2x`) is not built and not on the machine: the `subdir` and
-`glidept_mm_init()` the overlay's own patch adds are removed, `hw/mesa`
-stays. 2ksbox retired the Glide pass-through for the emulated Voodoo 2
-(ADR-020, doc 21), so no host wrapper exists for the device to load. The
-overlay directory is still copied in because `sign_commit` stamps a file
-in it. **Test:** the `machine-map` check (`info mtree` has `mesapt`
-and `d3dpt` and no `glidept`). **Drop:** never.
+**Dropped in M21** (QEMU 11.1). Folded into the qemu-3dfx port, which carries only the OpenGL half.
 
 ### 75-tpm-libtpms
 The libtpms TPM backend, `-tpmdev libtpms,id=…,state=<file>`: a TPM 2.0
@@ -869,7 +831,9 @@ refuses on a Windows host, so the Windows build has no TPM yet.
 TPM, a restart on the same file and a savevm / loadvm round trip
 through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
 with `TPM=libtpms` for Windows 11. **Drop:** never (upstream QEMU has no
-in-process TPM).
+in-process TPM). **On 11.1:** the backend includes `system/` headers (11.1
+renamed `sysemu/`) and its `class_init` takes `const void *`; the patch
+applies with offsets. Not yet run on 11.1 (the `tpm-qtest` check).
 
 ### 76-hvf-arm-macos12
 Arm HVF on the macOS 12 floor (track M20 step 4). QEMU 9.2's Arm
@@ -882,6 +846,10 @@ configuration (a 36-bit IPA space) and one that needs more is refused.
 **Test:** the build on the floor; a Windows 11 on Arm boot under HVF.
 The macOS 12 path is unrun (no macOS 12 host with HVF here).
 **Drop:** when the floor is macOS 13 or later, or upstream guards it.
+**On 11.1:** `hvf_arch_vm_create` also sets up nested virtualization and
+the in-kernel GIC (both macOS 15); the configuration path moved whole into
+`hvf_arm_vm_create_config` (marked macOS 13), and before 13 a VM asking
+for either is refused too. Not compiled yet (no macOS here).
 
 ### 77-arm-target-no-era-devices
 The era's devices stay out of a target with no ISA bus (track M20 step
@@ -894,3 +862,14 @@ targets, where `hw/mesa` is built. `embed/libqemu_embed.c` itself calls
 the gameport only under `CONFIG_GAMEPORT`. **Test:** the Arm build links;
 the x86 targets are unchanged (`scripts/test.sh host`). **Drop:** with
 patches 60 and 10, or when they say the same.
+
+### 78-wav-header-live
+QEMU's `wav` audiodev stores the RIFF and data lengths after every write.
+Since 11.0 every open voice holds a reference on its audio backend and
+devices are not unrealized at exit, so `audio_cleanup()` never finalizes
+a backend a device uses and `wav_fini_out()` never patches the header:
+every capture had both lengths 0, which readers take as empty (the
+`music` check read "silent", `sb-mixer` "not a WAVE file"). Stock
+`adlib` shows it too. **Test:** the `music` and `sb-mixer` checks.
+**Drop:** upstream finalizes audio backends at exit, or patches the
+header as it goes.

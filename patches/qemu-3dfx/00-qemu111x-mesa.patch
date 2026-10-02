@@ -1,0 +1,316 @@
+00-qemu111x-mesa: qemu-3dfx's 00-qemu92x-mesa-glide, ported to QEMU 11.1
+
+qemu-3dfx (third_party/qemu-3dfx, kjliew) ships one patch per QEMU release
+and has none past 9.2, so this port is ours (track M21, ADR-001's
+amendment). prepare-qemu.sh applies it in place of the submodule's patch,
+before our queue. The device sources (hw/mesa), sign_commit and the guest
+wrappers still come from the submodule.
+
+Only the OpenGL half is here. The Glide pass-through was retired in
+ADR-020, so its pieces are gone rather than switched off: no glidept
+device in the PC machine, no subdir('hw/3dfx') (this folds patch 74), no
+SDL2 requirement (this folds patch 02), and none of the ui/sdl2.c hunks,
+which only an SDL frontend used (patch 30's ui/fxui.c defines the same
+entry points). hw/3dfx is still copied into the tree, because sign_commit
+stamps exactly three files and one is there; nothing builds it.
+
+What moved since 9.2: include/sysemu became include/system; the WHPX
+memory listener moved to accel/whpx/whpx-common.c, so
+whpx_update_guest_pa_range lives there and calls whpx_set_phys_mem; the
+console API was renamed (graphic_hw_update is qemu_console_hw_update, and
+gfx_update returns bool), so the pass-through flag is honoured in
+qemu_console_hw_update. graphic_hw_passthrough keeps its name: hw/mesa
+calls it.
+
+Drop: when qemu-3dfx publishes a patch for the QEMU release we are on, if
+its OpenGL half matches this one.
+
+diff --git a/accel/kvm/kvm-all.c b/accel/kvm/kvm-all.c
+index 83cbd120a8..e4c3170fc6 100644
+--- a/accel/kvm/kvm-all.c
++++ b/accel/kvm/kvm-all.c
+@@ -1859,6 +1859,43 @@ static int kvm_dirty_ring_init(KVMState *s)
+     return 0;
+ }
+ 
++void kvm_update_guest_pa_range(uint64_t start_pa, uint64_t size, void *host_va, int readonly, int add)
++{
++    KVMState *s = kvm_state;
++    KVMMemoryListener *kml = &s->memory_listener;
++
++    MemoryRegion mr;
++    MemoryRegionSection section;
++    RAMBlock ram_block;
++
++    memset(&ram_block, 0, sizeof(RAMBlock));
++    ram_block.mr = &mr;
++    ram_block.used_length = REAL_HOST_PAGE_ALIGN(size);
++    ram_block.max_length = REAL_HOST_PAGE_ALIGN(size);
++    ram_block.fd = -1;
++    ram_block.guest_memfd = -1;
++    ram_block.page_size = getpagesize();
++    ram_block.host = host_va;
++    ram_block.flags |= RAM_PREALLOC;
++
++    memory_region_init(&mr, NULL, NULL, REAL_HOST_PAGE_ALIGN(size));
++    mr.ram = true;
++    mr.ram_block = &ram_block;
++    mr.readonly = readonly;
++    mr.nonvolatile = false;
++
++    section.mr = &mr;
++    section.fv = 0;
++    section.offset_within_region = 0;
++    section.size = mr.size;
++    section.offset_within_address_space = start_pa;
++    section.readonly = mr.readonly;
++    section.nonvolatile = mr.nonvolatile;
++
++    kvm_set_phys_mem(kml, &section, add);
++    object_unref(OBJECT(&mr));
++}
++
+ static void kvm_region_add(MemoryListener *listener,
+                            MemoryRegionSection *section)
+ {
+diff --git a/accel/whpx/whpx-common.c b/accel/whpx/whpx-common.c
+index 247e12db81..1e851b4100 100644
+--- a/accel/whpx/whpx-common.c
++++ b/accel/whpx/whpx-common.c
+@@ -13,6 +13,7 @@
+ #include "qemu/accel.h"
+ #include "accel/accel-ops.h"
+ #include "system/memory.h"
++#include "system/ramblock.h"
+ #include "system/whpx.h"
+ #include "system/cpus.h"
+ #include "system/runstate.h"
+@@ -332,6 +333,40 @@ static void whpx_set_phys_mem(MemoryRegionSection *section, bool add)
+     }
+ }
+ 
++void whpx_update_guest_pa_range(uint64_t start_pa, uint64_t size, void *host_va, int readonly, int add)
++{
++    MemoryRegion mr;
++    MemoryRegionSection section;
++    RAMBlock ram_block;
++
++    memset(&ram_block, 0, sizeof(RAMBlock));
++    ram_block.mr = &mr;
++    ram_block.used_length = REAL_HOST_PAGE_ALIGN(size);
++    ram_block.max_length = REAL_HOST_PAGE_ALIGN(size);
++    ram_block.fd = -1;
++    ram_block.guest_memfd = -1;
++    ram_block.page_size = getpagesize();
++    ram_block.host = host_va;
++    ram_block.flags |= RAM_PREALLOC;
++
++    memory_region_init(&mr, NULL, NULL, REAL_HOST_PAGE_ALIGN(size));
++    mr.ram = true;
++    mr.ram_block = &ram_block;
++    mr.readonly = readonly;
++    mr.nonvolatile = false;
++
++    section.mr = &mr;
++    section.fv = 0;
++    section.offset_within_region = 0;
++    section.size = mr.size;
++    section.offset_within_address_space = start_pa;
++    section.readonly = mr.readonly;
++    section.nonvolatile = mr.nonvolatile;
++
++    whpx_set_phys_mem(&section, add);
++    object_unref(OBJECT(&mr));
++}
++
+ static void whpx_region_add(MemoryListener *listener,
+                            MemoryRegionSection *section)
+ {
+diff --git a/hw/i386/pc.c b/hw/i386/pc.c
+index f064aa2b3e..bf46a0a386 100644
+--- a/hw/i386/pc.c
++++ b/hw/i386/pc.c
+@@ -1135,6 +1135,8 @@ void pc_basic_device_init(struct PCMachineState *pcms,
+             ? ON_OFF_AUTO_OFF : ON_OFF_AUTO_ON;
+     }
+ 
++    /* MESA pass-through */
++    mesapt_mm_init();
+     /* Super I/O */
+     pc_superio_init(isa_bus, create_fdctrl, pcms->i8042_enabled,
+                     pcms->vmport != ON_OFF_AUTO_ON, &error_fatal);
+@@ -1159,6 +1161,15 @@ void pc_nic_init(PCMachineClass *pcmc, ISABus *isa_bus, PCIBus *pci_bus)
+     }
+ }
+ 
++void mesapt_mm_init(void)
++{
++    DeviceState *mesapt_dev = NULL;
++
++    mesapt_dev = qdev_new(TYPE_MESAPT);
++    sysbus_realize(SYS_BUS_DEVICE(mesapt_dev), &error_fatal);
++    sysbus_mmio_map(SYS_BUS_DEVICE(mesapt_dev), 0, MESAPT_MM_BASE);
++}
++
+ void pc_i8259_create(ISABus *isa_bus, qemu_irq *i8259_irqs)
+ {
+     qemu_irq *i8259;
+diff --git a/include/hw/i386/pc.h b/include/hw/i386/pc.h
+index d4b6d3ed57..29ff4e942e 100644
+--- a/include/hw/i386/pc.h
++++ b/include/hw/i386/pc.h
+@@ -198,6 +198,11 @@ void pc_i8259_create(ISABus *isa_bus, qemu_irq *i8259_irqs);
+ 
+ #define TYPE_PORT92 "port92"
+ 
++/* MESA pass-through */
++#define TYPE_MESAPT "mesapt"
++#define MESAPT_MM_BASE 0xefffe000
++void mesapt_mm_init(void);
++
+ /* pc_sysfw.c */
+ void pc_system_flash_create(PCMachineState *pcms);
+ void pc_system_flash_cleanup_unused(PCMachineState *pcms);
+diff --git a/include/system/kvm.h b/include/system/kvm.h
+index 714b8c7b01..a6de29bd94 100644
+--- a/include/system/kvm.h
++++ b/include/system/kvm.h
+@@ -459,6 +459,8 @@ int kvm_physical_memory_addr_from_host(KVMState *s, void *ram_addr,
+ bool kvm_arch_supports_vmfd_change(void);
+ int kvm_arch_on_vmfd_change(MachineState *ms, KVMState *s);
+ 
++void kvm_update_guest_pa_range(uint64_t start_pa, uint64_t size, void *host_va, int readonly, int add);
++
+ void kvm_cpu_synchronize_state(CPUState *cpu);
+ 
+ void kvm_init_cpu_signals(CPUState *cpu);
+diff --git a/include/system/whpx.h b/include/system/whpx.h
+index 4217a27e91..26a5c411fe 100644
+--- a/include/system/whpx.h
++++ b/include/system/whpx.h
+@@ -15,6 +15,8 @@
+ #ifndef QEMU_WHPX_H
+ #define QEMU_WHPX_H
+ 
++void whpx_update_guest_pa_range(uint64_t start_pa, uint64_t size, void *host_va, int readonly, int add);
++
+ #ifdef COMPILING_PER_TARGET
+ # ifdef CONFIG_WHPX
+ #  define CONFIG_WHPX_IS_POSSIBLE
+diff --git a/include/ui/console.h b/include/ui/console.h
+index 3634956949..0c6d038f90 100644
+--- a/include/ui/console.h
++++ b/include/ui/console.h
+@@ -115,6 +115,8 @@ typedef struct QemuUIInfo {
+     uint32_t  width;
+     uint32_t  height;
+     uint32_t  refresh_rate;
++    /* passthrough */
++    bool passthrough;
+ } QemuUIInfo;
+ 
+ /* cursor data format is 32bit RGBA */
+@@ -352,6 +354,7 @@ void qemu_graphic_console_set_hwops(QemuConsole *con,
+                                     void *opaque);
+ void qemu_graphic_console_close(QemuConsole *con);
+ 
++void graphic_hw_passthrough(QemuConsole *con, bool passthrough);
+ void qemu_console_hw_update(QemuConsole *con);
+ void qemu_console_hw_update_done(QemuConsole *con);
+ void qemu_console_hw_invalidate(QemuConsole *con);
+@@ -463,4 +466,19 @@ bool qemu_console_fill_device_address(QemuConsole *con,
+                                       size_t size,
+                                       Error **errp);
+ 
++/* glidewnd.c */
++void glide_prepare_window(uint32_t, int, void *, void *);
++void glide_release_window(void *, void *);
++int glide_window_stat(const int);
++int glide_gui_fullscreen(int *, int *);
++void glide_renderer_stat(const int);
++
++/* mglcntx.c */
++void mesa_renderer_stat(const int);
++void mesa_prepare_window(int, int, int, void *);
++void mesa_release_window(void);
++void mesa_cursor_define(int, int, int, int, const void *);
++void mesa_mouse_warp(int, int, const int);
++int mesa_gui_fullscreen(int *);
++
+ #endif
+diff --git a/meson.build b/meson.build
+index 40e3f4ec44..cf78c54596 100644
+--- a/meson.build
++++ b/meson.build
+@@ -3806,6 +3806,7 @@ if have_system or have_user
+   subdir('libdecnumber')
+   subdir('gdbstub')
+   subdir('target')
++  subdir('hw/mesa')
+ endif
+ 
+ if have_block
+@@ -4270,6 +4271,11 @@ foreach target : target_dirs
+   target_inc = [include_directories('target' / config_target['TARGET_BASE_ARCH'])]
+   if host_os == 'linux'
+     target_inc += include_directories('linux-headers', is_system: true)
++    link_args += ['-ldl', '-lX11', '-lXxf86vm', '-lGL']
++  endif
++  if host_os == 'darwin'
++    c_args += ['-I/opt/X11/include']
++    link_args += ['-L/opt/X11/lib', '-lX11', '-lXxf86vm', '-lGL', '-Wl,-framework,OpenGL']
+   endif
+   if target.endswith('-softmmu')
+     target_type='system'
+diff --git a/system/vl.c b/system/vl.c
+index 061cbdf860..9afacb103a 100644
+--- a/system/vl.c
++++ b/system/vl.c
+@@ -875,6 +875,13 @@ static MachineClass *find_default_machine(GSList *machines)
+     return default_machineclass;
+ }
+ 
++static void feature(void)
++{
++    const char rev_[ALIGNED(1)]
++        ;
++    printf("  featuring qemu-3dfx@%s"__TIME__" "__DATE__" build\n", rev_);
++}
++
+ static void version(void)
+ {
+     printf("QEMU emulator version " QEMU_FULL_VERSION "\n"
+@@ -3114,6 +3121,7 @@ void qemu_init(int argc, char **argv)
+                 break;
+             case QEMU_OPTION_version:
+                 version();
++                feature();
+                 exit(0);
+                 break;
+             case QEMU_OPTION_m:
+diff --git a/ui/console.c b/ui/console.c
+index a8a2a247d8..c9993de913 100644
+--- a/ui/console.c
++++ b/ui/console.c
+@@ -143,6 +143,11 @@ static void gui_setup_refresh(DisplayState *ds)
+     }
+ }
+ 
++void graphic_hw_passthrough(QemuConsole *con, bool passthrough)
++{
++    con->ui_info.passthrough = passthrough;
++}
++
+ void qemu_console_hw_update_done(QemuConsole *con)
+ {
+     if (con) {
+@@ -155,7 +160,8 @@ void qemu_console_hw_update(QemuConsole *con)
+     if (!con) {
+         return;
+     }
+-    if (!con->hw_ops->gfx_update || con->hw_ops->gfx_update(con->hw)) {
++    if (con->ui_info.passthrough || !con->hw_ops->gfx_update ||
++        con->hw_ops->gfx_update(con->hw)) {
+         qemu_console_hw_update_done(con);
+     }
+ }

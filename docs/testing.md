@@ -69,7 +69,7 @@ copy).
 | `extra-args` | "Extra QEMU arguments": quoting round-trips, an open quote is refused, a `-global` reaches `info qtree` |
 | `pad` | the gamepad on every family; `tools/hid-descriptor-check.py` on the shipped descriptor and two mutated copies that must fail |
 | `family-other` | the Other family: `-vga std`, RTL8139 at `0x03`, ES1370 at `0x04`, no tablet |
-| `hpet` | Win98 is `hpet=off` (no `hpet` in `info qtree`), XP still has one |
+| `hpet` | Win98 is `hpet=off` (no `hpet` in `info qtree`), XP still has one; both on a versioned `pc-i440fx-` board, and a bundle with no `board` gets 9.2's |
 | `display-adapter` | each family's adapter choices and default; a foreign adapter refused; our adapter replaced, not added beside |
 | `d3d9` | the Direct3D picker: a new machine writes nothing (`auto`); `dxvk`/`system` reach only `d3dpt-vga`, whose `info qtree` shows the property |
 | `libsynth` | `synthx selftest`: AdLib detection, a 440 Hz FM note, the shipped bank through the MPU-401 path, running status; `--roms` adds the CM-32L (doc 20 §7) |

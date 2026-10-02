@@ -7,9 +7,10 @@
 #include "qemu/osdep.h"
 #include "qemu/main-loop.h"
 #include "qemu/thread.h"
-#include "block/aio.h"
-#include "sysemu/sysemu.h"
-#include "sysemu/runstate.h"
+#include "qemu/aio.h"
+#include "system/system.h"
+#include "system/runstate.h"
+#include "system/replay.h"
 #include "ui/console.h"
 #include "ui/surface.h"
 #include "ui/input.h"
@@ -169,6 +170,7 @@ void embed_fx_frame_ready(int slot)
  * A machine with one adapter always gets that one.
  */
 static void embed_tell_window_size(qemu_embed_t *e, bool delay);
+static const DisplayChangeListenerOps embed_dcl_ops;
 
 static QemuConsole *embed_live_console(void)
 {
@@ -200,10 +202,9 @@ static void bh_follow_console(void *opaque)
     }
     g_autofree char *label = qemu_console_get_label(con);
     fprintf(stderr, "qemu-embed: showing console %d (%s)\n", qemu_console_get_index(con), label);
-    unregister_displaychangelistener(&e->dcl);
+    qemu_console_unregister_listener(&e->dcl);
     qatomic_set(&e->con, con);
-    e->dcl.con = con;
-    register_displaychangelistener(&e->dcl);
+    qemu_console_register_listener(con, &e->dcl, &embed_dcl_ops);
     e->win_seen = false;
     embed_tell_window_size(e, false);
 }
@@ -216,10 +217,10 @@ static void embed_tell_window_size(qemu_embed_t *e, bool delay)
 {
     uint32_t w = qatomic_read(&e->win_w), h = qatomic_read(&e->win_h);
     uint32_t dpi = qatomic_read(&e->win_dpi);
-    if (!w || !h || !dpy_ui_info_supported(e->con)) {
+    if (!w || !h || !qemu_console_ui_info_supported(e->con)) {
         return;
     }
-    QemuUIInfo info = *dpy_get_ui_info(e->con);
+    QemuUIInfo info = *qemu_console_get_ui_info(e->con);
     info.width = w;
     info.height = h;
     if (dpi) {
@@ -228,7 +229,7 @@ static void embed_tell_window_size(qemu_embed_t *e, bool delay)
         info.width_mm = (uint16_t)MIN(w * 254u / (dpi * 10u), UINT16_MAX);
         info.height_mm = (uint16_t)MIN(h * 254u / (dpi * 10u), UINT16_MAX);
     }
-    dpy_set_ui_info(e->con, &info, delay && e->win_seen);
+    qemu_console_set_ui_info(e->con, &info, delay && e->win_seen);
     e->win_seen = true;
 }
 
@@ -248,7 +249,7 @@ void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w, uint32_t h, uint32_
 bool qemu_embed_display_follows_window(qemu_embed_t *e)
 {
     QemuConsole *con = qatomic_read(&e->con);
-    return con && dpy_ui_info_supported(con);
+    return con && qemu_console_ui_info_supported(con);
 }
 
 static void embed_dpy_refresh(DisplayChangeListener *dcl)
@@ -258,7 +259,7 @@ static void embed_dpy_refresh(DisplayChangeListener *dcl)
         e->follow_pending = true;
         aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_follow_console, e);
     }
-    graphic_hw_update(dcl->con);
+    qemu_console_hw_update(dcl->con);
     if (e->cb.on_refresh_done) {
         e->cb.on_refresh_done(e->ud);
     }
@@ -371,10 +372,8 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
     qemu_init(e->argc, e->argv);
 
     e->con = qemu_console_lookup_default();
-    e->dcl.ops = &embed_dcl_ops;
-    e->dcl.con = e->con;
     /* Fires on_switch/on_update/on_cursor synchronously before returning. */
-    register_displaychangelistener(&e->dcl);
+    qemu_console_register_listener(e->con, &e->dcl, &embed_dcl_ops);
     /* qemu-3dfx: window-less context provider (doc 12) */
     fx_instance = e;
 #ifdef TARGET_I386
@@ -393,8 +392,15 @@ int qemu_embed_run(qemu_embed_t *e)
 void qemu_embed_destroy(qemu_embed_t *e, int status)
 {
     fx_instance = NULL;
-    unregister_displaychangelistener(&e->dcl);
+    qemu_console_unregister_listener(&e->dcl);
     qemu_cleanup(status);
+    /* qemu_init took the BQL and the replay lock on this thread; give them
+     * back as upstream's qemu_default_main does before exit(). Since QEMU
+     * 10.0 the exit notifiers take the BQL (e7bc0204e5), and they run in
+     * the player's exit() on another thread: a BQL this thread kept would
+     * hang that exit for ever. */
+    bql_unlock();
+    replay_mutex_unlock();
     g_free(e->flip);
     qemu_mutex_destroy(&e->in_lock);
     for (int i = 0; i < e->argc; i++) {
@@ -407,7 +413,7 @@ void qemu_embed_destroy(qemu_embed_t *e, int status)
 static void bh_set_refresh(void *opaque)
 {
     qemu_embed_t *e = opaque;
-    update_displaychangelistener(&e->dcl, e->refresh_ms);
+    qemu_console_listener_set_refresh(&e->dcl, e->refresh_ms);
 }
 
 void qemu_embed_set_refresh_ms(qemu_embed_t *e, uint32_t ms)
@@ -491,8 +497,12 @@ void qemu_embed_key(qemu_embed_t *e, uint32_t qcode, bool down)
 
 uint32_t qemu_embed_atset1_to_qcode(uint32_t atset1)
 {
-    if (atset1 < qemu_input_map_atset1_to_qcode_len) {
-        return qemu_input_map_atset1_to_qcode[atset1];
+    /* QEMU's input layer is in Linux keycodes since 11.1; the player's
+     * API stays in qcodes (QKeyCode), so this is the composition. */
+    if (atset1 < qemu_input_map_atset1_to_linux_len) {
+        uint16_t lnx = qemu_input_map_atset1_to_linux[atset1];
+
+        return lnx < qemu_input_map_linux_to_qcode_len ? qemu_input_map_linux_to_qcode[lnx] : 0;
     }
     return 0;
 }
@@ -603,7 +613,10 @@ static void bh_input_drain(void *opaque)
         in_event *ev = &batch[i];
         switch (ev->kind) {
         case EV_KEY:
-            qemu_input_event_send_key_qcode(e->con, (QKeyCode)ev->a, ev->down);
+            if (ev->a < qemu_input_map_qcode_to_linux_len) {
+                qemu_input_event_send_key_linux(e->con, qemu_input_map_qcode_to_linux[ev->a],
+                                                ev->down);
+            }
             break;
         case EV_REL:
             qemu_input_queue_rel(e->con, INPUT_AXIS_X, ev->a);

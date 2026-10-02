@@ -54,7 +54,7 @@ holding 86Box's `flush` while a swap goes past, which flips the buffer
 where it stands rather than at the retrace, and tears the frame.
 
 diff --git a/hw/voodoo/86box/vid_voodoo_common.h b/hw/voodoo/86box/vid_voodoo_common.h
-index 38d2f19..915b208 100644
+index 38d2f19347..915b2080c8 100644
 --- a/hw/voodoo/86box/vid_voodoo_common.h
 +++ b/hw/voodoo/86box/vid_voodoo_common.h
 @@ -125,6 +125,11 @@ typedef struct
@@ -70,7 +70,7 @@ index 38d2f19..915b208 100644
  
  typedef struct voodoo_params_t {
 diff --git a/hw/voodoo/86box/vid_voodoo_fifo.c b/hw/voodoo/86box/vid_voodoo_fifo.c
-index 720b8f8..e3743b8 100644
+index 720b8f8fdd..e3743b8b7b 100644
 --- a/hw/voodoo/86box/vid_voodoo_fifo.c
 +++ b/hw/voodoo/86box/vid_voodoo_fifo.c
 @@ -219,9 +219,10 @@ voodoo_queue_command(voodoo_t *voodoo, uint32_t addr_type, uint32_t val)

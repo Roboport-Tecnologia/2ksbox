@@ -24,8 +24,8 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qemu/module.h"
-#include "hw/qdev-properties.h"
-#include "hw/usb.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/usb/usb.h"
 #include "hw/usb/hid.h"
 #include "migration/vmstate.h"
 #include "desc.h"
@@ -385,7 +385,7 @@ static const VMStateDescription vmstate_usb_gamepad = {
     }
 };
 
-static void usb_gamepad_class_init(ObjectClass *klass, void *data)
+static void usb_gamepad_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);

@@ -1,0 +1,77 @@
+78-wav-header-live: the wav audiodev writes a valid header as it goes
+
+Since 11.0 every open voice holds a reference on its audio backend, and
+devices are not unrealized at exit, so audio_cleanup() never finalizes a
+backend a device uses: wav_fini_out() never runs and every capture comes
+out with RIFF and data lengths of 0, which readers take as empty (the
+`music` and `sb-mixer` checks read "silent" and "not a WAVE file"). The
+lengths are now stored after every write, so a capture is valid at any
+moment, also from a QEMU that was killed.
+
+Drop: upstream finalizes audio backends at exit, or patches the header
+itself. The `music` check proves it either way.
+
+diff --git a/audio/wavaudio.c b/audio/wavaudio.c
+index d247dd3ffe..96ea2a82b2 100644
+--- a/audio/wavaudio.c
++++ b/audio/wavaudio.c
+@@ -44,6 +44,37 @@ typedef struct WAVVoiceOut {
+     int total_samples;
+ } WAVVoiceOut;
+ 
++/* VICE code: Store number as little endian. */
++static void le_store (uint8_t *buf, uint32_t val, int len)
++{
++    int i;
++    for (i = 0; i < len; i++) {
++        buf[i] = (uint8_t) (val & 0xff);
++        val >>= 8;
++    }
++}
++
++/*
++ * 2ksbox: the RIFF and data lengths, kept current after every write. Since
++ * 11.0 every open voice holds a reference on its backend and devices are
++ * not unrealized at exit, so audio_cleanup() never finalizes this backend
++ * and wav_fini_out() never patches the header: every capture came out with
++ * both lengths 0, which readers take as an empty file.
++ */
++static void wav_store_lengths(WAVVoiceOut *wav)
++{
++    uint32_t datalen = wav->total_samples * wav->hw.info.bytes_per_frame;
++    uint8_t rlen[4], dlen[4];
++
++    le_store(rlen, datalen + 36, 4);
++    le_store(dlen, datalen, 4);
++    if (fseek(wav->f, 4, SEEK_SET) || fwrite(rlen, 4, 1, wav->f) != 1 ||
++        fseek(wav->f, 40, SEEK_SET) || fwrite(dlen, 4, 1, wav->f) != 1 ||
++        fseek(wav->f, 0, SEEK_END)) {
++        error_report("wav: updating the header failed: %s", strerror(errno));
++    }
++}
++
+ static size_t wav_write_out(HWVoiceOut *hw, void *buf, size_t len)
+ {
+     WAVVoiceOut *wav = (WAVVoiceOut *) hw;
+@@ -56,18 +87,12 @@ static size_t wav_write_out(HWVoiceOut *hw, void *buf, size_t len)
+     }
+ 
+     wav->total_samples += bytes / hw->info.bytes_per_frame;
++    if (bytes) {
++        wav_store_lengths(wav);
++    }
+     return bytes;
+ }
+ 
+-/* VICE code: Store number as little endian. */
+-static void le_store (uint8_t *buf, uint32_t val, int len)
+-{
+-    int i;
+-    for (i = 0; i < len; i++) {
+-        buf[i] = (uint8_t) (val & 0xff);
+-        val >>= 8;
+-    }
+-}
+ 
+ static int wav_init_out(HWVoiceOut *hw, struct audsettings *as)
+ {

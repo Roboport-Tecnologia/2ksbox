@@ -19,52 +19,11 @@ Legacy encodings only; property simd-fast (default on) keeps the helpers
 for the on/off test. tools/sse-guest-test.py: 546,425 result lines
 identical on/off (MMX and XMM forms, memory operands, chains, a mixed
 x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
---- a/include/tcg/tcg-opc.h
-+++ b/include/tcg/tcg-opc.h
-@@ -356,6 +356,28 @@
- DEF(fmin_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_minmax_vec))
- DEF(fmax_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_minmax_vec))
- DEF(fcmp_vec, 1, 2, 1, IMPLVEC | IMPL(TCG_TARGET_HAS_fp_cmp_vec))
-+/*
-+ * Byte table lookup: r[i] = idx[i] & 0x80 ? 0 : a[idx[i] & 15] (pshufb /
-+ * tbl semantics; any index >= 16 also gives 0 on aarch64, keep tables to
-+ * 0..15 and 0x80). vece unused.
-+ */
-+DEF(tbl_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_tbl_vec))
-+
-+/*
-+ * Per-lane widening multiply, high half only (pmulhw / pmulhuw): the
-+ * mmx/sse2 op the SWAR/gvec paths can't express as bitwise tricks.
-+ * vece is the operand width (MO_16 only, so far).
-+ */
-+DEF(mulsh_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_mulh_vec))
-+DEF(muluh_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_mulh_vec))
-+/*
-+ * Saturating narrow (packsswb/packssdw, packuswb): a[i] narrowed into
-+ * r's low half, b[i] into the high half, each clamped to the output
-+ * width (signed for ssnarrow, unsigned for usnarrow). vece is the
-+ * operand (wide, pre-narrow) width: MO_16 -> byte, MO_32 -> word.
-+ */
-+DEF(ssnarrow_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_pack_vec))
-+DEF(usnarrow_vec, 1, 2, 0, IMPLVEC | IMPL(TCG_TARGET_HAS_pack_vec))
- 
- DEF(last_generic, 0, 0, 0, TCG_OPF_NOT_PRESENT)
- 
---- a/include/tcg/tcg.h
-+++ b/include/tcg/tcg.h
-@@ -159,6 +159,9 @@
- #define TCG_TARGET_HAS_fp_vec           0
- #define TCG_TARGET_HAS_fp_minmax_vec    0
- #define TCG_TARGET_HAS_fp_cmp_vec       0
-+#define TCG_TARGET_HAS_tbl_vec          0
-+#define TCG_TARGET_HAS_mulh_vec         0
-+#define TCG_TARGET_HAS_pack_vec         0
- #else
- #define TCG_TARGET_MAYBE_vec            1
- #endif
+diff --git a/include/tcg/tcg-op-common.h b/include/tcg/tcg-op-common.h
+index 8ee3cf5edd..5250185748 100644
 --- a/include/tcg/tcg-op-common.h
 +++ b/include/tcg/tcg-op-common.h
-@@ -512,6 +512,19 @@
+@@ -537,6 +537,19 @@ void tcg_gen_fmax_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b);
   */
  bool tcg_fp_cmp_vec_supported(unsigned vece);
  void tcg_gen_fcmp_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b, int pred);
@@ -84,247 +43,57 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
  void tcg_gen_ld_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset);
  void tcg_gen_st_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset);
  void tcg_gen_stl_vec(TCGv_vec r, TCGv_ptr base, TCGArg offset, TCGType t);
---- a/tcg/tcg-op-vec.c
-+++ b/tcg/tcg-op-vec.c
-@@ -649,6 +649,63 @@
-              temp_arg(rt), temp_arg(at), temp_arg(bt), pred);
- }
- 
-+bool tcg_tbl_vec_supported(void)
-+{
-+    return TCG_TARGET_HAS_tbl_vec
-+        && tcg_can_emit_vec_op(INDEX_op_tbl_vec, TCG_TYPE_V128, MO_8) > 0;
-+}
-+
-+void tcg_gen_tbl_vec(TCGv_vec r, TCGv_vec a, TCGv_vec idx)
-+{
-+    TCGTemp *rt = tcgv_vec_temp(r);
-+    TCGTemp *at = tcgv_vec_temp(a);
-+    TCGTemp *it = tcgv_vec_temp(idx);
-+    TCGType type = rt->base_type;
-+
-+    tcg_debug_assert(at->base_type >= type && it->base_type >= type);
-+    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_tbl_vec, type, MO_8) > 0);
-+    vec_gen_3(INDEX_op_tbl_vec, type, MO_8, temp_arg(rt), temp_arg(at), temp_arg(it));
-+}
-+
-+bool tcg_mulh_vec_supported(unsigned vece)
-+{
-+    return TCG_TARGET_HAS_mulh_vec
-+        && tcg_can_emit_vec_op(INDEX_op_mulsh_vec, TCG_TYPE_V128, vece) > 0
-+        && tcg_can_emit_vec_op(INDEX_op_muluh_vec, TCG_TYPE_V128, vece) > 0;
-+}
-+
-+void tcg_gen_mulsh_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_mulsh_vec);
-+}
-+
-+void tcg_gen_muluh_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_muluh_vec);
-+}
-+
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 2c830af38c..6f4c02de7b 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -238,6 +238,27 @@ DEF(fsqrt_vec, 1, 1, 0, TCG_OPF_VECTOR)
+ DEF(fmin_vec, 1, 2, 0, TCG_OPF_VECTOR)
+ DEF(fmax_vec, 1, 2, 0, TCG_OPF_VECTOR)
+ DEF(fcmp_vec, 1, 2, 1, TCG_OPF_VECTOR)
 +/*
-+ * Signed and unsigned narrowing aren't available at the same widths
-+ * (e.g. x86 has no unsigned dword->word narrow in our scope), so each
-+ * checks its own opcode rather than sharing one query.
++ * 2ksbox (patch 12). Byte table lookup: r[i] = idx[i] & 0x80 ? 0 :
++ * a[idx[i] & 15] (pshufb / tbl semantics; any index >= 16 also gives 0 on
++ * aarch64, keep tables to 0..15 and 0x80). vece unused.
 + */
-+bool tcg_narrow_vec_supported(unsigned vece, bool uns)
-+{
-+    return TCG_TARGET_HAS_pack_vec
-+        && tcg_can_emit_vec_op(uns ? INDEX_op_usnarrow_vec : INDEX_op_ssnarrow_vec,
-+                               TCG_TYPE_V128, vece) > 0;
-+}
-+
-+void tcg_gen_ssnarrow_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_ssnarrow_vec);
-+}
-+
-+void tcg_gen_usnarrow_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
-+{
-+    do_op3_nofail(vece, r, a, b, INDEX_op_usnarrow_vec);
-+}
-+
- void tcg_gen_fsqrt_vec(unsigned vece, TCGv_vec r, TCGv_vec a)
- {
-     TCGTemp *rt = tcgv_vec_temp(r);
---- a/tcg/tcg.c
-+++ b/tcg/tcg.c
-@@ -2201,6 +2201,14 @@
-         return have_vec && TCG_TARGET_HAS_fp_minmax_vec;
-     case INDEX_op_fcmp_vec:
-         return have_vec && TCG_TARGET_HAS_fp_cmp_vec;
-+    case INDEX_op_tbl_vec:
-+        return have_vec && TCG_TARGET_HAS_tbl_vec;
-+    case INDEX_op_mulsh_vec:
-+    case INDEX_op_muluh_vec:
-+        return have_vec && TCG_TARGET_HAS_mulh_vec;
-+    case INDEX_op_ssnarrow_vec:
-+    case INDEX_op_usnarrow_vec:
-+        return have_vec && TCG_TARGET_HAS_pack_vec;
-     case INDEX_op_add_vec:
-     case INDEX_op_sub_vec:
-     case INDEX_op_and_vec:
---- a/tcg/aarch64/tcg-target.h
-+++ b/tcg/aarch64/tcg-target.h
-@@ -174,6 +174,11 @@
-  * (target/i386/tcg/sse-fast.c.inc) covers min/max/cmp on this host. */
- #define TCG_TARGET_HAS_fp_minmax_vec    0
- #define TCG_TARGET_HAS_fp_cmp_vec       0
-+#define TCG_TARGET_HAS_tbl_vec          1
-+/* multiply-high and saturating-narrow: not implemented here, the
-+ * generic per-lane path (target/i386/tcg/simd-fast.c.inc) covers MMX. */
-+#define TCG_TARGET_HAS_mulh_vec         0
-+#define TCG_TARGET_HAS_pack_vec         0
++DEF(tbl_vec, 1, 2, 0, TCG_OPF_VECTOR)
++/*
++ * Per-lane widening multiply, high half only (pmulhw / pmulhuw): the
++ * mmx/sse2 op the SWAR/gvec paths can't express as bitwise tricks.
++ * vece is the operand width (MO_16 only, so far).
++ */
++DEF(mulsh_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(muluh_vec, 1, 2, 0, TCG_OPF_VECTOR)
++/*
++ * Saturating narrow (packsswb/packssdw, packuswb): a[i] narrowed into
++ * r's low half, b[i] into the high half, each clamped to the output
++ * width (signed for ssnarrow, unsigned for usnarrow). vece is the
++ * operand (wide, pre-narrow) width: MO_16 -> byte, MO_32 -> word.
++ */
++DEF(ssnarrow_vec, 1, 2, 0, TCG_OPF_VECTOR)
++DEF(usnarrow_vec, 1, 2, 0, TCG_OPF_VECTOR)
  
- #define TCG_TARGET_DEFAULT_MO (0)
- #define TCG_TARGET_NEED_LDST_LABELS
---- a/tcg/aarch64/tcg-target.c.inc
-+++ b/tcg/aarch64/tcg-target.c.inc
-@@ -2707,6 +2707,11 @@
-     case INDEX_op_fsqrt_vec:
-         tcg_out_fpv(s, I3FV_FSQRT, is_q, vece, a0, a1, 0);
-         break;
-+    case INDEX_op_tbl_vec:
-+        /* TBL Vd.<16|8>B, { Vn.16B }, Vm.<16|8>B */
-+        tcg_out32(s, 0x0e000000 | is_q << 30 | (a2 & 0x1f) << 16
-+                  | (a1 & 0x1f) << 5 | (a0 & 0x1f));
-+        break;
-     case INDEX_op_add_vec:
-         if (is_scalar) {
-             tcg_out_insn(s, 3611, ADD, vece, a0, a1, a2);
-@@ -3023,6 +3028,8 @@
-     case INDEX_op_fsqrt_vec:
-         /* S lanes in either width, D lanes only as .2D */
-         return vece == MO_32 || (vece == MO_64 && type == TCG_TYPE_V128);
-+    case INDEX_op_tbl_vec:
-+        return 1;
+ DEF(last_generic, 0, 0, 0, TCG_OPF_NOT_PRESENT)
  
-     default:
-         return 0;
-@@ -3138,6 +3145,8 @@
-         return C_O1_I2(w, w, w);
-     case INDEX_op_fsqrt_vec:
-         return C_O1_I1(w, w);
-+    case INDEX_op_tbl_vec:
-+        return C_O1_I2(w, w, w);
- 
-     case INDEX_op_ld8u_i32:
-     case INDEX_op_ld8s_i32:
---- a/tcg/i386/tcg-target.h
-+++ b/tcg/i386/tcg-target.h
-@@ -231,6 +231,9 @@
- #define TCG_TARGET_HAS_fp_vec           have_avx1
- #define TCG_TARGET_HAS_fp_minmax_vec    have_avx1
- #define TCG_TARGET_HAS_fp_cmp_vec       have_avx1
-+#define TCG_TARGET_HAS_tbl_vec          have_avx1
-+#define TCG_TARGET_HAS_mulh_vec         1
-+#define TCG_TARGET_HAS_pack_vec         1
- 
- #define TCG_TARGET_deposit_i32_valid(ofs, len) \
-     (((ofs) == 0 && ((len) == 8 || (len) == 16)) || \
---- a/tcg/i386/tcg-target.c.inc
-+++ b/tcg/i386/tcg-target.c.inc
-@@ -358,6 +358,8 @@
- #define OPC_PMULLW      (0xd5 | P_EXT | P_DATA16)
- #define OPC_PMULLD      (0x40 | P_EXT38 | P_DATA16)
- #define OPC_VPMULLQ     (0x40 | P_EXT38 | P_DATA16 | P_VEXW | P_EVEX)
-+#define OPC_PMULHW      (0xe5 | P_EXT | P_DATA16)
-+#define OPC_PMULHUW     (0xe4 | P_EXT | P_DATA16)
- #define OPC_POR         (0xeb | P_EXT | P_DATA16)
- #define OPC_PSHUFB      (0x00 | P_EXT38 | P_DATA16)
- #define OPC_PSHUFD      (0x70 | P_EXT | P_DATA16)
-@@ -3414,6 +3416,25 @@
-     static int const packus_insn[4] = {
-         OPC_PACKUSWB, OPC_PACKUSDW, OPC_UD2, OPC_UD2
-     };
-+    /*
-+     * mulsh_vec/muluh_vec/ssnarrow_vec/usnarrow_vec (target/i386/tcg
-+     * simd-fast.c.inc): indexed by the *operand* (pre-narrow, for the
-+     * pack pair) width, so word (vece 1) is the only populated mulh
-+     * entry and usnarrow has no dword source (no unsigned pack-dword
-+     * in MMX/SSE2, only SSE4.1's packusdw, out of scope here).
-+     */
-+    static int const mulhs_insn[4] = {
-+        OPC_UD2, OPC_PMULHW, OPC_UD2, OPC_UD2
-+    };
-+    static int const mulhu_insn[4] = {
-+        OPC_UD2, OPC_PMULHUW, OPC_UD2, OPC_UD2
-+    };
-+    static int const ssnarrow_insn[4] = {
-+        OPC_UD2, OPC_PACKSSWB, OPC_PACKSSDW, OPC_UD2
-+    };
-+    static int const usnarrow_insn[4] = {
-+        OPC_UD2, OPC_PACKUSWB, OPC_UD2, OPC_UD2
-+    };
-     static int const smin_insn[4] = {
-         OPC_PMINSB, OPC_PMINSW, OPC_PMINSD, OPC_VPMINSQ
-     };
-@@ -3596,6 +3617,21 @@
-         insn = vece == MO_64 ? OPC_VCMPPD : OPC_VCMPPS;
-         sub = args[3];
-         goto gen_simd_imm8;
-+    case INDEX_op_tbl_vec:
-+        insn = OPC_PSHUFB;
-+        goto gen_simd;
-+    case INDEX_op_mulsh_vec:
-+        insn = mulhs_insn[vece];
-+        goto gen_simd;
-+    case INDEX_op_muluh_vec:
-+        insn = mulhu_insn[vece];
-+        goto gen_simd;
-+    case INDEX_op_ssnarrow_vec:
-+        insn = ssnarrow_insn[vece];
-+        goto gen_simd;
-+    case INDEX_op_usnarrow_vec:
-+        insn = usnarrow_insn[vece];
-+        goto gen_simd;
-     gen_simd:
-         tcg_debug_assert(insn != OPC_UD2);
-         tcg_out_vex_modrm_type(s, insn, a0, a1, a2, type);
-@@ -3774,6 +3810,8 @@
-         return C_O1_I2(x, x, x);
-     case INDEX_op_fsqrt_vec:
-         return C_O1_I1(x, x);
-+    case INDEX_op_tbl_vec:
-+        return C_O1_I2(x, x, x);
- 
-     case INDEX_op_ld8u_i32:
-     case INDEX_op_ld8u_i64:
-@@ -4002,6 +4040,10 @@
-     case INDEX_op_x86_punpckl_vec:
-     case INDEX_op_x86_punpckh_vec:
-     case INDEX_op_x86_vpshldi_vec:
-+    case INDEX_op_mulsh_vec:
-+    case INDEX_op_muluh_vec:
-+    case INDEX_op_ssnarrow_vec:
-+    case INDEX_op_usnarrow_vec:
- #if TCG_TARGET_REG_BITS == 32
-     case INDEX_op_dup2_vec:
- #endif
-@@ -4056,6 +4098,15 @@
-     case INDEX_op_fmax_vec:
-     case INDEX_op_fcmp_vec:
-         return vece >= MO_32;
-+    case INDEX_op_tbl_vec:
-+        return type <= TCG_TYPE_V128;       /* vpshufb shuffles within 128-bit lanes */
-+    case INDEX_op_mulsh_vec:
-+    case INDEX_op_muluh_vec:
-+        return vece == MO_16 && type <= TCG_TYPE_V128;   /* pmulhw/pmulhuw only */
-+    case INDEX_op_ssnarrow_vec:
-+        return (vece == MO_16 || vece == MO_32) && type <= TCG_TYPE_V128;
-+    case INDEX_op_usnarrow_vec:
-+        return vece == MO_16 && type <= TCG_TYPE_V128;   /* no unsigned dword pack */
-     case INDEX_op_cmp_vec:
-     case INDEX_op_cmpsel_vec:
-         return -1;
+diff --git a/target/i386/cpu.c b/target/i386/cpu.c
+index 8b3dac6c9c..bee3a7f94b 100644
+--- a/target/i386/cpu.c
++++ b/target/i386/cpu.c
+@@ -10792,6 +10792,7 @@ static const Property x86_cpu_properties[] = {
+     DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
+     DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
+     DEFINE_PROP_BOOL("sse-fast", X86CPU, sse_fast, true),
++    DEFINE_PROP_BOOL("simd-fast", X86CPU, simd_fast, true),
+     DEFINE_PROP_BOOL("x-force-features", X86CPU, force_features, false),
+     DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
+     DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index eb257cd4b2..da2c48ffc5 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -1733,6 +1733,14 @@
-     target_ulong auxbits;
- } HVFX86LazyFlags;
+@@ -1986,6 +1986,14 @@ typedef struct CPUCaches {
+ struct kvm_msrs;
+ struct hv_vp_register_page;
  
 +/* tcg/simd-fast.c.inc permute tables (see there) */
 +#define SIMD_TBL_SHUFPS   0                     /* [256 imm][3: v, s, v==s][16] */
@@ -336,8 +105,8 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
 +
  typedef struct CPUArchState {
      /* standard registers */
-     target_ulong regs[CPU_NB_REGS];
-@@ -1800,8 +1808,8 @@
+     target_ulong regs[CPU_NB_EREGS];
+@@ -2053,8 +2061,8 @@ typedef struct CPUArchState {
       * on. Derived from mxcsr by update_mxcsr_status(), not migrated.
       */
      uint8_t sse_fast_mode;
@@ -348,7 +117,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      /* slow-path counters (info registers): guard, hand-over, helper, cvt/comis */
      uint64_t sses_stat[4];
      /* shadow doubles of the x87 stack, relative slots (tcg/x87-shadow.c.inc) */
-@@ -1969,6 +1977,13 @@
+@@ -2234,6 +2242,13 @@ typedef struct CPUArchState {
      /* Fields up to this point are cleared by a CPU reset */
      struct {} end_reset_fields;
  
@@ -362,7 +131,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      /* Fields after this point are preserved across CPU reset. */
  
      /* processor features (e.g. for CPUID insn) */
-@@ -2115,6 +2130,8 @@
+@@ -2379,6 +2394,8 @@ struct ArchCPU {
      bool x87_fast;
      /* SSE host-FPU inline path (target/i386/tcg/sse-fast.c.inc) */
      bool sse_fast;
@@ -371,78 +140,33 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      /*
       * Force features to be enabled even if the host doesn't support them.
       * This is dangerous and should be done only for testing CPUID
---- a/target/i386/cpu.c
-+++ b/target/i386/cpu.c
-@@ -8497,6 +8497,7 @@
-     DEFINE_PROP_BOOL("enforce", X86CPU, enforce_cpuid, false),
-     DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
-     DEFINE_PROP_BOOL("sse-fast", X86CPU, sse_fast, true),
-+    DEFINE_PROP_BOOL("simd-fast", X86CPU, simd_fast, true),
-     DEFINE_PROP_BOOL("x-force-features", X86CPU, force_features, false),
-     DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
-     DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),
---- a/target/i386/tcg/translate.c
-+++ b/target/i386/tcg/translate.c
-@@ -173,6 +173,7 @@
-     bool sses_on;               /* TB translated with TB_FLAG_SSE_FAST */
-     bool sses_guarded;          /* runtime guard emitted */
-     bool sses_pending;          /* hand-over check due at the end of the insn */
-+    bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
+diff --git a/target/i386/tcg/decode-new.c.inc b/target/i386/tcg/decode-new.c.inc
+index 7de74194d8..8f854d20e4 100644
+--- a/target/i386/tcg/decode-new.c.inc
++++ b/target/i386/tcg/decode-new.c.inc
+@@ -3098,7 +3098,7 @@ static void disas_insn(DisasContext *s, CPUState *cpu)
+     if (decode.e.special == X86_SPECIAL_MMX &&
+         !(s->prefix & (PREFIX_REPZ | PREFIX_REPNZ | PREFIX_DATA))) {
+         x87s_boundary(s);
+-        gen_helper_enter_mmx(tcg_env);
++        gen_enter_mmx(s);
+     }
  
-     /* TCG local temps */
-     TCGv cc_srcT;
-@@ -2483,6 +2484,23 @@
- static void sses_helper_done(DisasContext *s);
- static void sses_emit_pending(DisasContext *s);
- static void sses_end_tb(DisasContext *s);
-+/* simd-fast.c.inc, used by emit.c.inc and decode-new.c.inc */
-+static void gen_enter_mmx(DisasContext *s);
-+static bool simd_int_binary(DisasContext *s, X86DecodedInsn *decode, int op);
-+static bool simd_fp_unpck(DisasContext *s, X86DecodedInsn *decode, bool hi);
-+static bool simd_shufp(DisasContext *s, X86DecodedInsn *decode);
-+static bool simd_pshufw_insn(DisasContext *s, X86DecodedInsn *decode);
-+enum {
-+    SIMD_NONE,
-+    SIMD_PUNPCKLBW, SIMD_PUNPCKLWD, SIMD_PUNPCKLDQ,
-+    SIMD_PUNPCKHBW, SIMD_PUNPCKHWD, SIMD_PUNPCKHDQ,
-+    SIMD_PUNPCKLQDQ, SIMD_PUNPCKHQDQ,
-+    SIMD_PACKSSWB, SIMD_PACKUSWB, SIMD_PACKSSDW,
-+    SIMD_PMULHW, SIMD_PMULHUW, SIMD_PMADDWD, SIMD_PAVGB, SIMD_PAVGW,
-+    SIMD_PSADBW,
-+    SIMD_PSLLW, SIMD_PSLLD, SIMD_PSLLQ, SIMD_PSRLW, SIMD_PSRLD, SIMD_PSRLQ,
-+    SIMD_PSRAW, SIMD_PSRAD,
-+};
- enum {
-     SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
-     SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
-@@ -2491,6 +2509,7 @@
- #include "emit.c.inc"
- #include "x87-shadow.c.inc"
- #include "sse-fast.c.inc"
-+#include "simd-fast.c.inc"
- 
- static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
- {
-@@ -3871,6 +3890,7 @@
-         && !(flags & (HF_TF_MASK | HF_INHIBIT_IRQ_MASK));
-     dc->sses_guarded = false;
-     dc->sses_pending = false;
-+    dc->simd_on = env_archcpu(env)->simd_fast;
-     /* select memory access functions */
-     dc->mem_index = cpu_mmu_index(cpu, false);
-     dc->cpuid_features = env->features[FEAT_1_EDX];
+     if (decode.e.special != X86_SPECIAL_NoLoadEA &&
+diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
+index 188d664008..236ced8fca 100644
 --- a/target/i386/tcg/emit.c.inc
 +++ b/target/i386/tcg/emit.c.inc
-@@ -533,7 +533,7 @@
+@@ -520,7 +520,7 @@ static void gen_3dnow(DisasContext *s, X86DecodedInsn *decode)
      }
  
      x87s_boundary(s);
 -    gen_helper_enter_mmx(tcg_env);
 +    gen_enter_mmx(s);
      if (fn == FN_3DNOW_MOVE) {
-        tcg_gen_ld_i64(s->tmp1_i64, tcg_env, decode->op[1].offset);
-        tcg_gen_st_i64(s->tmp1_i64, tcg_env, decode->op[0].offset);
-@@ -694,6 +694,9 @@
+         TCGv_i64 t = tcg_temp_new_i64();
+ 
+@@ -683,6 +683,9 @@ FMA_SSE_PACKED(VFMSUBADD132, OP_PTR0, OP_PTR2, OP_PTR1, 0, float_muladd_negate_c
  #define FP_UNPACK_SSE(uname, lname)                                                \
  static void gen_##uname(DisasContext *s, X86DecodedInsn *decode)                   \
  {                                                                                  \
@@ -452,7 +176,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      /* PS maps to the DQ integer instruction, PD maps to QDQ.  */                  \
      gen_fp_sse(s, decode,                                                          \
                 gen_helper_##lname##qdq_xmm,                                        \
-@@ -702,6 +705,8 @@
+@@ -691,6 +694,8 @@ static void gen_##uname(DisasContext *s, X86DecodedInsn *decode)
                 gen_helper_##lname##dq_ymm,                                         \
                 NULL, NULL);                                                        \
  }
@@ -461,7 +185,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
  FP_UNPACK_SSE(VUNPCKLPx, punpckl)
  FP_UNPACK_SSE(VUNPCKHPx, punpckh)
  
-@@ -925,40 +930,44 @@
+@@ -914,40 +919,44 @@ static inline void gen_binary_int_sse(DisasContext *s, X86DecodedInsn *decode,
  }
  
  
@@ -531,7 +255,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
  
  BINARY_INT_MMX(PHADDW,    phaddw)
  BINARY_INT_MMX(PHADDSW,   phaddsw)
-@@ -984,8 +993,20 @@
+@@ -973,8 +982,20 @@ static void gen_##uname(DisasContext *s, X86DecodedInsn *decode)
  }
  
  /* Instructions with no MMX equivalent.  */
@@ -554,7 +278,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
  BINARY_INT_SSE(VPACKUSDW,  packusdw)
  BINARY_INT_SSE(VPERMILPS,  vpermilps)
  BINARY_INT_SSE(VPERMILPD,  vpermilpd)
-@@ -1911,7 +1932,7 @@
+@@ -1943,7 +1964,7 @@ static void gen_CRC32(DisasContext *s, X86DecodedInsn *decode)
  static void gen_CVTPI2Px(DisasContext *s, X86DecodedInsn *decode)
  {
      x87s_boundary(s);
@@ -563,7 +287,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      if (s->prefix & PREFIX_DATA) {
          gen_helper_cvtpi2pd(tcg_env, OP_PTR0, OP_PTR2);
      } else {
-@@ -1922,7 +1943,7 @@
+@@ -1954,7 +1975,7 @@ static void gen_CVTPI2Px(DisasContext *s, X86DecodedInsn *decode)
  static void gen_CVTPx2PI(DisasContext *s, X86DecodedInsn *decode)
  {
      x87s_boundary(s);
@@ -572,7 +296,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      if (s->prefix & PREFIX_DATA) {
          gen_helper_cvtpd2pi(tcg_env, OP_PTR0, OP_PTR2);
      } else {
-@@ -1933,7 +1954,7 @@
+@@ -1965,7 +1986,7 @@ static void gen_CVTPx2PI(DisasContext *s, X86DecodedInsn *decode)
  static void gen_CVTTPx2PI(DisasContext *s, X86DecodedInsn *decode)
  {
      x87s_boundary(s);
@@ -581,7 +305,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      if (s->prefix & PREFIX_DATA) {
          gen_helper_cvttpd2pi(tcg_env, OP_PTR0, OP_PTR2);
      } else {
-@@ -2620,7 +2641,7 @@
+@@ -2640,7 +2661,7 @@ static void gen_MOVQ(DisasContext *s, X86DecodedInsn *decode)
  static void gen_MOVq_dq(DisasContext *s, X86DecodedInsn *decode)
  {
      x87s_boundary(s);
@@ -590,7 +314,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      /* Otherwise the same as any other movq.  */
      return gen_MOVQ(s, decode);
  }
-@@ -3093,6 +3114,9 @@
+@@ -3117,6 +3138,9 @@ static void gen_POPF(DisasContext *s, X86DecodedInsn *decode)
  static void gen_PSHUFW(DisasContext *s, X86DecodedInsn *decode)
  {
      TCGv_i32 imm = tcg_constant8u_i32(decode->immediate);
@@ -600,7 +324,7 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      gen_helper_pshufw_mmx(OP_PTR0, OP_PTR1, imm);
  }
  
-@@ -4637,6 +4661,9 @@
+@@ -4715,6 +4739,9 @@ static void gen_VSHUF(DisasContext *s, X86DecodedInsn *decode)
  {
      TCGv_i32 imm = tcg_constant_i32(decode->immediate);
      SSEFunc_0_pppi ps, pd, fn;
@@ -610,36 +334,9 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
      ps = s->vex_l ? gen_helper_shufps_ymm : gen_helper_shufps_xmm;
      pd = s->vex_l ? gen_helper_shufpd_ymm : gen_helper_shufpd_xmm;
      fn = s->prefix & PREFIX_DATA ? pd : ps;
---- a/target/i386/tcg/decode-new.c.inc
-+++ b/target/i386/tcg/decode-new.c.inc
-@@ -2832,7 +2832,7 @@
-     if (decode.e.special == X86_SPECIAL_MMX &&
-         !(s->prefix & (PREFIX_REPZ | PREFIX_REPNZ | PREFIX_DATA))) {
-         x87s_boundary(s);
--        gen_helper_enter_mmx(tcg_env);
-+        gen_enter_mmx(s);
-     }
- 
-     if (decode.e.special != X86_SPECIAL_NoLoadEA &&
---- a/target/i386/tcg/tcg-cpu.c
-+++ b/target/i386/tcg/tcg-cpu.c
-@@ -198,6 +198,7 @@
-     }
- 
-     x86_tcg_cpu_xsave_init();
-+    x86_simd_tables_init(&cpu->env);
- }
- 
- static void x86_tcg_cpu_accel_class_init(ObjectClass *oc, void *data)
---- a/target/i386/tcg/tcg-cpu.h
-+++ b/target/i386/tcg/tcg-cpu.h
-@@ -77,5 +77,6 @@
- QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, pkru_state) != XSAVE_PKRU_OFFSET);
- 
- bool tcg_cpu_realizefn(CPUState *cs, Error **errp);
-+void x86_simd_tables_init(CPUX86State *env);   /* tcg/simd-fast.c.inc */
- 
- #endif /* TCG_CPU_H */
+diff --git a/target/i386/tcg/simd-fast.c.inc b/target/i386/tcg/simd-fast.c.inc
+new file mode 100644
+index 0000000000..fd7dc04b74
 --- /dev/null
 +++ b/target/i386/tcg/simd-fast.c.inc
 @@ -0,0 +1,755 @@
@@ -1398,3 +1095,344 @@ x87/MMX sequence); register-only MMX chain 4.0x over the helpers.
 +    simd_pshufw(s, decode);
 +    return true;
 +}
+diff --git a/target/i386/tcg/tcg-cpu.c b/target/i386/tcg/tcg-cpu.c
+index cf05c34232..9663ab93a3 100644
+--- a/target/i386/tcg/tcg-cpu.c
++++ b/target/i386/tcg/tcg-cpu.c
+@@ -254,6 +254,7 @@ static void x86_tcg_cpu_instance_init(CPUState *cs)
+     }
+ 
+     x86_tcg_cpu_xsave_init();
++    x86_simd_tables_init(&cpu->env);
+ }
+ 
+ static void x86_tcg_cpu_accel_class_init(ObjectClass *oc, const void *data)
+diff --git a/target/i386/tcg/tcg-cpu.h b/target/i386/tcg/tcg-cpu.h
+index 85bcd61678..ef394e90c2 100644
+--- a/target/i386/tcg/tcg-cpu.h
++++ b/target/i386/tcg/tcg-cpu.h
+@@ -81,6 +81,7 @@ QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, pkru_state) != XSAVE_PKRU_OFFSET);
+ extern const TCGCPUOps x86_tcg_ops;
+ 
+ bool tcg_cpu_realizefn(CPUState *cs, Error **errp);
++void x86_simd_tables_init(CPUX86State *env);   /* tcg/simd-fast.c.inc */
+ 
+ int x86_mmu_index_pl(CPUX86State *env, unsigned pl);
+ 
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 5b54e1e263..6431a8157b 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -179,6 +179,7 @@ typedef struct DisasContext {
+     bool sses_pending;          /* hand-over check due at the end of the insn */
+     bool sses_tracked;          /* the insn updated sses_clean itself */
+     uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
++    bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
+ 
+     /* TCG local temps */
+     TCGv cc_srcT;
+@@ -2223,6 +2224,23 @@ static void sses_helper_done(DisasContext *s);
+ static void sses_emit_pending(DisasContext *s);
+ static void sses_end_tb(DisasContext *s);
+ static void sses_track(DisasContext *s, X86DecodedInsn *decode);
++/* simd-fast.c.inc, used by emit.c.inc and decode-new.c.inc */
++static void gen_enter_mmx(DisasContext *s);
++static bool simd_int_binary(DisasContext *s, X86DecodedInsn *decode, int op);
++static bool simd_fp_unpck(DisasContext *s, X86DecodedInsn *decode, bool hi);
++static bool simd_shufp(DisasContext *s, X86DecodedInsn *decode);
++static bool simd_pshufw_insn(DisasContext *s, X86DecodedInsn *decode);
++enum {
++    SIMD_NONE,
++    SIMD_PUNPCKLBW, SIMD_PUNPCKLWD, SIMD_PUNPCKLDQ,
++    SIMD_PUNPCKHBW, SIMD_PUNPCKHWD, SIMD_PUNPCKHDQ,
++    SIMD_PUNPCKLQDQ, SIMD_PUNPCKHQDQ,
++    SIMD_PACKSSWB, SIMD_PACKUSWB, SIMD_PACKSSDW,
++    SIMD_PMULHW, SIMD_PMULHUW, SIMD_PMADDWD, SIMD_PAVGB, SIMD_PAVGW,
++    SIMD_PSADBW,
++    SIMD_PSLLW, SIMD_PSLLD, SIMD_PSLLQ, SIMD_PSRLW, SIMD_PSRLD, SIMD_PSRLQ,
++    SIMD_PSRAW, SIMD_PSRAD,
++};
+ enum {
+     SSES_ADD, SSES_SUB, SSES_MUL, SSES_DIV, SSES_MIN, SSES_MAX,
+     SSES_SQRT, SSES_RCP, SSES_RSQRT, SSES_CMP,
+@@ -2231,6 +2249,7 @@ enum {
+ #include "emit.c.inc"
+ #include "x87-shadow.c.inc"
+ #include "sse-fast.c.inc"
++#include "simd-fast.c.inc"
+ 
+ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
+ {
+@@ -3605,6 +3624,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->sses_pending = false;
+     dc->sses_tracked = false;
+     memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
++    dc->simd_on = env_archcpu(env)->simd_fast;
+     if (dc->x87s_on) {
+         dc->x87s_t32 = tcg_temp_new_i32();
+         dc->x87s_t64 = tcg_temp_new_i64();
+diff --git a/tcg/aarch64/tcg-target-has.h b/tcg/aarch64/tcg-target-has.h
+index 980d4c25e9..3e06afa1d3 100644
+--- a/tcg/aarch64/tcg-target-has.h
++++ b/tcg/aarch64/tcg-target-has.h
+@@ -42,6 +42,14 @@
+ #define TCG_TARGET_HAS_fp_vec           1
+ #define TCG_TARGET_HAS_fp_minmax_vec    0
+ #define TCG_TARGET_HAS_fp_cmp_vec       0
++/*
++ * 2ksbox (patch 12): tbl. Multiply-high and saturating-narrow are not
++ * implemented here: the generic per-lane path (target/i386/tcg
++ * simd-fast.c.inc) covers MMX.
++ */
++#define TCG_TARGET_HAS_tbl_vec          1
++#define TCG_TARGET_HAS_mulh_vec         0
++#define TCG_TARGET_HAS_pack_vec         0
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          1
+diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
+index 5013200310..bef094790a 100644
+--- a/tcg/aarch64/tcg-target.c.inc
++++ b/tcg/aarch64/tcg-target.c.inc
+@@ -3113,6 +3113,11 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+     case INDEX_op_fsqrt_vec:
+         tcg_out_fpv(s, I3FV_FSQRT, is_q, vece, a0, a1, 0);
+         break;
++    case INDEX_op_tbl_vec:
++        /* TBL Vd.<16|8>B, { Vn.16B }, Vm.<16|8>B */
++        tcg_out32(s, 0x0e000000 | is_q << 30 | (a2 & 0x1f) << 16
++                  | (a1 & 0x1f) << 5 | (a0 & 0x1f));
++        break;
+     case INDEX_op_add_vec:
+         if (is_scalar) {
+             tcg_out_insn(s, rrr_e, ADD, vece, a0, a1, a2);
+@@ -3433,6 +3438,8 @@ int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+     case INDEX_op_fsqrt_vec:
+         /* S lanes in either width, D lanes only as .2D */
+         return vece == MO_32 || (vece == MO_64 && type == TCG_TYPE_V128);
++    case INDEX_op_tbl_vec:
++        return 1;
+ 
+     default:
+         return 0;
+@@ -3521,6 +3528,8 @@ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
+         return C_O1_I2(w, w, w);
+     case INDEX_op_fsqrt_vec:
+         return C_O1_I1(w, w);
++    case INDEX_op_tbl_vec:
++        return C_O1_I2(w, w, w);
+     case INDEX_op_add_vec:
+     case INDEX_op_sub_vec:
+     case INDEX_op_mul_vec:
+diff --git a/tcg/tcg-has.h b/tcg/tcg-has.h
+index 80eae35591..f492bcf271 100644
+--- a/tcg/tcg-has.h
++++ b/tcg/tcg-has.h
+@@ -56,5 +56,15 @@
+ #ifndef TCG_TARGET_HAS_fp_cmp_vec
+ #define TCG_TARGET_HAS_fp_cmp_vec       0
+ #endif
++/* 2ksbox (patch 12) */
++#ifndef TCG_TARGET_HAS_tbl_vec
++#define TCG_TARGET_HAS_tbl_vec          0
++#endif
++#ifndef TCG_TARGET_HAS_mulh_vec
++#define TCG_TARGET_HAS_mulh_vec         0
++#endif
++#ifndef TCG_TARGET_HAS_pack_vec
++#define TCG_TARGET_HAS_pack_vec         0
++#endif
+ 
+ #endif
+diff --git a/tcg/tcg-op-vec.c b/tcg/tcg-op-vec.c
+index a967c9d757..40d10eeec3 100644
+--- a/tcg/tcg-op-vec.c
++++ b/tcg/tcg-op-vec.c
+@@ -640,6 +640,63 @@ void tcg_gen_fcmp_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b, int pre
+              temp_arg(rt), temp_arg(at), temp_arg(bt), pred);
+ }
+ 
++bool tcg_tbl_vec_supported(void)
++{
++    return TCG_TARGET_HAS_tbl_vec
++        && tcg_can_emit_vec_op(INDEX_op_tbl_vec, TCG_TYPE_V128, MO_8) > 0;
++}
++
++void tcg_gen_tbl_vec(TCGv_vec r, TCGv_vec a, TCGv_vec idx)
++{
++    TCGTemp *rt = tcgv_vec_temp(r);
++    TCGTemp *at = tcgv_vec_temp(a);
++    TCGTemp *it = tcgv_vec_temp(idx);
++    TCGType type = rt->base_type;
++
++    tcg_debug_assert(at->base_type >= type && it->base_type >= type);
++    tcg_debug_assert(tcg_can_emit_vec_op(INDEX_op_tbl_vec, type, MO_8) > 0);
++    vec_gen_3(INDEX_op_tbl_vec, type, MO_8, temp_arg(rt), temp_arg(at), temp_arg(it));
++}
++
++bool tcg_mulh_vec_supported(unsigned vece)
++{
++    return TCG_TARGET_HAS_mulh_vec
++        && tcg_can_emit_vec_op(INDEX_op_mulsh_vec, TCG_TYPE_V128, vece) > 0
++        && tcg_can_emit_vec_op(INDEX_op_muluh_vec, TCG_TYPE_V128, vece) > 0;
++}
++
++void tcg_gen_mulsh_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_mulsh_vec);
++}
++
++void tcg_gen_muluh_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_muluh_vec);
++}
++
++/*
++ * Signed and unsigned narrowing aren't available at the same widths
++ * (e.g. x86 has no unsigned dword->word narrow in our scope), so each
++ * checks its own opcode rather than sharing one query.
++ */
++bool tcg_narrow_vec_supported(unsigned vece, bool uns)
++{
++    return TCG_TARGET_HAS_pack_vec
++        && tcg_can_emit_vec_op(uns ? INDEX_op_usnarrow_vec : INDEX_op_ssnarrow_vec,
++                               TCG_TYPE_V128, vece) > 0;
++}
++
++void tcg_gen_ssnarrow_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_ssnarrow_vec);
++}
++
++void tcg_gen_usnarrow_vec(unsigned vece, TCGv_vec r, TCGv_vec a, TCGv_vec b)
++{
++    do_op3_nofail(vece, r, a, b, INDEX_op_usnarrow_vec);
++}
++
+ void tcg_gen_fsqrt_vec(unsigned vece, TCGv_vec r, TCGv_vec a)
+ {
+     TCGTemp *rt = tcgv_vec_temp(r);
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index 053ee27a78..4d497ce68d 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -2472,6 +2472,14 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+         return has_type && TCG_TARGET_HAS_fp_minmax_vec;
+     case INDEX_op_fcmp_vec:
+         return has_type && TCG_TARGET_HAS_fp_cmp_vec;
++    case INDEX_op_tbl_vec:
++        return has_type && TCG_TARGET_HAS_tbl_vec;
++    case INDEX_op_mulsh_vec:
++    case INDEX_op_muluh_vec:
++        return has_type && TCG_TARGET_HAS_mulh_vec;
++    case INDEX_op_ssnarrow_vec:
++    case INDEX_op_usnarrow_vec:
++        return has_type && TCG_TARGET_HAS_pack_vec;
+     case INDEX_op_not_vec:
+         return has_type && TCG_TARGET_HAS_not_vec;
+     case INDEX_op_neg_vec:
+diff --git a/tcg/x86_64/tcg-target-has.h b/tcg/x86_64/tcg-target-has.h
+index 1456b12b4c..d3aaa84c1b 100644
+--- a/tcg/x86_64/tcg-target-has.h
++++ b/tcg/x86_64/tcg-target-has.h
+@@ -45,6 +45,10 @@
+ #define TCG_TARGET_HAS_fp_vec           have_avx1
+ #define TCG_TARGET_HAS_fp_minmax_vec    have_avx1
+ #define TCG_TARGET_HAS_fp_cmp_vec       have_avx1
++/* 2ksbox (patch 12) */
++#define TCG_TARGET_HAS_tbl_vec          have_avx1
++#define TCG_TARGET_HAS_mulh_vec         1
++#define TCG_TARGET_HAS_pack_vec         1
+ 
+ #define TCG_TARGET_HAS_andc_vec         1
+ #define TCG_TARGET_HAS_orc_vec          have_avx512vl
+diff --git a/tcg/x86_64/tcg-target.c.inc b/tcg/x86_64/tcg-target.c.inc
+index 4f51f65e95..b19ae06f07 100644
+--- a/tcg/x86_64/tcg-target.c.inc
++++ b/tcg/x86_64/tcg-target.c.inc
+@@ -326,6 +326,8 @@ static bool tcg_target_const_match(int64_t val, int ct,
+ #define OPC_PMOVZXWD    (0x33 | P_EXT38 | P_DATA16)
+ #define OPC_PMOVZXDQ    (0x35 | P_EXT38 | P_DATA16)
+ #define OPC_PMULLW      (0xd5 | P_EXT | P_DATA16)
++#define OPC_PMULHW      (0xe5 | P_EXT | P_DATA16)
++#define OPC_PMULHUW     (0xe4 | P_EXT | P_DATA16)
+ #define OPC_PMULLD      (0x40 | P_EXT38 | P_DATA16)
+ #define OPC_VPMULLQ     (0x40 | P_EXT38 | P_DATA16 | P_VEXW | P_EVEX)
+ #define OPC_POR         (0xeb | P_EXT | P_DATA16)
+@@ -3686,6 +3688,25 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+     static int const packus_insn[4] = {
+         OPC_PACKUSWB, OPC_PACKUSDW, OPC_UD2, OPC_UD2
+     };
++    /*
++     * 2ksbox (patch 12): mulsh_vec/muluh_vec/ssnarrow_vec/usnarrow_vec
++     * (target/i386/tcg/simd-fast.c.inc), indexed by the *operand*
++     * (pre-narrow, for the pack pair) width, so word (vece 1) is the only
++     * populated mulh entry and usnarrow has no dword source (no unsigned
++     * pack-dword in MMX/SSE2, only SSE4.1's packusdw, out of scope here).
++     */
++    static int const mulhs_insn[4] = {
++        OPC_UD2, OPC_PMULHW, OPC_UD2, OPC_UD2
++    };
++    static int const mulhu_insn[4] = {
++        OPC_UD2, OPC_PMULHUW, OPC_UD2, OPC_UD2
++    };
++    static int const ssnarrow_insn[4] = {
++        OPC_UD2, OPC_PACKSSWB, OPC_PACKSSDW, OPC_UD2
++    };
++    static int const usnarrow_insn[4] = {
++        OPC_UD2, OPC_PACKUSWB, OPC_UD2, OPC_UD2
++    };
+     static int const smin_insn[4] = {
+         OPC_PMINSB, OPC_PMINSW, OPC_PMINSD, OPC_VPMINSQ
+     };
+@@ -3859,6 +3880,21 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+         insn = vece == MO_64 ? OPC_VCMPPD : OPC_VCMPPS;
+         sub = args[3];
+         goto gen_simd_imm8;
++    case INDEX_op_tbl_vec:
++        insn = OPC_PSHUFB;
++        goto gen_simd;
++    case INDEX_op_mulsh_vec:
++        insn = mulhs_insn[vece];
++        goto gen_simd;
++    case INDEX_op_muluh_vec:
++        insn = mulhu_insn[vece];
++        goto gen_simd;
++    case INDEX_op_ssnarrow_vec:
++        insn = ssnarrow_insn[vece];
++        goto gen_simd;
++    case INDEX_op_usnarrow_vec:
++        insn = usnarrow_insn[vece];
++        goto gen_simd;
+     gen_simd:
+         tcg_debug_assert(insn != OPC_UD2);
+         tcg_out_vex_modrm_type(s, insn, a0, a1, a2, type);
+@@ -4018,6 +4054,12 @@ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
+         return C_O1_I2(x, x, x);
+     case INDEX_op_fsqrt_vec:
+         return C_O1_I1(x, x);
++    case INDEX_op_tbl_vec:
++    case INDEX_op_mulsh_vec:
++    case INDEX_op_muluh_vec:
++    case INDEX_op_ssnarrow_vec:
++    case INDEX_op_usnarrow_vec:
++        return C_O1_I2(x, x, x);
+ 
+     case INDEX_op_st_vec:
+         return C_O0_I2(x, r);
+@@ -4110,6 +4152,15 @@ int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+     case INDEX_op_fmax_vec:
+     case INDEX_op_fcmp_vec:
+         return vece >= MO_32;
++    case INDEX_op_tbl_vec:
++        return type <= TCG_TYPE_V128;       /* vpshufb shuffles within 128-bit lanes */
++    case INDEX_op_mulsh_vec:
++    case INDEX_op_muluh_vec:
++        return vece == MO_16 && type <= TCG_TYPE_V128;   /* pmulhw/pmulhuw only */
++    case INDEX_op_ssnarrow_vec:
++        return (vece == MO_16 || vece == MO_32) && type <= TCG_TYPE_V128;
++    case INDEX_op_usnarrow_vec:
++        return vece == MO_16 && type <= TCG_TYPE_V128;   /* no unsigned dword pack */
+     case INDEX_op_cmp_vec:
+     case INDEX_op_cmpsel_vec:
+         return -1;

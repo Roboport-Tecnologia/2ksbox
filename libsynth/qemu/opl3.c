@@ -19,8 +19,8 @@
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "hw/isa/isa.h"
-#include "hw/qdev-properties.h"
-#include "audio/audio.h"
+#include "hw/core/qdev-properties.h"
+#include "qemu/audio.h"
 #include "qemu/error-report.h"
 #include "qom/object.h"
 
@@ -37,7 +37,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(Opl3State, OPL3)
 struct Opl3State {
     ISADevice parent_obj;
 
-    QEMUSoundCard card;
+    AudioBackend *audio_be;
     SWVoiceOut *voice;
     libsynth_opl *chip;
 
@@ -131,7 +131,7 @@ static void opl3_write(void *opaque, uint32_t nport, uint32_t val)
 
     if (!s->active) {
         s->active = true;
-        AUD_set_active_out(s->voice, 1);
+        audio_be_set_active_out(s->audio_be, s->voice, 1);
     }
     opl3_sync(s);
     if (a & 1) {
@@ -198,7 +198,7 @@ static void opl3_callback(void *opaque, int free)
             s->pending = frames * OPL3_FRAME_BYTES;
             s->pos = 0;
         }
-        wrote = AUD_write(s->voice, s->buf + s->pos, s->pending);
+        wrote = audio_be_write(s->audio_be, s->voice, s->buf + s->pos, s->pending);
         if (wrote <= 0) {
             return;         /* keep what is left for the next tick */
         }
@@ -219,7 +219,7 @@ static void opl3_realizefn(DeviceState *dev, Error **errp)
                    libsynth_api_version(), LIBSYNTH_API_VERSION);
         return;
     }
-    if (!AUD_register_card(TYPE_OPL3, &s->card, errp)) {
+    if (!audio_be_check(&s->audio_be, errp)) {
         return;
     }
     s->chip = libsynth_opl_new(s->freq);
@@ -231,8 +231,8 @@ static void opl3_realizefn(DeviceState *dev, Error **errp)
     as.freq = s->freq;
     as.nchannels = 2;
     as.fmt = AUDIO_FORMAT_S16;
-    as.endianness = AUDIO_HOST_ENDIANNESS;
-    s->voice = AUD_open_out(&s->card, s->voice, TYPE_OPL3, s, opl3_callback, &as);
+    as.big_endian = HOST_BIG_ENDIAN;
+    s->voice = audio_be_open_out(s->audio_be, s->voice, TYPE_OPL3, s, opl3_callback, &as);
     if (!s->voice) {
         /* Realize failed, so unrealize will not run: give the chip back
          * here rather than leaving it to a process exit. */
@@ -244,7 +244,7 @@ static void opl3_realizefn(DeviceState *dev, Error **errp)
     /* The chip's output ran into the sound card's mixer, whose FM volume
      * scaled it: an SB16 sets that input (patch 61); a bare AdLib has no
      * mixer and plays at unity. */
-    audio_mixin_attach(AUDIO_MIXIN_FM, s->voice);
+    audio_mixin_attach(AUDIO_MIXIN_FM, s->audio_be, s->voice);
 
     s->last_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     portio_list_init(&s->port_list, OBJECT(s), opl3_portio_list, s, TYPE_OPL3);
@@ -267,22 +267,22 @@ static void opl3_unrealizefn(DeviceState *dev)
     }
     if (s->voice) {
         audio_mixin_detach(AUDIO_MIXIN_FM, s->voice);
+        audio_be_close_out(s->audio_be, s->voice);
+        s->voice = NULL;
     }
-    AUD_remove_card(&s->card);
 }
 
-static Property opl3_properties[] = {
-    DEFINE_AUDIO_PROPERTIES(Opl3State, card),
+static const Property opl3_properties[] = {
+    DEFINE_AUDIO_PROPERTIES(Opl3State, audio_be),
     DEFINE_PROP_UINT32("iobase", Opl3State, port,   0x388),
     /* The Sound Blaster mirror. 0 turns it off, which is a bare AdLib. */
     DEFINE_PROP_UINT32("sbbase", Opl3State, sbbase, 0),
     /* The chip's own rate: at anything else the core resamples, and
      * QEMU's mixer would then be the second resampler in the path. */
     DEFINE_PROP_UINT32("freq",   Opl3State, freq,   LIBSYNTH_OPL_NATIVE_RATE),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
-static void opl3_class_initfn(ObjectClass *klass, void *data)
+static void opl3_class_initfn(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 

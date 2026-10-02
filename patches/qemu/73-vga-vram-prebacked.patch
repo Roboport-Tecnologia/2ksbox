@@ -12,15 +12,15 @@ region already has a size, and refuses one of the wrong size; every
 other VGA is unchanged.
 
 diff --git a/hw/display/vga.c b/hw/display/vga.c
-index a1a9292..fcb2726 100644
+index 9bc496c8ee..0251043571 100644
 --- a/hw/display/vga.c
 +++ b/hw/display/vga.c
-@@ -2234,11 +2234,25 @@ bool vga_common_init(VGACommonState *s, Object *obj, Error **errp)
+@@ -2260,11 +2260,25 @@ bool vga_common_init(VGACommonState *s, Object *obj, Error **errp)
          return false;
      }
  
--    memory_region_init_ram_nomigrate(&s->vram, obj, "vga.vram", s->vram_size,
--                                     &local_err);
+-    memory_region_init_ram_flags_nomigrate(&s->vram, obj, "vga.vram",
+-                                           s->vram_size, 0, &local_err);
 -    if (local_err) {
 -        error_propagate(errp, local_err);
 -        return false;
@@ -37,8 +37,8 @@ index a1a9292..fcb2726 100644
 +            return false;
 +        }
 +    } else {
-+        memory_region_init_ram_nomigrate(&s->vram, obj, "vga.vram", s->vram_size,
-+                                         &local_err);
++        memory_region_init_ram_flags_nomigrate(&s->vram, obj, "vga.vram",
++                                               s->vram_size, 0, &local_err);
 +        if (local_err) {
 +            error_propagate(errp, local_err);
 +            return false;

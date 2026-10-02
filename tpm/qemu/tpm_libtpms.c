@@ -36,9 +36,9 @@
 #include "qemu/error-report.h"
 #include "qemu/module.h"
 #include "qemu/lockable.h"
-#include "sysemu/runstate.h"
-#include "sysemu/tpm_backend.h"
-#include "sysemu/tpm_util.h"
+#include "system/runstate.h"
+#include "system/tpm_backend.h"
+#include "system/tpm_util.h"
 #include "migration/vmstate.h"
 #include "qapi/error.h"
 #include "qapi/clone-visitor.h"
@@ -503,7 +503,7 @@ static void tpm_libtpms_inst_finalize(Object *obj)
     }
 }
 
-static void tpm_libtpms_class_init(ObjectClass *klass, void *data)
+static void tpm_libtpms_class_init(ObjectClass *klass, const void *data)
 {
     TPMBackendClass *tbc = TPM_BACKEND_CLASS(klass);
 

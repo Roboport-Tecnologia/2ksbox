@@ -3,9 +3,11 @@ CONFIG_LINUX but is used in the shared Linux/Darwin body of
 MGLPresetPixelFormat() (upstream regression, qemu-3dfx d00e858).
 Error on macOS: "use of undeclared identifier GL_CONTEXTALPHA".
 
---- a/hw/mesa/mglcntx_linux.c	2026-09-02 09:03:34.727139621 -0300
-+++ b/hw/mesa/mglcntx_linux.c	2026-09-02 09:03:34.742430759 -0300
-@@ -71,8 +71,9 @@
+diff --git a/hw/mesa/mglcntx_linux.c b/hw/mesa/mglcntx_linux.c
+index c8c6a784cc..94fb842d72 100644
+--- a/hw/mesa/mglcntx_linux.c
++++ b/hw/mesa/mglcntx_linux.c
+@@ -71,8 +71,9 @@ int MGLUpdateGuestBufo(mapbufo_t *bufo, const int add)
  
      return ret;
  }

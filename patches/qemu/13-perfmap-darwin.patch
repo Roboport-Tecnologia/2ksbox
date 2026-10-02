@@ -5,6 +5,8 @@ because Linux perf is the consumer; the map writer itself is plain stdio
 size, guest-0x<pc>). tools/tcg-profile.py uses that map on macOS to
 attribute `sample` hits in the code buffer to guest addresses.
 
+diff --git a/include/tcg/perf.h b/include/tcg/perf.h
+index c96b5920a3..0baf492d86 100644
 --- a/include/tcg/perf.h
 +++ b/include/tcg/perf.h
 @@ -7,7 +7,7 @@
@@ -16,9 +18,11 @@ attribute `sample` hits in the code buffer to guest addresses.
  /* Start writing perf-<pid>.map. */
  void perf_enable_perfmap(void);
  
+diff --git a/qemu-options.hx b/qemu-options.hx
+index 34970fffc9..ec55c8f733 100644
 --- a/qemu-options.hx
 +++ b/qemu-options.hx
-@@ -5221,7 +5221,7 @@ SRST
+@@ -5726,7 +5726,7 @@ SRST
      Enable synchronization profiling.
  ERST
  
@@ -27,6 +31,21 @@ attribute `sample` hits in the code buffer to guest addresses.
  DEF("perfmap", 0, QEMU_OPTION_perfmap,
      "-perfmap        generate a /tmp/perf-${pid}.map file for perf\n",
      QEMU_ARCH_ALL)
+diff --git a/system/vl.c b/system/vl.c
+index 9afacb103a..eeccc93ba6 100644
+--- a/system/vl.c
++++ b/system/vl.c
+@@ -3152,7 +3152,7 @@ void qemu_init(int argc, char **argv)
+             case QEMU_OPTION_DFILTER:
+                 qemu_set_dfilter_ranges(optarg, &error_fatal);
+                 break;
+-#if defined(CONFIG_TCG) && defined(CONFIG_LINUX)
++#if defined(CONFIG_TCG)
+             case QEMU_OPTION_perfmap:
+                 perf_enable_perfmap();
+                 break;
+diff --git a/tcg/meson.build b/tcg/meson.build
+index 706a6eb260..aff251af47 100644
 --- a/tcg/meson.build
 +++ b/tcg/meson.build
 @@ -23,9 +23,7 @@ if get_option('tcg_interpreter')
@@ -38,22 +57,13 @@ attribute `sample` hits in the code buffer to guest addresses.
 -endif
 +tcg_ss.add(files('perf.c'))
  
- tcg_ss = tcg_ss.apply({})
- 
---- a/system/vl.c
-+++ b/system/vl.c
-@@ -3034,7 +3042,7 @@ void qemu_init(int argc, char **argv)
-             case QEMU_OPTION_DFILTER:
-                 qemu_set_dfilter_ranges(optarg, &error_fatal);
-                 break;
--#if defined(CONFIG_TCG) && defined(CONFIG_LINUX)
-+#if defined(CONFIG_TCG)
-             case QEMU_OPTION_perfmap:
-                 perf_enable_perfmap();
-                 break;
+ user_ss.add_all(tcg_ss)
+ system_ss.add_all(tcg_ss)
+diff --git a/tcg/perf.c b/tcg/perf.c
+index 8fa5fa9991..291f3c2867 100644
 --- a/tcg/perf.c
 +++ b/tcg/perf.c
-@@ -110,6 +110,23 @@
+@@ -110,6 +110,23 @@ static void write_perfmap_entry(const void *start, size_t insn,
              host_pc, host_size, pretty_symbol(q, NULL));
  }
  
@@ -77,7 +87,7 @@ attribute `sample` hits in the code buffer to guest addresses.
  static FILE *jitdump;
  static size_t perf_marker_size;
  static void *perf_marker = MAP_FAILED;
-@@ -232,6 +249,7 @@
+@@ -232,6 +249,7 @@ void perf_enable_jitdump(void)
      header.flags = 0;
      fwrite(&header, sizeof(header), 1, jitdump);
  }
@@ -85,7 +95,7 @@ attribute `sample` hits in the code buffer to guest addresses.
  
  void perf_report_prologue(const void *start, size_t size)
  {
-@@ -241,6 +259,7 @@
+@@ -241,6 +259,7 @@ void perf_report_prologue(const void *start, size_t size)
      }
  }
  
@@ -93,7 +103,7 @@ attribute `sample` hits in the code buffer to guest addresses.
  /* Write a JIT_CODE_DEBUG_INFO jitdump entry. */
  static void write_jr_code_debug_info(const void *start,
                                       const struct debuginfo_query *q,
-@@ -308,6 +327,7 @@
+@@ -308,6 +327,7 @@ static void write_jr_code_load(const void *start, uint16_t host_size,
      fwrite(symbol, symbol_size, 1, jitdump);
      fwrite(start, host_size, 1, jitdump);
  }
@@ -101,7 +111,7 @@ attribute `sample` hits in the code buffer to guest addresses.
  
  void perf_report_code(uint64_t guest_pc, TranslationBlock *tb,
                        const void *start)
-@@ -351,6 +371,7 @@
+@@ -350,6 +370,7 @@ void perf_report_code(uint64_t guest_pc, TranslationBlock *tb,
      }
  
      /* Emit jitdump entries if needed. */
@@ -109,7 +119,7 @@ attribute `sample` hits in the code buffer to guest addresses.
      if (jitdump) {
          flockfile(jitdump);
          write_jr_code_debug_info(start, q, tb->icount);
-@@ -358,6 +379,7 @@
+@@ -357,6 +378,7 @@ void perf_report_code(uint64_t guest_pc, TranslationBlock *tb,
                             q);
          funlockfile(jitdump);
      }
@@ -117,7 +127,7 @@ attribute `sample` hits in the code buffer to guest addresses.
  
      debuginfo_unlock();
      g_free(q);
-@@ -370,6 +392,7 @@
+@@ -369,6 +391,7 @@ void perf_exit(void)
          perfmap = NULL;
      }
  
@@ -125,7 +135,7 @@ attribute `sample` hits in the code buffer to guest addresses.
      if (perf_marker != MAP_FAILED) {
          munmap(perf_marker, perf_marker_size);
          perf_marker = MAP_FAILED;
-@@ -379,4 +402,5 @@
+@@ -378,4 +401,5 @@ void perf_exit(void)
          fclose(jitdump);
          jitdump = NULL;
      }

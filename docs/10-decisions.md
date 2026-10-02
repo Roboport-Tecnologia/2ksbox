@@ -44,6 +44,18 @@ pre-Win7 guests since 6.1). 86Box as a base (it already does
 authentic-hardware emulation; ADR-016 later borrows its Voodoo 2 as a
 device).
 
+**Amendment (2026-10-01, track M21): QEMU 11.1, and qemu-3dfx's patch is
+ours.** The user moved the base to the newest release, v11.1.2 ("upgrade
+to latest qemu version and just backport the qemu-3dfx part"). qemu-3dfx
+publishes one patch per QEMU release and has none past 9.2, so its patch
+is carried in our tree, ported to 11.1: `patches/qemu-3dfx/
+00-qemu111x-mesa.patch`, applied by `prepare-qemu.sh` before our queue.
+Only its OpenGL half (ADR-020 retired the Glide pass-through). The device
+sources (`hw/mesa`), `sign_commit` and the guest wrappers still come from
+the pinned `third_party/qemu-3dfx` submodule, so a qemu-3dfx bump stays
+possible as long as its `hw/mesa` compiles on our QEMU. Not a fork of
+qemu-3dfx: one patch file is less to keep than a repository.
+
 ## ADR-002: QEMU runs in-process with the display (2026-08-31)
 
 For gaming latency, framebuffer, input and audio must not cross a

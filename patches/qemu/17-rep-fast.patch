@@ -5,10 +5,10 @@ keeps the per-element loop. See the comments in mem_helper.c / translate.c and
 the patch README row. Test: tools/rep-guest-test.py.
 
 diff --git a/target/i386/cpu.c b/target/i386/cpu.c
-index 73c2f45..1208a39 100644
+index bee3a7f94b..04a03d6288 100644
 --- a/target/i386/cpu.c
 +++ b/target/i386/cpu.c
-@@ -8498,6 +8498,7 @@ static Property x86_cpu_properties[] = {
+@@ -10793,6 +10793,7 @@ static const Property x86_cpu_properties[] = {
      DEFINE_PROP_BOOL("x87-fast", X86CPU, x87_fast, true),
      DEFINE_PROP_BOOL("sse-fast", X86CPU, sse_fast, true),
      DEFINE_PROP_BOOL("simd-fast", X86CPU, simd_fast, true),
@@ -17,10 +17,10 @@ index 73c2f45..1208a39 100644
      DEFINE_PROP_BOOL("kvm", X86CPU, expose_kvm, true),
      DEFINE_PROP_UINT32("phys-bits", X86CPU, phys_bits, 0),
 diff --git a/target/i386/cpu.h b/target/i386/cpu.h
-index dde2310..a69018c 100644
+index da2c48ffc5..9c2022b9cf 100644
 --- a/target/i386/cpu.h
 +++ b/target/i386/cpu.h
-@@ -2132,6 +2132,8 @@ struct ArchCPU {
+@@ -2396,6 +2396,8 @@ struct ArchCPU {
      bool sse_fast;
      /* MMX/SSE integer and permutation ops inline (target/i386/tcg/simd-fast.c.inc) */
      bool simd_fast;
@@ -30,7 +30,7 @@ index dde2310..a69018c 100644
       * Force features to be enabled even if the host doesn't support them.
       * This is dangerous and should be done only for testing CPUID
 diff --git a/target/i386/helper.h b/target/i386/helper.h
-index 3f67098..75a5e66 100644
+index 3f67098f11..75a5e66c09 100644
 --- a/target/i386/helper.h
 +++ b/target/i386/helper.h
 @@ -192,6 +192,10 @@ DEF_HELPER_FLAGS_3(xsetbv, TCG_CALL_NO_WG, void, env, i32, i64)
@@ -45,10 +45,19 @@ index 3f67098..75a5e66 100644
  DEF_HELPER_FLAGS_2(pext, TCG_CALL_NO_RWG_SE, tl, tl, tl)
  
 diff --git a/target/i386/tcg/mem_helper.c b/target/i386/tcg/mem_helper.c
-index 3ef84e9..d912b7a 100644
+index c15a32d60a..6bf9c19e03 100644
 --- a/target/i386/tcg/mem_helper.c
 +++ b/target/i386/tcg/mem_helper.c
-@@ -55,3 +55,182 @@ void helper_boundl(CPUX86State *env, target_ulong a0, int v)
+@@ -21,6 +21,8 @@
+ #include "cpu.h"
+ #include "exec/helper-proto.h"
+ #include "accel/tcg/cpu-ldst.h"
++#include "accel/tcg/probe.h"
++#include "exec/target_page.h"
+ #include "qemu/int128.h"
+ #include "qemu/atomic128.h"
+ #include "tcg/tcg.h"
+@@ -54,3 +56,182 @@ void helper_boundl(CPUX86State *env, target_ulong a0, int v)
          raise_exception_ra(env, EXCP05_BOUND, GETPC());
      }
  }
@@ -232,18 +241,18 @@ index 3ef84e9..d912b7a 100644
 +    return n;
 +}
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index 892a4ef..c6a6e66 100644
+index 6431a8157b..349401e948 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -174,6 +174,7 @@ typedef struct DisasContext {
-     bool sses_guarded;          /* runtime guard emitted */
-     bool sses_pending;          /* hand-over check due at the end of the insn */
+@@ -180,6 +180,7 @@ typedef struct DisasContext {
+     bool sses_tracked;          /* the insn updated sses_clean itself */
+     uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
      bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
 +    bool rep_fast;              /* REP MOVS/STOS page runs through mem_helper.c */
  
      /* TCG local temps */
      TCGv cc_srcT;
-@@ -1381,6 +1382,69 @@ static void gen_outs(DisasContext *s, MemOp ot, TCGv dshift)
+@@ -1368,6 +1369,69 @@ static void gen_outs(DisasContext *s, MemOp ot, TCGv dshift)
  
  #define REP_MAX 65535
  
@@ -313,7 +322,7 @@ index 892a4ef..c6a6e66 100644
  static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
                         void (*fn)(DisasContext *s, MemOp ot, TCGv dshift),
                         bool is_repz_nz)
-@@ -1388,6 +1452,8 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1375,6 +1439,8 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
      TCGLabel *last = gen_new_label();
      TCGLabel *loop = gen_new_label();
      TCGLabel *done = gen_new_label();
@@ -322,7 +331,7 @@ index 892a4ef..c6a6e66 100644
  
      target_ulong cx_mask = MAKE_64BIT_MASK(0, 8 << s->aflag);
      TCGv cx_next = tcg_temp_new();
-@@ -1425,6 +1491,10 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1412,6 +1478,10 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
      /* Any iteration at all?  */
      tcg_gen_brcondi_tl(TCG_COND_TSTEQ, cpu_regs[R_ECX], cx_mask, done);
  
@@ -333,7 +342,7 @@ index 892a4ef..c6a6e66 100644
      /*
       * From now on we operate on the value of CX/ECX/RCX that will be written
       * back, which is stored in cx_next.  There can be no carry, so we can zero
-@@ -1461,7 +1531,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1448,7 +1518,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
  
      if (can_loop) {
          tcg_gen_subi_tl(cx_next, cx_next, 1);
@@ -342,7 +351,7 @@ index 892a4ef..c6a6e66 100644
          tcg_gen_brcondi_tl(TCG_COND_TSTEQ, cx_next, cx_mask, last);
      }
  
-@@ -1470,6 +1540,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
+@@ -1457,6 +1527,7 @@ static void do_gen_rep(DisasContext *s, MemOp ot, TCGv dshift,
       * but the last.  Set it here before giving the main loop a chance to
       * execute.  (For faults, seg_helper.c sets the flag as usual).
       */
@@ -350,11 +359,11 @@ index 892a4ef..c6a6e66 100644
      if (!had_rf) {
          gen_set_eflags(s, RF_MASK);
      }
-@@ -3891,6 +3962,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
-     dc->sses_guarded = false;
-     dc->sses_pending = false;
+@@ -3625,6 +3696,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->sses_tracked = false;
+     memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
      dc->simd_on = env_archcpu(env)->simd_fast;
 +    dc->rep_fast = env_archcpu(env)->rep_fast;
-     /* select memory access functions */
-     dc->mem_index = cpu_mmu_index(cpu, false);
-     dc->cpuid_features = env->features[FEAT_1_EDX];
+     if (dc->x87s_on) {
+         dc->x87s_t32 = tcg_temp_new_i32();
+         dc->x87s_t64 = tcg_temp_new_i64();

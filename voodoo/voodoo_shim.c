@@ -14,8 +14,8 @@
 #include "qemu/timer.h"
 #include "qemu/error-report.h"
 #include "qemu/rcu.h"
-#include "exec/address-spaces.h"
-#include "exec/memory.h"
+#include "system/address-spaces.h"
+#include "system/memory.h"
 #ifndef _WIN32
 #include <sys/mman.h>
 #endif
@@ -106,7 +106,8 @@ mem_mapping_enable(mem_mapping_t *map)
 uint32_t
 mem_readl_phys(uint32_t addr)
 {
-    return ldl_le_phys(&address_space_memory, addr);
+    return address_space_ldl_le(&address_space_memory, addr,
+                                MEMTXATTRS_UNSPECIFIED, NULL);
 }
 
 /* --------------------------------------------------------------- 86box.h */

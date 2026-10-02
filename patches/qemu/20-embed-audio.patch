@@ -3,9 +3,11 @@ libqemu-embed): QAPI enum/union entry plus the per-direction options case.
 The driver clips QEMU's mixed output into a ring owned by the embedding
 application (docs/11-m1-embed-api.md).
 
+diff --git a/audio/audio.c b/audio/audio.c
+index 6f10ee470e..9ccbc4b8c1 100644
 --- a/audio/audio.c
 +++ b/audio/audio.c
-@@ -2003,6 +2003,7 @@
+@@ -186,6 +186,7 @@ static void audio_create_pdos(Audiodev *dev)
          break
  
          CASE(NONE, none, );
@@ -13,9 +15,42 @@ application (docs/11-m1-embed-api.md).
  #ifdef CONFIG_AUDIO_ALSA
          CASE(ALSA, alsa, Alsa);
  #endif
+@@ -271,6 +272,8 @@ static AudiodevPerDirectionOptions *audio_get_pdo_out(Audiodev *dev)
+     switch (dev->driver) {
+     case AUDIODEV_DRIVER_NONE:
+         return dev->u.none.out;
++    case AUDIODEV_DRIVER_EMBED:
++        return dev->u.embed.out;
+ #ifdef CONFIG_AUDIO_ALSA
+     case AUDIODEV_DRIVER_ALSA:
+         return qapi_AudiodevAlsaPerDirectionOptions_base(dev->u.alsa.out);
+@@ -330,6 +333,8 @@ static AudiodevPerDirectionOptions *audio_get_pdo_in(Audiodev *dev)
+     switch (dev->driver) {
+     case AUDIODEV_DRIVER_NONE:
+         return dev->u.none.in;
++    case AUDIODEV_DRIVER_EMBED:
++        return dev->u.embed.in;
+ #ifdef CONFIG_AUDIO_ALSA
+     case AUDIODEV_DRIVER_ALSA:
+         return qapi_AudiodevAlsaPerDirectionOptions_base(dev->u.alsa.in);
+diff --git a/audio/audio_template.h b/audio/audio_template.h
+index 398a727373..a12aa50e32 100644
+--- a/audio/audio_template.h
++++ b/audio/audio_template.h
+@@ -341,6 +341,8 @@ AudiodevPerDirectionOptions *glue(audio_get_pdo_, TYPE)(Audiodev *dev)
+     switch (dev->driver) {
+     case AUDIODEV_DRIVER_NONE:
+         return dev->u.none.TYPE;
++    case AUDIODEV_DRIVER_EMBED:
++        return dev->u.embed.TYPE;
+ #ifdef CONFIG_AUDIO_ALSA
+     case AUDIODEV_DRIVER_ALSA:
+         return qapi_AudiodevAlsaPerDirectionOptions_base(dev->u.alsa.TYPE);
+diff --git a/qapi/audio.json b/qapi/audio.json
+index 2df87b9710..d05721756c 100644
 --- a/qapi/audio.json
 +++ b/qapi/audio.json
-@@ -462,7 +462,8 @@
+@@ -484,7 +484,8 @@
              { 'name': 'sdl', 'if': 'CONFIG_AUDIO_SDL' },
              { 'name': 'sndio', 'if': 'CONFIG_AUDIO_SNDIO' },
              { 'name': 'spice', 'if': 'CONFIG_SPICE' },
@@ -25,7 +60,7 @@ application (docs/11-m1-embed-api.md).
  
  ##
  # @Audiodev:
-@@ -508,7 +509,8 @@
+@@ -530,7 +531,8 @@
                     'if': 'CONFIG_AUDIO_SNDIO' },
      'spice':     { 'type': 'AudiodevGenericOptions',
                     'if': 'CONFIG_SPICE' },
@@ -35,14 +70,3 @@ application (docs/11-m1-embed-api.md).
  
  ##
  # @query-audiodevs:
---- a/audio/audio_template.h
-+++ b/audio/audio_template.h
-@@ -340,6 +340,8 @@
-     switch (dev->driver) {
-     case AUDIODEV_DRIVER_NONE:
-         return dev->u.none.TYPE;
-+    case AUDIODEV_DRIVER_EMBED:
-+        return dev->u.embed.TYPE;
- #ifdef CONFIG_AUDIO_ALSA
-     case AUDIODEV_DRIVER_ALSA:
-         return qapi_AudiodevAlsaPerDirectionOptions_base(dev->u.alsa.TYPE);

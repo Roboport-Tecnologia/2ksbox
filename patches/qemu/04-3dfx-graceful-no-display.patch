@@ -10,9 +10,11 @@ ui/sdl2.c is not compiled at all. These two guards stay because they are
 the backend's own half of the contract: qemu-system-i386 links the native
 GLX backend and nothing registers a provider for it.
 
---- a/hw/mesa/mglcntx_linux.c	2026-09-02 17:07:11.346825984 -0300
-+++ b/hw/mesa/mglcntx_linux.c	2026-09-02 17:07:11.362491177 -0300
-@@ -416,6 +416,10 @@
+diff --git a/hw/mesa/mglcntx_linux.c b/hw/mesa/mglcntx_linux.c
+index 94fb842d72..ed4d8b1596 100644
+--- a/hw/mesa/mglcntx_linux.c
++++ b/hw/mesa/mglcntx_linux.c
+@@ -416,6 +416,10 @@ void MGLWndRelease(void)
  int MGLCreateContext(uint32_t gDC)
  {
      int i, ret;
@@ -23,7 +25,7 @@ GLX backend and nothing registers a provider for it.
      i = gDC & (MAX_PBUFFER - 1);
      if (gDC == ((MESAGL_HPBDC & 0xFFFFFFF0U) | i)) {
          ret = 0;
-@@ -437,6 +441,8 @@
+@@ -437,6 +441,8 @@ int MGLCreateContext(uint32_t gDC)
  
  int MGLMakeCurrent(uint32_t cntxRC, int level)
  {

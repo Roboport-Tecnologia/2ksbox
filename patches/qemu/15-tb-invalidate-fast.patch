@@ -25,9 +25,11 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
    self-modifying guest (the game patches its rasterizer's immediates per
    span) invalidates 20k TBs a second.
 
+diff --git a/accel/tcg/tb-maint.c b/accel/tcg/tb-maint.c
+index 4313864d2c..22d1d4792d 100644
 --- a/accel/tcg/tb-maint.c
 +++ b/accel/tcg/tb-maint.c
-@@ -183,6 +183,25 @@
+@@ -191,6 +191,25 @@ struct PageDesc {
      QemuSpin lock;
      /* list of TBs intersecting this ram page */
      uintptr_t first_tb;
@@ -53,17 +55,16 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
  };
  
  void page_table_config_init(void)
-@@ -693,10 +712,35 @@
-     bool page_already_protected;
+@@ -702,10 +721,35 @@ static void tb_page_add(PageDesc *p, TranslationBlock *tb, unsigned int n)
  
      assert_page_locked(p);
-+
-+    tb_page_addr_t lo, hi;
  
++    tb_page_addr_t lo, hi;
++
      tb->page_next[n] = p->first_tb;
      page_already_protected = p->first_tb != 0;
      p->first_tb = (uintptr_t)tb | n;
-+
+ 
 +    /* the byte range this TB occupies on this page */
 +    if (n == 0) {
 +        lo = tb_page_addr0(tb) & ~TARGET_PAGE_MASK;
@@ -86,10 +87,11 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
 +    } else if (tb_page_addr1(tb) != -1) {
 +        p->span_out_lo = MIN(p->span_out_lo, lo);
 +    }
- 
++
      /*
       * If some code is already present, then the pages are already
-@@ -880,10 +924,17 @@
+      * protected. So we handle the case where only the first TB is
+@@ -897,10 +941,17 @@ static void tb_jmp_cache_inval_tb(TranslationBlock *tb)
      CPUState *cpu;
  
      if (tb_cflags(tb) & CF_PCREL) {
@@ -111,7 +113,7 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
      } else {
          uint32_t h = tb_jmp_cache_hash_func(tb->pc);
  
-@@ -1092,7 +1143,9 @@
+@@ -1100,7 +1151,9 @@ bool tb_invalidate_phys_page_unwind(CPUState *cpu, tb_page_addr_t addr,
  #else
  /*
   * @p must be non-NULL.
@@ -119,35 +121,41 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
 + * Call with all @pages locked, or with @pages NULL and only @p locked when
 + * no TB the range can hit spans another page (it lies between p->span_in_end
 + * and p->span_out_lo), so that removing a TB touches no other page's list.
+  * (@cpu, @retaddr) may be (NULL, 0) outside of a cpu context,
+  * in which case precise_smc need not be detected.
   */
- static void
- tb_invalidate_phys_page_range__locked(struct page_collection *pages,
-@@ -1104,7 +1157,9 @@
+@@ -1115,14 +1168,12 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
      PageForEachNext n;
- #ifdef TARGET_HAS_PRECISE_SMC
      bool current_tb_modified = false;
--    TranslationBlock *current_tb = retaddr ? tcg_tb_lookup(retaddr) : NULL;
+     TranslationBlock *current_tb = NULL;
 +    /* the g_tree lookup of the writing TB only once a TB is actually hit */
-+    TranslationBlock *current_tb = NULL;
-+    bool current_tb_known = !retaddr;
- #endif /* TARGET_HAS_PRECISE_SMC */
++    bool current_tb_known = !(retaddr && cpu && cpu->cc->tcg_ops->precise_smc);
  
      /* Range may not cross a page. */
-@@ -1128,6 +1183,10 @@
+     tcg_debug_assert(((start ^ last) & TARGET_PAGE_MASK) == 0);
+ 
+-    if (retaddr && cpu && cpu->cc->tcg_ops->precise_smc) {
+-        current_tb = tcg_tb_lookup(retaddr);
+-    }
+-
+     /*
+      * We remove all the TBs in the range [start, last].
+      * XXX: see if in some cases it could be faster to invalidate all the code
+@@ -1140,6 +1191,10 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
+             tb_last = tb_start + (tb_last & ~TARGET_PAGE_MASK);
          }
          if (!(tb_last < start || tb_start > last)) {
- #ifdef TARGET_HAS_PRECISE_SMC
 +            if (!current_tb_known) {
 +                current_tb = tcg_tb_lookup(retaddr);
 +                current_tb_known = true;
 +            }
-             if (current_tb == tb &&
+             if (unlikely(current_tb == tb) &&
                  (tb_cflags(current_tb) & CF_COUNT_MASK) != 1) {
                  /*
-@@ -1152,7 +1211,11 @@
+@@ -1162,7 +1217,11 @@ tb_invalidate_phys_page_range__locked(CPUState *cpu,
+     }
  
- #ifdef TARGET_HAS_PRECISE_SMC
-     if (current_tb_modified) {
+     if (unlikely(current_tb_modified)) {
 -        page_collection_unlock(pages);
 +        if (pages) {
 +            page_collection_unlock(pages);
@@ -155,9 +163,9 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
 +            page_unlock(p);     /* the single-page path holds only @p */
 +        }
          /* Force execution of one insn next time.  */
-         current_cpu->cflags_next_tb = 1 | CF_NOIRQ | curr_cflags(current_cpu);
-         mmap_unlock();
-@@ -1186,6 +1249,14 @@
+         cpu->cflags_next_tb = 1 | CF_NOIRQ | curr_cflags(cpu);
+         cpu_loop_exit_noexc(cpu);
+@@ -1195,6 +1254,14 @@ void tb_invalidate_phys_range(CPUState *cpu, tb_page_addr_t start,
          assert_page_locked(pd);
          page_start = index << TARGET_PAGE_BITS;
          page_last = page_start | ~TARGET_PAGE_MASK;
@@ -170,40 +178,50 @@ under TCG on the M1 Air, where the softmmu slow path and TB maintenance were
 +         */
 +        page_start = MAX(page_start, start);
          page_last = MIN(page_last, last);
-         tb_invalidate_phys_page_range__locked(pages, pd,
+         tb_invalidate_phys_page_range__locked(cpu, pages, pd,
                                                page_start, page_last, 0);
-@@ -1221,7 +1292,34 @@
-                                    uintptr_t retaddr)
+@@ -1211,15 +1278,37 @@ void tb_invalidate_phys_range_fast(CPUState *cpu, ram_addr_t start,
+                                    unsigned len, uintptr_t ra)
  {
-     struct page_collection *pages;
-+    PageDesc *p = page_find(ram_addr >> TARGET_PAGE_BITS);
-+    unsigned off = ram_addr & ~TARGET_PAGE_MASK;
+     PageDesc *p = page_find(start >> TARGET_PAGE_BITS);
++    unsigned off = start & ~TARGET_PAGE_MASK;
++    ram_addr_t last = start + len - 1;
++    struct page_collection *pages;
 +    bool may_hit;
  
+-    if (p) {
+-        ram_addr_t last = start + len - 1;
+-        struct page_collection *pages = page_collection_lock(start, last);
+-
+-        tb_invalidate_phys_page_range__locked(cpu, pages, p,
+-                                              start, last, ra);
+-        page_collection_unlock(pages);
 +    if (!p) {
 +        return;
-+    }
+     }
 +    /* under the page lock, against a TB being added on another vCPU */
 +    page_lock(p);
 +    may_hit = p->first_tb &&
-+              !(off + size - 1 < p->code_lo || off > p->code_hi);
++              !(off + len - 1 < p->code_lo || off > p->code_hi);
 +    if (!may_hit) {
 +        page_unlock(p);
 +        return;
 +    }
-+    if (off >= p->span_in_end && off + size - 1 < p->span_out_lo) {
++    if (off >= p->span_in_end && off + len - 1 < p->span_out_lo) {
 +        /*
 +         * The common case, nothing the write can hit reaches into another
 +         * page: the page's own lock is enough to unlink what it hits.  (The
 +         * precise-SMC exit inside unlocks @p itself before leaving.)
 +         */
-+        tb_invalidate_phys_page_range__locked(NULL, p, ram_addr,
-+                                              ram_addr + size - 1, retaddr);
++        tb_invalidate_phys_page_range__locked(cpu, NULL, p, start, last, ra);
 +        page_unlock(p);
 +        return;
 +    }
 +    page_unlock(p);
 +
-     pages = page_collection_lock(ram_addr, ram_addr + size - 1);
-     tb_invalidate_phys_page_fast__locked(pages, ram_addr, size, retaddr);
-     page_collection_unlock(pages);
++    pages = page_collection_lock(start, last);
++    tb_invalidate_phys_page_range__locked(cpu, pages, p, start, last, ra);
++    page_collection_unlock(pages);
+ }
+ 
+ #endif /* CONFIG_USER_ONLY */

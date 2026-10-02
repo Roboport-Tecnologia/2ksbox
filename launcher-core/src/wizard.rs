@@ -102,6 +102,9 @@ struct EditTarget {
     /// same reason: gaining or losing the USB controller is a hardware
     /// change (`pad_warning`).
     pad: Pad,
+    /// The board the bundle was created on, kept through an edit: the
+    /// form has no field for it (`Machine::board`).
+    board: Option<String>,
     /// A Windows 11 machine's processor, firmware variables and TPM
     /// state, which the form has no fields for and must not lose.
     arch: Option<bundle::Arch>,
@@ -373,6 +376,7 @@ impl Form {
                 video: machine.effective_video().unwrap_or(Video::Std),
                 sound: machine.effective_sound(),
                 pad: machine.effective_pad(),
+                board: machine.board.clone(),
                 arch: machine.arch,
                 efi_vars: machine.efi_vars.clone(),
                 tpm_state: machine.tpm_state.clone(),
@@ -1486,6 +1490,7 @@ impl Form {
                 soundfont: None,
                 mt32_roms: None,
                 pad: None,
+                board: edit.board.clone(),
                 arch: edit.arch,
                 efi_vars: edit.efi_vars.clone(),
                 tpm_state: edit.tpm_state.clone(),

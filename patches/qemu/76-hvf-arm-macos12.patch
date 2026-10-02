@@ -10,10 +10,10 @@ Each call now runs only under `__builtin_available(macOS 13, *)`; before
 that the VM is made with no configuration, which is a 36-bit IPA space,
 and a machine that needs more is refused with HV_UNSUPPORTED.
 diff --git a/target/arm/hvf/hvf.c b/target/arm/hvf/hvf.c
-index d1cf47c..310e42d 100644
+index b00a7e1a84..5eaff55cba 100644
 --- a/target/arm/hvf/hvf.c
 +++ b/target/arm/hvf/hvf.c
-@@ -931,20 +931,30 @@ static bool hvf_arm_get_host_cpu_features(ARMHostCPUFeatures *ahcf)
+@@ -1254,20 +1254,30 @@ static bool hvf_arm_get_host_cpu_features(ARMHostCPUFeatures *ahcf)
      return r == HV_SUCCESS;
  }
  
@@ -23,7 +23,7 @@ index d1cf47c..310e42d 100644
 + */
 +#define HVF_ARM_IPA_SIZE_MACOS12 36
 +
- uint32_t hvf_arm_get_default_ipa_bit_size(void)
+ uint32_t hvf_arch_get_default_ipa_bit_size(void)
  {
 -    uint32_t default_ipa_size;
 -    hv_return_t ret = hv_vm_config_get_default_ipa_size(&default_ipa_size);
@@ -37,7 +37,7 @@ index d1cf47c..310e42d 100644
      return default_ipa_size;
  }
  
- uint32_t hvf_arm_get_max_ipa_bit_size(void)
+ uint32_t hvf_arch_get_max_ipa_bit_size(void)
  {
 -    uint32_t max_ipa_size;
 -    hv_return_t ret = hv_vm_config_get_max_ipa_size(&max_ipa_size);
@@ -50,39 +50,29 @@ index d1cf47c..310e42d 100644
  
      /*
       * We clamp any IPA size we want to back the VM with to a valid PARange
-@@ -983,20 +993,24 @@ void hvf_arch_vcpu_destroy(CPUState *cpu)
+@@ -1321,7 +1331,25 @@ static bool hvf_arm_el2_supported(void)
+ }
+ 
+ 
++static hv_return_t hvf_arm_vm_create_config(uint32_t pa_range)
++    __attribute__((availability(macos, introduced = 13.0)));
++
  hv_return_t hvf_arch_vm_create(MachineState *ms, uint32_t pa_range)
- {
-     hv_return_t ret;
--    hv_vm_config_t config = hv_vm_config_create();
--
--    ret = hv_vm_config_set_ipa_size(config, pa_range);
--    if (ret != HV_SUCCESS) {
--        goto cleanup;
--    }
--    chosen_ipa_bit_size = pa_range;
- 
--    ret = hv_vm_create(config);
++{
 +    if (__builtin_available(macOS 13, *)) {
-+        hv_vm_config_t config = hv_vm_config_create();
- 
--cleanup:
--    os_release(config);
-+        ret = hv_vm_config_set_ipa_size(config, pa_range);
-+        if (ret == HV_SUCCESS) {
-+            chosen_ipa_bit_size = pa_range;
-+            ret = hv_vm_create(config);
-+        }
-+        os_release(config);
-+        return ret;
++        return hvf_arm_vm_create_config(pa_range);
 +    }
- 
--    return ret;
-+    if (pa_range > HVF_ARM_IPA_SIZE_MACOS12) {
++    /* no configuration: 36 bits; nested virtualization and the in-kernel GIC need macOS 15 */
++    if (pa_range > HVF_ARM_IPA_SIZE_MACOS12 || hvf_nested_virt_enabled() ||
++        hvf_irqchip_in_kernel()) {
 +        return HV_UNSUPPORTED;
 +    }
 +    chosen_ipa_bit_size = HVF_ARM_IPA_SIZE_MACOS12;
 +    return hv_vm_create(NULL);
- }
- 
- int hvf_arch_init_vcpu(CPUState *cpu)
++}
++
++/* upstream's hvf_arch_vm_create, the VM configuration calls of macOS 13 */
++static hv_return_t hvf_arm_vm_create_config(uint32_t pa_range)
+ {
+     hv_return_t ret;
+     hv_vm_config_t config = hv_vm_config_create();

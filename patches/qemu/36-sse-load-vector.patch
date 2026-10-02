@@ -35,18 +35,18 @@ Test: tools/sse-guest-test.py (memory-operand forms, sse-fast on/off
 identical), the x87, SMC and rep batteries, and 3DMark 99 on claude98.
 
 diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
-index fdf6121..7af3dc8 100644
+index a1bbb30346..4657229206 100644
 --- a/target/i386/tcg/translate.c
 +++ b/target/i386/tcg/translate.c
-@@ -182,6 +182,7 @@ typedef struct DisasContext {
-     bool sses_guarded;          /* runtime guard emitted */
-     bool sses_pending;          /* hand-over check due at the end of the insn */
+@@ -188,6 +188,7 @@ typedef struct DisasContext {
+     bool sses_tracked;          /* the insn updated sses_clean itself */
+     uint16_t sses_clean[4];     /* xmm registers with no denormal (sse-fast.c.inc) */
      bool simd_on;               /* simd-fast.c.inc: integer/permute ops inline */
 +    bool ldo_vec;               /* gen_ldo_env_A0: one 16-byte store into env (sse-fast) */
      bool rep_fast;              /* REP MOVS/STOS page runs through mem_helper.c */
  
      /* TCG local temps */
-@@ -2661,6 +2662,33 @@ static inline void gen_ldo_env_A0(DisasContext *s, int offset, bool align)
+@@ -2377,6 +2378,33 @@ static inline void gen_ldo_env_A0(DisasContext *s, int offset, bool align)
      TCGv_i128 t = tcg_temp_new_i128();
  
      tcg_gen_qemu_ld_i128(t, s->A0, mem_index, mop);
@@ -80,11 +80,12 @@ index fdf6121..7af3dc8 100644
      tcg_gen_st_i128(t, tcg_env, offset);
  }
  
-@@ -4136,6 +4164,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
-     dc->sses_guarded = false;
-     dc->sses_pending = false;
+@@ -3839,6 +3867,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+     dc->sses_tracked = false;
+     memset(dc->sses_clean, 0, sizeof(dc->sses_clean));
      dc->simd_on = env_archcpu(env)->simd_fast;
-+    dc->ldo_vec = env_archcpu(env)->sse_fast && TCG_TARGET_HAS_v128;
++    dc->ldo_vec = env_archcpu(env)->sse_fast
++        && tcg_op_supported(INDEX_op_ld_vec, TCG_TYPE_V128, 0);
      dc->rep_fast = env_archcpu(env)->rep_fast;
-     /* select memory access functions */
-     dc->mem_index = cpu_mmu_index(cpu, false);
+     if (dc->x87s_on) {
+         dc->x87s_t32 = tcg_temp_new_i32();

@@ -15,9 +15,11 @@ nothing can reach (2ksbox's audio is patch 20's `embed` audiodev).
 Skip the block outright when the option is disabled; `enabled` still
 forces the check and its error, `auto` still detects on Windows.
 
+diff --git a/meson.build b/meson.build
+index 2a5da02834..e6f03be1f6 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -1707,7 +1707,8 @@
+@@ -1750,7 +1750,8 @@ if get_option('oss').allowed() and have_system
    endif
  endif
  dsound = not_found

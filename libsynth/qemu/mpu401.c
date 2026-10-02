@@ -30,9 +30,9 @@
 #include "qapi/error.h"
 #include "qemu/module.h"
 #include "hw/isa/isa.h"
-#include "hw/irq.h"
-#include "hw/qdev-properties.h"
-#include "audio/audio.h"
+#include "hw/core/irq.h"
+#include "hw/core/qdev-properties.h"
+#include "qemu/audio.h"
 #include "qemu/error-report.h"
 #include "qemu/timer.h"
 #include "qom/object.h"
@@ -61,7 +61,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(Mpu401State, MPU401)
 struct Mpu401State {
     ISADevice parent_obj;
 
-    QEMUSoundCard card;
+    AudioBackend *audio_be;
     SWVoiceOut *voice;
     libsynth_midi *midi;
     qemu_irq irq_line;
@@ -177,7 +177,7 @@ static void mpu401_write(void *opaque, uint32_t nport, uint32_t val)
     if (!s->active) {
         s->active = true;
         if (s->voice) {
-            AUD_set_active_out(s->voice, 1);
+            audio_be_set_active_out(s->audio_be, s->voice, 1);
         }
     }
     /* The stream, byte by byte. Data written before the guest asked for
@@ -246,7 +246,7 @@ static void mpu401_callback(void *opaque, int free)
             s->pending = frames * MPU_FRAME_BYTES;
             s->pos = 0;
         }
-        wrote = AUD_write(s->voice, s->buf + s->pos, s->pending);
+        wrote = audio_be_write(s->audio_be, s->voice, s->buf + s->pos, s->pending);
         if (wrote <= 0) {
             return;
         }
@@ -341,20 +341,19 @@ static void mpu401_realizefn(DeviceState *dev, Error **errp)
         as.freq = rate;
         as.nchannels = 2;
         as.fmt = AUDIO_FORMAT_S16;
-        as.endianness = AUDIO_HOST_ENDIANNESS;
+        as.big_endian = HOST_BIG_ENDIAN;
         /* Both failures below leave the device unrealized, so unrealize
          * will not run: the synthesizer is given back here. */
-        if (!AUD_register_card(TYPE_MPU401, &s->card, errp)) {
+        if (!audio_be_check(&s->audio_be, errp)) {
             libsynth_midi_free(s->midi);
             s->midi = NULL;
             return;
         }
-        s->voice = AUD_open_out(&s->card, s->voice, TYPE_MPU401, s,
-                                mpu401_callback, &as);
+        s->voice = audio_be_open_out(s->audio_be, s->voice, TYPE_MPU401, s,
+                                     mpu401_callback, &as);
         if (!s->voice) {
             libsynth_midi_free(s->midi);
             s->midi = NULL;
-            AUD_remove_card(&s->card);
             error_setg(errp, "mpu401: opening the audio voice failed");
             return;
         }
@@ -378,12 +377,13 @@ static void mpu401_unrealizefn(DeviceState *dev)
         s->midi = NULL;
     }
     if (s->voice) {
-        AUD_remove_card(&s->card);
+        audio_be_close_out(s->audio_be, s->voice);
+        s->voice = NULL;
     }
 }
 
-static Property mpu401_properties[] = {
-    DEFINE_AUDIO_PROPERTIES(Mpu401State, card),
+static const Property mpu401_properties[] = {
+    DEFINE_AUDIO_PROPERTIES(Mpu401State, audio_be),
     DEFINE_PROP_UINT32("iobase", Mpu401State, port, 0x330),
     /* The MPU-401's own line is IRQ 2/9, and this device has none by
      * default: anything above 15 is "no interrupt".
@@ -412,10 +412,9 @@ static Property mpu401_properties[] = {
     DEFINE_PROP_STRING("synth",     Mpu401State, synth),
     DEFINE_PROP_STRING("soundfont", Mpu401State, soundfont),
     DEFINE_PROP_STRING("romdir",    Mpu401State, romdir),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
-static void mpu401_class_initfn(ObjectClass *klass, void *data)
+static void mpu401_class_initfn(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 

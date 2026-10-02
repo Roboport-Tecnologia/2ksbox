@@ -37,7 +37,7 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   `win98-xp-virt` by `launcher-core/src/paths.rs::data_dir()`). App ID
   `com._2ksbox.Launcher`; the underscore is required.
 - **QEMU is the base** (ADR-001): our fork as a **patch queue** on the
-  pinned submodule (v9.2.4 + qemu-3dfx). Not VMware, VirtualBox or 86Box
+  pinned submodule (v11.1.2 + our port of qemu-3dfx, track M21). Not VMware, VirtualBox or 86Box
   as a base (86Box's Voodoo 2 code is vendored as one device, below).
 - **QEMU runs in-process** (`libqemu-embed-<target>`, `embed/`) for
   latency (ADR-002).

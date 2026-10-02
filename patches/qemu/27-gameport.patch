@@ -19,12 +19,14 @@ gameport.h), called from the embed shim's input bottom half under the BQL
 with the same four axis bytes, hat and button bitmap the usb-gamepad
 takes, so one call feeds whichever of the two devices the machine has.
 
+diff --git a/hw/input/Kconfig b/hw/input/Kconfig
+index a116cb82df..2a0f3fdaf3 100644
 --- a/hw/input/Kconfig
 +++ b/hw/input/Kconfig
 @@ -1,6 +1,14 @@
  config ADB
      bool
-
+ 
 +# win98-xp-virt: the analog joystick port at 0x200-0x207 (M13 path B,
 +# docs/tracks/m13-gamepads.md). Overlaid into hw/input/ by
 +# scripts/prepare-qemu.sh; the only condition is an ISA bus to sit on.
@@ -36,6 +38,8 @@ takes, so one call feeds whichever of the two devices the machine has.
  config PCKBD
      bool
      select PS2
+diff --git a/hw/input/meson.build b/hw/input/meson.build
+index 90a214962c..df6959cedf 100644
 --- a/hw/input/meson.build
 +++ b/hw/input/meson.build
 @@ -1,5 +1,6 @@
