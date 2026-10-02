@@ -70,6 +70,19 @@ unless `VK_ICD_FILENAMES` is set. Put **only**
 `/opt/homebrew/lib` (every image decode dies with `SIGBUS`; 00-status),
 including in the shell a launcher starts from.
 
+A launcher or player started from a checkout with none of that set
+falls back to the SDK itself (2026-10-01, user): the newest
+`~/VulkanSDK/<version>/macOS` with KosmicKrisp in it, the one
+`package-macos.sh` ships. The launcher's probe opens its loader by full
+path when no `libvulkan` loads by name (`host_gpu::sdk_loader`, reported
+as "the Vulkan SDK's") and names its KosmicKrisp manifest
+(`announce_driver`); the player opens the same loader by full path
+before QEMU starts, which makes the executor's and DXVK's leaf-name
+`dlopen`s return it (dyld matches the loaded image), and sets
+`VK_DRIVER_FILES` (`companions::checkout_vulkan`). Before, both found
+no loader there, and Automatic meant Wine. A `DYLD_LIBRARY_PATH` or
+`VK_ICD_FILENAMES` of your own still wins.
+
 ### Open Watcom, for the Win98 display driver
 
 The 16-bit `.drv` and the ring-0 `.vxd` (doc 19) build with Open

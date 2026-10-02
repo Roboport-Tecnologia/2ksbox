@@ -97,6 +97,50 @@ const VARS: [(&str, &str); 7] = [
     ("soundfont", "LIBSYNTH_SF2"),
 ];
 
+/// A checkout's Vulkan on macOS, which has none of its own: the newest
+/// `~/VulkanSDK/<version>/macOS` with KosmicKrisp in it, the SDK
+/// `scripts/package-macos.sh` copies into the app, and the launcher's
+/// probe falls back to (`launcher_core::host_gpu::sdk_dir`, the same rule
+/// duplicated as the prefix is). The executor and DXVK `dlopen` the
+/// loader by its leaf name, which only a `DYLD_LIBRARY_PATH` resolved, so
+/// a player started without one ran Direct3D through Wine (user: "make
+/// both fall back to the SDK"). Opening the SDK's loader by its full path
+/// first makes those leaf-name opens return it (dyld matches an image
+/// already loaded); its driver is named as the package's is. Nothing
+/// when the caller set a loader path or a driver, or a loader is found
+/// already.
+fn checkout_vulkan() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME") else { return };
+    let version = |d: &Path| -> Vec<u32> {
+        let name = d.parent().and_then(Path::file_name).and_then(|n| n.to_str()).unwrap_or("");
+        name.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    };
+    let Some(sdk) = std::fs::read_dir(Path::new(&home).join("VulkanSDK"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("macOS"))
+        .filter(|d| d.join("lib/libvulkan_kosmickrisp.dylib").is_file() && d.join("lib/libvulkan.1.dylib").is_file())
+        .max_by_key(|d| version(d))
+    else {
+        return;
+    };
+    let open = |path: &str| {
+        let path = std::ffi::CString::new(path).expect("no NUL in a path");
+        // SAFETY: a plain dlopen; the handle is kept for the process's life.
+        !unsafe { libc::dlopen(path.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) }.is_null()
+    };
+    if !open("libvulkan.1.dylib") && !open(&sdk.join("lib/libvulkan.1.dylib").to_string_lossy()) {
+        return;
+    }
+    if std::env::var_os("VK_ICD_FILENAMES").is_none() {
+        set_if_unset_and_present("VK_DRIVER_FILES", sdk.join("share/vulkan/icd.d/libkosmickrisp_icd.json"));
+    }
+}
+
 /// What `announce` resolved, one line each. It answers "did this
 /// package ship the thing, and is the copy it found its own?". Called
 /// after `announce`, so a name with a path is either the package's file or
@@ -117,8 +161,9 @@ pub fn report() {
     }
 }
 
-/// Point QEMU's own `dlopen` searches at the package. A no-op in a
-/// checkout, where those searches already find `build/…`.
+/// Point QEMU's own `dlopen` searches at the package. In a checkout,
+/// where those searches already find `build/…`, only the bank and, on
+/// macOS, the Vulkan SDK (`checkout_vulkan`).
 pub fn announce() {
     // The bank first, because it is the one companion that also has to
     // be found in a checkout: `soundfonts/` in the source tree, the
@@ -133,7 +178,10 @@ pub fn announce() {
             Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../soundfonts")).join(SOUNDFONT),
         ),
     }
-    let Some(prefix) = install_prefix() else { return };
+    let Some(prefix) = install_prefix() else {
+        checkout_vulkan();
+        return;
+    };
     let dylib = |stem: &str| {
         let ext = if cfg!(target_os = "macos") {
             "dylib"
