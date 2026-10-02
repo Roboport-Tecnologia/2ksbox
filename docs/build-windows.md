@@ -490,6 +490,7 @@ scripts/build-windows.sh                  # qemu rust qt exec, and the ISO if th
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, after a driver change
 scripts/win-run.sh launcher               # the Qt launcher, out of the checkout
+scripts/win-run.sh mitsuami               # launcher-mitsuami (MSVC, its own build), same setup
 GDB=1 scripts/win-run.sh player ...       # the player under gdb
 ```
 

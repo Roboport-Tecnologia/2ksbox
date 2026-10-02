@@ -41,6 +41,14 @@ must be installed; no developer prompt needed):
 cd launcher-mitsuami; cargo +stable-x86_64-pc-windows-msvc build
 ```
 
+To play from it, start it with `scripts/win-run.sh mitsuami` in MSYS2's
+MINGW64 shell (a release build). The mitsuami player has no Windows build
+yet (M22 step 4), so the launcher's fallback is the winit player, which on
+Windows is only ever the MinGW build in `target/x86_64-pc-windows-gnu/`.
+Run on its own, the launcher looks for `target/release/player.exe` and
+finds nothing. The script points it at that player and puts the embed DLL
+and the executor on its path, as it does for the Qt launcher.
+
 On Windows the toolbar sits in the title bar beside the caption buttons,
 as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
 `winui::set_toolbar_place(ToolbarPlace::InTitleBar(ToolbarAlign::End))`,

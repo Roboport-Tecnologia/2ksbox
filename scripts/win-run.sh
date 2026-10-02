@@ -5,6 +5,7 @@
 # build/win/ and target/, so this script points each program at them.
 #
 #   scripts/win-run.sh launcher [args...]   the Qt launcher (2ksbox.exe in a package)
+#   scripts/win-run.sh mitsuami [args...]   launcher-mitsuami (M19, MSVC build, release)
 #   scripts/win-run.sh player [args...]     the player (2ksbox-player.exe)
 #   scripts/win-run.sh qemu [args...]       qemu-system-i386.exe: no window of its
 #                                           own, -display vnc=:0 to look at a guest
@@ -14,7 +15,7 @@
 #   PATH                  build/win/qemu first, for libqemu-embed-i386.dll.
 #                         The mingw runtime and Qt come from /mingw64/bin,
 #                         already on this shell's PATH
-#   LAUNCHER_PLAYER_BIN   the launcher is built into launcher-qt/target/ and
+#   LAUNCHER_PLAYER_BIN   either launcher is built into its own target/ and
 #                         looks beside itself and in target/<profile>, where
 #                         a --target build never puts the player
 #   D3DPT_EXEC_LIB        QEMU's own search is relative to the working directory
@@ -33,12 +34,20 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REL="$ROOT/target/x86_64-pc-windows-gnu/release"
 case "${1:-}" in
   launcher) BIN="$ROOT/launcher-qt/target/x86_64-pc-windows-gnu/release/launcher-qt.exe"; STAGE=qt ;;
+  mitsuami) BIN="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"; STAGE=mitsuami ;;
   player)   BIN="$REL/player.exe"; STAGE=rust ;;
   qemu)     BIN="$ROOT/build/win/qemu/qemu-system-i386.exe"; STAGE=qemu ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 shift
-[ -x "$BIN" ] || { echo "win-run.sh: no $BIN (scripts/build-windows.sh $STAGE)" >&2; exit 1; }
+if [ ! -x "$BIN" ]; then
+  if [ "$STAGE" = mitsuami ]; then
+    echo "win-run.sh: no $BIN (cd launcher-mitsuami; cargo +stable-x86_64-pc-windows-msvc build --release)" >&2
+  else
+    echo "win-run.sh: no $BIN (scripts/build-windows.sh $STAGE)" >&2
+  fi
+  exit 1
+fi
 
 # Native programs read these, so Windows paths rather than MSYS2's /c/...
 win() { cygpath -w "$1"; }
