@@ -230,7 +230,12 @@ is faster. Everything it refuses and DXVK accepts sits behind
 - hardware vertex processing, and a windowed back-buffer format not the
   desktop's, are retried rather than refused;
 - NVIDIA's d3d9 lists `D3DFMT_L6V5U5` and draws it with no luminance, so
-  this backend uploads it as X8L8V8U8 (`d3dpt/exec/d3dpt_exec_ddi.cpp`).
+  this backend uploads it as X8L8V8U8 (`d3dpt/exec/d3dpt_exec_ddi.cpp`);
+- an autogen texture (`D3DPT_VS_AUTOGEN`, managed pool) is `PreLoad`ed
+  before `GenerateMipSubLevels`: Microsoft's runtime makes the levels
+  from the video-memory copy, which a fresh `LockRect` leaves stale, so
+  a re-upload kept the old level 0's mips (the host test's autogen
+  record read `0x7f7f00` for blue). DXVK ignores the `PreLoad`.
 
 It is a second rasteriser, so the goldens stay DXVK's and
 `d3dpt-dp2-test` runs on both backends whenever either changes; its

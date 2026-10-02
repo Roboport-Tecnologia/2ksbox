@@ -688,8 +688,14 @@ static void upload_texture(Exec &x, Ddi &d, VramSurf &s) {
         else s.tex->UnlockRect(l);
     }
     /* v15: an autogen texture's levels from the level 0 just written, as
-     * Direct3D 9 makes them on its own (DXVK does not after an upload) */
-    if (s.d.caps & D3DPT_VS_AUTOGEN) s.tex->GenerateMipSubLevels();
+     * Direct3D 9 makes them on its own (DXVK does not after an upload).
+     * Windows' own d3d9 makes a managed texture's levels from its copy in
+     * video memory, stale until the manager uploads the lock: PreLoad
+     * first, or the levels are the old level 0's (D3DPT_D3D9=system) */
+    if (s.d.caps & D3DPT_VS_AUTOGEN) {
+        s.tex->PreLoad();
+        s.tex->GenerateMipSubLevels();
+    }
     s.dirty = false;
 }
 
@@ -2636,6 +2642,7 @@ struct Dp2 {
                         else upload_texture(x, d, *s);
                     }
                     s->tex->SetAutoGenFilterType(filter == D3DTEXF_POINT ? D3DTEXF_POINT : D3DTEXF_LINEAR);
+                    s->tex->PreLoad();          /* a managed one's video copy current first (upload_texture) */
                     s->tex->GenerateMipSubLevels();
                     s->mips_stale = false;
                 }

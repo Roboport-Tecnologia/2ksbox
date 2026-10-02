@@ -499,7 +499,7 @@ EOF
       echo "direct3d       $ok checks through the staged d3dpt_exec.dll + dxvk_d3d9.dll"
     else
       echo "package-windows.sh: the staged Direct3D executor failed its host test (exit $rc, $bad failed):" >&2
-      grep '^FAIL\|^exec: \|^dlopen\|^bad \|mismatch' "$scratch/dp2.log" | head -20 >&2
+      { grep '^FAIL' "$scratch/dp2.log"; grep '^exec: \|^dlopen\|^bad \|mismatch' "$scratch/dp2.log"; } | head -20 >&2
       fail=1
     fi
     # ... and the same records on the *other* backend, the system
@@ -518,7 +518,7 @@ EOF
       echo "direct3d/sys   $sysok checks on $([ "$RUN" = wine ] && echo "wine's own d3d9 (the system-Direct3D-9 backend)" || echo "this PC's system32 d3d9")"
     elif [ "$RUN" = native ]; then
       echo "package-windows.sh: the staged executor failed on the system Direct3D 9 (exit $rc, $sysbad failed):" >&2
-      grep '^FAIL\|^exec: \|^dlopen\|^bad \|mismatch' "$scratch/dp2-system.log" | head -20 >&2
+      { grep '^FAIL' "$scratch/dp2-system.log"; grep '^exec: \|^dlopen\|^bad \|mismatch' "$scratch/dp2-system.log"; } | head -20 >&2
       fail=1
     else
       echo "direct3d/sys   not run here (exit $rc, $sysbad failed): wine's d3d9 needs a display and GL — the real check is on Windows"
