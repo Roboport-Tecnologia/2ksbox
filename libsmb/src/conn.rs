@@ -51,6 +51,8 @@ const FSCTL_DFS_GET_REFERRALS: u32 = 0x0006_0194;
 const FSCTL_DFS_GET_REFERRALS_EX: u32 = 0x0006_01b0;
 const FSCTL_VALIDATE_NEGOTIATE_INFO: u32 = 0x0014_0204;
 const FSCTL_GET_REPARSE_POINT: u32 = 0x0009_00a8;
+const FSCTL_PIPE_WAIT: u32 = 0x0011_0018;
+const FSCTL_PIPE_TRANSCEIVE: u32 = 0x0011_c017;
 
 /// Access bits that need the share to be writable.
 const WRITE_ACCESS: u32 = 0x0000_0002 | 0x0000_0004 | 0x0000_0010 | 0x0000_0100 | 0x0001_0000 | 0x4000_0000 | 0x1000_0000;
@@ -186,6 +188,8 @@ struct Open {
     delete_on_close: bool,
     listing: Option<(Vec<Entry>, usize, String)>,
     access: u32,
+    /// An IPC$ pipe's RPC state; such an open has no path or file.
+    pipe: Option<crate::rpc::Pipe>,
 }
 
 pub struct Conn {
@@ -527,10 +531,7 @@ impl Conn {
                 last_session = sid;
                 last_tree = tid;
                 last_status = status;
-                self.log(
-                    status != STATUS_SUCCESS && h.command != QUERY_DIRECTORY && status != STATUS_MORE_PROCESSING_REQUIRED,
-                    &format!("{} {:#010x} mid={}", name(h.command), status, h.message_id),
-                );
+                self.log(true, &format!("{} {:#010x} mid={}", name(h.command), status, h.message_id));
 
                 let start = out.len();
                 if start > 0 {
@@ -641,7 +642,7 @@ impl Conn {
                             }
                             CREATE => match share {
                                 Some(i) => self.create(c, i),
-                                None => Err(STATUS_OBJECT_NAME_NOT_FOUND),
+                                None => self.open_pipe(c),
                             },
                             CLOSE => self.close(c),
                             FLUSH => {
@@ -941,6 +942,7 @@ impl Conn {
         if sh.read_only && (access & WRITE_ACCESS != 0 || delete_on_close || !matches!(disposition, 1 | 3)) {
             return Err(STATUS_ACCESS_DENIED);
         }
+        self.log(true, &format!("create {:?} access {:#x} disposition {} options {:#x}", rel, access, disposition, options));
         let path = hostfs::resolve(&sh.path, &rel)?;
         let existing = fs::metadata(&path).ok();
         let mut action = 1u32; // FILE_OPENED
@@ -1018,6 +1020,7 @@ impl Conn {
                 delete_on_close,
                 listing: None,
                 access,
+                pipe: None,
             },
         );
         let mut w = W::new();
@@ -1048,12 +1051,85 @@ impl Conn {
         ok(w.0)
     }
 
+    /// A CREATE on IPC$: one of the RPC pipes `rpc` serves, or not found.
+    fn open_pipe(&mut self, c: &Ctx) -> Result<Reply, u32> {
+        let noff = u16_at(c.req, HDR + 44) as usize;
+        let nlen = u16_at(c.req, HDR + 46) as usize;
+        let name = from_utf16(slice(c.req, noff, nlen).unwrap_or(&[]));
+        if !crate::rpc::serves(&name) {
+            self.log(true, &format!("pipe {:?} not served", name));
+            return Err(STATUS_OBJECT_NAME_NOT_FOUND);
+        }
+        let id = self.next_file;
+        self.next_file += 1;
+        self.opens.insert(
+            id,
+            Open {
+                session_id: c.session_id,
+                tree_id: c.tree_id,
+                share: 0,
+                path: PathBuf::new(),
+                rel: name.clone(),
+                is_dir: false,
+                file: None,
+                delete_on_close: false,
+                listing: None,
+                access: u32_at(c.req, HDR + 24),
+                pipe: Some(crate::rpc::Pipe::new(&name)),
+            },
+        );
+        self.log(true, &format!("pipe {:?} opened", name));
+        let mut w = W::new();
+        w.u16(89).u8(0).u8(0).u32(1).zeros(32).u64(4096).u64(0).u32(0x80).u32(0);
+        w.u64(id).u64(id).u32(0).u32(0);
+        ok(w.0)
+    }
+
+    fn rpc_ctx(cfg: &Config) -> crate::rpc::Ctx<'_> {
+        let mut shares: Vec<crate::rpc::ShareDesc> = cfg
+            .shares
+            .iter()
+            .map(|s| crate::rpc::ShareDesc { name: s.name.clone(), remark: String::new(), ipc: false })
+            .collect();
+        shares.push(crate::rpc::ShareDesc { name: "IPC$".into(), remark: "Remote IPC".into(), ipc: true });
+        crate::rpc::Ctx { server_name: &cfg.server_name, shares }
+    }
+
+    /// Bytes written to a pipe: RPC PDUs, answered into its read buffer.
+    fn pipe_write(&mut self, id: u64, data: &[u8]) {
+        let cfg = self.cfg.clone();
+        let ctx = Self::rpc_ctx(&cfg);
+        let mut pipe = self.opens.get_mut(&id).unwrap().pipe.take().unwrap();
+        let what = pipe.write(data, &ctx);
+        self.opens.get_mut(&id).unwrap().pipe = Some(pipe);
+        self.log(true, &format!("rpc: {}", what));
+    }
+
+    /// Up to `max` bytes of a pipe's answer; BUFFER_OVERFLOW when more of
+    /// the message is left (a message-mode pipe's partial read).
+    fn pipe_take(&mut self, id: u64, max: usize) -> (u32, Vec<u8>) {
+        let pipe = self.opens.get_mut(&id).unwrap().pipe.as_mut().unwrap();
+        let n = pipe.out.len().min(max);
+        let data: Vec<u8> = pipe.out.drain(..n).collect();
+        (if pipe.out.is_empty() { STATUS_SUCCESS } else { STATUS_BUFFER_OVERFLOW }, data)
+    }
+
     fn read(&mut self, c: &Ctx) -> Result<Reply, u32> {
         let r = c.req;
         let len = u32_at(r, HDR + 4).min(MAX_IO) as usize;
         let offset = u64_at(r, HDR + 8);
         let min = u32_at(r, HDR + 32) as usize;
-        let o = self.open(c, 16)?;
+        let id = self.file_id(c, 16)?;
+        if self.opens[&id].pipe.is_some() {
+            let (status, data) = self.pipe_take(id, len);
+            if data.is_empty() {
+                return Err(STATUS_PIPE_EMPTY);
+            }
+            let mut w = W::new();
+            w.u16(17).u8(80).u8(0).u32(data.len() as u32).u32(0).u32(0).bytes(&data);
+            return with(status, w.0);
+        }
+        let o = self.opens.get_mut(&id).unwrap();
         if o.is_dir {
             return Err(STATUS_INVALID_DEVICE_REQUEST);
         }
@@ -1068,6 +1144,8 @@ impl Conn {
                 Err(e) => return Err(from_io(&e)),
             }
         }
+        let detail = format!("read {:?} at {} len {} min {} -> {} (size {:?})", o.rel, offset, len, min, got, f.metadata().map(|m| m.len()).ok());
+        self.log(true, &detail);
         if got == 0 && len > 0 || got < min {
             return Err(STATUS_END_OF_FILE);
         }
@@ -1083,6 +1161,13 @@ impl Conn {
         let len = u32_at(r, HDR + 4) as usize;
         let mut offset = u64_at(r, HDR + 8);
         let data = slice(r, doff, len).ok_or(STATUS_INVALID_PARAMETER)?;
+        let id = self.file_id(c, 16)?;
+        if self.opens[&id].pipe.is_some() {
+            self.pipe_write(id, data);
+            let mut w = W::new();
+            w.u16(17).u16(0).u32(len as u32).u32(0).u16(0).u16(0);
+            return ok(w.0);
+        }
         let read_only = {
             let o = self.open(c, 16)?;
             o.share
@@ -1107,7 +1192,21 @@ impl Conn {
         let in_off = u32_at(r, HDR + 24) as usize;
         let in_len = u32_at(r, HDR + 28) as usize;
         let fid = slice(r, HDR + 8, 16).ok_or(STATUS_INVALID_PARAMETER)?.to_vec();
+        let max_out = u32_at(r, HDR + 44) as usize;
+        let mut status = STATUS_SUCCESS;
         let output = match code {
+            FSCTL_PIPE_WAIT => Vec::new(),
+            FSCTL_PIPE_TRANSCEIVE => {
+                let id = self.file_id(c, 8)?;
+                if self.opens[&id].pipe.is_none() {
+                    return Err(STATUS_INVALID_DEVICE_REQUEST);
+                }
+                let input = slice(r, in_off, in_len).ok_or(STATUS_INVALID_PARAMETER)?.to_vec();
+                self.pipe_write(id, &input);
+                let (st, data) = self.pipe_take(id, max_out);
+                status = st;
+                data
+            }
             FSCTL_VALIDATE_NEGOTIATE_INFO => {
                 let input = slice(r, in_off, in_len).ok_or(STATUS_INVALID_PARAMETER)?;
                 let caps = u32_at(input, 0);
@@ -1133,7 +1232,7 @@ impl Conn {
         let out_at = (HDR + 48) as u32;
         w.u32(out_at).u32(0).u32(out_at).u32(output.len() as u32).u32(0).u32(0);
         w.bytes(&output);
-        ok(w.0)
+        with(status, w.0)
     }
 
     fn query_directory(&mut self, c: &Ctx) -> Result<Reply, u32> {
@@ -1228,6 +1327,25 @@ impl Conn {
         let max = u32_at(r, HDR + 4) as usize;
         let additional = u32_at(r, HDR + 16);
         let id = self.file_id(c, 24)?;
+        self.log(true, &format!("query info {}/{} of {:?} max {}", ty, class, self.opens[&id].rel, max));
+        if self.opens[&id].pipe.is_some() {
+            let mut w = W::new();
+            match (ty, class) {
+                (1, 4) => {
+                    w.zeros(32).u32(0x80).u32(0);
+                }
+                (1, 5) => {
+                    w.u64(4096).u64(0).u32(1).u8(0).u8(0).u16(0);
+                }
+                (1, 23) => {
+                    w.u32(1).u32(0); // message mode, blocking
+                }
+                _ => return Err(STATUS_INVALID_INFO_CLASS),
+            }
+            let mut out = W::new();
+            out.u16(9).u16((HDR + 8) as u16).u32(w.len() as u32).bytes(&w.0);
+            return ok(out.0);
+        }
         let o = &self.opens[&id];
         let sh = &self.cfg.shares[o.share];
         let meta = fs::metadata(&o.path).map_err(|e| from_io(&e))?;
@@ -1347,6 +1465,10 @@ impl Conn {
         let boff = u16_at(r, HDR + 8) as usize;
         let buf = slice(r, boff, blen).ok_or(STATUS_INVALID_PARAMETER)?.to_vec();
         let id = self.file_id(c, 16)?;
+        self.log(true, &format!("set info {}/{} of {:?}: {:02x?}", ty, class, self.opens[&id].rel, &buf[..buf.len().min(40)]));
+        if self.opens[&id].pipe.is_some() {
+            return ok(vec![2, 0]); // the pipe's read mode, which is message mode anyway
+        }
         let share = self.opens[&id].share;
         let sh = self.cfg.shares[share].clone();
         if sh.read_only {

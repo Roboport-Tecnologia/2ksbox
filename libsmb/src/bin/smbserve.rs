@@ -27,12 +27,13 @@ fn main() {
         }
     }
     let dir = dir.unwrap_or_else(|| usage("no folder"));
+    let t0 = std::time::Instant::now();
     let cfg = Config::new("smbserve", Account::new(&user, &pass))
         .share(Share::new(&share, &dir).read_only(ro))
         .max_dialect(max)
         .logger(Arc::new(move |chatty, msg| {
             if verbose || !chatty {
-                eprintln!("smbserve: {}", msg);
+                eprintln!("smbserve: {:9.3} {}", t0.elapsed().as_secs_f64(), msg);
             }
         }));
     let server = Server::new(cfg);

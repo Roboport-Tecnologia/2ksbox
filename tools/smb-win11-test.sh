@@ -16,7 +16,8 @@
 # elevated on the desktop. Then the host checks the guest's upload against
 # the hashes the guest wrote, and lists what the server did not support.
 #
-# Environment: OUT, TPM_PPI (off: QEMU 11.1's HVF aborts on the TPM's PPI
+# Environment: OUT, PROBE_PS1 (another guest script instead), SEED (a
+# folder whose contents are copied into the share first), TPM_PPI (off: QEMU 11.1's HVF aborts on the TPM's PPI
 # region, M21), MAX_DIALECT (3.1.1). macOS on Apple Silicon only for now.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -61,6 +62,7 @@ with open(os.path.join(root, "hostsrc.sha256"), "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
 print("host tree: %d files" % len(lines))
 EOF
+[ -n "${SEED:-}" ] && cp -R "$SEED"/. "$SHARE"/
 
 # the host's side of the change-notification check: a new file every 3 s
 mkdir -p "$SHARE/hostwatch"
@@ -73,7 +75,7 @@ trap 'kill $SP $TICK 2>/dev/null' EXIT
 sleep 1
 
 OUT="$OUT" TPM_PPI="${TPM_PPI:-off}" ARCH=aarch64 NET=1 SMB="$ROOT/$OUT/smb.sock" \
-  PROBE=1 PROBE_PS1=tools/win11-spike/smb-explorer.ps1 PROBE_WAIT=900 SETTLE=20 \
+  PROBE=1 PROBE_PS1="${PROBE_PS1:-tools/win11-spike/smb-explorer.ps1}" PROBE_WAIT=900 SETTLE=20 \
   python3 tools/win11-spike.py boot >"$OUT/run.out" 2>&1
 kill $SP $TICK 2>/dev/null
 

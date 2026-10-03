@@ -449,7 +449,11 @@ change-notification item. `tools/win11-spike/smb-explorer.ps1` (run as
 times 512 MB, edits in place, watches the folder, and opens Explorer on
 the share for `shots/desktop-hvf.png`. The host then checks the guest's
 upload and lists what the server refused. About 10 minutes; macOS on
-Apple Silicon only so far.
+Apple Silicon only so far. `PROBE_PS1=` runs another guest script
+(`smb-open.ps1`: Notepad and Paint on files of the share;
+`smb-unc.ps1`: the share used by its `\\10.0.2.4\host` path, as typed
+into Explorer), and `SEED=<folder>` copies a folder's files into the share
+first.
 
 `tools/win11-spike.py boot` with `SMB=<socket> PROBE=1
 PROBE_PS1=tools/win11-spike/smb.ps1 NET=1 ARCH=aarch64` (M23 step 2): the

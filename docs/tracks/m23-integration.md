@@ -133,6 +133,39 @@ because `win11-spike.py` passes no `-rtc` (the launcher passes
 `base=localtime`). So copied files carry the guest's future times, and
 folders keep the host's.
 
+## The user's own use (2026-10-03)
+
+With `tools/smb-try.sh`, a drive mapped with `net use Z:` worked
+normally. But `\\10.0.2.4\host` typed into Explorer took long to ask for
+credentials, every file opened through that path took ages, and
+`\\10.0.2.4` alone gave an error instead of the share list. The
+timestamped log showed a wait of 10 to 14 s after each CREATE of the
+`srvsvc` pipe on IPC$, which the server refused. Windows asks the
+server's share information (NetrShareGetInfo) on every open through a
+path, and the share list for `\\server`; refused, it falls back and
+waits the fallback out. A mapped drive does not ask.
+
+The fix is `libsmb/src/rpc.rs`: DCE/RPC (connection-oriented PDUs, NDR,
+bind with bind-time feature negotiation, fragmented responses, faults for
+other operations) over IPC$ pipes, through WRITE / READ and
+FSCTL_PIPE_TRANSCEIVE. It answers `srvsvc` NetrShareEnum (levels 0 and
+1), NetrShareGetInfo (0, 1, 501, 1005; 2 / 502 refused as for a
+non-administrator), NetrServerGetInfo (100, 101) and `wkssvc`
+NetrWkstaGetInfo (100). Reproduced by `tools/win11-spike/smb-unc.ps1`
+(the path-typed flow in the user's own session) through
+`tools/smb-win11-test.sh`:
+
+| | Waits over 3 s while in use | Unserved pipe opens |
+|---|---|---|
+| Before | 10.6 s after the first share open, 3.9 and 4.5 s around opening a file | every `srvsvc` open |
+| After | none | none |
+
+Explorer lists `\\10.0.2.4` (the `host` share), and Notepad opens a file
+by its path at once. `smbserve`'s log now times each request, and with
+`-v` names the file of each CREATE, READ and QUERY / SET_INFO. macOS's
+`smbutil view` still gives up after connecting to IPC$, without opening a
+pipe; Windows is what needs it.
+
 ## Open items
 
 - **Leases / oplocks.** None are granted, so Windows caches nothing: a

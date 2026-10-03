@@ -20,6 +20,7 @@
 mod conn;
 mod fs;
 mod ntlm;
+mod rpc;
 mod spnego;
 mod status;
 mod wire;

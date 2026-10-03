@@ -11,6 +11,10 @@ every response is signed, which is what current Windows clients insist on
   (on close or by disposition), directory listing in the classes Windows,
   macOS and Samba clients use, file and volume information, a permissive
   security descriptor.
+- The `srvsvc` and `wkssvc` RPC pipes on `IPC$` (DCE/RPC over SMB): the
+  share list (`\\server` in Explorer) and share information. Windows asks
+  for them on every open through a `\\server\share` path, and without
+  them waits out a fallback each time.
 - Names resolved under the share's root only: no `..`, no symlink out of
   it, case-insensitive lookup on case-sensitive hosts.
 - Change notification from a watcher that polls once a second: the names
