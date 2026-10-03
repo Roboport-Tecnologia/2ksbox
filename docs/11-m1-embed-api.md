@@ -172,9 +172,16 @@ Audited 2026-10-02, every channel the API or the process offers:
   byte in both compilers), no struct by value and no `long double`;
   function pointers on the Windows x64 convention both use.
 
-Left for the MSVC build: `link.exe` looks for an import library
-`qemu-embed-<target>.lib`, and the mingw build makes
-`libqemu-embed-<target>.dll.a`.
+**Linking across the toolchains.** The mingw build makes an import
+library only as `libqemu-embed-<target>.dll.a`, which `link.exe` does not
+look for. So on Windows the bindings import the DLL themselves
+(`#[link(kind = "raw-dylib")]` in `qemu-embed/src/lib.rs`): rustc writes
+the import table under either toolchain, and no import library is needed
+at all. It is still a load-time import, never a run-time open (patch
+63). Proved 2026-10-03: the winit player built with
+`x86_64-pc-windows-msvc` (UCRT) ran mingw QEMU to the BIOS screen, with
+QMP connected through `socket_to_fd` and the General MIDI bank set
+through `setenv`, and quit cleanly.
 
 ## What needs patches
 

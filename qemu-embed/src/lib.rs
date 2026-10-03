@@ -51,6 +51,23 @@ pub struct qemu_embed_t {
     _private: [u8; 0],
 }
 
+// On Windows rustc writes the imports itself (`raw-dylib`), so no import
+// library is needed: mingw's `.dll.a` is one MSVC's link.exe would not
+// take, and the player links QEMU's mingw DLL from either toolchain
+// (ADR-026, doc 11 "The C runtime boundary"). Still a load-time import,
+// never a run-time open (patch 63). Elsewhere build.rs links it.
+#[cfg_attr(
+    all(windows, not(any(feature = "qemu-x86_64", feature = "qemu-aarch64"))),
+    link(name = "libqemu-embed-i386", kind = "raw-dylib")
+)]
+#[cfg_attr(
+    all(windows, feature = "qemu-x86_64"),
+    link(name = "libqemu-embed-x86_64", kind = "raw-dylib")
+)]
+#[cfg_attr(
+    all(windows, feature = "qemu-aarch64", not(feature = "qemu-x86_64")),
+    link(name = "libqemu-embed-aarch64", kind = "raw-dylib")
+)]
 extern "C" {
     fn qemu_embed_api_version() -> u32;
     fn qemu_embed_new(

@@ -177,7 +177,7 @@ The launcher is WinUI 3, built with MSVC on the PC only (ADR-023, since
 2026-10-02; the Qt launcher before), so the zip is rolled there.
 
 **Left:** Moto Racer's speed on the PC, live control over AF_UNIX, the
-Windows-built ISO in a guest, an installer, DXGI zero-copy, a check that
+Windows-built ISO's `SETUP.EXE` and Win98 half in a guest, an installer, DXGI zero-copy, a check that
 boots a guest (the track doc).
 
 ## M12: Music

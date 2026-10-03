@@ -1,6 +1,8 @@
 //! Links libqemu-embed-i386, or libqemu-embed-x86_64 / -aarch64 with the
 //! `qemu-x86_64` / `qemu-aarch64` feature, from the QEMU build dir (override with
-//! QEMU_EMBED_LIB_DIR) and bakes an rpath so `cargo run` finds it.
+//! QEMU_EMBED_LIB_DIR) and bakes an rpath so `cargo run` finds it. On
+//! Windows lib.rs imports the DLL itself (`raw-dylib`) and this only says
+//! where the build directory is.
 use std::path::PathBuf;
 
 fn main() {
@@ -33,7 +35,11 @@ fn main() {
     } else {
         "i386"
     };
-    println!("cargo:rustc-link-lib=dylib=qemu-embed-{target}");
+    // On Windows the bindings import it themselves (`raw-dylib` in
+    // lib.rs), with no import library for either toolchain to need.
+    if target_os != "windows" {
+        println!("cargo:rustc-link-lib=dylib=qemu-embed-{target}");
+    }
     // Exported to dependents as DEP_QEMU_EMBED_LIBDIR (via `links`), so
     // binaries can bake an rpath. Link-args here would not propagate.
     println!("cargo:libdir={}", dir.display());

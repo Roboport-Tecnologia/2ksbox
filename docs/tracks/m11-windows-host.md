@@ -127,9 +127,12 @@ Kept here:
    has no AF_UNIX (`socket()` answers 10047). Start a machine, take a
    snapshot, swap a disc; `live control off: …` in `launcher.log` means
    the trial bind failed.
-3. **The Windows-built guest-tools ISO in a guest** (its `SETUP.EXE` and a
-   driver it installs). The native build builds every stage and runs the
-   launcher; its ISO has not been booted.
+3. **The Windows-built guest-tools ISO in a guest.** Half done
+   (2026-10-03): `test.sh all` on the PC installs the XP display driver
+   from an ISO built natively there and runs Direct3D 9 and 8 scenes
+   through it (`guest-G9`, `-G8`, `-F9`, `guest-ddvm` pass). Left: its
+   `SETUP.EXE`, and the Win98 half (the checks need the winetests and a
+   FreeDOS floppy that PC's checkout lacked).
 4. **An installer** beside the zip (doc 07). QEMU's own `mingw32-nsis`
    recipe is within the cross image's reach.
 5. **Zero-copy frames** through a DXGI shared handle, the counterpart of

@@ -506,8 +506,9 @@ emulated regardless.
 `scripts/build-windows.sh` runs all its stages in **MSYS2's MINGW64
 shell** with no container, and `scripts/win-run.sh` runs the result out
 of the checkout. Every stage builds on the user's PC and the launcher
-runs there; the ISO this build makes has not yet been booted in a
-guest. The launcher builds only here, so `scripts/package-windows.sh`
+runs there; the ISO this build makes installs the XP display driver in
+a guest and runs `test.sh`'s Direct3D checks (2026-10-03), its
+`SETUP.EXE` and the Win98 half untried. The launcher builds only here, so `scripts/package-windows.sh`
 rolls and checks the zip here too ("Packaging on Windows").
 
 **MINGW64, not UCRT64 or CLANG64**: it is the cross image's ABI (msvcrt,
@@ -550,9 +551,9 @@ finds converted.
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu rust mitsuami exec, and the ISO if there is none
+scripts/build-windows.sh                  # qemu rust mitsuami exec, and the ISO when its sources moved
 scripts/build-windows.sh rust             # one stage
-scripts/build-windows.sh guest            # the ISO again, after a driver change
+scripts/build-windows.sh guest            # the ISO again, whatever the stamp says
 scripts/win-run.sh launcher               # the launcher, out of the checkout
 GDB=1 scripts/win-run.sh player ...       # the player under gdb
 scripts/package-windows.sh                # the zip ("Packaging on Windows")
@@ -588,7 +589,14 @@ What differs from the cross build, and why:
   `Unable to create index.lock: File exists`, a scanner holding the lock
   of the git that just exited (00-status, "Building").
 
-**The guest-tools ISO** comes from the same scripts as on Linux
+**The guest-tools ISO** is rebuilt by a default run when its sources
+moved, by `scripts/build.sh`'s stamp (`build/.stamp-guest-tools`: the
+guest sources, the protocol and register headers, the build scripts and
+qemu-3dfx's revision; one file for both scripts, since one checkout holds
+one ISO). Until 2026-10-03 a default run only checked that an ISO
+existed, and one from before M16 failed the XP Direct3D checks with
+`CreateDevice failed 0x8876086c` (a vs 1.1 / ps 1.4 driver). It comes
+from the same scripts as on Linux
 (`build-wrappers.sh`, `build-driver.sh`, `build-driver9x.sh`), each of
 which first sources `guest-tools/msys2-i686.sh`, the whole port:
 

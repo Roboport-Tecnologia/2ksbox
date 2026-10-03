@@ -43,8 +43,9 @@
 #           system32\d3d9.dll instead.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
-#           a default run builds it only when there is none yet. Naming
-#           the stage rebuilds it (after a driver change).
+#           a default run rebuilds it when its sources move, by
+#           scripts/build.sh's stamp (build/.stamp-guest-tools). Naming
+#           the stage rebuilds it regardless.
 #
 # docs/build-windows.md is the prose; docs/tracks/m11-windows-host.md is
 # the track. Nothing here writes to build/qemu or target/release, so a
@@ -282,17 +283,31 @@ if want exec; then
   BUILT+=(exec)
 fi
 
-# The ISO is guest code and identical whatever host built it, so this
-# stage exists to notice that there is none rather than to rebuild one.
+# The ISO is guest code and identical whatever host built it, so it is
+# rebuilt when its sources move, by scripts/build.sh's stamp (same file,
+# same hash): a protocol bump or a driver change makes it stale, and a
+# stale one reads as a guest that will not attach. Only its presence was
+# checked before, and an ISO from before M16 failed the XP checks.
 if want guest; then
-  if [ -z "$EXPLICIT" ] && ls guest-tools/out/guest-tools-*.iso >/dev/null 2>&1; then
+  guest_stamp=$( { git -C third_party/qemu-3dfx rev-parse HEAD 2>/dev/null || echo none
+                   find guest-tools/src d3dpt/d3dpt_proto.h d3dpt/d3dpt_fb.h \
+                        cdshelf/cdshelf_proto.h guest-tools/build-wrappers.sh \
+                        guest-tools/build-driver.sh guest-tools/build-driver9x.sh \
+                        -type f 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cat 2>/dev/null
+                 } | sha256sum | cut -d' ' -f1)
+  guest_current=""
+  [ "$(cat build/.stamp-guest-tools 2>/dev/null || true)" = "$guest_stamp" ] \
+    && [ -e guest-tools/out/d3dpt-driver.iso ] \
+    && ls guest-tools/out/guest-tools-*.iso >/dev/null 2>&1 && guest_current=1
+  if [ -z "$EXPLICIT" ] && [ -n "$guest_current" ]; then
     say "guest"
-    echo "    guest-tools ISO present - skipping (scripts/build-windows.sh guest rebuilds it)"
+    echo "    guest sources, protocol headers and qemu-3dfx unchanged - skipping"
   elif [ -n "$NATIVE" ]; then
     # msys2-i686.sh, sourced by the script, switches it to MSYS2's i686
     # toolchain and says what is missing
     say "guest: guest-tools ISO (MSYS2 i686)"
     guest-tools/build-wrappers.sh
+    mkdir -p build && printf '%s\n' "$guest_stamp" > build/.stamp-guest-tools
     BUILT+=(guest)
   elif ! command -v i686-w64-mingw32-gcc >/dev/null; then
     skip guest "needs mingw-w64 (i686-w64-mingw32-gcc)" || true
@@ -301,6 +316,7 @@ if want guest; then
   else
     say "guest: guest-tools ISO"
     guest-tools/build-wrappers.sh
+    mkdir -p build && printf '%s\n' "$guest_stamp" > build/.stamp-guest-tools
     BUILT+=(guest)
   fi
 fi

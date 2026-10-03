@@ -148,9 +148,13 @@ embed library, as for the winit player, into a target dir of its own:
    Windows, even from today's `windows-gnu` player, and the packaged
    player refused every General MIDI machine run from outside its folder.
    Fixed by `qemu_embed_setenv` (embed API v10) and checked by
-   `test.sh`'s `companions-env`. Left before the MSVC link: an import
-   library `link.exe` takes (`qemu-embed-<target>.lib`; mingw makes a
-   `.dll.a`).
+   `test.sh`'s `companions-env`. The link needs no import library: the
+   bindings import the DLL through `raw-dylib` on Windows (2026-10-03),
+   and the winit player built for `x86_64-pc-windows-msvc` ran mingw
+   QEMU to the BIOS and quit cleanly (doc 11). Left for this step on
+   Windows: `player-mitsuami` built with MSVC (a `build-windows.sh`
+   stage, as the launcher's), its window and input there, and the
+   keyboard grab above.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and
