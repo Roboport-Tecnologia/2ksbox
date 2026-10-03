@@ -434,6 +434,12 @@ index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
 
+`tools/smb-try.sh <folder> [build/w11d]` (M23): the shared folder by
+hand before the launcher has the setting. Windows 11 on Arm in the
+aarch64 player, on the launcher's board, booted from a fresh overlay in
+`build/w11s`, with `<folder>` at `\\10.0.2.4\host` (user `smb`, password
+`smb`). smbserve's log is `build/w11s/smb.log`.
+
 `tools/smb-win11-test.sh [build/w11d]` (M23 step 3): the shared folder
 under Windows 11 on Arm's own use, on a fresh overlay of an installed
 spike machine in `OUT=build/w11s`. smbserve serves a host tree with
