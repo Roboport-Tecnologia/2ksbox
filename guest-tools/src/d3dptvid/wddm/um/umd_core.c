@@ -104,12 +104,20 @@ static HRESULT gdi2(ULONG type, void *q, ULONG size)
     return hr;
 }
 
+/* D3DCAPS2_CANSHARERESOURCE: Direct3D 9Ex's surfaces shared between
+ * processes, which DWM composes with. WDDM's alone: the XP driver's DX9
+ * face has no sharing to claim */
+#define D3DCAPS2_CANSHARERESOURCE_ 0x80000000u
+
 HRESULT umd_caps9(void *out, UINT size)
 {
-    if (size != sizeof(d3d_caps9)) {
-        umd_log("GetCaps(D3D9CAPS): the runtime's %u bytes, ours %u", size, (UINT)sizeof(d3d_caps9));
+    D3DCAPS9_ c = d3d_caps9;
+
+    if (size != sizeof(c)) {
+        umd_log("GetCaps(D3D9CAPS): the runtime's %u bytes, ours %u", size, (UINT)sizeof(c));
     }
-    CopyMemory(out, &d3d_caps9, size < sizeof(d3d_caps9) ? size : sizeof(d3d_caps9));
+    c.c8.Caps2 |= D3DCAPS2_CANSHARERESOURCE_;
+    CopyMemory(out, &c, size < sizeof(c) ? size : sizeof(c));
     return S_OK;
 }
 

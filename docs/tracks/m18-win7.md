@@ -314,6 +314,19 @@ device's half is plain QEMU C and builds anywhere.
    depth-to-depth StretchRect, the test loop as a repo tool (its base
    image is still made by hand), and the device's own interrupt (step 4).
    Next is step 7: Direct3D 9Ex, shared surfaces, DWM.
+7. **First probes of DWM** (2026-10-03, `w7d3d.sh EXTRA=`): with the
+   UxSms service running, applying `aero.theme` answers "This theme can't
+   be applied to the desktop", and the driver sees only OpenAdapter,
+   GetCaps (D3D9 caps, the format list, the queries) and CloseAdapter: DWM
+   refuses composition before it makes a device. Not the cause, each
+   tried alone: `HKCU\Software\Microsoft\Windows\DWM` `CompositionPolicy=2`
+   (forcing it past the Experience Index); `D3DCAPS2_CANSHARERESOURCE`
+   (now claimed: Direct3D 9Ex's sharing is real on this driver, a shared
+   resource allocated and freed through the runtime's handle, an opened
+   one never freed by the opener); X8R8G8B8 source modes (cdd.dll still
+   makes an A8R8G8B8 primary and dxgkrnl drops it in a loop, as the first
+   boots found; A8R8G8B8 modes stay, as VirtualBox's WDDM driver has
+   them). Next: DWM's own reason, from the guest's event logs.
    Windows 7's UAC dialog is not always centred: the test loop answers it
    with Alt+Y.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**

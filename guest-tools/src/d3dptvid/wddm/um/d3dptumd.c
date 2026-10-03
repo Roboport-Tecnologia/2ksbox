@@ -98,6 +98,8 @@ typedef struct UMD_RES {
     UINT nsub;
     struct UMD_SUB { UINT off, pitch, slice; const void *sysmem; } *sub;
     BOOL rendered;                                /* the host drew into it: read back before the CPU sees it */
+    BOOL opened;                                  /* another process's allocation (OpenResource): never freed here */
+    BOOL shared;                                  /* a shared resource: allocated and freed through the runtime's handle */
 } UMD_RES;
 
 /* The device: the runtime's callbacks, its one context, and the command
@@ -517,6 +519,10 @@ static HRESULT APIENTRY umd_create_resource(HANDLE h, D3DDDIARG_CREATERESOURCE *
         ai.PrivateDriverDataSize = sizeof(r->d);
         ai.VidPnSourceId = c->VidPnSourceId;
         ai.Flags.Primary = c->Flags.Primary;
+        /* a shared resource (Direct3D 9Ex's, DWM's) is a kernel resource
+         * other processes open: it takes the runtime's handle */
+        r->shared = c->Flags.SharedResource;
+        al.hResource = r->shared ? r->rt : NULL;
         al.NumAllocations = 1;
         al.pAllocationInfo = &ai;
         hr = dev->cb.pfnAllocateCb(dev->rt, &al);
@@ -549,10 +555,11 @@ static HRESULT APIENTRY umd_destroy_resource(HANDLE h, HANDLE hres)
     }
     if (dev->ib.res == r) dev->ib.res = NULL;
     if (dev->z == r) dev->z = NULL;
-    if (r->kmt) {
+    if (r->kmt && !r->opened) {
         D3DDDICB_DEALLOCATE da;
 
         ZeroMemory(&da, sizeof(da));
+        da.hResource = r->shared ? r->rt : NULL;
         da.NumAllocations = 1;
         da.HandleList = &r->kmt;
         dev->cb.pfnDeallocateCb(dev->rt, &da);
@@ -1986,6 +1993,7 @@ static HRESULT APIENTRY umd_open_resource(HANDLE h, D3DDDIARG_OPENRESOURCE *o)
     }
     r->rt = o->hResource;
     r->kmt = ai[0].hAllocation;
+    r->opened = TRUE;
     r->d = *d;
     if (d->kind == D3DPT_ALLOC_PRIMARY) {
         r->d.caps = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;     /* as the kernel-mode driver registers it */
