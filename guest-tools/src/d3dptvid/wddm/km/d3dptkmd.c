@@ -556,6 +556,7 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
         u->d3d = a->d3d;
         u->vram = a->vram_len;
         u->seg_size = a->seg_size;
+        u->fb_caps = a->regs[D3DPT_FB_REG_CAPS / 4];
         st = STATUS_SUCCESS;
         break;
     }
@@ -2568,12 +2569,45 @@ static NTSTATUS APIENTRY d3dpt_set_vidpn_source_visibility(IN_CONST_HANDLE h,
     return STATUS_SUCCESS;
 }
 
+/* The path's gamma ramp: D3DKMTSetGammaRamp (Direct3D 9's SetGammaRamp,
+ * DXGI's SetGammaControl, GDI's SetDeviceGammaRamp) into the device's
+ * GAMMA block (register set v5), as the XP driver's DrvIcmSetDeviceGammaRamp
+ * loads it. The user-mode driver claims D3DCAPS2_FULLSCREENGAMMA on it,
+ * which d3d10level9 requires for any feature level (and so DWM). */
 static DXGKDDI_UPDATEACTIVEVIDPNPRESENTPATH d3dpt_update_active_vidpn_present_path;
 static NTSTATUS APIENTRY d3dpt_update_active_vidpn_present_path(IN_CONST_HANDLE h,
     IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST u)
 {
-    UNREFERENCED_PARAMETER(h);
-    UNREFERENCED_PARAMETER(u);
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    const D3DKMDT_GAMMA_RAMP *g = &u->VidPnPresentPathInfo.GammaRamp;
+    static ULONG logged;
+    ULONG i;
+
+    if (!(a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_GAMMA)) {
+        return STATUS_SUCCESS;
+    }
+    if (g->Type == D3DDDI_GAMMARAMP_RGB256x3x16 && g->Data.pRgb256x3x16 &&
+        g->DataSize >= sizeof(D3DDDI_GAMMA_RAMP_RGB256x3x16)) {
+        const D3DDDI_GAMMA_RAMP_RGB256x3x16 *r = g->Data.pRgb256x3x16;
+
+        for (i = 0; i < D3DPT_FB_GAMMA_SIZE; i++) {
+            a->regs[D3DPT_FB_REG_GAMMA / 4 + i] = ((ULONG)(r->Red[i] >> 8) << 16) |
+                                                   ((ULONG)(r->Green[i] >> 8) << 8) | (r->Blue[i] >> 8);
+        }
+        a->regs[D3DPT_FB_REG_GAMMA_ENABLE / 4] = 1;
+    } else if (g->Type == D3DDDI_GAMMARAMP_DEFAULT) {
+        a->regs[D3DPT_FB_REG_GAMMA_ENABLE / 4] = 0;
+    } else if (g->Type != D3DDDI_GAMMARAMP_UNINITIALIZED) {
+        dbg_hex("d3dptkmd: gamma ramp type not loaded ", (ULONG)g->Type);
+        dbg_puts("\n");
+        return STATUS_SUCCESS;
+    }
+    if (logged < 8) {
+        logged++;
+        dbg_hex("d3dptkmd: gamma ramp type ", (ULONG)g->Type);
+        dbg_hex(", 128 -> ", a->regs[D3DPT_FB_REG_GAMMA / 4 + 128]);
+        dbg_puts("\n");
+    }
     return STATUS_SUCCESS;
 }
 

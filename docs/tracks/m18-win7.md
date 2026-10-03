@@ -330,14 +330,80 @@ device's half is plain QEMU C and builds anywhere.
    (`wevtutil qe Application`, through the scratch disk): event 9007,
    "The Desktop Window Manager was unable to start because WDDM is not in
    use", then 9009 exits with `0xc00002fe` and `0x80070224`, while the
-   same boot runs its desktop and Direct3D 9 on this WDDM driver. So DWM's
-   test of the driver model fails on something the driver reports (the
-   WDDM version or a cap in DXGK_DRIVERCAPS, the adapter as dxgkrnl
-   describes it to user mode, or the VGA-compatible boot device beside
-   it), not on the D3D caps. That is the next thing to find.
+   same boot runs its desktop and Direct3D 9 on this WDDM driver.
    Windows 7's UAC dialog is not always centred: the test loop answers it
    with Alt+Y.
-7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**
+8. **Why DWM refused: d3d10level9's feature-level test** (2026-10-03).
+   Read in the guest's own binaries with Microsoft's public symbols
+   (dwm.exe, dwmcore.dll, d3d10level9.dll, win32k.sys of 7601; the
+   symbol server serves their PDBs, and they are OMAP-optimised, so an
+   address needs the PDB's OMAP_FROM_SRC map). The message is misleading:
+   - dwm.exe's `CDwmAppHost::VerifyDisplayModesViaGDI` walks
+     `EnumDisplayDevices` and wants win32k's LDDM bit (`StateFlags`
+     `0x00800000`, `PDEVOBJ::bLddmDriver`, set when the device answers
+     dxgkrnl's IOCTL `0x232033` with type 2) on every attached device. Our
+     device has it (`flags=00900005`; the three RDP devices are not
+     attached), so that check passes.
+   - `VerifyDisplayModesViaMIL` then asks dwmcore for the display's
+     `MilGraphicsAccelerationCaps`, and reports the *same* event 9007 when
+     its "accelerated" word is 0. dwmcore sets it only after
+     `CD3DDeviceTable::GetDeviceCapsForAdapter` has a **Direct3D 10.1
+     device** on the adapter: DWM composes through D3D 10.1, which on a
+     Direct3D 9-class driver is `d3d10level9.dll` over our user-mode
+     driver. The OpenAdapter / GetCaps / CloseAdapter the driver saw was
+     d3d10level9 reading our caps and refusing every level, so
+     `D3D10CreateDevice1` returned `E_NOINTERFACE` (the probe below).
+   - d3d10level9's test (`CapCapsAtFeatureLevel` / `ExceedsCapsBits` over
+     `RequiredCaps` tables, one each for 9_1, 9_2, 9_3) wanted, for 9_1,
+     what our caps lacked: `D3DCAPS2_FULLSCREENGAMMA`, and cube (and for
+     L8 volume) operations on L8, Q8W8V8U8, DXT2 and DXT4 (it maps BC2 and
+     BC3 to DXT2 and DXT4, the first D3DFORMAT in its table, not to DXT3 /
+     DXT5). Its D3D10 format support is derived from the FORMATOPs
+     (`UMAdapter::AddCapsForFormat`); the event and occlusion queries it
+     wants we have. 9_2 also wants `D3DPMISCCAPS_SEPARATEALPHABLEND`,
+     MaxPrimitiveCount and MaxVertexIndex at 0xFFFFF (so 32-bit indices),
+     volume / cube A8, L16, Q16W16V16U16; 9_3 4096 textures, four targets.
+   - DWM needs only 9_1: dwmcore's tier 2 (`GraphicsAccelerationTier::
+     GetTier`, `g_rgTierRequirements`) takes 4096-texel textures, and below
+     9_3 it probes them by creating a 2100-wide R8 texture, which
+     d3d10level9 allows up to the hardware's own limit.
+   The fix is the user-mode driver's: FULLSCREENGAMMA claimed on the
+   device's gamma block, which the kernel driver now loads from
+   `UpdateActiveVidPnPresentPath` (the path's 256x3x16 ramp, as the XP
+   driver's DrvIcmSetDeviceGammaRamp), and the four formats' extra
+   operations added in `umd_format` (the core keeps them 2D for XP and
+   9x). With that `D3D10CreateDevice1` at 9_1 succeeds, and DWM goes one
+   check further: event 9016, "an analysis of the hardware and
+   configuration indicated that it would perform poorly", the Experience
+   Index (`VerifyGraphicsAssesment`), which `CompositionPolicy` overrides.
+   **With `CompositionPolicy=2` (HKLM and HKCU) DWM composes Windows 7's
+   desktop on this driver: Aero glass** (2026-10-03: window frames
+   transparent over what is behind them, shadows, `dwm.exe` running in
+   the console session, 12-30 composed frames a second under TCG). Two
+   user-mode driver bugs DWM found on the way, both making the host
+   refuse a batch and lose the context creation inside it, after which
+   every DP2 named a missing context (`batch error 3`, the windows'
+   contents blank): a buffer whose size is not a multiple of 4 was sent
+   with its width unrounded and its pitch rounded (the host wants them
+   equal), and SETRENDERTARGET's depth slot was left as the reused command
+   buffer had it when there is no depth surface (a stale handle, here a
+   vertex buffer's). Also an indexed draw's range now ends at its buffer
+   (d3d10level9 passes the whole buffer's vertex count from a base vertex
+   inside it, and the host skipped the draw). The executor now names a
+   VRAM surface or buffer it refuses (`ddi: surface N refused (why)`).
+   Left open: **D3DGAME9 hangs under composition** (device made, window
+   white, no frame; it runs without DWM), the Experience Index itself
+   (`winsat dwm`, instead of the policy override), and the device's
+   interrupt (DWM paces on the vertical blank; the timer stands in).
+   Tools for this (throwaway, in the session's scratch): `DDPROBE`
+   (EnumDisplayDevices as DWM calls it) and `D10PROBE` (DXGI's adapter,
+   `D3D10CreateDevice1` at each level, run under a debug loop for
+   OutputDebugString), and a replay of d3d10level9's test on the UMD's
+   GetCaps answers dumped to the QEMU log.
+7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
+   the desktop since 2026-10-03 (finding 8 above), behind the
+   `CompositionPolicy` override; next the windowed Direct3D 9 program
+   under composition, the Experience Index, the vertical-blank interrupt.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

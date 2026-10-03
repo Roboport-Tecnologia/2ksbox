@@ -41,7 +41,8 @@ typedef struct D3DPT_UMD_INFO {
     ULONG ddflags;                                /* -device d3dpt-vga,ddflags=N (core_caps.c reads them) */
     ULONG d3d;                                    /* 1: a command window and an executor on the host */
     ULONG vram, seg_size;                         /* BAR 0's bytes, and the segment's (VRAM below the window) */
-    ULONG reserved[9];
+    ULONG fb_caps;                                /* D3DPT_FB_CAP_* (an older KMD leaves 0 here) */
+    ULONG reserved[8];
 } D3DPT_UMD_INFO;
 
 /* Escape: the user-mode driver's private data */

@@ -168,7 +168,7 @@ HRESULT APIENTRY OpenAdapter(D3DDDIARG_OPENADAPTER *o)
     }
     umd_log("adapter: register set v%u, ddflags 0x%x, Direct3D %u, VRAM %u MiB, segment %u MiB",
             a->info.fb_version, a->info.ddflags, a->info.d3d, a->info.vram >> 20, a->info.seg_size >> 20);
-    umd_caps_init(a->info.ddflags);
+    umd_caps_init(a->info.ddflags, a->info.fb_caps);
     o->hAdapter = a;
     o->pAdapterFuncs->pfnGetCaps = umd_get_caps;
     o->pAdapterFuncs->pfnCreateDevice = umd_create_device;
@@ -448,7 +448,11 @@ static UINT umd_layout(UMD_RES *r, const D3DDDIARG_CREATERESOURCE *c)
         total += rb * rows * depth;
         total = (total + 15) & ~15u;
     }
-    d->w = c->pSurfList[0].Width;
+    /* a buffer is its bytes rounded up to a dword, width and pitch alike
+     * (the host refuses one whose two differ: d3d10level9 makes buffers of
+     * any size, three 16-bit indices among them, and the rest of the
+     * batch, a context's creation, went with the refusal) */
+    d->w = buffer ? r->sub[0].pitch : c->pSurfList[0].Width;
     d->h = buffer ? 1 : c->pSurfList[0].Height;
     d->pitch = r->sub[0].pitch;
     d->format = buffer ? 0 : (ULONG)c->Format;
@@ -767,6 +771,10 @@ static BYTE *dp2_tok(UMD_DEV *d, UINT op, UINT count, UINT bytes, UINT nal)
             d->rt_dirty = FALSE;
             pair = (UINT *)dp2_put_nal(d, 41, 1, 8, 2);     /* SETRENDERTARGET: target 0, depth */
             if (pair) {
+                /* no depth surface is a 0, not what an earlier submission
+                 * left in the reused buffer (DWM draws with none, and a
+                 * stale handle there named a vertex buffer as its depth) */
+                pair[0] = pair[1] = 0;
                 if (d->tgt[0] && d->tgt[0]->kmt) cmd_patch(d, &pair[0], d->tgt[0], D3DPT_PATCH_HANDLE, 0);
                 if (d->z && d->z->kmt) cmd_patch(d, &pair[1], d->z, D3DPT_PATCH_HANDLE, 0);
             }
@@ -1270,6 +1278,12 @@ static void umd_draw(UMD_DEV *d, UINT prim, UINT count, UINT voff, UINT nverts, 
     if (nindices && ((!d->ib.res && !d->ib.um) || d->ib.stride != 2)) {
         skip_draw(d, d->ib.stride == 4 ? "32-bit indices" : "no index buffer", prim, count);
         return;
+    }
+    /* an indexed draw's range ends at its buffer's end: d3d10level9 passes
+     * the whole buffer's vertex count with a base vertex inside it, and
+     * the host skips a range that runs past the buffer */
+    if (nindices && s0->res && s0->off + voff < s0->res->d.w && nverts * stride > s0->res->d.w - s0->off - voff) {
+        nverts = (s0->res->d.w - s0->off - voff) / stride;
     }
     vbytes = nverts * stride;
     if (nindices && !d->ib.res) {

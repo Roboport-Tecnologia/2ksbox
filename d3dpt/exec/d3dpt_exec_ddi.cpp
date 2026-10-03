@@ -2726,7 +2726,13 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
              * (a DRAW8 reads its range from VRAM) */
             if (!a->handle || !a->width || a->height != 1 || a->pitch != a->width || a->format || a->levels > 1 ||
                 (a->caps & ~D3DPT_VS_BUFFER) || (uint64_t)a->offset + a->width > x.vram_size ||
-                c->size < sizeof(d3dpt_cmd) + sizeof *a) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+                c->size < sizeof(d3dpt_cmd) + sizeof *a) {
+                if (ddi(x).warn_once(0x72000000u | (a->handle & 0xffffffu)))
+                    x.log("ddi: buffer %u refused: %u bytes pitch %u height %u format %u levels %u caps 0x%x offset 0x%x", a->handle,
+                          a->width, a->pitch, a->height, a->format, a->levels, a->caps, a->offset);
+                b.err = D3DPT_ERR_BAD_ARG;
+                return true;
+            }
             Ddi &d = ddi(x);
             VramSurf &s = d.surfs[a->handle];
             if (s.tex || s.rt || s.cube || s.vol) s.release();       /* the handle was a texture / target before */
@@ -2745,6 +2751,15 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         bool cube = (a->caps & D3DPT_VS_CUBE) != 0, vol = (a->caps & D3DPT_VS_VOLUME) != 0;
         uint32_t nlv = cube ? D3DPT_CUBE_FACES * levels - 1 : levels - 1;     /* the tail's level entries (v11: face-major) */
         uint32_t row = fmt_row_bytes(a->format, a->width), rows = fmt_rows(a->format, a->height);
+        /* a refused surface says which, once per handle: the batch's later
+         * records (a context, its draws) are lost with it */
+        auto refuse = [&](const char *why) {
+            if (ddi(x).warn_once(0x71000000u | (a->handle & 0xffffffu)))
+                x.log("ddi: surface %u refused (%s): %ux%u format %u pitch %u offset 0x%x levels %u caps 0x%x", a->handle, why,
+                      a->width, a->height, a->format, a->pitch, a->offset, a->levels, a->caps);
+            b.err = D3DPT_ERR_BAD_ARG;
+            return true;
+        };
         if (!a->handle || !a->width || !a->height || a->width > 8192 || a->height > 8192 || levels > 16 ||
             (cube && (a->width != a->height || !(a->caps & D3DPT_VS_TEXTURE) || (a->caps & (D3DPT_VS_PRIMARY | D3DPT_VS_ZBUFFER)))) ||
             (vol && (cube || !(a->caps & D3DPT_VS_TEXTURE) || (a->caps & (D3DPT_VS_PRIMARY | D3DPT_VS_ZBUFFER | D3DPT_VS_RENDER_TARGET)) ||
@@ -2752,19 +2767,19 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
             /* v15: an autogen texture is a 2D texture of one level the guest keeps */
             ((a->caps & D3DPT_VS_AUTOGEN) && (cube || vol || levels != 1 || !(a->caps & D3DPT_VS_TEXTURE) ||
                                               (a->caps & (D3DPT_VS_PRIMARY | D3DPT_VS_ZBUFFER | D3DPT_VS_SAMPLES_MASK)))) ||
-            c->size < sizeof(d3dpt_cmd) + sizeof *a + (nlv + (vol ? 1 : 0)) * sizeof(d3dpt_u32x2)) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+            c->size < sizeof(d3dpt_cmd) + sizeof *a + (nlv + (vol ? 1 : 0)) * sizeof(d3dpt_u32x2)) return refuse("shape");
         if (!row) {
             if (ddi(x).warn_once(0x70000 | a->format)) x.log("ddi: surface format %u (0x%08x) not mirrored", a->format, a->format);
             return true;
         }
-        if (a->pitch < row || (uint64_t)a->offset + (uint64_t)a->pitch * rows > x.vram_size) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+        if (a->pitch < row || (uint64_t)a->offset + (uint64_t)a->pitch * rows > x.vram_size) return refuse("pitch or VRAM range");
         const d3dpt_u32x2 *lv = (const d3dpt_u32x2 *)tail(a);
         for (uint32_t i = 1; i <= nlv; i++) {
             uint32_t l = i % levels, w = a->width >> l, h = a->height >> l;     /* a cube's entry i is face i / levels */
             if (!w) w = 1;
             if (!h) h = 1;
             if (lv[i - 1].b < fmt_row_bytes(a->format, w) ||
-                (uint64_t)lv[i - 1].a + (uint64_t)lv[i - 1].b * fmt_rows(a->format, h) > x.vram_size) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+                (uint64_t)lv[i - 1].a + (uint64_t)lv[i - 1].b * fmt_rows(a->format, h) > x.vram_size) return refuse("a level");
         }
         /* v12: a volume's {depth, slice pitch} after its levels; every slice of every level inside VRAM */
         uint32_t depth = 0, slice = 0;
@@ -2772,7 +2787,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
             depth = lv[nlv].a;
             slice = lv[nlv].b;
             if (!depth || depth > D3DPT_VOLUME_MAX_DEPTH || (uint64_t)slice < (uint64_t)a->pitch * rows ||
-                (uint64_t)a->offset + (uint64_t)slice * depth > x.vram_size) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+                (uint64_t)a->offset + (uint64_t)slice * depth > x.vram_size) return refuse("volume depth");
             for (uint32_t l = 1; l < levels; l++) {
                 uint32_t h = a->height >> l, dep = depth >> l;
                 if (!h) h = 1;

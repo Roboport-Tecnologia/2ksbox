@@ -76,13 +76,16 @@ ULONG heap_end(d3dpt_core *c) { (void)c; return 0; }
 
 /* --- umd_core.h --- */
 
-void umd_caps_init(ULONG flags)
+void umd_caps_init(ULONG flags, ULONG fb_caps)
 {
     ZeroMemory(g_regs, sizeof(g_regs));
     g_regs[D3DPT_FB_REG_DDFLAGS / 4] = flags;
     ZeroMemory(&g_core, sizeof(g_core));
     g_core.regs = g_regs;
     g_core.dx9 = TRUE;
+    /* the kernel-mode driver loads the path's gamma ramp into the GAMMA
+     * block (UpdateActiveVidPnPresentPath): D3DCAPS2_FULLSCREENGAMMA */
+    g_core.gamma = (fb_caps & D3DPT_FB_CAP_GAMMA) && !(flags & DDF_NO_GAMMA);
     g_core.rt_dxver = 0x902;          /* d3d9.dll's, as XP's announces itself (DXVERSION) */
     d3d_caps_init(&g_core);
 }
@@ -168,6 +171,23 @@ BOOL umd_format(UINT i, ULONG *fmt, ULONG *ops, ULONG *ms)
     *fmt = f.format.dwFourCC;
     *ops = f.format.dwRBitMask;               /* dwOperations */
     *ms = f.format.dwGBitMask;                /* MultiSampleCaps: wFlipMSTypes, wBltMSTypes */
+    /* What d3d10level9 requires of a feature level 9_1 device beyond the
+     * core's list (its RequiredCaps table, Windows 7 SP1), and so DWM,
+     * which composes through Direct3D 10.1 on it: R8_UNORM (L8) as a cube
+     * and a volume, R8G8B8A8_SNORM (Q8W8V8U8) and BC2 / BC3 as cubes. It
+     * takes BC2 and BC3 from DXT2 and DXT4, which decode as DXT3 and DXT5
+     * do, so those two get the DXT3 / DXT5 ops. The core keeps them 2D for
+     * the XP and 9x drivers (untried there); the host makes each in its own
+     * format whatever its shape */
+    if (*fmt == D3DFMT_L8_) {
+        *ops |= (ddflags(&g_core) & DDF_NO_CUBE) ? 0 : D3DFORMAT_OP_CUBETEXTURE_;
+        *ops |= (ddflags(&g_core) & DDF_NO_VOLUME) ? 0 : D3DFORMAT_OP_VOLUMETEXTURE_;
+    } else if (*fmt == D3DFMT_Q8W8V8U8_) {
+        *ops |= (ddflags(&g_core) & DDF_NO_CUBE) ? 0 : D3DFORMAT_OP_CUBETEXTURE_;
+    } else if (*fmt == FOURCC_('D', 'X', 'T', '2') || *fmt == FOURCC_('D', 'X', 'T', '4')) {
+        *ops |= (ddflags(&g_core) & DDF_NO_CUBE) ? 0 : D3DFORMAT_OP_CUBETEXTURE_;
+        *ops |= (ddflags(&g_core) & DDF_NO_VOLUME) ? 0 : D3DFORMAT_OP_VOLUMETEXTURE_;
+    }
     return TRUE;
 }
 

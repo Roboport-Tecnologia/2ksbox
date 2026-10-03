@@ -12,7 +12,7 @@
 
 /* the caps tables the XP driver's DX9 face hands d3d9.dll, built for the
  * adapter's ddflags */
-void umd_caps_init(ULONG ddflags);
+void umd_caps_init(ULONG ddflags, ULONG fb_caps);
 HRESULT umd_caps9(void *out, UINT size);           /* D3DCAPS9 */
 HRESULT umd_caps8(void *out, UINT size);           /* D3DCAPS8 */
 HRESULT umd_caps_hal(void *out, UINT size);        /* D3DHAL_GLOBALDRIVERDATA (DX3's device) */
