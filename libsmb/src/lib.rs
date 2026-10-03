@@ -2,8 +2,10 @@
 //! a folder on the host, one account logs in with NTLMv2, and every
 //! response is signed (what Windows 11 24H2's client requires).
 //!
-//! It speaks dialects 2.0.2 through 3.1.1 without encryption, leases or
-//! oplocks, durable handles or DFS. Change notification polls the folder
+//! It speaks dialects 2.0.2 through 3.1.1 without encryption, oplocks,
+//! write or handle caching, durable handles or DFS. It grants
+//! read-caching leases, broken by another open's write or a change on the
+//! host. Change notification polls the folder
 //! once a second and reports what was added, removed or modified.
 //! It is meant for one trusted client on a private transport, such as a
 //! virtual machine's guest reaching it through the hypervisor's NAT,
@@ -19,6 +21,7 @@
 
 mod conn;
 mod fs;
+mod lease;
 mod ntlm;
 mod rpc;
 mod spnego;
@@ -96,6 +99,9 @@ pub struct Config {
     pub shares: Vec<Share>,
     pub max_dialect: Dialect,
     pub logger: Option<Logger>,
+    /// Grant read-caching leases (on by default): the client then caches
+    /// file data, until a write or a change on the host breaks it.
+    pub leases: bool,
 }
 
 impl Config {
@@ -106,6 +112,7 @@ impl Config {
             shares: Vec::new(),
             max_dialect: Dialect::Smb311,
             logger: None,
+            leases: true,
         }
     }
     pub fn share(mut self, s: Share) -> Config {
@@ -114,6 +121,10 @@ impl Config {
     }
     pub fn max_dialect(mut self, d: Dialect) -> Config {
         self.max_dialect = d;
+        self
+    }
+    pub fn leases(mut self, on: bool) -> Config {
+        self.leases = on;
         self
     }
     pub fn logger(mut self, l: Logger) -> Config {

@@ -43,7 +43,11 @@ const FLAG_ASYNC: u32 = 0x02;
 const FLAG_RELATED: u32 = 0x04;
 const FLAG_SIGNED: u32 = 0x08;
 
+const CAP_LEASING: u32 = 0x02;
 const CAP_LARGE_MTU: u32 = 0x04;
+const OPLOCK_BREAK: u16 = 0x12;
+/// The CREATE's RequestedOplockLevel that means "see my lease context".
+const OPLOCK_LEVEL_LEASE: u8 = 0xff;
 const MAX_IO: u32 = 1 << 20;
 const HDR: usize = 64;
 
@@ -190,6 +194,10 @@ struct Open {
     access: u32,
     /// An IPC$ pipe's RPC state; such an open has no path or file.
     pipe: Option<crate::rpc::Pipe>,
+    /// The lease key the client opened this with, if it asked for one.
+    lease_key: Option<[u8; 16]>,
+    /// The file's identity for leases (`lease::file_id`).
+    file_ident: u64,
 }
 
 pub struct Conn {
@@ -210,6 +218,7 @@ pub struct Conn {
     watches: Arc<Mutex<Vec<Watch>>>,
     next_async: u64,
     watcher: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+    leases: Arc<Mutex<crate::lease::Leases>>,
 }
 
 /// The connection's writing half, shared with the watcher thread.
@@ -335,6 +344,15 @@ fn notify_done(out: &Out, w: &Watch, status: u32, data: &[u8]) -> io::Result<()>
     write_frame(&mut **out.lock().unwrap(), &m.0)
 }
 
+/// What the server offers at a dialect: large reads and leases from 2.1.
+fn caps(dialect: u16, leases: bool) -> u32 {
+    match (dialect >= 0x0210, leases) {
+        (false, _) => 0,
+        (true, true) => CAP_LARGE_MTU | CAP_LEASING,
+        (true, false) => CAP_LARGE_MTU,
+    }
+}
+
 fn sha512(parts: &[&[u8]]) -> [u8; 64] {
     let mut h = Sha512::new();
     for p in parts {
@@ -388,6 +406,7 @@ impl Conn {
             watches: Arc::new(Mutex::new(Vec::new())),
             next_async: 1,
             watcher: None,
+            leases: Arc::new(Mutex::new(crate::lease::Leases::default())),
         }
     }
 
@@ -421,17 +440,28 @@ impl Conn {
         res
     }
 
-    /// The watcher thread, started with the first CHANGE_NOTIFY: once a
-    /// second it compares each armed watch's directory with its snapshot.
+    /// The watcher thread, started with the first CHANGE_NOTIFY or lease:
+    /// once a second it compares each armed watch's directory with its
+    /// snapshot, and each leased file with what this server left.
     fn start_watcher(&mut self) {
         if self.watcher.is_some() {
             return;
         }
         let (stop, watches, out) = (Arc::new(AtomicBool::new(false)), self.watches.clone(), self.out.clone().unwrap());
+        let leases = self.leases.clone();
+        let (cfg, peer) = (self.cfg.clone(), self.peer.clone());
         let s2 = stop.clone();
         let t = thread::spawn(move || {
             while !s2.load(Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(1000));
+                // leased files changed on the host: the client's copy goes
+                let breaks = leases.lock().unwrap().host_changes();
+                for b in &breaks {
+                    cfg.log(true, &format!("[{}] lease broken: {:02x?}, changed on the host", peer, &b.key[..4]));
+                    if write_frame(&mut **out.lock().unwrap(), &crate::lease::break_message(b)).is_err() {
+                        return;
+                    }
+                }
                 let mut ws = watches.lock().unwrap();
                 let mut i = 0;
                 while i < ws.len() {
@@ -663,6 +693,7 @@ impl Conn {
                             CHANGE_NOTIFY => self.change_notify(h, c),
                             QUERY_INFO => self.query_info(c),
                             SET_INFO => self.set_info(c),
+                            OPLOCK_BREAK => self.lease_break_ack(c),
                             _ => Err(STATUS_NOT_SUPPORTED),
                         }
                     }
@@ -703,7 +734,7 @@ impl Conn {
         let blob = spnego::hint();
         let mut w = W::new();
         w.u16(65).u16(0x01 | 0x02).u16(dialect).u16(contexts.len() as u16);
-        w.bytes(&self.server_guid).u32(if dialect >= 0x0210 { CAP_LARGE_MTU } else { 0 });
+        w.bytes(&self.server_guid).u32(caps(dialect, self.cfg.leases));
         w.u32(MAX_IO).u32(MAX_IO).u32(MAX_IO).u64(crate::wire::now()).u64(0);
         w.u16((HDR + 64) as u16).u16(blob.len() as u16).u32(0);
         w.bytes(&blob);
@@ -1007,6 +1038,33 @@ impl Conn {
         let info = hostfs::info(&leaf, &meta);
         let id = self.next_file;
         self.next_file += 1;
+
+        // Leases: an open that writes (or truncated) takes every other
+        // client cache of the file away; then this open's own, if asked.
+        let file_ident = crate::lease::file_id(&path, &meta);
+        let rel_for_log = rel.clone();
+        let req = if self.cfg.leases && r.get(HDR + 3) == Some(&OPLOCK_LEVEL_LEASE) && !meta.is_dir() {
+            let coff = u32_at(r, HDR + 48) as usize;
+            let clen = u32_at(r, HDR + 52) as usize;
+            slice(r, coff, clen).and_then(crate::lease::parse)
+        } else {
+            None
+        };
+        let writes = access & (0x0000_0002 | 0x0000_0004 | 0x4000_0000 | 0x1000_0000) != 0 || matches!(action, 0 | 3);
+        if writes {
+            let breaks = self.leases.lock().unwrap().conflict(file_ident, req.as_ref().map(|q| &q.key));
+            self.send_breaks(&breaks);
+        }
+        let mut lease_ctx = Vec::new();
+        if let Some(q) = &req {
+            let (state, epoch) = self.leases.lock().unwrap().grant(q, file_ident, &path);
+            if state != 0 {
+                lease_ctx = crate::lease::response(q, state, epoch);
+                self.log(true, &format!("lease {:02x?} read-caching on {:?}", &q.key[..4], rel_for_log));
+                self.start_watcher();
+            }
+        }
+        let lease_key = req.as_ref().map(|q| q.key);
         self.opens.insert(
             id,
             Open {
@@ -1021,13 +1079,21 @@ impl Conn {
                 listing: None,
                 access,
                 pipe: None,
+                lease_key,
+                file_ident,
             },
         );
         let mut w = W::new();
-        w.u16(89).u8(0).u8(0).u32(action);
+        let level = if lease_ctx.is_empty() { 0 } else { OPLOCK_LEVEL_LEASE };
+        w.u16(89).u8(level).u8(0).u32(action);
         w.u64(info.created).u64(info.accessed).u64(info.written).u64(info.changed);
         w.u64(info.alloc).u64(info.size).u32(info.attrs).u32(0);
-        w.u64(id).u64(id).u32(0).u32(0);
+        w.u64(id).u64(id);
+        if lease_ctx.is_empty() {
+            w.u32(0).u32(0);
+        } else {
+            w.u32((HDR + 88) as u32).u32(lease_ctx.len() as u32).bytes(&lease_ctx);
+        }
         ok(w.0)
     }
 
@@ -1036,6 +1102,9 @@ impl Conn {
         let flags = u16_at(c.req, HDR + 2);
         let o = self.opens.remove(&id).unwrap();
         self.end_watches(STATUS_NOTIFY_CLEANUP, |w| w.file_id == id);
+        if let Some(k) = &o.lease_key {
+            self.leases.lock().unwrap().release(k);
+        }
         let info = if flags & 1 != 0 { fs::metadata(&o.path).ok().map(|m| hostfs::info("", &m)) } else { None };
         finish(&self.cfg, o);
         let mut w = W::new();
@@ -1048,6 +1117,36 @@ impl Conn {
                 w.zeros(52);
             }
         }
+        ok(w.0)
+    }
+
+    /// Lease break notifications, written now: they need no answer.
+    fn send_breaks(&self, breaks: &[crate::lease::Break]) {
+        let Some(out) = &self.out else { return };
+        for b in breaks {
+            self.log(true, &format!("lease broken: {:02x?}", &b.key[..4]));
+            let _ = write_frame(&mut **out.lock().unwrap(), &crate::lease::break_message(b));
+        }
+    }
+
+    /// The file under open `id` was written or changed through it: other
+    /// leases on it go, and its own lease learns the new size and time.
+    fn wrote(&self, id: u64) {
+        let o = &self.opens[&id];
+        let breaks = self.leases.lock().unwrap().conflict(o.file_ident, o.lease_key.as_ref());
+        self.send_breaks(&breaks);
+    }
+
+    /// LEASE_BREAK_ACK: a client may acknowledge a break that asked for
+    /// none. Its state is already the one acknowledged; echo it.
+    fn lease_break_ack(&mut self, c: &Ctx) -> Result<Reply, u32> {
+        let r = c.req;
+        if u16_at(r, HDR) != 36 {
+            return Err(STATUS_NOT_SUPPORTED); // an oplock's: none are granted
+        }
+        let key = slice(r, HDR + 8, 16).ok_or(STATUS_INVALID_PARAMETER)?.to_vec();
+        let mut w = W::new();
+        w.u16(36).u16(0).u32(0).bytes(&key).u32(u32_at(r, HDR + 24)).u64(0);
         ok(w.0)
     }
 
@@ -1076,6 +1175,8 @@ impl Conn {
                 listing: None,
                 access: u32_at(c.req, HDR + 24),
                 pipe: Some(crate::rpc::Pipe::new(&name)),
+                lease_key: None,
+                file_ident: 0,
             },
         );
         self.log(true, &format!("pipe {:?} opened", name));
@@ -1181,6 +1282,7 @@ impl Conn {
             offset = f.metadata().map(|m| m.len()).unwrap_or(0);
         }
         write_all_at(f, data, offset).map_err(|e| from_io(&e))?;
+        self.wrote(id);
         let mut w = W::new();
         w.u16(17).u16(0).u32(len as u32).u32(0).u16(0).u16(0);
         ok(w.0)
@@ -1209,14 +1311,14 @@ impl Conn {
             }
             FSCTL_VALIDATE_NEGOTIATE_INFO => {
                 let input = slice(r, in_off, in_len).ok_or(STATUS_INVALID_PARAMETER)?;
-                let caps = u32_at(input, 0);
+                let client_caps = u32_at(input, 0);
                 let secmode = u16_at(input, 20);
-                if caps != self.client_caps || input[4..20] != self.client_guid || secmode != self.client_secmode {
+                if client_caps != self.client_caps || input[4..20] != self.client_guid || secmode != self.client_secmode {
                     self.log(false, "validate negotiate: mismatch, dropping");
                     return Err(STATUS_ACCESS_DENIED);
                 }
                 let mut w = W::new();
-                w.u32(if self.dialect >= 0x0210 { CAP_LARGE_MTU } else { 0 }).bytes(&self.server_guid);
+                w.u32(caps(self.dialect, self.cfg.leases)).bytes(&self.server_guid);
                 w.u16(0x01 | 0x02).u16(self.dialect);
                 w.0
             }
@@ -1536,6 +1638,10 @@ impl Conn {
                 self.log(true, &format!("SET_INFO {}/{} not supported", ty, class));
                 return Err(STATUS_NOT_SUPPORTED);
             }
+        }
+        // times, size, name, a pending delete: other caches of the file go
+        if ty == 1 && !matches!(class, 14 | 16) {
+            self.wrote(id);
         }
         ok(vec![2, 0])
     }

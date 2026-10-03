@@ -4,7 +4,9 @@
 # (2.1 with HMAC-SHA256 signing, 3.1.1 with AES-CMAC and the preauth
 # hash); the host's client mounts it with signing required, reads,
 # writes, copies, renames and deletes, and the server's log must show the
-# login and no signature it could not verify.
+# login and no signature it could not verify. With macOS's client also
+# leases: one is granted, and a read after the file changed on the host
+# returns the new contents (the server broke the lease).
 #
 #   tools/smb-host-test.sh [out]     (default build/test/smb)
 #
@@ -44,6 +46,16 @@ one() { # dialect
     mkdir "$mnt/d" && rmdir "$mnt/d" && [ ! -e "$share/d" ] || bad "$d: mkdir / rmdir"
     ls "$mnt" | grep -qx sub || bad "$d: listing"
     smbutil statshares -m "$mnt" | tee "$OUT/statshares-$d.txt" | grep -q "SIGNING_ON *TRUE" || bad "$d: not signed"
+    # a lease's cached copy does not outlive a change on the host: read
+    # through one open, change the file under the share, read again
+    echo one > "$share/live.txt"
+    python3 - "$mnt/live.txt" "$share/live.txt" <<'PY' || bad "$d: a cached read outlived a change on the host"
+import sys, time
+f = open(sys.argv[1]); f.read(); f.seek(0); f.read()
+open(sys.argv[2], "w").write("two\n")
+time.sleep(3)
+f.seek(0); sys.exit(0 if f.read() == "two\n" else 1)
+PY
     umount "$mnt" || bad "$d: unmount"
   else
     local c=(smbclient "//127.0.0.1/host" -p "$PORT" -U smb%smb --option="client signing=required"
@@ -57,6 +69,10 @@ one() { # dialect
   grep -q "logged in as" "$log" || bad "$d: no login in the server's log"
   grep -q "dialect 0x0$(echo "$d" | tr -d . | sed 's/^2$/202/;s/^21$/210/')" "$log" || bad "$d: not the dialect asked for"
   ! grep -q "bad signature" "$log" || bad "$d: a request's signature did not verify"
+  if [ $CLIENT = mount_smbfs ]; then
+    grep -q "read-caching on" "$log" || bad "$d: no lease granted"
+    grep -q "changed on the host" "$log" || bad "$d: no lease broken for the host's change"
+  fi
 }
 
 mkdir -p "$OUT"

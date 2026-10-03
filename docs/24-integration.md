@@ -80,8 +80,14 @@ So the first server needs:
   QUERY_DIRECTORY, QUERY_INFO / SET_INFO (basic, standard, rename,
   disposition, end of file), FLUSH, ECHO, and IOCTL refusing everything
   except validate-negotiate.
-- Credits enough for Explorer's pipelining. Oplocks and leases are
-  refused (none granted), so no break traffic.
+- Credits enough for Explorer's pipelining. **Read-caching leases**
+  (`libsmb/src/lease.rs`, M23 2026-10-03): without one Windows reads
+  every few kilobytes over the wire, however often it read the bytes
+  before. Only read caching, whose break needs no acknowledgement, so no
+  request ever waits on a client's flush. Broken when another open (another
+  lease key, or none) writes, resizes, renames or deletes the file, or
+  when the file changes on the host (the connection's watcher compares
+  size and time once a second). No oplocks.
 - `CHANGE_NOTIFY`: an interim STATUS_PENDING, then a signed async
   completion from a watcher thread that polls the folder once a second
   (no file-watching dependency). A one-folder watch gets real change

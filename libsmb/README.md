@@ -20,7 +20,12 @@ every response is signed, which is what current Windows clients insist on
 - Change notification from a watcher that polls once a second: the names
   added, removed or modified for a one-folder watch (FileSystemWatcher's
   Created / Deleted / Changed), "enumerate again" for a whole tree.
-- Not supported: encryption, oplocks and leases, durable handles, DFS,
+- Read-caching leases (SMB 2.1+), so a client caches file data: broken
+  when another open writes the file, or when it changes on the host (a
+  watcher compares size and time once a second). Write and handle
+  caching are not granted. `Config::leases(false)` / `--no-leases` turns
+  them off.
+- Not supported: encryption, oplocks, write and handle leases, durable handles, DFS,
   named streams, SMB1 (an SMB1 negotiate that offers
   SMB2 is answered so the client moves on).
 

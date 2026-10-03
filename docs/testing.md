@@ -141,7 +141,7 @@ What differs from Linux, so a failure there reads right:
 | `d3d9` | the Direct3D picker: a new machine writes nothing (`auto`); `dxvk`/`system` reach only `d3dpt-vga`, whose `info qtree` shows the property |
 | `libsynth` | `synthx selftest`: AdLib detection, a 440 Hz FM note, the shipped bank through the MPU-401 path, running status; `--roms` adds the CM-32L (doc 20 §7) |
 | `sharing` | Windows 11's clipboard and shared folder (M23) through `launcherx`: a new machine has the `qemu-vdagent` channel and no share; a folder is the player's `--share <dir>` only with the network on; `noclipboard none` takes both away, in the bundle too; and our QEMU of the machine's architecture takes the channel's devices on a bare board |
-| `smb` | `tools/smb-host-test.sh`: libsmb's `smbserve` against the host's own SMB client (macOS `mount_smbfs`, else Samba's `smbclient`) on localhost, at 2.1 and at 3.1.1 with signing required: read, a 3 MB write and read-back, rename, delete, mkdir / rmdir, and the server's log with the login and no signature it could not verify (M23, doc 24); skipped with no client or no `target/release/smbserve` |
+| `smb` | `tools/smb-host-test.sh`: libsmb's `smbserve` against the host's own SMB client (macOS `mount_smbfs`, else Samba's `smbclient`) on localhost, at 2.1 and at 3.1.1 with signing required: read, a 3 MB write and read-back, rename, delete, mkdir / rmdir, and the server's log with the login and no signature it could not verify (M23, doc 24); with macOS's client a lease granted and broken when the host changes the file, whose next read is the new contents; skipped with no client or no `target/release/smbserve` |
 | `music` | the sound-card and music pickers into a real QEMU; the monitor writes the ports and the note must be in QEMU's own `wav` |
 | `companions-env` | the bank the player names (`LIBSYNTH_SF2`, `companions.rs`) reaches QEMU's own `getenv()`: the real player, run from a folder with no `soundfonts/` and nothing in the environment, takes a General MIDI machine to the BIOS and quits. On Windows `set_var` never reached QEMU's C runtime (doc 11, "The C runtime boundary"). Needs the player and a display |
 | `sb-mixer` | the SB16's FM, master and SB Pro FM volumes at −12 dB come out 12 dB down (patch 61) |
@@ -461,7 +461,9 @@ spike machine in `OUT=build/w11s`. smbserve serves a host tree with
 awkward names and a 3000-file folder, and adds a file every 3 s for the
 change-notification item. `tools/win11-spike/smb-explorer.ps1` (run as
 `main.ps1` under `stub.ps1`) copies through Explorer's engine both ways,
-times 512 MB, edits in place, watches the folder, and opens Explorer on
+times 512 MB, hashes 512 MB through the share twice (the lease's cache),
+checks that a cached read sees another open's write and the host's
+rewrite of `live.txt`, edits in place, watches the folder, and opens Explorer on
 the share for `shots/desktop-hvf.png`. The host then checks the guest's
 upload and lists what the server refused. About 10 minutes; macOS on
 Apple Silicon only so far. `PROBE_PS1=` runs another guest script

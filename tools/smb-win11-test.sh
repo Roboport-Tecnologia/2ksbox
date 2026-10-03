@@ -16,7 +16,8 @@
 # elevated on the desktop. Then the host checks the guest's upload against
 # the hashes the guest wrote, and lists what the server did not support.
 #
-# Environment: OUT, PROBE_PS1 (another guest script instead), SEED (a
+# Environment: OUT, LEASES=off (smbserve --no-leases, the A/B), PROBE_PS1
+# (another guest script instead), SEED (a
 # folder whose contents are copied into the share first), TPM_PPI (off: QEMU 11.1's HVF aborts on the TPM's PPI
 # region, M21), MAX_DIALECT (3.1.1). macOS on Apple Silicon only for now.
 set -u
@@ -66,10 +67,14 @@ EOF
 
 # the host's side of the change-notification check: a new file every 3 s
 mkdir -p "$SHARE/hostwatch"
-( i=0; while sleep 3; do i=$((i + 1)); echo "$i" > "$SHARE/hostwatch/tick-$i.txt"; done ) &
+# and live.txt rewritten in place, for the lease check (a client's cached
+# copy must not outlive a change on the host)
+echo 0 > "$SHARE/live.txt"
+( i=0; while sleep 3; do i=$((i + 1)); echo "$i" > "$SHARE/hostwatch/tick-$i.txt"; echo "$i" > "$SHARE/live.txt"; done ) &
 TICK=$!
 
-"$BIN" --unix "$OUT/smb.sock" --user smb --password smb --max-dialect "${MAX_DIALECT:-3.1.1}" -v "$SHARE" >"$OUT/smb.log" 2>&1 &
+NOLEASES=""; [ "${LEASES:-on}" = off ] && NOLEASES=--no-leases
+"$BIN" --unix "$OUT/smb.sock" --user smb --password smb --max-dialect "${MAX_DIALECT:-3.1.1}" $NOLEASES -v "$SHARE" >"$OUT/smb.log" 2>&1 &
 SP=$!
 trap 'kill $SP $TICK 2>/dev/null' EXIT
 sleep 1
@@ -107,6 +112,6 @@ EOF
 echo "== what the server refused or did not support"
 grep -E "not supported|refused|bad signature|failed" "$OUT/smb.log" | sed 's/^smbserve: //;s/\[unix#[0-9]*\] //' | sort | uniq -c | sort -rn
 grep -q "bad signature" "$OUT/smb.log" && { echo "FAIL: a signature did not verify"; fail=1; }
-echo "requests: $(grep -c 'mid=' "$OUT/smb.log"); screenshot: $OUT/shots/desktop-hvf.png"
+echo "requests: $(grep -c 'mid=' "$OUT/smb.log") (READ $(grep -c '] READ ' "$OUT/smb.log")), leases broken: $(grep -c 'lease broken' "$OUT/smb.log"); screenshot: $OUT/shots/desktop-hvf.png"
 [ $fail = 0 ] && echo "smb-win11: pass"
 exit $fail

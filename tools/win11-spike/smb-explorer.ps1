@@ -140,6 +140,39 @@ try {
   check connection ($c.Signed) "dialect=$($c.Dialect) signed=$($c.Signed)"
 } catch { say "FAIL drive $_" }
 
+# 5b. Caching (leases): the same 512 MB hashed twice through the share,
+# and two caches that must not go stale: after another open writes the
+# file, and after the host rewrites it (the harness, every 3 s).
+try {
+  Copy-Item "$local\big.bin" Z:\cache.bin
+  $t = [Diagnostics.Stopwatch]::StartNew(); $h1 = (Get-FileHash Z:\cache.bin).Hash; $a = $t.Elapsed.TotalSeconds
+  $t = [Diagnostics.Stopwatch]::StartNew(); $h2 = (Get-FileHash Z:\cache.bin).Hash; $b = $t.Elapsed.TotalSeconds
+  $h0 = (Get-FileHash "$local\big.bin").Hash
+  check hash-twice (($h1 -eq $h0) -and ($h2 -eq $h0)) ("512 MB: first {0:N1} s, second {1:N1} s" -f $a, $b)
+  Remove-Item Z:\cache.bin
+} catch { say "FAIL hash-twice $_" }
+try {
+  Set-Content Z:\coh.txt -Value 'one' -NoNewline
+  $fs = [IO.File]::Open('Z:\coh.txt', 'Open', 'Read', 'ReadWrite, Delete')
+  $sr = New-Object IO.StreamReader($fs)
+  $v1 = $sr.ReadToEnd()
+  [IO.File]::WriteAllText('Z:\coh.txt', 'two')
+  Start-Sleep -Milliseconds 500
+  $fs.Seek(0, 'Begin') | Out-Null; $sr.DiscardBufferedData(); $v2 = $sr.ReadToEnd()
+  $fs.Close()
+  check coherent-write (($v1 -eq 'one') -and ($v2 -eq 'two')) "$v1 -> $v2"
+  Remove-Item Z:\coh.txt
+} catch { say "FAIL coherent-write $_" }
+try {
+  $fs = [IO.File]::Open('Z:\live.txt', 'Open', 'Read', 'ReadWrite, Delete')
+  $sr = New-Object IO.StreamReader($fs)
+  $v1 = $sr.ReadToEnd().Trim()
+  Start-Sleep 5
+  $fs.Seek(0, 'Begin') | Out-Null; $sr.DiscardBufferedData(); $v2 = $sr.ReadToEnd().Trim()
+  $fs.Close()
+  check coherent-host ($v1 -ne $v2) "$v1 -> $v2"
+} catch { say "FAIL coherent-host $_" }
+
 # 6. Change notification: the harness drops a file into hostwatch every
 # few seconds on the host; .NET's watcher (CHANGE_NOTIFY underneath) must
 # report it as Created (the server's change records, not "enumerate

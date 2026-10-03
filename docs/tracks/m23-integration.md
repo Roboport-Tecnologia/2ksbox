@@ -221,16 +221,31 @@ TPM device trips QEMU 11.1's HVF (M21); the test runs the spike's board
 with `ppi=off`, and the `sharing` check runs the launcher's channel on a
 bare board.
 
+## Leases (2026-10-03)
+
+Read-caching leases (`libsmb/src/lease.rs`; doc 24 §2.2). A/B with
+`tools/smb-win11-test.sh` (`LEASES=off` is `smbserve --no-leases`):
+
+| | Leases off | Leases on |
+|---|---|---|
+| A 512 MB file hashed through the share, first / second time | 49.3 s / 52.2 s | 17.5 s / 15.0 s |
+| READ requests over the whole run | 405,055 | 12,282 |
+| Every request | 474,363 | 71,333 |
+
+Coherence, checked both ways: a handle that read a file sees another
+open's write (Windows keeps one lease key per file and keeps its own
+handles coherent), and sees the host's rewrite of `live.txt`: the log
+shows the lease granted and broken about 2.5 s after the host's change.
+macOS's client the same, now in the `smb` host check.
+
 ## Open items
 
 - An ARM64-native agent (an ARM64 Windows toolchain on the build host).
 - Non-administrator users: a SYSTEM service holding the port, as Red
   Hat's agent does.
 
-- **Leases / oplocks.** None are granted, so Windows caches nothing: a
-  hash of a 512 MB file read in 4 KiB pieces costs about 131,000 READs. A
-  read lease (with a break when the host changes the file, through the
-  same watcher) would let it cache. This is about speed only.
+- ~~Leases~~ (done 2026-10-03, below). Write and handle caching are
+  still not granted.
 - Four IOCTLs are refused: 0x94264 (offload read), 0x900ef, 0x900a0 and
   0x9009c (object IDs). Nothing visible missed them.
 
