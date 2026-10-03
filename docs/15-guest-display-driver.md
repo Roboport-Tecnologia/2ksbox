@@ -14,7 +14,8 @@ The driver came in three stages, which still name the parts: **M7a** the
 framebuffer driver, **M7b** the DirectDraw DDI, **M7c** the Direct3D DDI
 (a DirectX 7 HAL, grown into a DirectX 8 DDI with hardware T&L, and
 since M16 a DirectX 9 DDI with shader model 3.0). The
-register set is **v5** (`D3DPT_FB_VERSION`) and the protocol **v20**
+register set is **v6** (`D3DPT_FB_VERSION`; v6 added only the WDDM
+driver's interrupt, which this driver never touches) and the protocol **v22**
 (`D3DPT_PROTO_VERSION`). FIFA 2000, Max Payne, Diablo, Moto Racer 1997,
 GTA 2 and GTA Vice City run on it with no DLL in their folders.
 
@@ -144,7 +145,7 @@ is checked.
 | `exec=wine` | the executor in a Wine process on the host (ADR-018, M15, doc 14) |
 | `fb-version=N` | the register set version reported |
 | `full-frames=on` | whole-frame conversion every refresh |
-| `irq=on` | an interrupt pin (INTA) for Windows 7's WDDM driver (M18), which dxgkrnl will not start without one; nothing raises it yet, and off (the default) keeps the PCI config XP, 9x and snapshots know |
+| `irq=on` | an interrupt pin (INTA) for Windows 7's WDDM driver (M18), which dxgkrnl will not start without one, and the IRQ registers behind it (register set v6, `CAP_IRQ`): the vertical blank at the refresh in `HZ`, on the guest's clock, while the driver enables it; off (the default) keeps the PCI config XP, 9x and snapshots know |
 
 The executor properties model hosts, not devices. The adapter only hands
 them to the loader (`d3dpt/hw/d3dpt_exec_load.c`).

@@ -70,7 +70,11 @@ struct D3dptVgaState {
     bool irq;                   /* property: an interrupt pin (INTA). dxgkrnl will not
                                    start a WDDM adapter without one (M18); off keeps
                                    XP, 9x and snapshots unchanged */
-    bool no_exec;               /* property: act as a host with no Vulkan 1.3 device
+    uint32_t irq_enable;        /* IRQ_ENABLE (register set v6) */
+    uint32_t irq_status;        /* IRQ_STATUS: raised while enabled, not yet acknowledged */
+    QEMUTimer *vbl_timer;       /* the vertical blank interrupt's, while IRQ_VBLANK is enabled */
+    int64_t vbl_next_ns;        /* its next deadline (QEMU_CLOCK_VIRTUAL) */
+    bool no_exec;              /* property: act as a host with no Vulkan 1.3 device
                                    (ADR-013's floor unmet); D3D_STATUS then reads
                                    NO_EXEC and the guest driver offers DirectDraw only */
     char *d3d9;                 /* property: which Direct3D 9 the executor runs on:
@@ -323,6 +327,64 @@ static uint32_t fb_vblank_count(D3dptVgaState *s)
     }
     return (uint32_t)((qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - s->vbl_ns) *
                       hz / NANOSECONDS_PER_SECOND);
+}
+
+/* The interrupt line (register set v6): high while an enabled event is
+ * pending, until the driver acknowledges it in IRQ_STATUS. */
+static void fb_irq_update(D3dptVgaState *s)
+{
+    if (s->irq) {
+        pci_set_irq(&s->dev, (s->irq_status & s->irq_enable) != 0);
+    }
+}
+
+/* The vertical blank interrupt (IRQ_VBLANK): every period of the mode's
+ * refresh on the guest's clock, which stops with the VM, so a paused or
+ * snapshotted guest is not handed a burst of them. A deadline missed by
+ * more than a period (a host stall) is skipped, not caught up: one
+ * interrupt, as a display that kept scanning out would give. */
+static uint32_t fb_refresh_hz(D3dptVgaState *s)
+{
+    return s->r_hz >= 30 && s->r_hz <= 200 ? s->r_hz : 60;
+}
+
+static void fb_vbl_arm(D3dptVgaState *s)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    int64_t period = NANOSECONDS_PER_SECOND / fb_refresh_hz(s);
+
+    s->vbl_next_ns += period;
+    if (s->vbl_next_ns <= now) {
+        s->vbl_next_ns = now + period;
+    }
+    timer_mod(s->vbl_timer, s->vbl_next_ns);
+}
+
+static void fb_vbl_tick(void *opaque)
+{
+    D3dptVgaState *s = opaque;
+
+    if (!(s->irq_enable & D3DPT_FB_IRQ_VBLANK)) {
+        return;
+    }
+    s->irq_status |= D3DPT_FB_IRQ_VBLANK;
+    fb_irq_update(s);
+    fb_vbl_arm(s);
+}
+
+static void fb_irq_enable(D3dptVgaState *s, uint32_t val)
+{
+    uint32_t was = s->irq_enable;
+
+    s->irq_enable = s->irq ? val & D3DPT_FB_IRQ_VBLANK : 0;
+    s->irq_status &= s->irq_enable;         /* nothing stays pending that is off */
+    if ((s->irq_enable & D3DPT_FB_IRQ_VBLANK) && !(was & D3DPT_FB_IRQ_VBLANK)) {
+        s->vbl_next_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        fb_vbl_arm(s);
+    } else if (!(s->irq_enable & D3DPT_FB_IRQ_VBLANK)) {
+        timer_del(s->vbl_timer);
+    }
+    fb_irq_update(s);
 }
 
 /* The guest's real frame rate. A game of the era paces itself by its flip
@@ -718,7 +780,12 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return s->vga.vram_size;
     case D3DPT_FB_REG_CAPS:
         return D3DPT_FB_CAP_BPP8 | D3DPT_FB_CAP_BPP16 | D3DPT_FB_CAP_BPP32 |
-               D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0);
+               D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0) |
+               (s->irq ? D3DPT_FB_CAP_IRQ : 0);
+    case D3DPT_FB_REG_IRQ_ENABLE:
+        return s->irq_enable;
+    case D3DPT_FB_REG_IRQ_STATUS:
+        return s->irq_status;
     case D3DPT_FB_REG_CURSOR_ADDR:
         return s->cur_addr;
     case D3DPT_FB_REG_CURSOR_W:
@@ -904,6 +971,13 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         s->gamma_on = val != 0;
         fb_gamma_apply(s);
         break;
+    case D3DPT_FB_REG_IRQ_ENABLE:
+        fb_irq_enable(s, val);
+        break;
+    case D3DPT_FB_REG_IRQ_STATUS:
+        s->irq_status &= ~(uint32_t)val;
+        fb_irq_update(s);
+        break;
     default:
         if (addr >= D3DPT_FB_REG_PALETTE &&
             addr < D3DPT_FB_REG_PALETTE + 4 * D3DPT_FB_PALETTE_SIZE) {
@@ -983,6 +1057,7 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
     if (s->irq) {
         dev->config[PCI_INTERRUPT_PIN] = 1;
     }
+    s->vbl_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, fb_vbl_tick, s);
 
     /* the command window takes the top 64 MiB when at least as much is
      * left below it for the frame buffer and the DirectDraw heap */
@@ -1014,6 +1089,8 @@ static void d3dpt_vga_reset(DeviceState *dev)
     }
     s->gamma_on = false;
     fb_gamma_apply(s);     /* no ramp after a reset: a RAMDAC comes up linear */
+    s->irq_status = 0;
+    fb_irq_enable(s, 0);   /* no interrupt until the driver asks again */
     d3d_reset(s);
 }
 
@@ -1052,8 +1129,8 @@ static const Property d3dpt_vga_properties[] = {
      * 3DMark 99 loading screen on the PC). On means the pixels in VRAM are
      * right and this device's incremental path is what lost them. */
     DEFINE_PROP_BOOL("full-frames", D3dptVgaState, full_frames, false),
-    /* an interrupt pin for the WDDM driver (M18, Windows 7); nothing
-     * raises it yet */
+    /* an interrupt pin for the WDDM driver (M18, Windows 7) and the IRQ
+     * registers behind it (register set v6: the vertical blank) */
     DEFINE_PROP_BOOL("irq", D3dptVgaState, irq, false),
 };
 

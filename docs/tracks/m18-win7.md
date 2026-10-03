@@ -220,6 +220,24 @@ device's half is plain QEMU C and builds anywhere.
    with M7): an interrupt line, a fence register, DMA command buffers read
    from guest memory. Registers are only added (`D3DPT_FB_VERSION`), so
    XP, Win98 and old snapshots see no change.
+   **The vertical blank done 2026-10-03** (register set v6): `IRQ_ENABLE`
+   / `IRQ_STATUS` at 0xb8 / 0xbc and `CAP_IRQ`, only with `irq=on`. The
+   device raises `IRQ_VBLANK` every period of `HZ` (60 when unset) on
+   QEMU's virtual clock while it is enabled, level-triggered on INTx until
+   acknowledged; a paused guest gets none, and a missed deadline is
+   skipped, not caught up. The kernel driver enables it from
+   ControlInterrupt(CRTC_VSYNC) and its ISR acknowledges the bit and
+   reports CRTC_VSYNC with the scanout address, an interrupt with nothing
+   in IRQ_STATUS being another device's (the line may be shared). Without
+   CAP_IRQ (a v5 device, which the driver still takes) the KTIMER stands
+   in as before. Proved under DWM: the driver takes the device's
+   interrupt, dxgkrnl switches it on and off as it needs the vertical
+   blank (about 200 interrupts in the run), DWM composes at up to 57
+   flips a second while D3DGAME9 runs (about 45 with the timer, whose
+   period the system clock rounds to 15.6 ms), and D3DGAME9's frame
+   stays 0 pixels off native. Left of this step: a fence register and
+   DMA command buffers (fences complete at submit, on the CPU, and are
+   reported through the same DPC path).
 5. **The desktop, basic theme.** Segments (VRAM as one linear segment),
    allocations, paging buffers, DMA submission and fences, VidPN (modes,
    the scanout address in `OFFSET`), the cursor, vertical blank, timeout
@@ -438,8 +456,9 @@ device's half is plain QEMU C and builds anywhere.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
    the desktop since 2026-10-03 (finding 8 above), behind the
    `CompositionPolicy` override, and a windowed Direct3D 9 program draws
-   in it with native frames (finding 9); next the other programs under
-   composition, the Experience Index, the vertical-blank interrupt.
+   in it with native frames (finding 9), paced by the device's own
+   vertical-blank interrupt (plan step 4); next the other programs under
+   composition, the Experience Index.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

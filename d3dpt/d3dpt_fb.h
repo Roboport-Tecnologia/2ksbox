@@ -60,6 +60,12 @@
  *
  * Version 5: gamma ramps (GAMMA_ENABLE and the GAMMA block).
  *
+ * Version 6: interrupts (IRQ_ENABLE, IRQ_STATUS), for the WDDM driver
+ * (M18): the vertical blank, at the mode's refresh, on the PCI INTx pin
+ * that -device d3dpt-vga,irq=on gives the adapter (CAP_IRQ says it is
+ * there). Level triggered and possibly shared: a set STATUS bit that is
+ * enabled holds the line until the driver writes it back.
+ *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
  * built with and refuses only an older one, because a newer register set is
@@ -80,7 +86,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_FB_VERSION      5u
+#define D3DPT_FB_VERSION      6u
 #define D3DPT_FB_MAGIC        0x42463344u          /* "D3FB" at REG_MAGIC */
 
 /* PCI identity: QEMU/Bochs pseudo vendor, our device id ("3D00"). The INF
@@ -137,6 +143,10 @@
 #define D3DPT_FB_REG_GAMMA_ENABLE 0xb4u  /* RW (version 5): 1 = the GAMMA block below is applied to every pixel
                                           * shown, as a RAMDAC would; the tables take effect at this write, so
                                           * write the 256 entries first. An identity ramp costs nothing */
+#define D3DPT_FB_REG_IRQ_ENABLE  0xb8u   /* RW (version 6, CAP_IRQ): D3DPT_FB_IRQ_* the device may raise; 0 at reset */
+#define D3DPT_FB_REG_IRQ_STATUS  0xbcu   /* R: D3DPT_FB_IRQ_* that happened while enabled; W: 1 bits acknowledge
+                                          * (clear) them, and the line drops when none enabled is left */
+#define D3DPT_FB_IRQ_VBLANK      0x1u    /* each period of HZ (60 when unset) while enabled, off the guest's clock */
 #define D3DPT_FB_CURSOR_MAX      64u     /* pixels per side; larger pointers stay with GDI's software one */
 #define D3DPT_FB_CURSOR_BYTES    (D3DPT_FB_CURSOR_MAX * D3DPT_FB_CURSOR_MAX * 4u)
 
@@ -153,5 +163,6 @@
 #define D3DPT_FB_CAP_BPP8        0x8u    /* version 3: BPP = 8 and the PALETTE block */
 #define D3DPT_FB_CAP_CURSOR      0x10u   /* version 4: the CURSOR registers */
 #define D3DPT_FB_CAP_GAMMA       0x20u   /* version 5: GAMMA_ENABLE and the GAMMA block */
+#define D3DPT_FB_CAP_IRQ         0x40u   /* version 6: an interrupt pin and the IRQ registers (irq=on) */
 
 #endif

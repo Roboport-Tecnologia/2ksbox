@@ -69,9 +69,11 @@ typedef struct D3DPT_ADAPTER {
     volatile LONG fence_done;         /* the last submission fence executed */
     volatile LONG fence_notify;       /* the fence the next DPC reports */
     volatile LONG preempt_fence;      /* a preemption request to answer, 0 for none */
-    /* the vertical blank, from a periodic timer at the mode's refresh while
-     * dxgkrnl has it enabled (ControlInterrupt): the device raises no
-     * interrupt yet (plan step 4) */
+    /* the vertical blank while dxgkrnl has it enabled (ControlInterrupt):
+     * the device's interrupt (register set v6, CAP_IRQ), else a periodic
+     * timer at the mode's refresh */
+    BOOLEAN vsync_irq;                /* the device raises it (IRQ_VBLANK) */
+    ULONG vsync_isr;                  /* interrupts taken, the first few logged */
     KTIMER vsync_timer;
     KDPC vsync_dpc;
     volatile LONG vsync_on;
@@ -319,7 +321,9 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     dbg_hex(" version=", version);
     dbg_hex(" vram=", a->vram_len);
     dbg_puts("\n");
-    if (magic != D3DPT_FB_MAGIC || version < D3DPT_FB_VERSION) {
+    /* register set v5 is what this driver needs; v6's interrupt is used
+     * when CAP_IRQ says it is there, a timer stands in otherwise */
+    if (magic != D3DPT_FB_MAGIC || version < 5u) {
         dbg_line("not a d3dpt-vga register set this driver knows");
         g_regs = NULL;
         MmUnmapIoSpace((PVOID)a->regs, D3DPT_FB_REGS_SIZE);
@@ -386,6 +390,13 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->fence_done = a->fence_notify = a->preempt_fence = 0;
     a->vsync_on = 0;
     a->scan_addr = 0;
+    a->vsync_irq = version >= 6u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_IRQ);
+    a->vsync_isr = 0;
+    if (a->vsync_irq) {
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;   /* nothing raised until dxgkrnl enables it */
+        a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = ~0u;
+    }
+    dbg_line(a->vsync_irq ? "vertical blank: the device's interrupt" : "vertical blank: a timer (no CAP_IRQ)");
     KeInitializeTimer(&a->vsync_timer);
     KeInitializeDpc(&a->vsync_dpc, vsync_tick, a);
     a->vsync_ready = TRUE;
@@ -571,12 +582,32 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
     return st;
 }
 
+static BOOLEAN notify_vsync(PVOID ctx);
+
+/* The device's interrupt (register set v6): a level-triggered INTx line,
+ * possibly shared, so an interrupt with nothing in IRQ_STATUS is another
+ * device's. The vertical blank is acknowledged here and reported as an
+ * ISR reports it, with a DPC queued for dxgkrnl's half. */
 static DXGKDDI_INTERRUPT_ROUTINE d3dpt_interrupt;
 static BOOLEAN d3dpt_interrupt(IN_CONST_PVOID ctx, IN_ULONG msg)
 {
-    UNREFERENCED_PARAMETER(ctx);
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    ULONG st;
+
     UNREFERENCED_PARAMETER(msg);
-    return FALSE;       /* the device has no interrupt yet (plan step 4) */
+    if (!a->vsync_irq || !a->regs) {
+        return FALSE;
+    }
+    st = a->regs[D3DPT_FB_REG_IRQ_STATUS / 4];
+    if (!st) {
+        return FALSE;
+    }
+    a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = st;
+    if ((st & D3DPT_FB_IRQ_VBLANK) && a->vsync_on) {
+        a->vsync_isr++;
+        notify_vsync(a);
+    }
+    return TRUE;
 }
 
 /* Queued after every completion reported from a submit (complete_fence):
@@ -2670,12 +2701,17 @@ static VOID vsync_tick(PKDPC dpc, PVOID ctx, PVOID a1, PVOID a2)
 static void vsync_stop(D3DPT_ADAPTER *a)
 {
     InterlockedExchange(&a->vsync_on, 0);
+    if (a->vsync_irq && a->regs) {
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;
+        a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = ~0u;
+    }
     KeCancelTimer(&a->vsync_timer);
 }
 
 /* CONTROLINTERRUPT takes two values, not a structure. The vertical blank
- * is the only interrupt dxgkrnl switches; the timer runs at the committed
- * mode's refresh (the system clock's granularity, ~15.6 ms, rounds it). */
+ * is the only interrupt dxgkrnl switches: the device's own at the refresh
+ * HZ says (CommitVidPn writes it), or a timer at the committed mode's
+ * refresh, which the system clock's granularity (~15.6 ms) rounds. */
 static DXGKDDI_CONTROLINTERRUPT d3dpt_control_interrupt;
 static NTSTATUS APIENTRY d3dpt_control_interrupt(IN_CONST_HANDLE h,
                                                  IN_CONST_DXGK_INTERRUPT_TYPE type,
@@ -2692,7 +2728,16 @@ static NTSTATUS APIENTRY d3dpt_control_interrupt(IN_CONST_HANDLE h,
         return STATUS_NOT_SUPPORTED;
     }
     if (!enable) {
+        if (a->vsync_irq) {
+            dbg_hex("d3dptkmd: vertical blank interrupts taken: ", a->vsync_isr);
+            dbg_puts("\n");
+        }
         vsync_stop(a);
+        return STATUS_SUCCESS;
+    }
+    if (a->vsync_irq) {
+        InterlockedExchange(&a->vsync_on, 1);
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = D3DPT_FB_IRQ_VBLANK;
         return STATUS_SUCCESS;
     }
     if (!InterlockedExchange(&a->vsync_on, 1)) {
