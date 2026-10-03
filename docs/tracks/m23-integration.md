@@ -166,6 +166,9 @@ by its path at once. `smbserve`'s log now times each request, and with
 `smbutil view` still gives up after connecting to IPC$, without opening a
 pipe; Windows is what needs it.
 
+The user tried it again by hand the same day: "everything works great
+now", Explorer's path-typed flow and its credential prompt included.
+
 ## Open items
 
 - **Leases / oplocks.** None are granted, so Windows caches nothing: a
