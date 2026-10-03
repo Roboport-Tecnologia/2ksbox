@@ -15,9 +15,11 @@
 #   PATH                  build/win/qemu first, for libqemu-embed-i386.dll.
 #                         The mingw runtime comes from /mingw64/bin, already
 #                         on this shell's PATH
-#   LAUNCHER_PLAYER_BIN   the launcher is built into its own target/ and
-#                         looks beside itself and in target/<profile>, where
-#                         a --target build never puts the player
+#   LAUNCHER_PLAYER_BIN   the winit player, when player-mitsuami is not built
+#                         (the launcher finds that one itself): the launcher
+#                         is built into its own target/ and looks beside
+#                         itself and in target/<profile>, where a --target
+#                         build never puts the winit player
 #   D3DPT_EXEC_LIB        QEMU's own search is relative to the working directory
 #   D3DPT_DXVK_LIB        the executor loads DXVK only by the package's name for
 #                         it, dxvk_d3d9.dll (never plain d3d9.dll, which is
@@ -48,7 +50,12 @@ fi
 win() { cygpath -w "$1"; }
 
 export PATH="$ROOT/build/win/qemu:$REL:$PATH"
-[ -n "${LAUNCHER_PLAYER_BIN:-}" ] || export LAUNCHER_PLAYER_BIN="$(win "$REL/player.exe")"
+# Only when there is no mitsuami player: once built it is the default,
+# and the launcher finds it in the checkout by its own rule
+# (launcher_core::player), which this variable would override.
+if [ -z "${LAUNCHER_PLAYER_BIN:-}" ] && [ ! -x "$ROOT/player-mitsuami/target/release/player-mitsuami.exe" ]; then
+  export LAUNCHER_PLAYER_BIN="$(win "$REL/player.exe")"
+fi
 
 EXEC="$ROOT/build/win/d3dpt/d3dpt_exec.dll"
 DXVK="$ROOT/build/win/dxvk/src/d3d9/d3d9.dll"

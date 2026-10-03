@@ -563,8 +563,10 @@ scripts/package-windows.sh                # the zip ("Packaging on Windows")
 ```
 
 `scripts/win-run.sh` stands in for the one-folder package: it puts
-`build/win/qemu` on `PATH` for the embed DLL, names the player to the
-launcher, and names the executor and DXVK (copied to `dxvk_d3d9.dll`) to
+`build/win/qemu` on `PATH` for the embed DLL, names the winit player to
+the launcher only when `player-mitsuami` is not built (once built, the
+launcher finds that one itself and it is the default; `LAUNCHER_PLAYER_BIN`
+picks either), and names the executor and DXVK (copied to `dxvk_d3d9.dll`) to
 QEMU. The launcher writes nothing to the terminal, so paste the
 `[player] …` line from `launcher.log` after `GDB=1 scripts/win-run.sh
 player`.
