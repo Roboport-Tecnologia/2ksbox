@@ -80,6 +80,7 @@ typedef struct D3DPT_ALLOC_DESC {
     ULONG levels;                                 /* d3dpt_vram_surface.levels */
     ULONG nlv;                                    /* entries of lv in use */
     ULONG primary;                                /* also a primary the VidPN may scan out (a full-screen swap chain) */
+    ULONG shared;                                 /* a shared resource's: other processes open it, the CPU never maps it */
     struct { ULONG a, b; } lv[D3DPT_ALLOC_MAX_LV];
 } D3DPT_ALLOC_DESC;
 

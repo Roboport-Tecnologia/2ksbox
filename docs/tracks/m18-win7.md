@@ -391,19 +391,55 @@ device's half is plain QEMU C and builds anywhere.
    (d3d10level9 passes the whole buffer's vertex count from a base vertex
    inside it, and the host skipped the draw). The executor now names a
    VRAM surface or buffer it refuses (`ddi: surface N refused (why)`).
-   Left open: **D3DGAME9 hangs under composition** (device made, window
-   white, no frame; it runs without DWM), the Experience Index itself
-   (`winsat dwm`, instead of the policy override), and the device's
-   interrupt (DWM paces on the vertical blank; the timer stands in).
+   Left open then: D3DGAME9 hung under composition (finding 9), the
+   Experience Index itself (`winsat dwm`, instead of the policy
+   override), and the device's interrupt (DWM paces on the vertical
+   blank; the timer stands in).
    Tools for this (throwaway, in the session's scratch): `DDPROBE`
    (EnumDisplayDevices as DWM calls it) and `D10PROBE` (DXGI's adapter,
    `D3D10CreateDevice1` at each level, run under a debug loop for
    OutputDebugString), and a replay of d3d10level9's test on the UMD's
    GetCaps answers dumped to the QEMU log.
+9. **A windowed Direct3D 9 program under DWM** (2026-10-03). D3DGAME9's
+   window stayed white because DWM could not make the window's
+   redirection surface: a shared X8R8G8B8 render-target texture (flags
+   0x10881) that DWM creates through Direct3D 10.1 / d3d10level9, and
+   the game opens. Every one failed in AllocateCb with `E_INVALIDARG`,
+   after our CreateAllocation and OpenAllocation had both succeeded; DWM
+   then dropped its device and started over, in a loop. The refusal is
+   Windows 7's video memory manager's (dxgmms1.sys,
+   `VIDMM_GLOBAL::CreateOneAllocation`, read with its public symbols):
+   **a shared allocation marked CpuVisible must have only aperture
+   segments** in its segment sets, and ours are VRAM only. Non-shared
+   allocations are not checked, so this showed only with the first shared
+   resource (CANSHARERESOURCE had been claimed, never used). Three
+   changes:
+   - The user-mode driver marks a shared resource in its private data
+     (`D3DPT_ALLOC_DESC.shared`) and the kernel driver leaves CpuVisible
+     off for it. The CPU never maps it.
+   - So a Blt to or from it cannot be the CPU's: it goes to the host as
+     the DP2 stream's BLT (op 81), which the executor now runs between
+     two colour render targets too (StretchRect with the rectangles and
+     the filter; **protocol v22**). Windows 7's d3d9 presents a windowed
+     swap chain under DWM as exactly that: a Blt from the back buffer
+     into the opened redirection surface, flags
+     `BeginPresentToDwm | EndPresentToDwm` (0x500), then a Present.
+   - With the game drawing, its frame came out 31 % off native (the
+     particles over-bright) and DWM gave up composition when it quit:
+     the executor's one host device carried each context's render states
+     into the other's draws. The executor now keeps each context's state
+     in a state block while another has the device (doc 14 "One device,
+     many contexts").
+   **D3DGAME9 under composition: frame 300 is 0 pixels off the native
+   frame**, in an Aero window composed at ~45 frames a second under TCG,
+   and DWM keeps composing after it exits (`build/w7/w7d3d.sh` with
+   `EXTRA_KEYS=alt-f4`, which closes the Personalization window
+   `aero.theme` leaves with the keyboard).
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
    the desktop since 2026-10-03 (finding 8 above), behind the
-   `CompositionPolicy` override; next the windowed Direct3D 9 program
-   under composition, the Experience Index, the vertical-blank interrupt.
+   `CompositionPolicy` override, and a windowed Direct3D 9 program draws
+   in it with native frames (finding 9); next the other programs under
+   composition, the Experience Index, the vertical-blank interrupt.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

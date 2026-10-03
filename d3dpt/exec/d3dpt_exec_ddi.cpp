@@ -188,12 +188,28 @@ struct Ctx {
     uint32_t vfunc = 0;
     bool dx9 = false;
     bool np2cond = false;               /* v20: D3DPT_CTX_NP2_CONDITIONAL (Dp2::apply_addr) */
+    /* One device serves every context. While another context has it, this
+     * one's state is kept here: the device's (a state block of everything,
+     * made when the device switched away, so it knows every light created
+     * by then) and Ddi's shadows of it (Ddi::save_shadow). Two programs
+     * drawing at once (a windowed game under Windows 7's DWM) otherwise
+     * draw with each other's render states and textures. */
+    IDirect3DStateBlock9 *sb = nullptr;
+    struct Shadow {
+        std::bitset<1024> lights_on;
+        uint32_t ckey_rs = 0, stage_tex[21] = {}, addr[21][3] = {};
+        bool ckey_forced = false, ckey_alpha_ovr = false, legacy_cop = false, legacy_aop = false;
+        bool clip_tl = false;
+        uint32_t clip_host = ~0u;
+    } shadow;
     void release_shaders() {
         for (auto &kv : vshaders) kv.second.release();
         for (auto &kv : pshaders) if (kv.second) kv.second->Release();
         for (auto &kv : vfuncs) if (kv.second) kv.second->Release();
         vshaders.clear(); pshaders.clear(); vfuncs.clear();
         vfunc = 0;
+        if (sb) sb->Release();
+        sb = nullptr;
     }
 };
 
@@ -217,6 +233,7 @@ struct Ddi {
      * light created later), M16 finding 15 */
     IDirect3DStateBlock9 *fresh = nullptr;
     std::bitset<1024> lights_on;
+    uint32_t cur_ctx = 0;                   /* the context whose state the device holds (use_ctx) */
     std::vector<uint32_t> warned;           /* one log line per unsupported state / token */
     /* DX8 state sets (STATESET tokens) as d3d9 state blocks, by the runtime's handle */
     std::unordered_map<uint32_t, IDirect3DStateBlock9 *> sblocks;
@@ -272,6 +289,25 @@ struct Ddi {
     /* host time in readbacks, and the part of it spent waiting for the GPU's frame (GetRenderTargetData + the lock) */
     uint64_t rb_ns = 0, rb_wait_ns = 0, stat_rb_ns = 0, stat_rb_wait_ns = 0;
 
+    /* the shadows of the device's state that belong to its current context */
+    void save_shadow(Ctx::Shadow &s) const {
+        s.lights_on = lights_on;
+        s.ckey_rs = ckey_rs;
+        memcpy(s.stage_tex, stage_tex, sizeof s.stage_tex);
+        memcpy(s.addr, addr, sizeof s.addr);
+        s.ckey_forced = ckey_forced; s.ckey_alpha_ovr = ckey_alpha_ovr;
+        s.legacy_cop = legacy_cop; s.legacy_aop = legacy_aop;
+        s.clip_tl = clip_tl; s.clip_host = clip_host;
+    }
+    void load_shadow(const Ctx::Shadow &s) {
+        lights_on = s.lights_on;
+        ckey_rs = s.ckey_rs;
+        memcpy(stage_tex, s.stage_tex, sizeof stage_tex);
+        memcpy(addr, s.addr, sizeof addr);
+        ckey_forced = s.ckey_forced; ckey_alpha_ovr = s.ckey_alpha_ovr;
+        legacy_cop = s.legacy_cop; legacy_aop = s.legacy_aop;
+        clip_tl = s.clip_tl; clip_host = s.clip_host;
+    }
     bool warn_once(uint32_t key) {
         for (uint32_t k : warned) if (k == key) return false;
         warned.push_back(key);
@@ -319,6 +355,36 @@ static Ddi &ddi(Exec &x) {
         if (const char *e = getenv("D3DPT_DDI_FLUSH_AB")) { x.ddi->flush_ab = true; x.ddi->flush_alt = (uint32_t)atoi(e); }
     }
     return *x.ddi;
+}
+
+/* The device's state leaves with its context (Ctx::sb): kept in a state
+ * block of everything made now, with Ddi's shadows. */
+static void save_ctx(Exec &x, Ddi &d) {
+    if (!d.cur_ctx || !x.dev) return;
+    auto it = d.ctxs.find(d.cur_ctx);
+    d.cur_ctx = 0;
+    if (it == d.ctxs.end()) return;
+    Ctx &c = it->second;
+    if (c.sb) c.sb->Release();
+    c.sb = nullptr;
+    if (FAILED(x.dev->CreateStateBlock(D3DSBT_ALL, &c.sb))) {
+        c.sb = nullptr;
+        if (d.warn_once(0xf1000)) x.log("ddi: context %u: no state block for its state, the next context draws with it", it->first);
+    }
+    d.save_shadow(c.shadow);
+}
+
+/* The device takes context h's state, when another context's is there. */
+static void use_ctx(Exec &x, Ddi &d, uint32_t h, Ctx &c) {
+    if (d.cur_ctx == h || !x.dev) return;
+    save_ctx(x, d);
+    if (c.sb) {
+        /* a light this context never created is off: the state block knows only its own */
+        for (uint32_t i = 0; i < d.lights_on.size(); i++) if (d.lights_on[i] && !c.shadow.lights_on[i]) x.dev->LightEnable(i, FALSE);
+        c.sb->Apply();
+        d.load_shadow(c.shadow);
+    }
+    d.cur_ctx = h;
 }
 
 /* --------------------------------------------------------------- formats */
@@ -2583,9 +2649,14 @@ struct Dp2 {
                 break;
             }
             case DP2_BLT:
-                /* v18: StretchRect between two depth buffers (the driver
-                 * sends no other BLT): whole surfaces of one size, as
-                 * Direct3D 9 allows it, outside a scene */
+                /* v18: StretchRect between two depth buffers: whole
+                 * surfaces of one size, as Direct3D 9 allows it, outside a
+                 * scene. v22: also between two colour render targets, the
+                 * rectangles and the filter (flags: 1 point, 2 linear) as
+                 * given; the WDDM driver sends it for a surface the CPU
+                 * cannot map (a shared one: DWM's redirection surface of a
+                 * windowed Direct3D program). Every other BLT is the
+                 * driver's. */
                 need = count * 52u;
                 if (need > left) return fail("truncated BLT");
                 for (uint32_t i = 0; i < count; i++) {
@@ -2593,11 +2664,35 @@ struct Dp2 {
                     VramSurf *src = surf(x, u32(e)), *dst = surf(x, u32(e + 24));
                     RECT sr, dr;
                     memcpy(&sr, e + 4, sizeof sr); memcpy(&dr, e + 28, sizeof dr);
+                    const uint32_t colour = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;
+                    if (src && dst && (src->d.caps & colour) && (dst->d.caps & colour) &&
+                        !((src->d.caps | dst->d.caps) & D3DPT_VS_ZBUFFER)) {
+                        tr("colour blt %u (%d,%d,%d,%d) -> %u (%d,%d,%d,%d)", u32(e), (int)sr.left, (int)sr.top, (int)sr.right,
+                           (int)sr.bottom, u32(e + 24), (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom);
+                        if (!ensure_object(x, *src) || !ensure_object(x, *dst) || !src->rt || !dst->rt) {
+                            if (d.warn_once(0xf0002)) x.log("ddi: dp2: colour BLT %u -> %u: no host target, dropped", u32(e), u32(e + 24));
+                            continue;
+                        }
+                        if (src->dirty) upload_target(x, d, *src);
+                        bool whole = dr.left == 0 && dr.top == 0 && (uint32_t)dr.right == dst->d.width && (uint32_t)dr.bottom == dst->d.height;
+                        if (dst->dirty && !whole) upload_target(x, d, *dst);
+                        x.scene_end();
+                        HRESULT hr = x.dev->StretchRect(src->rt, &sr, dst->rt, &dr, (u32(e + 48) & 2) ? D3DTEXF_LINEAR : D3DTEXF_NONE);
+                        if (FAILED(hr)) {
+                            if (d.warn_once(0xf0003)) x.log("ddi: dp2: colour StretchRect %u -> %u: 0x%08x", u32(e), u32(e + 24), (unsigned)hr);
+                            continue;
+                        }
+                        dst->dirty = false;
+                        dst->rendered = true;
+                        dst->checked = true;
+                        if (dst->d.caps & D3DPT_VS_AUTOGEN) dst->mips_stale = true;
+                        continue;
+                    }
                     tr("depth blt %u -> %u", u32(e), u32(e + 24));
                     if (!src || !dst || !(src->d.caps & D3DPT_VS_ZBUFFER) || !(dst->d.caps & D3DPT_VS_ZBUFFER) ||
                         !ensure_object(x, *src) || !ensure_object(x, *dst) || !src->rt || !dst->rt ||
                         src->d.width != dst->d.width || src->d.height != dst->d.height) {
-                        if (d.warn_once(0xf0000)) x.log("ddi: dp2: BLT %u -> %u is no blit between two depth buffers of one size, dropped", u32(e), u32(e + 24));
+                        if (d.warn_once(0xf0000)) x.log("ddi: dp2: BLT %u -> %u is no blit between two depth buffers of one size or two colour targets, dropped", u32(e), u32(e + 24));
                         continue;
                     }
                     x.scene_end();
@@ -2998,6 +3093,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
          * runtime sends the new context's own render and stage states,
          * never a light it has not enabled) */
         if (x.dev) {
+            save_ctx(x, d);                     /* the context that had the device keeps its state */
             if (!d.fresh && d.ctxs.empty()) x.dev->CreateStateBlock(D3DSBT_ALL, &d.fresh);
             else if (d.fresh) {
                 for (uint32_t i = 0; i < d.lights_on.size(); i++) if (d.lights_on[i]) x.dev->LightEnable(i, FALSE);
@@ -3017,6 +3113,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         cx.np2cond = (a->flags & D3DPT_CTX_NP2_CONDITIONAL) != 0;
         if (!ensure_object(x, *rt) || (cx.z && !ensure_object(x, *surf(x, cx.z)))) { r->hr = (uint32_t)E_FAIL; return true; }
         d.ctxs[a->handle] = cx;
+        if (x.dev) d.cur_ctx = a->handle;      /* the device's state is the new context's now */
         x.log("ddi: context %u on %ux%u fmt %u (z %u%s), %zu contexts", a->handle, rt->d.width, rt->d.height, rt->d.format, cx.z,
               cx.np2cond ? ", conditional NP2" : "", d.ctxs.size());
         r->hr = S_OK;
@@ -3030,6 +3127,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
                 if (x.dev && (!it->second.vshaders.empty() || !it->second.pshaders.empty())) { x.dev->SetVertexShader(nullptr); x.dev->SetPixelShader(nullptr); }
                 it->second.release_shaders();
                 x.ddi->ctxs.erase(it);
+                if (x.ddi->cur_ctx == a->handle) x.ddi->cur_ctx = 0;
             }
         }
         break;
@@ -3043,6 +3141,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         it->second.z = surf(x, a->c) ? a->c : 0;
         VramSurf *rt = surf(x, a->b);
         it->second.vp = { 0, 0, rt->d.width, rt->d.height, 0.0f, 1.0f };
+        use_ctx(x, *x.ddi, it->first, it->second);
         bind_ctx(x, *x.ddi, it->second, b, false);
         break;
     }
@@ -3053,6 +3152,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         auto it = x.ddi->ctxs.find(a->ctx);
         if (it == x.ddi->ctxs.end()) { b.err = D3DPT_ERR_BAD_HANDLE; return true; }
         if (!x.dev) { b.err = D3DPT_ERR_NO_DEVICE; return true; }
+        use_ctx(x, *x.ddi, it->first, it->second);
         Dp2 p = { x, *x.ddi, it->second, b, nullptr, nullptr, nullptr, 0, 0 };
         p.clear(a->flags, a->color, a->z, a->stencil, a->count, tail(a));
         break;
@@ -3070,6 +3170,7 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         auto it = x.ddi->ctxs.find(a->ctx);
         if (it == x.ddi->ctxs.end()) { b.err = D3DPT_ERR_BAD_HANDLE; return true; }
         if (!x.dev) { b.err = D3DPT_ERR_NO_DEVICE; return true; }
+        use_ctx(x, *x.ddi, it->first, it->second);
         const uint8_t *cmds = tail(a);
         Dp2 p = { x, *x.ddi, it->second, b, cmds, cmds + a->command_bytes, cmds + cmd_aligned, stride, stride ? a->vertex_bytes / stride : 0, a->fvf };
         x.ddi->dp2_calls++;

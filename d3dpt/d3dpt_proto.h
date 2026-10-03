@@ -21,6 +21,9 @@
  * resources, Present) and the SysBus device's addresses and registers
  * are gone; the surviving ops keep their numbers.
  *
+ * v22 (M18): the DP2 stream's BLT (op 81) also copies between two colour
+ * render targets, with its rectangles and filter (see v18 below).
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef D3DPT_PROTO_H
@@ -28,7 +31,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   21u
+#define D3DPT_PROTO_VERSION   22u
 
 #define D3DPT_SHM_SIZE        0x04000000u          /* 64 MiB */
 #define D3DPT_CMD_OFFSET      0x00001000u          /* records start after the header page */
@@ -246,7 +249,10 @@ typedef struct d3dpt_dp2 {
  * v18: StretchRect between two depth buffers. The runtime's BLT (op 81,
  * D3DHAL_DP2BLT: source, RECTL, level, destination, RECTL, level, flags)
  * travels in the DP2 stream when both are video-memory depth buffers,
- * whose contents only the host has; every other BLT is the driver's. */
+ * whose contents only the host has. v22: also between two colour render
+ * targets, its rectangles and filter (flags 1 point, 2 linear) as given,
+ * for a surface the guest's CPU cannot map; every other BLT is the
+ * driver's. */
 #define D3DPT_DP2_DRAW8 200u
 #define D3DPT_DRAW8_VRAM_VB 0x1u
 #define D3DPT_DRAW8_VRAM_IB 0x2u

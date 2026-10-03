@@ -500,6 +500,7 @@ static HRESULT APIENTRY umd_create_resource(HANDLE h, D3DDDIARG_CREATERESOURCE *
     r->d.refresh_den = c->RefreshRate.Denominator;
     r->d.source = c->VidPnSourceId;
     r->d.primary = c->Flags.Primary;
+    r->d.shared = c->Flags.SharedResource;
     bytes = umd_layout(r, c);
     r->d.size = bytes;
     r->d.bpp = r->d.h ? r->sub[0].pitch / (r->d.w ? r->d.w : 1) : 0;
@@ -1594,6 +1595,44 @@ static HRESULT APIENTRY umd_color_fill(HANDLE h, CONST D3DDDIARG_COLORFILL *a)
     return S_OK;
 }
 
+/* A Blt involving a shared resource, which the CPU cannot map (the kernel
+ * driver's CreateAllocation): the host's StretchRect between the two
+ * render targets (protocol v22's colour BLT, op 81). DWM's redirection
+ * surface of a windowed Direct3D program is filled this way at each of
+ * its presents. Level 0 of plain targets only. */
+static HRESULT umd_host_blt(UMD_DEV *d, CONST D3DDDIARG_BLT *a, UMD_RES *src, UMD_RES *dst)
+{
+    const ULONG colour = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;
+    static ULONG logged;
+    UINT *k;
+
+    if (logged < 8) {
+        logged++;
+        umd_log("Blt on the host: %p (%ux%u fmt %u%s) -> %p (%ux%u fmt %u%s), flags 0x%x", src, src->d.w, src->d.h,
+                src->d.format, src->d.shared ? " shared" : "", dst, dst->d.w, dst->d.h, dst->d.format,
+                dst->d.shared ? " shared" : "", a->Flags.Value);
+    }
+    if (!src->kmt || !dst->kmt || !(src->d.caps & colour) || !(dst->d.caps & colour) ||
+        ((src->d.caps | dst->d.caps) & D3DPT_VS_ZBUFFER) || a->SrcSubResourceIndex || a->DstSubResourceIndex) {
+        umd_log("Blt with a shared resource refused: caps 0x%x -> 0x%x, subresources %u -> %u", src->d.caps, dst->d.caps,
+                a->SrcSubResourceIndex, a->DstSubResourceIndex);
+        return S_OK;
+    }
+    /* D3DHAL_DP2BLT: source, RECTL, level, destination, RECTL, level, flags */
+    k = (UINT *)dp2_tok(d, 81, 1, 52, 2);
+    if (!k) {
+        return S_OK;
+    }
+    cmd_patch(d, &k[0], src, D3DPT_PATCH_HANDLE, 0);
+    CopyMemory(&k[1], &a->SrcRect, sizeof(RECT));
+    k[5] = 0;
+    cmd_patch(d, &k[6], dst, D3DPT_PATCH_HANDLE, 0);
+    CopyMemory(&k[7], &a->DstRect, sizeof(RECT));
+    k[11] = 0;
+    k[12] = a->Flags.Linear ? 2 : 1;
+    return S_OK;
+}
+
 /* Blt (StretchRect, GetRenderTargetData, UpdateSurface): on the CPU, as
  * the XP driver's walk_blt9 does it. Same-size rectangles copy (DXT in
  * whole blocks), scaled ones take the nearest texel; one texel size
@@ -1614,6 +1653,9 @@ static HRESULT APIENTRY umd_blt(HANDLE h, CONST D3DDDIARG_BLT *a)
     }
     sub_size(src, a->SrcSubResourceIndex, &sw, &sh);
     sub_size(dst, a->DstSubResourceIndex, &dw, &dh);
+    if ((src->d.shared || dst->d.shared) && rect_ok(sr, sw, sh) && rect_ok(dr, dw, dh)) {
+        return umd_host_blt(d, a, src, dst);
+    }
     if (umd_row_bytes(sfmt, 1) != umd_row_bytes(dfmt, 1) || (sfmt != dfmt && (umd_is_dxt(sfmt) || umd_is_dxt(dfmt)))) {
         ZeroMemory(zero, sizeof(zero));
         if (!umd_px_unpack(sfmt, zero, &c) || !umd_fill_pack(dfmt, 0, zero)) {
@@ -1634,6 +1676,12 @@ static HRESULT APIENTRY umd_blt(HANDLE h, CONST D3DDDIARG_BLT *a)
     sb = lock_res(d, src, src != dst);
     db = dst == src ? sb : lock_res(d, dst, FALSE);
     if (!sb || !db) {
+        static ULONG logged;
+
+        if (logged++ < 8) {
+            umd_log("Blt: no lock (%s%s), flags 0x%x, %ux%u -> %ux%u", sb ? "" : "source", db ? "" : " destination",
+                    a->Flags.Value, sw, sh, dw, dh);
+        }
         if (sb) unlock_res(d, src);
         return E_FAIL;
     }

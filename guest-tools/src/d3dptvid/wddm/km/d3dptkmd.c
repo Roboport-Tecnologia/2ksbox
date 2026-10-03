@@ -1054,10 +1054,14 @@ static NTSTATUS APIENTRY d3dpt_get_standard_allocation_driver_data(IN_CONST_HAND
     return STATUS_SUCCESS;
 }
 
-/* Every allocation is CPU visible (GDI locks the shadow and staging
- * surfaces, the primary is scanned out from VRAM, Direct3D locks its
- * resources) and is evicted to system memory. A D3D allocation gets the
- * host handle it will be registered under. */
+/* Every allocation but a shared one is CPU visible (GDI locks the shadow
+ * and staging surfaces, the primary is scanned out from VRAM, Direct3D
+ * locks its resources) and is evicted to system memory. Windows 7's video
+ * memory manager takes a shared CPU-visible allocation only in aperture
+ * segments (dxgmms1's CreateOneAllocation: STATUS_INVALID_PARAMETER,
+ * which DWM's redirection surface for a Direct3D window met), and the
+ * host reads these from VRAM. A D3D allocation gets the host handle it
+ * will be registered under. */
 static DXGKDDI_CREATEALLOCATION d3dpt_create_allocation;
 static NTSTATUS APIENTRY d3dpt_create_allocation(IN_CONST_HANDLE h, INOUT_PDXGKARG_CREATEALLOCATION c)
 {
@@ -1114,7 +1118,7 @@ static NTSTATUS APIENTRY d3dpt_create_allocation(IN_CONST_HANDLE h, INOUT_PDXGKA
         info->MaximumRenamingListLength = 0;
         info->hAllocation = al;
         info->Flags.Value = 0;
-        info->Flags.CpuVisible = 1;
+        info->Flags.CpuVisible = d->kind != D3DPT_ALLOC_D3D || !d->shared;
         info->pAllocationUsageHint = NULL;
         info->AllocationPriority = d->kind == D3DPT_ALLOC_PRIMARY ? D3DDDI_ALLOCATIONPRIORITY_HIGH
                                                                   : D3DDDI_ALLOCATIONPRIORITY_NORMAL;

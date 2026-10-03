@@ -49,14 +49,25 @@ guest (XP / Win98)                      host (QEMU process)
   thread under the BQL; a decoder thread waits until a measurement asks
   for it.
 - **Protocol.** `d3dpt/d3dpt_proto.h` is the one header for the display
-  drivers, the adapter and the executor (`D3DPT_PROTO_VERSION`, 21
+  drivers, the adapter and the executor (`D3DPT_PROTO_VERSION`, 22
   today; v21 dropped the guest DLLs' records, whose op numbers stay
-  unused). Bump it on
+  unused; v22, M18, lets the DP2 stream's BLT copy between two colour
+  render targets, for the WDDM driver's shared surfaces). Bump it on
   any wire change and rebuild the executor and the ISO, which do not say
   they are stale; the suite then fails as `protocol mismatch` or a guest
   that never attaches. The guest encoder is `d3dpt/d3dpt_enc.h`. The
   executor validates every record (a hostile guest must not crash the
   host), and a refused batch logs `batch error N at record R (op O)`.
+- **One device, many contexts.** Every guest context (a process's
+  Direct3D device) draws on the executor's one host device. The device's
+  state belongs to the context that last used it: when a record names
+  another context, the executor keeps the leaving one's state in a
+  `D3DSBT_ALL` state block with its own shadows (bound textures, address
+  modes, colour keys, lights, clipping; `use_ctx`) and applies the
+  arriving one's. Before 2026-10-03 it did not, which nothing noticed
+  until Windows 7's DWM drew beside a windowed game: each drew with the
+  other's render states (the game's frame 31 % off native, DWM giving up
+  composition when the game quit).
 - **Guest `d3d9.dll`** (retired; `guest-tools/src/d3dpt/` in git history): COM objects for
   IDirect3D9, the device, swap chain and resources. Each method is
   *forward* (append a record), *shadow* (state the app reads back, such
