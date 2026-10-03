@@ -1253,8 +1253,9 @@ typedef struct PKT_D3D_T { PKT_HDR h; ULONG count; } PKT_D3D_T;
  * address), and calls no Patch at all when every one is left out, while
  * each DMA buffer here is a fresh copy of the user-mode driver's records.
  * So an allocation keeps where the last Patch saw it (cur_seg, cur_addr),
- * and the registration at submit time reads that. */
-typedef struct PKT_FIX_E { ULONG index, kind, add, off; } PKT_FIX_E;
+ * and the registration and the offsets read that at submit time; the
+ * fix-up packet comes before the records it patches. */
+typedef struct PKT_FIX_E { ULONG kind, add, off; struct D3DPT_ALLOC *al; } PKT_FIX_E;
 typedef struct PKT_FIX_T { PKT_HDR h; ULONG n; PKT_FIX_E e[1]; } PKT_FIX_T;
 
 static void pkt_hdr(PKT_HDR *p, ULONG op, ULONG size)
@@ -1526,20 +1527,43 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
 }
 
 /* The user-mode driver's records, as they are: each one's size was checked
- * at Render. */
+ * at Render. A D3DPT_UMD_OP_RETURN before one (../d3dpt_wddm.h) gives it a
+ * return slot here (every result record has its ret_off second in its
+ * body), runs the batch so far, and copies the result into the user-mode
+ * driver's result allocation in VRAM. */
 static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 {
     const UCHAR *r = (const UCHAR *)(p + 1), *end = (const UCHAR *)p + p->h.size;
-    ULONG i;
+    ULONG i, ret_dst = 0, ret_bytes = 0;
+    BOOLEAN ret = FALSE;
 
     for (i = 0; i < p->count && r + sizeof(d3dpt_cmd) <= end; i++) {
         const d3dpt_cmd *c = (const d3dpt_cmd *)r;
-        void *body = d3dpt_enc_cmd(&a->enc, c->op, c->size - sizeof(*c), 0);
+        ULONG body_size = c->size - sizeof(*c), slot = 0;
+        UCHAR *body;
 
-        if (body) {
-            RtlCopyMemory(body, c + 1, c->size - sizeof(*c));
-        }
         r += c->size;
+        if (c->op == D3DPT_UMD_OP_RETURN) {
+            const d3dpt_u32x2 *u = (const d3dpt_u32x2 *)(c + 1);
+
+            ret = body_size >= sizeof(*u) && u->b <= 4096 && u->a + sizeof(d3dpt_ret) + u->b <= a->seg_size;
+            ret_dst = ret ? u->a : 0;
+            ret_bytes = ret ? u->b : 0;
+            continue;
+        }
+        if (ret && body_size >= 8) {
+            slot = d3dpt_enc_ret(&a->enc, ret_bytes);
+        }
+        body = (UCHAR *)d3dpt_enc_cmd(&a->enc, c->op, body_size, 0);
+        if (body) {
+            RtlCopyMemory(body, c + 1, body_size);
+        }
+        if (ret && body && body_size >= 8) {
+            ((ULONG *)body)[1] = slot;
+            d3dpt_enc_flush(&a->enc);
+            RtlCopyMemory(a->vram + ret_dst, d3dpt_enc_result(&a->enc, slot), sizeof(d3dpt_ret) + ret_bytes);
+        }
+        ret = FALSE;
     }
 }
 
@@ -1585,6 +1609,19 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
                 run_reg(a, (const PKT_REG_T *)hd);
             }
             break;
+        case PKT_FIX: {             /* the records' VRAM offsets, where their allocations are now */
+            const PKT_FIX_T *x = (const PKT_FIX_T *)hd;
+            ULONG i;
+
+            for (i = 0; i < x->n; i++) {
+                const PKT_FIX_E *e = &x->e[i];
+
+                if (e->kind == D3DPT_PATCH_OFFSET && e->al && e->off + 4 <= len) {
+                    *(ULONG *)(p + e->off) = e->al->cur_addr + e->add;
+                }
+            }
+            break;
+        }
         case PKT_D3D:
             if (a->d3d) {
                 run_d3d(a, (const PKT_D3D_T *)hd);
@@ -1900,7 +1937,8 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         dbg_puts("\n");
         return STATUS_INVALID_PARAMETER;
     }
-    d3d = (PKT_D3D_T *)((PUCHAR)r->pDmaBuffer + reg_size);
+    fix = (PKT_FIX_T *)((PUCHAR)r->pDmaBuffer + reg_size);
+    d3d = (PKT_D3D_T *)((PUCHAR)fix + fix_size);
     rec = (PUCHAR)(d3d + 1);
     __try {
         RtlCopyMemory(&hdr, r->pCommand, sizeof(hdr));
@@ -1947,7 +1985,6 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
     }
     pkt_hdr(&d3d->h, PKT_D3D, sizeof(*d3d) + rec_bytes);
     d3d->count = count;
-    fix = (PKT_FIX_T *)(rec + rec_bytes);
     pkt_hdr(&fix->h, PKT_FIX, fix_size);
     fix->n = npl;
     for (i = 0; i < npl; i++) {
@@ -1961,14 +1998,12 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
             dbg_puts("\n");
             return STATUS_INVALID_PARAMETER;
         }
-        fix->e[i].index = in.AllocationIndex;
+        fix->e[i].al = (D3DPT_ALLOC *)r->pAllocationList[in.AllocationIndex].hDeviceSpecificAllocation;
         fix->e[i].kind = in.DriverId;
         fix->e[i].add = in.AllocationOffset;
         fix->e[i].off = (ULONG)(rec - (PUCHAR)r->pDmaBuffer) + in.PatchOffset - sizeof(hdr);
         if (in.DriverId == D3DPT_PATCH_HANDLE) {
-            const D3DPT_ALLOC *al = (const D3DPT_ALLOC *)r->pAllocationList[in.AllocationIndex].hDeviceSpecificAllocation;
-
-            *(ULONG *)((PUCHAR)r->pDmaBuffer + fix->e[i].off) = al ? al->handle : 0;
+            *(ULONG *)((PUCHAR)r->pDmaBuffer + fix->e[i].off) = fix->e[i].al ? fix->e[i].al->handle : 0;
         }
     }
     if (logged < 8) {
@@ -1979,7 +2014,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         dbg_hex(" patches ", r->PatchLocationListInSize);
         dbg_puts("\n");
     }
-    r->pDmaBuffer = (PUCHAR)fix + fix_size;
+    r->pDmaBuffer = rec + rec_bytes;
     r->pPatchLocationListOut = out;
     return STATUS_SUCCESS;
 }
@@ -2045,27 +2080,6 @@ static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH 
                         e->al->cur_seg = e->seg;
                         e->al->cur_addr = e->addr;
                     }
-                }
-            }
-        } else if (hd->op == PKT_FIX) {
-            /* the records' patches: a host handle or a VRAM offset */
-            PKT_FIX_T *x = (PKT_FIX_T *)hd;
-            ULONG i;
-
-            for (i = 0; i < x->n; i++) {
-                const PKT_FIX_E *e = &x->e[i];
-                const DXGK_ALLOCATIONLIST *l;
-                const D3DPT_ALLOC *al;
-
-                if (e->index >= p->AllocationListSize || e->off + 4 > p->DmaBufferSize) {
-                    continue;
-                }
-                l = &p->pAllocationList[e->index];
-                al = (const D3DPT_ALLOC *)l->hDeviceSpecificAllocation;
-                if (e->kind == D3DPT_PATCH_OFFSET) {
-                    *(ULONG *)(buf + e->off) = l->PhysicalAddress.LowPart + e->add;
-                } else {
-                    *(ULONG *)(buf + e->off) = al ? al->handle : 0;
                 }
             }
         }

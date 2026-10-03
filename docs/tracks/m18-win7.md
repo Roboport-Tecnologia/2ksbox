@@ -272,6 +272,29 @@ device's half is plain QEMU C and builds anywhere.
    (render-to-texture, textures, particles; ~70 fps under TCG, the host
    at ~3000 draws a second). The windowed present is the backbuffer read
    back into its VRAM, then dxgkrnl's Present blit to the primary.
+   - **Results back from the host** (the occlusion query's count): the
+     host answers into the window's return area, which the user-mode
+     driver cannot see. A record only the kernel driver reads
+     (`D3DPT_UMD_OP_RETURN`, before the one whose result is wanted) has it
+     give that record a return slot, ring the doorbell right after it and
+     copy the answer into a page of VRAM the user-mode driver locks. The
+     VRAM offsets the records carry are resolved at submit time from where
+     the last Patch saw the allocation, like the registrations.
+   - **ColorFill and Blt** (StretchRect, GetRenderTargetData,
+     UpdateSurface) are the XP driver's CPU paths: a readback of what the
+     host drew, the copy or fill through locks, VRAM_DIRTY. Their pixel
+     helpers (`fill_pack`, `px_unpack`, `px_copy`) moved from
+     `core_dp2.c` to `core_surf.c` so both drivers link them.
+   **Proved 2026-10-03** (`build/w7/w7d3d.sh`, a scratch disk for the
+   dumps): **D3DGAME9's frame 300 differs from the native d3d9 frame in 0
+   of 307200 pixels, D3DFEAT9's is byte-identical** and its occlusion
+   query and getter lines are native's (21316 pixels). d3d9.dll did not
+   call StateSet: with a non-pure device it records state blocks itself.
+   Left of step 6: the DX8 / DX7 programs (d3d8.dll and ddraw.dll reach
+   the same driver through GetCaps' D3D8 / D3D3..7 types, answered empty
+   for now), full-screen swap chains (Primary resources, SetDisplayMode,
+   flips), render targets on a level or a face, 32-bit indices, the
+   depth-to-depth StretchRect, and the test loop as a repo tool.
    Windows 7's UAC dialog is not always centred: the test loop answers it
    with Alt+Y.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**

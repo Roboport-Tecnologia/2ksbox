@@ -133,6 +133,8 @@ typedef struct UMD_DEV {
     ULONG fvf;                                    /* the vertex declaration's handle (bit 0), as DRAW8's fvf */
     ULONG next_decl, next_vs, next_ps;
     ULONG skipped;                                /* draws the host could not be given */
+    struct UMD_RES *qres;                         /* the queries' result page (umd_result_res) */
+    ULONG next_query;
 } UMD_DEV;
 
 static HRESULT APIENTRY umd_get_caps(HANDLE h, CONST D3DDDIARG_GETCAPS *g);
@@ -192,6 +194,17 @@ static HRESULT APIENTRY umd_get_caps(HANDLE h, CONST D3DDDIARG_GETCAPS *g)
     switch (g->Type) {
     case D3DDDICAPS_GETD3D9CAPS:
         hr = umd_caps9(g->pData, g->DataSize);
+        break;
+    case D3DDDICAPS_GETD3D8CAPS:
+        hr = umd_caps8(g->pData, g->DataSize);
+        break;
+    case D3DDDICAPS_GETD3D3CAPS:
+        hr = umd_caps_hal(g->pData, g->DataSize);
+        break;
+    case D3DDDICAPS_GETD3D5CAPS:
+    case D3DDDICAPS_GETD3D6CAPS:
+    case D3DDDICAPS_GETD3D7CAPS:
+        hr = umd_caps_ext(g->pData, g->DataSize);
         break;
     case D3DDDICAPS_GETFORMATCOUNT:
         *(UINT *)g->pData = umd_format_count();
@@ -1485,6 +1498,144 @@ static HRESULT APIENTRY umd_buf_blt(HANDLE h, CONST D3DDDIARG_BUFFERBLT *a)
     return S_OK;
 }
 
+/* a subresource's size: its level of the resource's level-0 size */
+static void sub_size(const UMD_RES *r, UINT i, UINT *w, UINT *h)
+{
+    UINT levels = r->cr.MipLevels ? r->cr.MipLevels : 1, lv = i % levels;
+
+    *w = r->d.w >> lv ? r->d.w >> lv : 1;
+    *h = r->d.h >> lv ? r->d.h >> lv : 1;
+}
+
+static BOOL rect_ok(const RECT *r, UINT w, UINT h)
+{
+    return r->left >= 0 && r->top >= 0 && r->left < r->right && r->top < r->bottom &&
+           (UINT)r->right <= w && (UINT)r->bottom <= h;
+}
+
+/* ColorFill: the rectangle in the colour packed for the surface's format,
+ * on the CPU after what the host drew came back (core_dp2.c,
+ * walk_colorfill) */
+static HRESULT APIENTRY umd_color_fill(HANDLE h, CONST D3DDDIARG_COLORFILL *a)
+{
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_RES *r = (UMD_RES *)a->hResource;
+    UINT w, ht, bpp, x, y;
+    ULONG v[4];
+    BYTE *base, *mem;
+
+    sub_size(r, a->SubResourceIndex, &w, &ht);
+    bpp = umd_fill_pack((ULONG)r->cr.Format, a->Color, (UCHAR *)v);
+    if (a->SubResourceIndex >= r->nsub || !rect_ok(&a->DstRect, w, ht) || !bpp) {
+        umd_log("ColorFill refused: fmt %u sub %u", r->cr.Format, a->SubResourceIndex);
+        return S_OK;
+    }
+    umd_readback(d, r);
+    cmd_flush(d);
+    base = lock_res(d, r, FALSE);
+    if (!base) {
+        return E_FAIL;
+    }
+    mem = sub_mem(r, base, a->SubResourceIndex);
+    for (y = (UINT)a->DstRect.top; y < (UINT)a->DstRect.bottom; y++) {
+        BYTE *row = mem + y * r->sub[a->SubResourceIndex].pitch + a->DstRect.left * bpp;
+
+        for (x = 0; x < (UINT)(a->DstRect.right - a->DstRect.left); x++) {
+            if (bpp == 4) ((ULONG *)row)[x] = v[0];
+            else if (bpp == 2) ((USHORT *)row)[x] = (USHORT)v[0];
+            else if (bpp == 1) row[x] = (BYTE)v[0];
+            else CopyMemory(row + x * bpp, v, bpp);
+        }
+    }
+    unlock_res(d, r);
+    vram_dirty(d, r);
+    return S_OK;
+}
+
+/* Blt (StretchRect, GetRenderTargetData, UpdateSurface): on the CPU, as
+ * the XP driver's walk_blt9 does it. Same-size rectangles copy (DXT in
+ * whole blocks), scaled ones take the nearest texel; one texel size
+ * copies as it is, two formats of the ARGB group convert through a
+ * D3DCOLOR. */
+static HRESULT APIENTRY umd_blt(HANDLE h, CONST D3DDDIARG_BLT *a)
+{
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_RES *src = (UMD_RES *)a->hSrcResource, *dst = (UMD_RES *)a->hDstResource;
+    const RECT *sr = &a->SrcRect, *dr = &a->DstRect;
+    ULONG sfmt = (ULONG)src->cr.Format, dfmt = (ULONG)dst->cr.Format, c;
+    UINT sw, sh, dw, dh, spitch, dpitch, bpp, dbpp, cw, ch, x, y;
+    BYTE *sb, *db, *smem, *dmem;
+    UCHAR zero[16];
+
+    if (a->SrcSubResourceIndex >= src->nsub || a->DstSubResourceIndex >= dst->nsub) {
+        return E_INVALIDARG;
+    }
+    sub_size(src, a->SrcSubResourceIndex, &sw, &sh);
+    sub_size(dst, a->DstSubResourceIndex, &dw, &dh);
+    if (umd_row_bytes(sfmt, 1) != umd_row_bytes(dfmt, 1) || (sfmt != dfmt && (umd_is_dxt(sfmt) || umd_is_dxt(dfmt)))) {
+        ZeroMemory(zero, sizeof(zero));
+        if (!umd_px_unpack(sfmt, zero, &c) || !umd_fill_pack(dfmt, 0, zero)) {
+            sfmt = 0;
+        }
+    } else if (sfmt != dfmt) {
+        dfmt = sfmt;                                /* one texel size: copied as it is */
+    }
+    if (!sfmt || !rect_ok(sr, sw, sh) || !rect_ok(dr, dw, dh) || !umd_row_bytes(sfmt, 1)) {
+        umd_log("Blt refused: fmt %u -> %u, %ux%u -> %ux%u", src->cr.Format, dst->cr.Format, sw, sh, dw, dh);
+        return S_OK;
+    }
+    umd_readback(d, src);
+    if (dst != src) {
+        umd_readback(d, dst);                       /* the rest of the destination stays what the host drew */
+    }
+    cmd_flush(d);
+    sb = lock_res(d, src, src != dst);
+    db = dst == src ? sb : lock_res(d, dst, FALSE);
+    if (!sb || !db) {
+        if (sb) unlock_res(d, src);
+        return E_FAIL;
+    }
+    smem = sub_mem(src, sb, a->SrcSubResourceIndex);
+    dmem = sub_mem(dst, db, a->DstSubResourceIndex);
+    spitch = src->sub[a->SrcSubResourceIndex].pitch;
+    dpitch = dst->sub[a->DstSubResourceIndex].pitch;
+    cw = (UINT)(dr->right - dr->left);
+    ch = (UINT)(dr->bottom - dr->top);
+    if (umd_is_dxt(sfmt)) {
+        UINT block = umd_row_bytes(sfmt, 4), rows = (sr->top + ch + 3) / 4 - sr->top / 4;
+        UINT rowbytes = ((sr->left + cw + 3) / 4 - sr->left / 4) * block;
+
+        if (cw == (UINT)(sr->right - sr->left) && ch == (UINT)(sr->bottom - sr->top)) {
+            for (y = 0; y < rows; y++) {
+                CopyMemory(dmem + (dr->top / 4 + y) * dpitch + (dr->left / 4) * block,
+                           smem + (sr->top / 4 + y) * spitch + (sr->left / 4) * block, rowbytes);
+            }
+        }
+    } else if (cw == (UINT)(sr->right - sr->left) && ch == (UINT)(sr->bottom - sr->top) && sfmt == dfmt) {
+        bpp = umd_row_bytes(sfmt, 1);
+        for (y = 0; y < ch; y++) {
+            MoveMemory(dmem + (dr->top + y) * dpitch + dr->left * bpp, smem + (sr->top + y) * spitch + sr->left * bpp, cw * bpp);
+        }
+    } else {
+        UINT scw = (UINT)(sr->right - sr->left), sch = (UINT)(sr->bottom - sr->top);
+
+        bpp = umd_row_bytes(sfmt, 1);
+        dbpp = umd_row_bytes(dfmt, 1);
+        for (y = 0; y < ch; y++) {
+            const BYTE *srow = smem + (sr->top + ((2 * y + 1) * sch) / (2 * ch)) * spitch;
+            BYTE *drow = dmem + (dr->top + y) * dpitch + dr->left * dbpp;
+
+            for (x = 0; x < cw; x++) {
+                umd_px_copy(sfmt, dfmt, drow + x * dbpp, srow + (sr->left + ((2 * x + 1) * scw) / (2 * cw)) * bpp, bpp);
+            }
+        }
+    }
+    if (db != sb) unlock_res(d, dst);
+    unlock_res(d, src);
+    vram_dirty(d, dst);
+    return S_OK;
+}
+
 /* -------------------------------------------------------------- present */
 
 static HRESULT APIENTRY umd_present(HANDLE h, CONST D3DDDIARG_PRESENT *p)
@@ -1509,6 +1660,24 @@ static HRESULT APIENTRY umd_present(HANDLE h, CONST D3DDDIARG_PRESENT *p)
         umd_log("Present flags 0x%x src %p sub %u dst %p -> 0x%08x", p->Flags.Value, p->hSrcResource,
                 p->SrcSubResourceIndex, p->hDstResource, hr);
     }
+    return hr;
+}
+
+/* A full-screen swap chain's primary becomes what the display scans out
+ * (dxgkrnl then flips through SetVidPnSourceAddress / Present). */
+static HRESULT APIENTRY umd_set_display_mode(HANDLE h, CONST D3DDDIARG_SETDISPLAYMODE *a)
+{
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_RES *r = (UMD_RES *)a->hResource;
+    D3DDDICB_SETDISPLAYMODE m;
+    HRESULT hr;
+
+    umd_readback(d, r);
+    cmd_flush(d);
+    ZeroMemory(&m, sizeof(m));
+    m.hPrimaryAllocation = r->kmt;
+    hr = d->cb.pfnSetDisplayModeCb(d->rt, &m);
+    umd_log("SetDisplayMode %ux%u fmt %u -> 0x%08x", r->d.w, r->d.h, r->d.format, hr);
     return hr;
 }
 
@@ -1543,14 +1712,9 @@ STUB1(PFND3DDDI_STATESET, umd_state_set, D3DDDIARG_STATESET *)
 STUB1(PFND3DDDI_SETPRIORITY, umd_set_priority, CONST D3DDDIARG_SETPRIORITY *)
 STUB2(PFND3DDDI_UPDATEPALETTE, umd_update_palette, CONST D3DDDIARG_UPDATEPALETTE *, CONST PALETTEENTRY *)
 STUB1(PFND3DDDI_SETPALETTE, umd_set_palette, CONST D3DDDIARG_SETPALETTE *)
-STUB1(PFND3DDDI_SETDISPLAYMODE, umd_set_display_mode, CONST D3DDDIARG_SETDISPLAYMODE *)
 STUB1(PFND3DDDI_SETCONVOLUTIONKERNELMONO, umd_set_convolution_kernel_mono, CONST D3DDDIARG_SETCONVOLUTIONKERNELMONO *)
 STUB1(PFND3DDDI_COMPOSERECTS, umd_compose_rects, CONST D3DDDIARG_COMPOSERECTS *)
-STUB1(PFND3DDDI_BLT, umd_blt, CONST D3DDDIARG_BLT *)
-STUB1(PFND3DDDI_COLORFILL, umd_color_fill, CONST D3DDDIARG_COLORFILL *)
 STUB1(PFND3DDDI_DEPTHFILL, umd_depth_fill, CONST D3DDDIARG_DEPTHFILL *)
-STUB1(PFND3DDDI_DESTROYQUERY, umd_destroy_query, CONST HANDLE)
-STUB1(PFND3DDDI_ISSUEQUERY, umd_issue_query, CONST D3DDDIARG_ISSUEQUERY *)
 STUB1(PFND3DDDI_QUERYRESOURCERESIDENCY, umd_query_resource_residency, CONST D3DDDIARG_QUERYRESOURCERESIDENCY *)
 STUB1(PFND3DDDI_RENAME, umd_rename, CONST D3DDDIARG_RENAME *)
 
@@ -1572,22 +1736,202 @@ static HRESULT APIENTRY umd_get_info(HANDLE h, UINT id, VOID *p, UINT size)
     return E_FAIL;
 }
 
-static ULONG g_dummy_handle;
+/* --------------------------------------------------------------- queries
+ *
+ * The event and occlusion queries, as the XP driver's DX9 face has them
+ * (core_dp2.c): an event is done once the commands before it ran, an
+ * occlusion query is the host's. Its count comes back through the
+ * kernel-mode driver: a D3DPT_UMD_OP_RETURN before the QUERY_GET_DATA
+ * record has the result copied into this device's result allocation, a
+ * page of VRAM the host never sees, which a lock then reads. */
+
+typedef struct UMD_QUERY {
+    D3DDDIQUERYTYPE type;
+    ULONG host;                                   /* the host's handle (occlusion) */
+    BOOL ended;                                   /* issued with End since the last answer */
+    DWORD value;                                  /* the last answer */
+} UMD_QUERY;
+
+#define UMD_RESULT_BYTES 4096
+
+/* the result allocation, made at the first occlusion query */
+static UMD_RES *umd_result_res(UMD_DEV *d)
+{
+    D3DDDICB_ALLOCATE al;
+    D3DDDI_ALLOCATIONINFO ai;
+    UMD_RES *r;
+
+    if (d->qres) {
+        return d->qres;
+    }
+    r = (UMD_RES *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*r));
+    if (!r) {
+        return NULL;
+    }
+    r->sub = (struct UMD_SUB *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*r->sub));
+    if (!r->sub) {
+        HeapFree(GetProcessHeap(), 0, r);
+        return NULL;
+    }
+    r->nsub = 1;
+    r->d.magic = D3DPT_ALLOC_MAGIC;
+    r->d.kind = D3DPT_ALLOC_D3D;
+    r->d.size = UMD_RESULT_BYTES;
+    r->d.w = UMD_RESULT_BYTES;
+    r->d.h = 1;
+    r->d.pitch = UMD_RESULT_BYTES;
+    r->d.caps = 0;                                /* no host handle: the kernel-mode driver writes it */
+    ZeroMemory(&al, sizeof(al));
+    ZeroMemory(&ai, sizeof(ai));
+    ai.pPrivateDriverData = &r->d;
+    ai.PrivateDriverDataSize = sizeof(r->d);
+    al.NumAllocations = 1;
+    al.pAllocationInfo = &ai;
+    if (FAILED(d->cb.pfnAllocateCb(d->rt, &al))) {
+        HeapFree(GetProcessHeap(), 0, r->sub);
+        HeapFree(GetProcessHeap(), 0, r);
+        return NULL;
+    }
+    r->kmt = ai.hAllocation;
+    d->qres = r;
+    return r;
+}
 
 static HRESULT APIENTRY umd_create_query(HANDLE h, D3DDDIARG_CREATEQUERY *a)
 {
-    (void)h;
-    UMD_TODO(umd_create_query);
-    a->hQuery = (HANDLE)(ULONG_PTR)++g_dummy_handle;
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_QUERY *q;
+
+    if (a->QueryType != D3DDDIQUERYTYPE_EVENT && a->QueryType != D3DDDIQUERYTYPE_OCCLUSION) {
+        umd_log("CreateQuery: type %u refused", a->QueryType);
+        return D3DDDIERR_NOTAVAILABLE;
+    }
+    q = (UMD_QUERY *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*q));
+    if (!q) {
+        return E_OUTOFMEMORY;
+    }
+    q->type = a->QueryType;
+    if (q->type == D3DDDIQUERYTYPE_OCCLUSION) {
+        d3dpt_create_query *c;
+
+        /* the host's handle space is the whole guest's: this process's id in it */
+        q->host = 0x51000000u | ((GetCurrentProcessId() & 0xfffu) << 12) | (++d->next_query & 0xfffu);
+        c = (d3dpt_create_query *)cmd_rec(d, D3DPT_OP_CREATE_QUERY, sizeof(*c), 0, 0);
+        if (c) {
+            c->handle = q->host;
+            c->type = 9;
+        }
+    }
+    a->hQuery = q;
+    return S_OK;
+}
+
+static HRESULT APIENTRY umd_destroy_query(HANDLE h, CONST HANDLE hq)
+{
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_QUERY *q = (UMD_QUERY *)hq;
+
+    if (q->host) {
+        d3dpt_handle *k = (d3dpt_handle *)cmd_rec(d, D3DPT_OP_RELEASE, sizeof(*k), 0, 0);
+
+        if (k) {
+            k->handle = q->host;
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, q);
+    return S_OK;
+}
+
+/* D3DISSUE_END 1, D3DISSUE_BEGIN 2, as the host takes them */
+static HRESULT APIENTRY umd_issue_query(HANDLE h, CONST D3DDDIARG_ISSUEQUERY *a)
+{
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_QUERY *q = (UMD_QUERY *)a->hQuery;
+
+    if (a->Flags.End) {
+        q->ended = TRUE;
+    }
+    if (q->host) {
+        d3dpt_u32x2 *k = (d3dpt_u32x2 *)cmd_rec(d, D3DPT_OP_QUERY_ISSUE, sizeof(*k), 0, 0);
+
+        if (k) {
+            k->a = q->host;
+            k->b = (a->Flags.End ? 1u : 0u) | (a->Flags.Begin ? 2u : 0u);
+        }
+    }
     return S_OK;
 }
 
 static HRESULT APIENTRY umd_get_query_data(HANDLE h, CONST D3DDDIARG_GETQUERYDATA *a)
 {
-    (void)h;
-    UMD_TODO(umd_get_query_data);
+    UMD_DEV *d = (UMD_DEV *)h;
+    UMD_QUERY *q = (UMD_QUERY *)a->hQuery;
+    UMD_RES *res;
+    UINT n;
+
+    if (q->type == D3DDDIQUERYTYPE_EVENT) {
+        cmd_flush(d);                             /* every command before it on its way */
+        if (a->pData) {
+            *(BOOL *)a->pData = TRUE;
+        }
+        return S_OK;
+    }
+    if (!q->ended) {
+        if (a->pData) {
+            *(DWORD *)a->pData = q->value;
+        }
+        return S_OK;
+    }
+    res = umd_result_res(d);
+    if (!res) {
+        return E_OUTOFMEMORY;
+    }
+    /* the host has the count once the draws before it ran: it says "not
+     * yet" (S_FALSE) only while it waits for its own GPU */
+    for (n = 0; n < 1000; n++) {
+        d3dpt_u32x2 *ret = (d3dpt_u32x2 *)cmd_rec(d, D3DPT_UMD_OP_RETURN, sizeof(*ret), 0, 1);
+        d3dpt_query_get *g;
+        const d3dpt_ret *r;
+        BYTE *mem;
+        HRESULT hr = E_FAIL;
+        DWORD v = 0;
+
+        if (!ret) {
+            return E_FAIL;
+        }
+        cmd_patch(d, &ret->a, res, D3DPT_PATCH_OFFSET, 0);
+        ret->b = 4;
+        g = (d3dpt_query_get *)cmd_rec(d, D3DPT_OP_QUERY_GET_DATA, sizeof(*g), 0, 0);
+        if (!g) {
+            return E_FAIL;
+        }
+        g->handle = q->host;
+        g->flags = 1;                             /* D3DGETDATA_FLUSH */
+        g->size = 4;
+        cmd_flush(d);
+        mem = lock_res(d, res, TRUE);
+        if (mem) {
+            r = (const d3dpt_ret *)mem;
+            hr = (HRESULT)r->hr;
+            v = *(const DWORD *)(r + 1);
+            unlock_res(d, res);
+        }
+        if (hr == S_OK) {
+            q->value = v;
+            q->ended = FALSE;
+            if (a->pData) {
+                *(DWORD *)a->pData = v;
+            }
+            return S_OK;
+        }
+        if (hr != S_FALSE) {
+            umd_log("occlusion query 0x%08x: the host answered 0x%08x", q->host, hr);
+            break;
+        }
+    }
+    q->ended = FALSE;
     if (a->pData) {
-        *(DWORD *)a->pData = 1;       /* an event done, one pixel drawn */
+        *(DWORD *)a->pData = 0;
     }
     return S_OK;
 }
@@ -1649,6 +1993,13 @@ static HRESULT APIENTRY umd_destroy_device(HANDLE h)
             k->handle = d->host_ctx;
         }
         cmd_flush(d);
+    }
+    if (d->qres) {
+        umd_destroy_resource(d, d->qres);
+        d->qres = NULL;
+    }
+    if (d->pre) {
+        HeapFree(GetProcessHeap(), 0, d->pre);
     }
     if (d->ctx) {
         D3DDDICB_DESTROYCONTEXT dc;

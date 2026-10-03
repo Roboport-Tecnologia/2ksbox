@@ -366,6 +366,13 @@ void surf_unlock_dirty(d3dpt_core *c, ULONG handle);
 ULONG surf_dxt_size(ULONG fourcc, ULONG w, ULONG h);
 ULONG surf_lw_layout(ULONG fmt, ULONG w, ULONG h, ULONG *off, ULONG *pitch, ULONG *levels);
 BOOL fmt_fourcc_rows(ULONG fourcc);
+/* a D3DCOLOR in a format's layout (the texel's bytes, 0: no such fill), one
+ * texel of the ARGB group as a D3DCOLOR, one texel from one format to
+ * another (the same, or both in the ARGB group): the DX9 blits' and fills'
+ * pixels, the XP driver's (core_dp2.c) and the WDDM one's */
+ULONG fill_pack(ULONG fmt, ULONG c, UCHAR *out);
+BOOL px_unpack(ULONG fmt, const UCHAR *px, ULONG *c);
+void px_copy(ULONG sfmt, ULONG dfmt, UCHAR *d, const UCHAR *s, ULONG bpp);
 
 /* --- core_ctx.c: contexts, render targets, Clear2, scene capture --- */
 extern D3DCTX d3d_ctx[D3D_MAX_CTX];

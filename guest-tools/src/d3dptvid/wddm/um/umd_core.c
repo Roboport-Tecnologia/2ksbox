@@ -113,6 +113,33 @@ HRESULT umd_caps9(void *out, UINT size)
     return S_OK;
 }
 
+/* the older runtimes' caps (d3d8.dll's D3DCAPS8; ddraw.dll's DX3..7
+ * device: the HAL's global data and extended caps), the XP driver's */
+static HRESULT caps_copy(const char *what, void *out, UINT size, const void *ours, UINT n)
+{
+    if (size != n) {
+        umd_log("GetCaps(%s): the runtime's %u bytes, ours %u", what, size, n);
+    }
+    ZeroMemory(out, size);
+    CopyMemory(out, ours, size < n ? size : n);
+    return S_OK;
+}
+
+HRESULT umd_caps8(void *out, UINT size)
+{
+    return caps_copy("D3D8CAPS", out, size, &d3d_caps8, sizeof(d3d_caps8));
+}
+
+HRESULT umd_caps_hal(void *out, UINT size)
+{
+    return caps_copy("D3D3CAPS", out, size, &d3d_global, sizeof(d3d_global));
+}
+
+HRESULT umd_caps_ext(void *out, UINT size)
+{
+    return caps_copy("D3D7CAPS", out, size, &d3d_extcaps, sizeof(d3d_extcaps));
+}
+
 UINT umd_format_count(void)
 {
     DD_GETFORMATCOUNTDATA_ f;
@@ -159,4 +186,19 @@ ULONG umd_rows(ULONG fmt, ULONG h)
 BOOL umd_is_dxt(ULONG fmt)
 {
     return fmt_is_dxt(fmt);
+}
+
+ULONG umd_fill_pack(ULONG fmt, ULONG c, UCHAR *out)
+{
+    return fill_pack(fmt, c, out);
+}
+
+BOOL umd_px_unpack(ULONG fmt, const UCHAR *px, ULONG *c)
+{
+    return px_unpack(fmt, px, c);
+}
+
+void umd_px_copy(ULONG sfmt, ULONG dfmt, UCHAR *d, const UCHAR *s, ULONG bpp)
+{
+    px_copy(sfmt, dfmt, d, s, bpp);
 }

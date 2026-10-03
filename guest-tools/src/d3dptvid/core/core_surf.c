@@ -149,6 +149,105 @@ ULONG surf_lw_layout(ULONG fmt, ULONG w, ULONG h, ULONG *off, ULONG *pitch, ULON
     return total;
 }
 
+/* x / 255 (x 1..255) as the IEEE bits of a float with mbits of mantissa
+ * and an exponent biased by bias, rounded to nearest: integer long
+ * division only, since the kernel-mode driver keeps off the FPU */
+static ULONG unorm8_float(ULONG x, ULONG mbits, ULONG bias)
+{
+    ULONG k = 0, q, rem, i;
+
+    if (!x) {
+        return 0;
+    }
+    while ((x << k) < 255) k++;                 /* x * 2^k / 255 in [1, 2) */
+    rem = x << k;
+    q = rem / 255;
+    rem %= 255;
+    for (i = 0; i < mbits; i++) {
+        rem <<= 1;
+        q = (q << 1) | (rem >= 255);
+        if (rem >= 255) rem -= 255;
+    }
+    if (2 * rem >= 255) q++;                    /* round; q may reach 2^(mbits+1), which the add carries into the exponent */
+    return ((bias - k) << mbits) + (q - (1u << mbits));
+}
+
+/* D3DCOLOR in fmt's layout at out (up to 16 bytes), each channel rounded
+ * as a float conversion rounds it (what the host's fill would write): the
+ * float formats take R, then G, B, A, as far as they have channels, and
+ * the 16-bit unorm ones x * 257. Returns the texel's bytes; 0 for a format
+ * with no fill here */
+ULONG fill_pack(ULONG fmt, ULONG c, UCHAR *out)
+{
+    ULONG a = c >> 24, r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff, ch[4], i, n;
+    ULONG *o32 = (ULONG *)out;
+    USHORT *o16 = (USHORT *)out;
+#define CH(x, bits) (((x) * ((1u << (bits)) - 1) + 127) / 255)
+    ch[0] = r; ch[1] = g; ch[2] = b; ch[3] = a;
+    switch (fmt) {
+    case D3DFMT_X8R8G8B8_: case D3DFMT_A8R8G8B8_: o32[0] = c; return 4;
+    case D3DFMT_A8B8G8R8_: case D3DFMT_X8B8G8R8_: o32[0] = (c & 0xff00ff00u) | r | (b << 16); return 4;
+    case D3DFMT_A2R10G10B10_: o32[0] = CH(a, 2) << 30 | CH(r, 10) << 20 | CH(g, 10) << 10 | CH(b, 10); return 4;
+    case D3DFMT_A2B10G10R10_: o32[0] = CH(a, 2) << 30 | CH(b, 10) << 20 | CH(g, 10) << 10 | CH(r, 10); return 4;
+    case D3DFMT_G16R16_: o32[0] = g * 257 << 16 | r * 257; return 4;
+    case D3DFMT_A16B16G16R16_: for (i = 0; i < 4; i++) o16[i] = (USHORT)(ch[i] * 257); return 8;
+    case D3DFMT_R5G6B5_: o16[0] = (USHORT)(CH(r, 5) << 11 | CH(g, 6) << 5 | CH(b, 5)); return 2;
+    case D3DFMT_X1R5G5B5_: case D3DFMT_A1R5G5B5_: o16[0] = (USHORT)(CH(a, 1) << 15 | CH(r, 5) << 10 | CH(g, 5) << 5 | CH(b, 5)); return 2;
+    case D3DFMT_A4R4G4B4_: case D3DFMT_X4R4G4B4_: o16[0] = (USHORT)(CH(a, 4) << 12 | CH(r, 4) << 8 | CH(g, 4) << 4 | CH(b, 4)); return 2;
+    case D3DFMT_A8_: out[0] = (UCHAR)a; return 1;
+    case D3DFMT_R16F_: case D3DFMT_G16R16F_: case D3DFMT_A16B16G16R16F_:
+        n = fmt == D3DFMT_R16F_ ? 1 : fmt == D3DFMT_G16R16F_ ? 2 : 4;
+        for (i = 0; i < n; i++) o16[i] = (USHORT)unorm8_float(ch[i], 10, 15);
+        return n * 2;
+    case D3DFMT_R32F_: case D3DFMT_G32R32F_: case D3DFMT_A32B32G32R32F_:
+        n = fmt == D3DFMT_R32F_ ? 1 : fmt == D3DFMT_G32R32F_ ? 2 : 4;
+        for (i = 0; i < n; i++) o32[i] = unorm8_float(ch[i], 23, 127);
+        return n * 4;
+    default: return 0;
+    }
+#undef CH
+}
+
+/* one texel of an ARGB-group format as a D3DCOLOR (an X channel reads as
+ * 0xff, each field widened by repeating its top bits, so fill_pack gives
+ * the texel back); FALSE for a format outside the group */
+BOOL px_unpack(ULONG fmt, const UCHAR *px, ULONG *c)
+{
+    ULONG v, r, g, b;
+
+    switch (fmt) {
+    case D3DFMT_A8R8G8B8_: *c = *(const ULONG *)px; return TRUE;
+    case D3DFMT_X8R8G8B8_: *c = *(const ULONG *)px | 0xff000000u; return TRUE;
+    case D3DFMT_R5G6B5_:
+        v = *(const USHORT *)px;
+        r = (v >> 11) & 0x1f; g = (v >> 5) & 0x3f; b = v & 0x1f;
+        *c = 0xff000000u | ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);
+        return TRUE;
+    case D3DFMT_X1R5G5B5_: case D3DFMT_A1R5G5B5_:
+        v = *(const USHORT *)px;
+        r = (v >> 10) & 0x1f; g = (v >> 5) & 0x1f; b = v & 0x1f;
+        *c = ((fmt == D3DFMT_X1R5G5B5_ || (v & 0x8000)) ? 0xff000000u : 0) |
+             ((r << 3 | r >> 2) << 16) | ((g << 3 | g >> 2) << 8) | (b << 3 | b >> 2);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+/* one texel from sfmt to dfmt: as it is when they are the same, else
+ * through a D3DCOLOR (both in the ARGB group, walk_blt9 checked) */
+void px_copy(ULONG sfmt, ULONG dfmt, UCHAR *d, const UCHAR *s, ULONG bpp)
+{
+    ULONG c, v[4];
+
+    if (sfmt == dfmt) {
+        memcpy(d, s, bpp);
+        return;
+    }
+    px_unpack(sfmt, s, &c);
+    memcpy(d, v, fill_pack(dfmt, c, (UCHAR *)v));
+}
+
 /* a FOURCC code that is an uncompressed D3DFORMAT (Q8W8V8U8): the runtime
  * creates a DX8 format with no DDPIXELFORMAT this way, and DirectDraw knows
  * no bit count for it, so the layer's CreateSurface gives it its pitch */

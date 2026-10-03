@@ -89,6 +89,14 @@ enum {
     D3DPT_PATCH_OFFSET = 2,                       /* its VRAM offset + AllocationOffset */
 };
 
+/* A record the kernel-mode driver consumes, never sent to the host: the
+ * next record's result (its ret_off's d3dpt_ret and `bytes` of payload)
+ * is copied into VRAM at `dst` (a D3DPT_PATCH_OFFSET fix-up of the
+ * user-mode driver's result allocation) once the host ran it. The kernel
+ * driver gives that record a return slot of its own and rings the doorbell
+ * right after it. Body: d3dpt_u32x2 {dst, bytes}. */
+#define D3DPT_UMD_OP_RETURN 0x8000u
+
 /* the allocation list's entries per submission (the context's
  * AllocationListSize, and what the user-mode driver tracks) */
 #define D3DPT_WDDM_MAX_LIST 64
