@@ -211,7 +211,11 @@ fn content(w: Window_) -> impl View {
     });
     let ready = move |handle: SurfaceHandle| {
         let size = handle.size();
-        let mut gpu = Gpu::new(handle.clone(), (size.width.max(1), size.height.max(1)));
+        // On Windows the surface is a child window of the XAML window, and
+        // frames Vulkan presents there never show (acquired and presented
+        // without an error, the window empty); Direct3D 12's do.
+        let backends = cfg!(windows).then_some(player_core::wgpu::Backends::DX12);
+        let mut gpu = Gpu::with_backends(handle.clone(), (size.width.max(1), size.height.max(1)), backends);
         let started = with(|p| {
             p.input = Input::new(p.args.pad_mode);
             p.scale = if size.scale > 0.0 { size.scale } else { 1.0 };

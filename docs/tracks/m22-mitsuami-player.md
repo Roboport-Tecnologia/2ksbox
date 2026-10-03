@@ -162,8 +162,24 @@ embed library, as for the winit player, into a target dir of its own:
    now run on a thread of their own); and QEMU's Windows threads queued
    our QEMU thread's exit notifiers for process exit, after its TLS was
    gone (patch 80). 72 of 72 exits clean afterwards, against about one
-   in twelve crashing. Left for this step on Windows: the window and
-   input on the desktop by hand, and the keyboard grab above.
+   in twelve crashing. The user's first run through the launcher
+   (2026-10-03) crashed twice and then showed an empty window:
+   - **Empty window:** the surface is a child window of the XAML window,
+     and frames wgpu's Vulkan backend presents there never show
+     (acquired and presented without an error). Direct3D 12's do, so
+     the player asks for it on Windows (`Gpu::with_backends`;
+     `WGPU_BACKEND` still overrides). The winit player's top-level window
+     shows Vulkan's.
+   - **Crash at boot:** QEMU's `vga_draw_blank()` blanked 720x400 rows
+     into an allocated 640x400 surface, 320 bytes past its file mapping
+     (gdb; the `strncpy+1108` frame Windows logged). Three boots of six
+     with the MSVC winit player, none with the GNU one; patch 81. Six
+     boots of `base98-br` on each player afterwards, none ending early.
+   - Win98 offered "Add New Hardware" for a standard PCI VGA adapter on
+     every one of those boots (through `-snapshot`), not yet looked at.
+
+   Left for this step on Windows: the window and input on the desktop by
+   hand, and the keyboard grab above.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and

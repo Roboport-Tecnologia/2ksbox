@@ -30,6 +30,7 @@ pub use gpu::{Gpu, MinSize};
 pub use input::Input;
 pub use qemu_embed::Qemu;
 pub use session::Session;
+pub use wgpu;
 
 /// The question a keyboard close asks before the player pulls the
 /// machine's plug (Alt+F4, Cmd+Q), and what it says under it.

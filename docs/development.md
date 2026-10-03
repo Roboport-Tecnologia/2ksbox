@@ -279,7 +279,9 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
 knob, which are `player-core`'s. It is its own cargo workspace: `cd
 player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
 --features kde,gilrs` for Kirigami); on Windows `build-windows.sh
-mitsuami` builds it with MSVC after the launcher (`docs/build-windows.md`). It is the default player: once it
+mitsuami` builds it with MSVC after the launcher (`docs/build-windows.md`),
+and there it presents through Direct3D 12 unless `WGPU_BACKEND` says
+otherwise (Vulkan's frames never show on its child window). It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
 (Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full

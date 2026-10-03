@@ -906,3 +906,17 @@ the GNU and MSVC winit players and `player-mitsuami`, 2026-10-03; about
 one in twelve crashed before), and `test.sh`'s `companions-env`.
 **Drop:** upstream gives foreign threads a per-thread exit list on
 Windows.
+
+### 81-vga-blank-surface-size
+`vga_draw_blank()` blanks `last_scr_width` x `last_scr_height` of the
+console's surface and trusted an allocated one to be that size. On a
+Win98 boot through the embed library it was not: gdb at the fault showed
+`last_scr` 720x400 (text) over an allocated 640x400 surface, and the last
+row's `memset` ran 320 bytes past it. On Windows an allocated surface is
+a file mapping that ends exactly there, so it faulted in msvcrt (the
+`strncpy+1108` frame) in three boots of six with the MSVC-built player
+(track M22); elsewhere the write lands silently on what follows. An
+allocated surface of another size is now replaced, as a shared one
+always was. How `last_scr` and the surface part is not yet known.
+**Test:** six boots of `base98-br` on each player, none ending early.
+**Drop:** upstream checks the surface's size in `vga_draw_blank()`.

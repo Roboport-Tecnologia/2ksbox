@@ -1,0 +1,33 @@
+vga_draw_blank() blanks last_scr_width x last_scr_height pixels of the
+console's surface, and when that surface is allocated it trusts it to be
+that size. It can be another: on a Win98 boot through the embed library,
+gdb at the fault showed last_scr 720x400 (text) over an allocated 640x400
+surface (last_width/last_height 640x400), and the last row's memset ran
+320 bytes past the surface. On Windows an allocated surface is a file
+mapping that ends exactly there (640x400x4 is 250 pages), so it faulted
+in msvcrt (the "strncpy+1108" memset) in three boots of six with the
+MSVC-built player, whose heap leaves the next page unmapped more often;
+elsewhere the same write lands silently on whatever follows. An allocated surface of another size is now
+replaced like a shared one. 2ksbox track M22.
+
+diff --git a/hw/display/vga.c b/hw/display/vga.c
+index 0251043..0d035b8 100644
+--- a/hw/display/vga.c
++++ b/hw/display/vga.c
+@@ -1782,7 +1782,15 @@ static void vga_draw_blank(VGACommonState *s, int full_update)
+     if (s->last_scr_width <= 0 || s->last_scr_height <= 0)
+         return;
+ 
+-    if (!surface_is_allocated(surface)) {
++    /*
++     * An allocated surface of another size than last_scr_*: blanking it
++     * at last_scr_* writes past its end (720x400 rows of a 640x400
++     * surface: 320 bytes past it, a fault on Windows, where the surface
++     * is a file mapping that ends there). A new one, as when shared.
++     */
++    if (!surface_is_allocated(surface) ||
++        surface_width(surface) != s->last_scr_width ||
++        surface_height(surface) != s->last_scr_height) {
+         /* unshare buffer, otherwise the blanking corrupts vga vram */
+         surface = qemu_create_displaysurface(s->last_scr_width,
+                                              s->last_scr_height);
