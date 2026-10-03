@@ -14,6 +14,7 @@
 #include "ui/console.h"
 #include "ui/surface.h"
 #include "ui/input.h"
+#include "ui/clipboard.h"
 #include "qemu-main.h"
 #include "libqemu_embed.h"
 #include "embedfx.h"
@@ -86,6 +87,19 @@ struct qemu_embed {
     uint32_t refresh_ms;
     uint32_t *flip;         /* row-flipped copy of a bottom-up 3D frame */
     size_t flip_len;
+
+    /* v11: the clipboard, a peer of QEMU's (ui/clipboard.c), which
+       `qemu-vdagent` joins for the guest's agent (track M23) */
+    QemuClipboardPeer cbpeer;
+    bool cb_registered;
+    qemu_embed_clipboard_cb clip_fn;
+    void *clip_ud;
+    QemuMutex clip_lock;    /* clip_next, set from any thread */
+    char *clip_next;        /* host text waiting for bh_clip_set */
+    size_t clip_next_len;
+    char *clip_text;        /* the host text the guest was last offered */
+    size_t clip_text_len;
+    const void *clip_seen;  /* the guest data last handed to clip_fn */
 };
 
 /* one VM per process: the 3D backend reports through this instance */
@@ -325,6 +339,122 @@ static const DisplayChangeListenerOps embed_dcl_ops = {
     .dpy_cursor_define    = embed_dpy_cursor_define,
 };
 
+/* -------------------------------------------------------------- clipboard */
+
+/* A guest agent came up: vdagent resets the serials, then joins the
+   clipboard. Text of ours from before it joined is announced again once
+   it has (a bottom half runs after the join). */
+static void bh_clip_reannounce(void *opaque)
+{
+    qemu_embed_t *e = opaque;
+    if (e->clip_text && qemu_clipboard_peer_owns(&e->cbpeer, QEMU_CLIPBOARD_SELECTION_CLIPBOARD)) {
+        /* a new info: vdagent sends the guest a grab only for an info that
+           is not the current one, never for an update of it */
+        g_autoptr(QemuClipboardInfo) info =
+            qemu_clipboard_info_new(&e->cbpeer, QEMU_CLIPBOARD_SELECTION_CLIPBOARD);
+        qemu_clipboard_set_data(&e->cbpeer, info, QEMU_CLIPBOARD_TYPE_TEXT, e->clip_text_len,
+                                e->clip_text, true);
+    }
+}
+
+/* The guest's agent took the clipboard (vdagent made the info), or its
+   data arrived: ask for the text, and hand it over once it is there. */
+static void clip_notify(Notifier *n, void *data)
+{
+    qemu_embed_t *e = container_of(n, qemu_embed_t, cbpeer.notifier);
+    QemuClipboardNotify *nt = data;
+    if (nt->type == QEMU_CLIPBOARD_RESET_SERIAL) {
+        aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_clip_reannounce, e);
+        return;
+    }
+    if (nt->type != QEMU_CLIPBOARD_UPDATE_INFO) {
+        return;
+    }
+    QemuClipboardInfo *info = nt->info;
+    if (info->owner == &e->cbpeer || info->selection != QEMU_CLIPBOARD_SELECTION_CLIPBOARD) {
+        return;
+    }
+    QemuClipboardContent *t = &info->types[QEMU_CLIPBOARD_TYPE_TEXT];
+    if (!t->available) {
+        return;
+    }
+    if (!t->data || !t->size) {
+        qemu_clipboard_request(info, QEMU_CLIPBOARD_TYPE_TEXT);
+        return;
+    }
+    if (t->data == e->clip_seen) {
+        return;             /* the same data notified again */
+    }
+    e->clip_seen = t->data;
+    size_t len = t->size;
+    while (len && ((const char *)t->data)[len - 1] == '\0') {
+        len--;
+    }
+    if (e->clip_fn) {
+        e->clip_fn(e->clip_ud, t->data, len);
+    }
+}
+
+/* Someone (vdagent, for the guest) wants the text of an info of ours
+   that lost it: offer the last text again. */
+static void clip_request(QemuClipboardInfo *info, QemuClipboardType type)
+{
+    qemu_embed_t *e = container_of(info->owner, qemu_embed_t, cbpeer);
+    if (type == QEMU_CLIPBOARD_TYPE_TEXT && e->clip_text) {
+        qemu_clipboard_set_data(&e->cbpeer, info, type, e->clip_text_len, e->clip_text, true);
+    }
+}
+
+static void bh_clip_register(void *opaque)
+{
+    qemu_embed_t *e = opaque;
+    if (!e->cb_registered) {
+        e->cbpeer.name = "2ksbox-player";
+        e->cbpeer.notifier.notify = clip_notify;
+        e->cbpeer.request = clip_request;
+        qemu_clipboard_peer_register(&e->cbpeer);
+        e->cb_registered = true;
+    }
+}
+
+void qemu_embed_set_clipboard_cb(qemu_embed_t *e, qemu_embed_clipboard_cb fn, void *ud)
+{
+    e->clip_fn = fn;
+    e->clip_ud = ud;
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_clip_register, e);
+}
+
+/* The host's text, published as ours: vdagent offers it to the guest. */
+static void bh_clip_set(void *opaque)
+{
+    qemu_embed_t *e = opaque;
+    qemu_mutex_lock(&e->clip_lock);
+    char *text = e->clip_next;
+    size_t len = e->clip_next_len;
+    e->clip_next = NULL;
+    qemu_mutex_unlock(&e->clip_lock);
+    if (!text) {
+        return;
+    }
+    bh_clip_register(e);
+    g_free(e->clip_text);
+    e->clip_text = text;
+    e->clip_text_len = len;
+    g_autoptr(QemuClipboardInfo) info =
+        qemu_clipboard_info_new(&e->cbpeer, QEMU_CLIPBOARD_SELECTION_CLIPBOARD);
+    qemu_clipboard_set_data(&e->cbpeer, info, QEMU_CLIPBOARD_TYPE_TEXT, len, text, true);
+}
+
+void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *utf8, size_t len)
+{
+    qemu_mutex_lock(&e->clip_lock);
+    g_free(e->clip_next);
+    e->clip_next = g_memdup2(utf8, len);
+    e->clip_next_len = len;
+    qemu_mutex_unlock(&e->clip_lock);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_clip_set, e);
+}
+
 /* -------------------------------------------------------------- lifecycle */
 
 uint32_t qemu_embed_api_version(void)
@@ -365,6 +495,7 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
     }
     e->ud = ud;
     qemu_mutex_init(&e->in_lock);
+    qemu_mutex_init(&e->clip_lock);
 
     /* argv + "-S" + "-display none" (+ NULL); we own the copies. */
     e->argc = argc + 3;

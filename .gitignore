@@ -3,6 +3,7 @@
 # the root build never needs GTK), so each has its own target directory
 # that `/target` above doesn't cover.
 /launcher-mitsuami/target
+/guest-agent/target
 /player-mitsuami/target
 *.o
 *.so

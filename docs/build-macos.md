@@ -21,7 +21,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 - **No library the app carries comes from Homebrew.** `build.sh`'s
   `deps` stage (`scripts/build-deps.sh`) builds QEMU's libraries (glib,
-  pixman, libslirp, zstd, and libtpms with OpenSSL's libcrypto; static)
+  pixman, libslirp, zstd, and libtpms with OpenSSL's libcrypto; static;
+  and spice-protocol's headers)
   from pinned upstream tarballs into `build/deps/<arch>`, and
   `configure-qemu.sh` and the packager use nothing else. meson, ninja
   and pkg-config are needed to build them and ship nothing.
@@ -463,6 +464,10 @@ a recipe change for the same version wants `--clean`.
   meson's `prefer_static`: QEMU turns it into `-static`, fatal on macOS.
 - **libtpms 0.10.2 with OpenSSL 3.5's libcrypto**, static, for the TPM
   2.0 behind `-tpmdev libtpms` (track M20, patch 75).
+- **spice-protocol 0.14.5's headers**, nothing linked: QEMU builds its
+  `qemu-vdagent` chardev with them, the clipboard's channel to a guest
+  agent (track M23). Its `.pc` is moved from `share/pkgconfig` into the
+  prefix's `lib/pkgconfig`.
 - **No toolkit.** Until 2026-10-02 the script also built Qt 6.9.3 as
   frameworks for the Qt launcher (and carried two qtdeclarative patches
   for the macOS style's button margins); the AppKit launcher needs

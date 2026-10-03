@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v10** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v11** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
@@ -50,6 +50,7 @@ not block. Everything else may come from any thread.
 | 8 | `pad_state`, `pad_present`: the gamepad (M13); the same bytes feed the gameport |
 | 9 | `set_window_size`, `display_follows_window`: the window's size as a monitor's (M20, below) |
 | 10 | `setenv`: an environment variable set on the library's C runtime ("The C runtime boundary") |
+| 11 | `set_clipboard_cb`, `clipboard_set_text`: the clipboard, text, through QEMU's own (M23, below) |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -100,6 +101,18 @@ Windows has no zero-copy slot; its 3D frames arrive through
   presses, drops) only when something is off.
   `qemu_input_is_absolute()` plus the mouse-mode notifier say whether the
   guest wants tablet or PS/2 semantics.
+- **The clipboard** (v11, track M23, doc 24 §3). The library is a peer
+  of QEMU's clipboard (`ui/clipboard.c`), which `-chardev
+  qemu-vdagent,clipboard=on` joins for a guest agent once the agent
+  announces its capabilities. Guest text: an update owned by another peer
+  is requested if it has no data, and handed to the callback once it
+  has (QEMU thread, BQL held). Host text: a new `QemuClipboardInfo` of
+  ours with the data attached, from a bottom half. When an agent comes up
+  vdagent broadcasts `RESET_SERIAL` and then joins; the library answers
+  that, from a bottom half that runs after the join, with a *new* info
+  carrying its last text, since vdagent sends the guest a grab only for
+  an info that is not the current one. Notifications go out only while
+  the VM runs.
 - **VM control.** `qemu_system_{vmstop,reset,powerdown,shutdown}_request()`
   are async and thread-safe; `vm_start()` needs the BQL, so it goes
   through a bottom-half.

@@ -434,6 +434,19 @@ index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
 
+`tools/clipboard-win11-test.sh [build/w11d]` (M23 steps 4-5): the
+clipboard between this Mac and Windows 11 on Arm, end to end. The machine
+runs in the aarch64 player itself (`tools/player-as-qemu.sh` as
+`win11-spike.py`'s `QEMU=`, with `CLIPBOARD=1` adding `qemu-vdagent` and
+the virtio-serial port), so the embed library's clipboard peer is in the
+run; its window opens. `tools/win11-spike/clip.ps1` installs `vioser` from
+virtio-win's ISO and starts `guest-agent` elevated in the user's session.
+Checks: text on the Mac's clipboard at boot reaches the guest, text the
+guest sets reaches `pbpaste`, a second Mac text reaches the guest. The
+Mac's clipboard is the user's: its text is saved and put back. About 5
+minutes. Needs the aarch64 player, the agent (`cd guest-agent && cargo
+build --release --target x86_64-pc-windows-gnu`) and the ISO.
+
 `tools/smb-try.sh <folder> [build/w11d]` (M23): the shared folder by
 hand before the launcher has the setting. Windows 11 on Arm in the
 aarch64 player, on the launcher's board, booted from a fresh overlay in

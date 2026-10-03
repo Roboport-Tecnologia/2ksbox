@@ -36,10 +36,14 @@ filesystem driver or a virtual disk).
    CHANGE_NOTIFY is implemented. Left for the user once the launcher has
    the setting (step 6): browsing and dragging by mouse. Left here:
    leases (below) and Linux's `smbclient` in the host check.
-4. **The clipboard's host side.** spice-protocol headers, `qemu-vdagent`
-   built, an embed clipboard peer, and the player bridge.
-5. **The guest agent.** The clipboard, mapping the share, the drivers
-   disc's `vioserial` and the agent's autostart.
+4. **The clipboard's host side** (done 2026-10-03). spice-protocol
+   0.14.5's headers in `build-deps.sh` (macOS and Linux; the Flatpak
+   carries the tarball), `--enable-spice-protocol` except on Windows,
+   embed API v11's clipboard peer, and `player-core/src/clipboard.rs`.
+5. **The guest agent** (clipboard done 2026-10-03). `guest-agent/`,
+   x64, elevated in the user's session; `vioser` on the drivers disc.
+   Left: the agent's install (copied off the drivers disc, a logon task
+   with highest privileges) and mapping the share.
 6. **The launcher.** The form's "Shared folder" and "Clipboard" rows,
    the arguments, and their sentences in `launcher-core`.
 7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC.
@@ -169,7 +173,36 @@ pipe; Windows is what needs it.
 The user tried it again by hand the same day: "everything works great
 now", Explorer's path-typed flow and its credential prompt included.
 
+## Steps 4 and 5's results (2026-10-03)
+
+`tools/clipboard-win11-test.sh`: Windows 11 on Arm in the player itself
+(`tools/player-as-qemu.sh` under `win11-spike.py CLIPBOARD=1`), `vioser`
+installed by `pnputil`, the agent started elevated in the user's session.
+
+| Check | Result |
+|---|---|
+| Text on the Mac's clipboard at boot, in the guest once the agent is up | 0.4 s after |
+| Text the guest sets, on the Mac (`pbpaste`) | pass |
+| A second Mac text, in the guest | 1.3 s |
+
+On the way:
+
+- **`vioser`'s port refuses an unelevated process** (error 5); the agent
+  runs with the user's elevated token (doc 24 §4).
+- **`vdagent` grabs only for a new info.** Host text set before the agent
+  was up was not offered when it came up; the library now answers
+  vdagent's `RESET_SERIAL` with a new info carrying the text (doc 11).
+- **Reading the clipboard at once raced .NET's `Set-Clipboard`** ("Requested
+  Clipboard operation did not succeed"); the agent waits 150 ms after the
+  last change notice.
+- `bsdtar` refuses virtio-win's ISO's hard links; the test extracts with
+  `xorriso`, as `build-virtio-win.sh` does.
+
 ## Open items
+
+- An ARM64-native agent (an ARM64 Windows toolchain on the build host).
+- Non-administrator users: a SYSTEM service holding the port, as Red
+  Hat's agent does.
 
 - **Leases / oplocks.** None are granted, so Windows caches nothing: a
   hash of a 512 MB file read in 4 KiB pieces costs about 131,000 READs. A

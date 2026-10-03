@@ -174,9 +174,26 @@ QEMU_EMBED_API void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w,
  * should not be held to the guest's mode. Any thread. */
 QEMU_EMBED_API bool qemu_embed_display_follows_window(qemu_embed_t *e);
 
+/* v11: the clipboard (track M23), through QEMU's own clipboard, which
+ * `-chardev qemu-vdagent,clipboard=on` connects to a guest agent (the
+ * SPICE agent protocol over a virtio-serial port). Text only, UTF-8.
+ *
+ * The callback hears the guest's text whenever the guest's clipboard
+ * changes: QEMU thread, BQL held, `utf8` valid only during the call (copy
+ * it, do not block). Call after qemu_embed_new(); the library joins
+ * QEMU's clipboard then. */
+typedef void (*qemu_embed_clipboard_cb)(void *ud, const char *utf8, size_t len);
+QEMU_EMBED_API void qemu_embed_set_clipboard_cb(qemu_embed_t *e, qemu_embed_clipboard_cb fn,
+                                                void *ud);
+/* The host's clipboard text, offered to the guest (copied). Any thread,
+ * after qemu_embed_new(). Text the guest has not asked for yet is simply
+ * replaced by the next call. */
+QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *utf8,
+                                                  size_t len);
+
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 10
+#define QEMU_EMBED_API_VERSION 11
 
 #ifdef __cplusplus
 }

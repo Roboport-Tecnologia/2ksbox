@@ -123,10 +123,12 @@ virtio-serial port named `com.redhat.spice.0`:
   version bump). The guest grabbing, the host's text arriving, and
   requests both ways.
 - **The player** bridges that peer to the host's clipboard in
-  `player-core`, through the `arboard` crate, polled on focus changes
-  and when the window gets focus. A front end with a toolkit clipboard
-  (mitsuami) can take over later. Text only: QEMU's peer interface has
-  `QEMU_CLIPBOARD_TYPE_TEXT` and nothing richer.
+  `player-core/src/clipboard.rs`, through the `arboard` crate: a thread
+  polls the host's clipboard twice a second, and each side remembers
+  what it last took from the other so nothing bounces back. Only for a
+  machine whose command line has a `qemu-vdagent`. A front end with a
+  toolkit clipboard (mitsuami) can take over later. Text only: QEMU's
+  peer interface has `QEMU_CLIPBOARD_TYPE_TEXT` and nothing richer.
 - **The guest driver:** virtio-win's `vioserial`, which has a signed
   ARM64 Windows 11 build (`vioserial/w11/ARM64`), joins our drivers disc
   (`scripts/build-virtio-win.sh`) beside NetKVM and viogpudo. x64
@@ -137,16 +139,26 @@ virtio-serial port named `com.redhat.spice.0`:
 
 ## 4. The guest agent
 
-`guest-agent/` is a small Rust program for modern Windows, built for
-`x86_64` and `aarch64` Windows (native ARM64, no emulation). It runs in
-the user's session, started from the Run key that our drivers disc's
-setup step writes. It does two jobs:
+`guest-agent/` is a small Rust program for modern Windows (its own cargo
+workspace). It is built for x64 (`x86_64-pc-windows-gnu`, mingw-w64 on
+the build host); Windows 11 on Arm runs it under its x64 emulation, since
+no ARM64 Windows toolchain is on the Mac yet. It runs in the user's
+session **with the user's elevated token**: `vioser` lets only SYSTEM and
+Administrators open the port (an unelevated agent gets error 5), and
+in the user's session it shares that session's clipboard. Red Hat's
+agent solves the same with a SYSTEM service plus a per-session process;
+ours is one process, started at logon by a task set to run with highest
+privileges, so the user must be an administrator (Windows 11's first
+user is). It does two jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
-   the agent protocol subset QEMU's `vdagent.c` implements: capabilities,
-   GRAB / REQUEST / CLIPBOARD / RELEASE with the selection and serial
-   capabilities, and `CF_UNICODETEXT` ↔ UTF-8. It watches the clipboard
-   with `AddClipboardFormatListener`.
+   the agent protocol subset QEMU's `vdagent.c` implements: it announces
+   only CLIPBOARD_BY_DEMAND, so GRAB / REQUEST / CLIPBOARD carry no
+   selection byte or serial; `CF_UNICODETEXT` ↔ UTF-8, CRLF ↔ LF. It
+   watches the clipboard with `AddClipboardFormatListener` and reads
+   150 ms after the last change notice (a program still finishing its
+   own write, .NET's for one, fails if the clipboard is opened under it),
+   and does not send back a change it made itself.
 2. **The share:** at login, if `10.0.2.4:445` answers, it maps the share
    to a drive letter (`WNetAddConnection2`, the fixed credentials). It
    shows no UI, and a machine without a shared folder simply has no

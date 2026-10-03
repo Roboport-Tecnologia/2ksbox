@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # The drivers disc of a Windows 11 on Arm machine (track M20): the ARM64
 # Windows 11 builds of virtio-win's network driver (NetKVM, for the
-# board's virtio-net) and display driver (viogpudo, for virtio-gpu), taken
-# from Red Hat's virtio-win ISO, pinned by version and sha256 here.
+# board's virtio-net), display driver (viogpudo, for virtio-gpu) and
+# virtio-serial driver (vioser, the clipboard's channel to QEMU's
+# qemu-vdagent, track M23), taken from Red Hat's virtio-win ISO, pinned by
+# version and sha256 here.
 #
 #   scripts/build-virtio-win.sh       build if anything changed
 #   scripts/build-virtio-win.sh -f    build again regardless
 #
-# Windows on Arm has no driver in the box for either device, and neither
+# Windows on Arm has no driver in the box for any of the three, and none
 # can be built here: Windows loads a kernel driver only with Microsoft's
 # signature, and these carry it ("Microsoft Windows Hardware
 # Compatibility Publisher" on each catalog). The binaries are under the
@@ -52,13 +54,14 @@ if ! [ -f "$SRC" ] || [ "$(shasum -a 256 "$SRC" | cut -d' ' -f1)" != "$SHA256" ]
   mv "$SRC.part" "$SRC"
 fi
 
-echo "==> virtio-win: the ARM64 NetKVM and viogpudo for Windows 11"
+echo "==> virtio-win: the ARM64 NetKVM, viogpudo and vioser for Windows 11"
 TREE=$OUT/tree
 # what xorriso extracts keeps the disc's read-only modes
 [ -d "$TREE" ] && chmod -R u+w "$TREE"
 rm -rf "$TREE"
 mkdir -p "$TREE/\$WinPEDriver\$"
 for pair in /NetKVM/w11/ARM64:\$WinPEDriver\$/NetKVM /viogpudo/w11/ARM64:\$WinPEDriver\$/viogpudo \
+            /vioserial/w11/ARM64:\$WinPEDriver\$/vioserial \
             /virtio-win_license.txt:virtio-win_license.txt; do
   xorriso -osirrox on -indev "$SRC" -extract "${pair%%:*}" "$TREE/${pair#*:}" 2>&1 \
     | grep -i -E "failure|sorry" >&2 && exit 1
@@ -66,7 +69,8 @@ for pair in /NetKVM/w11/ARM64:\$WinPEDriver\$/NetKVM /viogpudo/w11/ARM64:\$WinPE
 done
 # Debug symbols: 18 of the 20 MB, and no use to anyone without a debugger
 find "$TREE" -name '*.pdb' -delete
-for f in NetKVM/netkvm.inf NetKVM/netkvm.cat NetKVM/netkvm.sys viogpudo/viogpudo.inf viogpudo/viogpudo.cat viogpudo/viogpudo.sys; do
+for f in NetKVM/netkvm.inf NetKVM/netkvm.cat NetKVM/netkvm.sys viogpudo/viogpudo.inf viogpudo/viogpudo.cat viogpudo/viogpudo.sys \
+         vioserial/vioser.inf vioserial/vioser.cat vioserial/vioser.sys; do
   [ -f "$TREE/\$WinPEDriver\$/$f" ] || { echo "build-virtio-win: virtio-win $VERSION has no ARM64 $f" >&2; exit 1; }
 done
 cat > "$TREE/README.txt" <<EOF

@@ -782,6 +782,9 @@ pub fn start(
             }
             let (q, owner) =
                 unsafe { Qemu::new(&args, &cb, ud as *mut c_void) }.expect("qemu_embed_new failed");
+            if crate::clipboard::wanted(&args) {
+                crate::clipboard::start(q); // M23: the guest agent's clipboard
+            }
             q.vm_start();
             tx.send(q).unwrap();
             let status = owner.run();
@@ -805,6 +808,7 @@ pub fn start(
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
+            crate::clipboard::stop();
             owner.destroy(status);
             status
         })

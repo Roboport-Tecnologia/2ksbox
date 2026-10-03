@@ -245,6 +245,15 @@ elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
   CFG+=(--disable-smartcard --enable-libtpms --extra-ldflags="-Wl,--exclude-libs,$HIDE")
   echo "==> glib, libslirp and libtpms: $DEPS (static, hidden)"
 fi
+# spice-protocol's headers, and nothing of SPICE's server: they are what
+# `qemu-vdagent` builds with, the chardev that carries the clipboard to a
+# guest agent (track M23, doc 24 §3). build-deps.sh puts them in the prefix
+# on macOS and Linux; Windows hosts come later (M23 step 7).
+if [ -n "$WINDOWS" ]; then
+  CFG+=(--disable-spice-protocol)
+else
+  CFG+=(--enable-spice-protocol)
+fi
 # No QEMU user interface at all. The player is the front end. It embeds
 # QEMU, the embed library appends `-display none` itself
 # (embed/libqemu_embed.c), and it brings its own 3D context provider
@@ -311,7 +320,6 @@ case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
   --disable-cocoa \
   --disable-curses \
   --disable-spice \
-  --disable-spice-protocol \
   --disable-alsa \
   --disable-pa \
   --disable-pipewire \

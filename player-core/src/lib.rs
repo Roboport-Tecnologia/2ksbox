@@ -6,6 +6,7 @@
 //! what one front end could do differently from another lives here.
 
 pub mod audio;
+pub mod clipboard;
 pub mod companions;
 #[cfg(target_os = "linux")]
 pub mod dmabuf;

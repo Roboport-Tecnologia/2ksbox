@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 10;
+pub const API_VERSION: u32 = 11;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -95,6 +95,12 @@ extern "C" {
     fn qemu_embed_input_flush(e: *mut qemu_embed_t);
     fn qemu_embed_set_refresh_ms(e: *mut qemu_embed_t, ms: u32);
     fn qemu_embed_set_window_size(e: *mut qemu_embed_t, w: u32, h: u32, dpi: u32);
+    fn qemu_embed_set_clipboard_cb(
+        e: *mut qemu_embed_t,
+        f: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize)>,
+        ud: *mut c_void,
+    );
+    fn qemu_embed_clipboard_set_text(e: *mut qemu_embed_t, utf8: *const c_char, len: usize);
     fn qemu_embed_display_follows_window(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_set_audio_ring(
         base: *mut c_void,
@@ -270,6 +276,23 @@ impl Qemu {
     /// the window should not be held to the guest's mode (v9).
     pub fn display_follows_window(&self) -> bool {
         unsafe { qemu_embed_display_follows_window(self.0) }
+    }
+    /// Hear the guest's clipboard text (v11, track M23), through QEMU's
+    /// `qemu-vdagent`. `f` runs on QEMU's thread with the BQL held: it
+    /// must not block. One handler per process, set once after `new`.
+    pub fn set_clipboard_handler(&self, f: Box<dyn Fn(String) + Send + Sync>) {
+        unsafe extern "C" fn tramp(ud: *mut c_void, p: *const c_char, len: usize) {
+            let f = unsafe { &*(ud as *const Box<dyn Fn(String) + Send + Sync>) };
+            let bytes = unsafe { std::slice::from_raw_parts(p as *const u8, len) };
+            f(String::from_utf8_lossy(bytes).into_owned());
+        }
+        // one VM per process: the handler lives as long as it
+        let ud = Box::into_raw(Box::new(f)) as *mut c_void;
+        unsafe { qemu_embed_set_clipboard_cb(self.0, Some(tramp), ud) }
+    }
+    /// Offer the host's clipboard text to the guest (v11). Any thread.
+    pub fn set_clipboard_text(&self, text: &str) {
+        unsafe { qemu_embed_clipboard_set_text(self.0, text.as_ptr() as *const c_char, text.len()) }
     }
 }
 

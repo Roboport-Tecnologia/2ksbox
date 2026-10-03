@@ -58,6 +58,9 @@ Environment:
                        main.ps1 under stub.ps1, which logs a refusal
                        (tools/win11-spike/smb.ps1: the shared folder, M23)
   PROBE_WAIT=60        seconds a probe may run after its first line
+  CLIPBOARD=1          the clipboard's channel: QEMU's qemu-vdagent on a
+                       virtio-serial port named com.redhat.spice.0 (M23);
+                       the host's end is the player's (QEMU=tools/player-as-qemu.sh)
   SMB=<socket>         NET=1: the guest's 10.0.2.4:445 forwarded to the Unix
                        socket an SMB server listens on (smbserve --unix,
                        track M23; QEMU patch 79)
@@ -99,6 +102,7 @@ TPM = os.environ.get("TPM", "libtpms" if ARM else "swtpm")
 REPORT = os.environ.get("REPORT", "") == "1"
 PROBE = os.environ.get("PROBE", "") == "1"
 SMB = os.environ.get("SMB", "")
+CLIPBOARD = os.environ.get("CLIPBOARD", "") == "1"
 TPM_PPI = os.environ.get("TPM_PPI", "on") != "off"
 PROBE_WAIT = int(os.environ.get("PROBE_WAIT", "60"))
 SPIKE = os.path.join(ROOT, "tools/win11-spike")
@@ -338,6 +342,10 @@ def run_qemu(cds):
         if SMB:
             netdev += ",guestfwd=tcp:10.0.2.4:445-unix:" + SMB
         args += ["-netdev", netdev, "-device", nic + ",netdev=n0"]
+    if CLIPBOARD:
+        args += ["-chardev", "qemu-vdagent,id=vda,clipboard=on,mouse=off",
+                 "-device", "virtio-serial-pci",
+                 "-device", "virtserialport,chardev=vda,name=com.redhat.spice.0"]
     if ARM:
         # after the CDs: plugged first, the firmware made its one USB
         # boot entry for this disk and never tried the ISO
