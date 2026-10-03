@@ -183,7 +183,8 @@ embed library, as for the winit player, into a target dir of its own:
    So mitsuami's `WH_KEYBOARD_LL` grab holds while the player's window
    has focus on this PC, where doc 03 measured such a hook going blind;
    the winit player's Alt+F4 asks before closing instead (00-status,
-   "Player"). Windows' half of this step is done; macOS's is left.
+   "Player"). Left that way (user, 2026-10-03): in the mitsuami player
+   Alt+F4 is the guest's. Windows' half of this step is done; macOS's is left.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and
