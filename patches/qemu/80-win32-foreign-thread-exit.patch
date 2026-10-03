@@ -1,0 +1,84 @@
+On Windows, run a foreign thread's thread-exit notifiers when that thread
+exits, not at process exit. qemu_thread_atexit_add() took any thread QEMU
+did not create for the process's main thread and queued its notifiers
+(defer-call's, fdmon-poll's, the log's, the coroutine pool's, all
+__thread variables) for atexit. libqemu-embed runs the main loop on a
+thread the player creates, which ends after qemu_embed_destroy(), so at
+process exit the list was walked through that thread's freed TLS: a
+segfault in notifier_list_notify() from the DLL's onexit table in about
+one exit in twelve, with either player toolchain. Such a thread's list now
+runs from a fiber-local storage callback when it exits; the main thread
+(noted by a constructor) keeps atexit. POSIX already uses a per-thread
+key destructor. 2ksbox track M22; docs/11-m1-embed-api.md.
+
+diff --git a/util/qemu-thread-win32.c b/util/qemu-thread-win32.c
+index 3037732..e3bbb5a 100644
+--- a/util/qemu-thread-win32.c
++++ b/util/qemu-thread-win32.c
+@@ -255,8 +255,66 @@ static void run_main_thread_exit(void)
+     notifier_list_notify(&main_thread_exit, NULL);
+ }
+ 
++/*
++ * A thread QEMU did not create is not necessarily the process's main
++ * thread: an embedder (2ksbox's libqemu-embed) runs the main loop on a
++ * thread of its own, which ends before the process does. Its notifiers
++ * are __thread variables, so queued for atexit they were walked in that
++ * thread's freed TLS at process exit, a call through a null pointer in
++ * about one exit in twelve. Such a thread's list runs when it exits, from
++ * a fiber-local storage callback; the main thread keeps atexit.
++ */
++static DWORD main_thread_id;
++static DWORD foreign_exit_fls = FLS_OUT_OF_INDEXES;
++static INIT_ONCE foreign_exit_once = INIT_ONCE_STATIC_INIT;
++
++static void __attribute__((constructor)) note_main_thread(void)
++{
++    main_thread_id = GetCurrentThreadId();
++}
++
++static void WINAPI run_foreign_thread_exit(void *opaque)
++{
++    NotifierList *list = opaque;
++
++    notifier_list_notify(list, NULL);
++    g_free(list);
++}
++
++static BOOL CALLBACK foreign_exit_init(PINIT_ONCE once, void *param,
++                                       void **context)
++{
++    foreign_exit_fls = FlsAlloc(run_foreign_thread_exit);
++    return foreign_exit_fls != FLS_OUT_OF_INDEXES;
++}
++
++static bool foreign_thread_atexit_add(Notifier *notifier)
++{
++    NotifierList *list;
++
++    if (GetCurrentThreadId() == main_thread_id ||
++        !InitOnceExecuteOnce(&foreign_exit_once, foreign_exit_init,
++                             NULL, NULL)) {
++        return false;
++    }
++    list = FlsGetValue(foreign_exit_fls);
++    if (!list) {
++        list = g_new0(NotifierList, 1);
++        notifier_list_init(list);
++        if (!FlsSetValue(foreign_exit_fls, list)) {
++            g_free(list);
++            return false;
++        }
++    }
++    notifier_list_add(list, notifier);
++    return true;
++}
++
+ void qemu_thread_atexit_add(Notifier *notifier)
+ {
++    if (!qemu_thread_data && foreign_thread_atexit_add(notifier)) {
++        return;
++    }
+     if (!qemu_thread_data) {
+         if (!atexit_registered) {
+             atexit_registered = true;

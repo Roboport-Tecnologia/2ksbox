@@ -887,3 +887,22 @@ connection. libslirp 4.9.5 has it on Unix only, so on Windows the rule
 is refused until a `patches/deps/libslirp` patch turns on `AF_UNIX` there.
 **Test:** `tools/win11-spike.py` with `SMB=` (docs/testing.md).
 **Drop:** upstream QEMU gains a Unix target for `guestfwd`.
+
+### 80-win32-foreign-thread-exit
+On Windows, the thread-exit notifiers of a thread QEMU did not create run
+when that thread exits, not at process exit. `qemu_thread_atexit_add()`
+took any such thread for the process's main thread and queued its
+notifiers (defer-call's, fdmon-poll's, the log's, the coroutine pool's,
+all `__thread` variables) for `atexit`. libqemu-embed runs the main loop
+on a thread the player creates, which ends after `qemu_embed_destroy()`,
+so at exit the list was walked through freed TLS: a segfault in
+`notifier_list_notify()` from the DLL's onexit table in about one exit
+in twelve, with either player toolchain (track M22, doc 11). A foreign
+thread's list now runs from a fiber-local storage callback; the main
+thread, noted by a constructor, keeps `atexit`. POSIX already uses a
+per-thread key destructor. **Test:** the player through
+`PLAYER_QMP_EXEC='{"execute":"quit"}'` exits 0 every time (72 of 72 across
+the GNU and MSVC winit players and `player-mitsuami`, 2026-10-03; about
+one in twelve crashed before), and `test.sh`'s `companions-env`.
+**Drop:** upstream gives foreign threads a per-thread exit list on
+Windows.

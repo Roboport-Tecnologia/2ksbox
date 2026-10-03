@@ -151,10 +151,19 @@ embed library, as for the winit player, into a target dir of its own:
    `test.sh`'s `companions-env`. The link needs no import library: the
    bindings import the DLL through `raw-dylib` on Windows (2026-10-03),
    and the winit player built for `x86_64-pc-windows-msvc` ran mingw
-   QEMU to the BIOS and quit cleanly (doc 11). Left for this step on
-   Windows: `player-mitsuami` built with MSVC (a `build-windows.sh`
-   stage, as the launcher's), its window and input there, and the
-   keyboard grab above.
+   QEMU to the BIOS and quit cleanly (doc 11). `player-mitsuami` builds
+   with MSVC unchanged, in `build-windows.sh`'s `mitsuami` stage after the
+   launcher (static C runtime), and runs a machine to its BIOS and quits
+   there; a checkout's launcher on Windows starts it once built.
+   Repeated exits found two crashes, both older than this step and in
+   every player: `PLAYER_QMP_EXEC` ran its requests on the UI thread, so a
+   `quit` blocked it while QEMU's thread waited 5 s for the VM's release,
+   then tore down and left the UI reading a freed surface (the requests
+   now run on a thread of their own); and QEMU's Windows threads queued
+   our QEMU thread's exit notifiers for process exit, after its TLS was
+   gone (patch 80). 72 of 72 exits clean afterwards, against about one
+   in twelve crashing. Left for this step on Windows: the window and
+   input on the desktop by hand, and the keyboard grab above.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and

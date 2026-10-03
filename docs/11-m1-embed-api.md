@@ -167,7 +167,13 @@ Audited 2026-10-02, every channel the API or the process offers:
   `ExitProcess` on either target.
 - **Threads.** QEMU's thread is Rust's `std::thread` (`CreateThread`
   either way), and the library is linked at load, never opened later
-  (patch 63), so its static TLS is set up as for any thread.
+  (patch 63), so its static TLS is set up as for any thread. But QEMU on
+  Windows took a thread it did not create for the process's main thread
+  and queued that thread's exit notifiers, `__thread` variables, for
+  `atexit`. Ours ends before the process, so at exit QEMU walked freed
+  TLS: a segfault in `notifier_list_notify()` from the DLL's onexit table
+  in about one exit in twelve, with either player toolchain. **Patch 80**
+  runs such a thread's list when it exits (2026-10-03).
 - **Types.** Pointers, `int`, fixed-width integers and C `bool` (one
   byte in both compilers), no struct by value and no `long double`;
   function pointers on the Windows x64 convention both use.

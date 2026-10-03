@@ -278,7 +278,8 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
 `player-mitsuami/` takes the same command line and every `PLAYER_*`
 knob, which are `player-core`'s. It is its own cargo workspace: `cd
 player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
---features kde,gilrs` for Kirigami). It is the default player: once it
+--features kde,gilrs` for Kirigami); on Windows `build-windows.sh
+mitsuami` builds it with MSVC after the launcher (`docs/build-windows.md`). It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
 (Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
@@ -362,7 +363,8 @@ socket file). A script adds its own `-qmp unix:…,server,nowait`.
   regardless).
 - `PLAYER_QMP_EXEC='{"execute":"query-status"}'` (or a JSON array) runs
   requests once the guest has drawn its first frame and prints the
-  replies.
+  replies, from a thread of its own (a `quit`'s reply comes only after
+  QEMU has torn down, which waits for the UI thread).
 
 ### Direct3D pass-through (doc 14)
 

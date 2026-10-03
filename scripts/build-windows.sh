@@ -28,13 +28,16 @@
 #           player links the embed DLL from build/win/qemu.
 #   mitsuami (Windows only) cargo build --release in launcher-mitsuami/
 #           (its own workspace): the launcher every package ships
-#           (ADR-023), on WinUI 3. It is the one MSVC binary here
-#           (cargo +stable-x86_64-pc-windows-msvc, Visual Studio's C++
-#           tools), linked with a static C runtime so it needs no
-#           vcruntime DLL, and it runs on the Windows App Runtime 2.4+,
-#           which a PC installs once. It talks to the rest only through
-#           the player's command line, so the C runtimes never meet. The
-#           cross image has no MSVC, so a Linux host skips it.
+#           (ADR-023), on WinUI 3, then player-mitsuami/ the same way
+#           (track M22). Both are MSVC (cargo
+#           +stable-x86_64-pc-windows-msvc, Visual Studio's C++ tools),
+#           linked with a static C runtime so they need no vcruntime DLL,
+#           and run on the Windows App Runtime 2.4+, which a PC installs
+#           once. The launcher talks to the rest only through the
+#           player's command line; the player links QEMU's mingw DLL, two
+#           C runtimes in one process (docs/11-m1-embed-api.md, "The C
+#           runtime boundary"). The cross image has no MSVC, so a Linux
+#           host skips it.
 #   exec    DXVK's d3d9.dll into build/win/dxvk (configure-dxvk.sh
 #           --windows), then build-d3dpt-exec.sh --windows: d3dpt_exec.dll,
 #           the Direct3D executor (doc 14). The package ships DXVK as
@@ -244,6 +247,13 @@ if want mitsuami; then
     for d in "${dirs[@]}"; do case "$d" in /usr/bin|/bin) ;; *) nolink="${nolink:+$nolink:}$d" ;; esac; done
     cargo=$(command -v cargo)
     ( cd launcher-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
+        "$cargo" "+$MSVC" build --release )
+    # ... and the player on mitsuami (track M22), the same way. It links
+    # QEMU's mingw DLL across two C runtimes (doc 11, "The C runtime
+    # boundary"). A launcher in a checkout starts it whenever it is built
+    # (launcher_core::player); packages still ship the winit player.
+    say "mitsuami: cargo +$MSVC build --release (player-mitsuami)"
+    ( cd player-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
         "$cargo" "+$MSVC" build --release )
     BUILT+=(mitsuami)
   fi
