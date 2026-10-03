@@ -326,7 +326,15 @@ device's half is plain QEMU C and builds anywhere.
    one never freed by the opener); X8R8G8B8 source modes (cdd.dll still
    makes an A8R8G8B8 primary and dxgkrnl drops it in a loop, as the first
    boots found; A8R8G8B8 modes stay, as VirtualBox's WDDM driver has
-   them). Next: DWM's own reason, from the guest's event logs.
+   them). **DWM's own reason**, from the guest's Application log
+   (`wevtutil qe Application`, through the scratch disk): event 9007,
+   "The Desktop Window Manager was unable to start because WDDM is not in
+   use", then 9009 exits with `0xc00002fe` and `0x80070224`, while the
+   same boot runs its desktop and Direct3D 9 on this WDDM driver. So DWM's
+   test of the driver model fails on something the driver reports (the
+   WDDM version or a cap in DXGK_DRIVERCAPS, the adapter as dxgkrnl
+   describes it to user mode, or the VGA-compatible boot device beside
+   it), not on the D3D caps. That is the next thing to find.
    Windows 7's UAC dialog is not always centred: the test loop answers it
    with Alt+Y.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**
