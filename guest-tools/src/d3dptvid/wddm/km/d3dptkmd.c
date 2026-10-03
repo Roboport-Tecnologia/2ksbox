@@ -1090,6 +1090,14 @@ static NTSTATUS APIENTRY d3dpt_create_allocation(IN_CONST_HANDLE h, INOUT_PDXGKA
             }
         } else {
             al->size = ROUND_TO_PAGES((SIZE_T)d->pitch * d->h);
+            /* the desktop's primary is a render target too: ddraw.dll's
+             * full-screen flip chain opens it as one of its buffers */
+            if (d->kind == D3DPT_ALLOC_PRIMARY) {
+                al->d.caps = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;
+                al->d.levels = 1;
+                al->d.nlv = 0;
+                al->handle = (ULONG)InterlockedIncrement(&a->next_handle);
+            }
         }
         info->Alignment = 0;
         info->Size = al->size;
@@ -1689,6 +1697,22 @@ static void complete_fence(D3DPT_ADAPTER *a, ULONG fence)
 
 /* --------------------------------------------- building and submitting */
 
+/* Where an allocation is, from everything that moves it or names its
+ * place: the paging operations (in the order they will run), every
+ * Patch's allocation list, the scanout. The registration with the host
+ * reads it at submit time (PKT_REG); no one source sees every allocation
+ * (dxgkrnl skips the Patch of a submission whose allocations it already
+ * patched, cdd.dll's presents patch the desktop's primary). */
+static void alloc_at(HANDLE h, UINT seg, ULONG addr)
+{
+    D3DPT_ALLOC *al = (D3DPT_ALLOC *)h;
+
+    if (al && al->d.magic == D3DPT_ALLOC_MAGIC) {
+        al->cur_seg = seg;
+        al->cur_addr = seg ? addr : 0;
+    }
+}
+
 static void transfer_side(PKT_MEM *m, UINT seg, LARGE_INTEGER addr, MDL *mdl, UINT offset, UINT mdl_pages)
 {
     m->seg = seg;
@@ -1721,6 +1745,8 @@ static NTSTATUS APIENTRY d3dpt_build_paging_buffer(IN_CONST_HANDLE h, IN_PDXGKAR
         }
         pkt_hdr(&p->h, PKT_TRANSFER, sizeof(*p));
         p->bytes = (ULONG)b->Transfer.TransferSize;
+        alloc_at(b->Transfer.hAllocation, b->Transfer.Destination.SegmentId,
+                 b->Transfer.Destination.SegmentAddress.LowPart);
         transfer_side(&p->src, b->Transfer.Source.SegmentId, b->Transfer.Source.SegmentAddress,
                       b->Transfer.Source.pMdl, b->Transfer.TransferOffset, b->Transfer.MdlOffset);
         transfer_side(&p->dst, b->Transfer.Destination.SegmentId, b->Transfer.Destination.SegmentAddress,
@@ -1744,6 +1770,7 @@ static NTSTATUS APIENTRY d3dpt_build_paging_buffer(IN_CONST_HANDLE h, IN_PDXGKAR
             return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
         }
         pkt_hdr(&p->h, PKT_FILL, sizeof(*p));
+        alloc_at(b->Fill.hAllocation, b->Fill.Destination.SegmentId, b->Fill.Destination.SegmentAddress.LowPart);
         p->bytes = (ULONG)b->Fill.FillSize;
         p->pattern = b->Fill.FillPattern;
         p->seg = b->Fill.Destination.SegmentId;
@@ -2039,6 +2066,11 @@ static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH 
         }
         dbg_puts("\n");
     }
+    for (off = 0; off < p->AllocationListSize; off++) {
+        alloc_at(p->pAllocationList[off].hDeviceSpecificAllocation, p->pAllocationList[off].SegmentId,
+                 p->pAllocationList[off].PhysicalAddress.LowPart);
+    }
+    off = p->DmaBufferSubmissionStartOffset;
     while (off + sizeof(PKT_HDR) <= p->DmaBufferSubmissionEndOffset) {
         PKT_HDR *hd = (PKT_HDR *)(buf + off);
 
@@ -2513,6 +2545,7 @@ static NTSTATUS APIENTRY d3dpt_set_vidpn_source_address(IN_CONST_HANDLE h,
 {
     D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
 
+    alloc_at(s->hAllocation, s->PrimarySegment, s->PrimaryAddress.LowPart);
     if (s->PrimarySegment == 1) {
         a->regs[D3DPT_FB_REG_OFFSET / 4] = s->PrimaryAddress.LowPart;
         a->scan_addr = s->PrimaryAddress.LowPart;

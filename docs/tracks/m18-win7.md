@@ -290,11 +290,30 @@ device's half is plain QEMU C and builds anywhere.
    of 307200 pixels, D3DFEAT9's is byte-identical** and its occlusion
    query and getter lines are native's (21316 pixels). d3d9.dll did not
    call StateSet: with a non-pure device it records state blocks itself.
-   Left of step 6: the DX8 / DX7 programs (d3d8.dll and ddraw.dll reach
-   the same driver through GetCaps' D3D8 / D3D3..7 types, answered empty
-   for now), full-screen swap chains (Primary resources, SetDisplayMode,
-   flips), render targets on a level or a face, 32-bit indices, the
-   depth-to-depth StretchRect, and the test loop as a repo tool.
+   - **DX8 and DX7** reach the same driver: d3d8.dll opens a device with
+     interface 8, ddraw.dll with interface 7, and both ask GetCaps for the
+     older caps (type 12, D3DCAPS8, 212 bytes; type 8, the HAL's global
+     data, 192; type 11, the extended caps, 116), which the XP driver's
+     tables answer at the sizes the runtimes pass. **D3DGAME8's frame is 0
+     pixels off the native frame** (2026-10-03). D3D7TEST finds the HAL
+     and T&L HAL devices with the XP driver's caps and flips a full-screen
+     chain whose second buffer is **the desktop's shared primary**, which
+     ddraw.dll opens (OpenResource) and renders into: the kernel driver
+     now gives dxgkrnl's primaries a host handle and render-target caps,
+     and a plain video-memory surface is a possible target too, as the XP
+     driver's DirectDraw surfaces are. That primary also showed that no
+     single DDI sees every allocation's place (its Patch is cdd.dll's),
+     so the kernel driver keeps each allocation's place from paging
+     transfers and fills, every Patch's whole list and SetVidPnSourceAddress.
+   **Plan step 6 proved 2026-10-03**: D3DGAME9 and D3DGAME8 0 pixels off
+   the native frame, D3DFEAT9 byte-identical with native query / getter
+   lines, **D3D7TEST's full-screen frame equal to the host-only frame**
+   (`d3dpt-dp2-test`), all four in one boot. Left over, none of it in the
+   proof: d3d9 full-screen swap chains (SetDisplayMode is wired,
+   untested), render targets on a level or a face, 32-bit indices, the
+   depth-to-depth StretchRect, the test loop as a repo tool (its base
+   image is still made by hand), and the device's own interrupt (step 4).
+   Next is step 7: Direct3D 9Ex, shared surfaces, DWM.
    Windows 7's UAC dialog is not always centred: the test loop answers it
    with Alt+Y.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**

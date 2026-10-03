@@ -403,6 +403,14 @@ static ULONG umd_res_caps(const D3DDDIARG_CREATERESOURCE *c)
     if (c->Flags.RenderTarget) caps |= D3DPT_VS_RENDER_TARGET;
     if (c->Flags.ZBuffer) caps |= D3DPT_VS_ZBUFFER;
     if (c->Flags.Primary) caps |= D3DPT_VS_PRIMARY | D3DPT_VS_RENDER_TARGET;
+    /* A plain surface in video memory (a DirectDraw flip chain's back
+     * buffer, an offscreen plain one): DX7 renders into it without its
+     * runtime saying so, so the host knows it as a possible target, as the
+     * XP driver's DirectDraw surfaces are */
+    if (!caps && c->SurfCount == 1 && c->Pool != D3DDDIPOOL_SYSTEMMEM && umd_row_bytes((ULONG)c->Format, 1) &&
+        !umd_is_dxt((ULONG)c->Format)) {
+        caps = D3DPT_VS_RENDER_TARGET;
+    }
     if (c->Flags.AutogenMipmap && (caps & D3DPT_VS_TEXTURE)) caps |= D3DPT_VS_AUTOGEN;
     if (c->MultisampleType >= D3DDDIMULTISAMPLE_2_SAMPLES && c->MultisampleType <= D3DDDIMULTISAMPLE_16_SAMPLES) {
         caps |= (ULONG)c->MultisampleType << D3DPT_VS_SAMPLES_SHIFT;
@@ -590,6 +598,13 @@ static HRESULT APIENTRY umd_lock(HANDLE h, D3DDDIARG_LOCK *l)
          * host reads textures and buffers from VRAM at draw time) */
         if (!l->Flags.WriteOnly && !l->Flags.Discard) {
             umd_readback(dev, r);
+        }
+        if (r->d.caps & (D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY)) {
+            static ULONG logged;
+
+            if (logged++ < 16) {
+                umd_log("Lock of a target %p: flags 0x%x, rendered %u", r, l->Flags.Value, r->rendered);
+            }
         }
         cmd_flush(dev);
         ZeroMemory(&lk, sizeof(lk));
@@ -801,10 +816,16 @@ static HRESULT APIENTRY umd_set_render_target(HANDLE h, CONST D3DDDIARG_SETRENDE
 {
     UMD_DEV *d = (UMD_DEV *)h;
     UMD_RES *r = (UMD_RES *)s->hRenderTarget;
+    static ULONG logged;
     UINT *e;
 
     if (s->RenderTargetIndex >= 4) {
         return E_INVALIDARG;
+    }
+    if (logged < 32) {
+        logged++;
+        umd_log("SetRenderTarget %u: %p, allocation 0x%x, caps 0x%x, %ux%u", s->RenderTargetIndex, r, r ? r->kmt : 0,
+                r ? r->d.caps : 0, r ? r->d.w : 0, r ? r->d.h : 0);
     }
     if (s->SubResourceIndex) {
         umd_log("todo: SetRenderTarget %u on subresource %u (a level or a face)", s->RenderTargetIndex, s->SubResourceIndex);
@@ -1966,6 +1987,9 @@ static HRESULT APIENTRY umd_open_resource(HANDLE h, D3DDDIARG_OPENRESOURCE *o)
     r->rt = o->hResource;
     r->kmt = ai[0].hAllocation;
     r->d = *d;
+    if (d->kind == D3DPT_ALLOC_PRIMARY) {
+        r->d.caps = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;     /* as the kernel-mode driver registers it */
+    }
     r->nsub = 1;
     r->sub[0].pitch = d->pitch;
     r->sub[0].slice = d->pitch * d->h;
