@@ -178,8 +178,12 @@ embed library, as for the winit player, into a target dir of its own:
    - Win98 offered "Add New Hardware" for a standard PCI VGA adapter on
      every one of those boots (through `-snapshot`), not yet looked at.
 
-   Left for this step on Windows: the window and input on the desktop by
-   hand, and the keyboard grab above.
+   **On the desktop by hand (2026-10-03, user):** "everything seems to be
+   working, including keyboard capture. even alt+f4 went to the guest".
+   So mitsuami's `WH_KEYBOARD_LL` grab holds while the player's window
+   has focus on this PC, where doc 03 measured such a hook going blind;
+   the winit player's Alt+F4 asks before closing instead (00-status,
+   "Player"). Windows' half of this step is done; macOS's is left.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and
