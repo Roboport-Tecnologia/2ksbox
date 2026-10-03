@@ -40,12 +40,21 @@ filesystem driver or a virtual disk).
    0.14.5's headers in `build-deps.sh` (macOS and Linux; the Flatpak
    carries the tarball), `--enable-spice-protocol` except on Windows,
    embed API v11's clipboard peer, and `player-core/src/clipboard.rs`.
-5. **The guest agent** (clipboard done 2026-10-03). `guest-agent/`,
-   x64, elevated in the user's session; `vioser` on the drivers disc.
-   Left: the agent's install (copied off the drivers disc, a logon task
-   with highest privileges) and mapping the share.
-6. **The launcher.** The form's "Shared folder" and "Clipboard" rows,
-   the arguments, and their sentences in `launcher-core`.
+5. **The guest agent** (done 2026-10-03). `guest-agent/`, x64, elevated
+   in the user's session; `--map`, run unelevated, maps the share. The
+   drivers disc carries `vioser` and `2ksbox\install.cmd`
+   (`install.ps1`): the drivers, the agent in `C:\Program Files\2ksbox`,
+   and two logon tasks for every user (the agent with highest
+   privileges, `--map` limited), both started at once.
+6. **The launcher** (done 2026-10-03). `Machine::clipboard` (on for a
+   new Windows 11 machine) and `shared_folder`; the form's Network page
+   has both, with their notes in `launcher-core` and their rows in
+   `launcher-mitsuami`; `--wizard-edit` takes them last; the machine
+   details show them. The clipboard is QEMU arguments
+   (`clipboard_args`); the folder is the player's `--share <dir>`
+   (`player::share_args`), only with Networking on, which
+   `player-core/src/share.rs` serves with `libsmb` and forwards to. The
+   `sharing` host check, and `tools/clipboard-win11-test.sh` end to end.
 7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC.
 8. **Vintage** (to be scoped): SMB1 for Win98 / XP, and a C agent over a
    COM port (doc 24 §5).
@@ -197,6 +206,20 @@ On the way:
   last change notice.
 - `bsdtar` refuses virtio-win's ISO's hard links; the test extracts with
   `xorriso`, as `build-virtio-win.sh` does.
+
+## Steps 5 and 6's end to end (2026-10-03)
+
+`tools/clipboard-win11-test.sh` as a user gets it: the player with
+`--share` (as the launcher passes it) and `qemu-vdagent`; in the guest,
+the drivers disc's `install.ps1`. Every check passes: the tasks
+registered, host text at boot in the guest at once, guest text on the
+Mac, a second host text in 1.3 s, the share mapped on Z: by `--map`, and a
+host file read through it, served by the player's own `libsmb`.
+
+Not run: the launcher's own machine under the player on the Mac, since its
+TPM device trips QEMU 11.1's HVF (M21); the test runs the spike's board
+with `ppi=off`, and the `sharing` check runs the launcher's channel on a
+bare board.
 
 ## Open items
 

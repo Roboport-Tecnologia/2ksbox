@@ -89,6 +89,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let machine = Machine::load(Path::new(&path)).expect("load bundle");
             let mut argv = player::shader_args(&machine);
             argv.extend(player::pad_args(&machine));
+            argv.extend(player::share_args(&machine));
             println!("{}", argv.join(" "));
         }
         "--prepare" => {
@@ -204,7 +205,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // a bundle, change the fields given, save it back in place.
             // `-` keeps a field as it is.
             let usage =
-                "usage: --wizard-edit <machine.toml> <new-name|-> [ram-mb|-] [auto|kvm|tcg|-] [net|nonet] [cpu-speed|-] [boot|-] [seamless|noseamless] [d3dpt|std|cirrus|-] [none|usb|keys|-] [voodoo|voodoo-undither|novoodoo|-] [extra-qemu-args|-] [auto|dxvk|system|-]";
+                "usage: --wizard-edit <machine.toml> <new-name|-> [ram-mb|-] [auto|kvm|tcg|-] [net|nonet] [cpu-speed|-] [boot|-] [seamless|noseamless] [d3dpt|std|cirrus|-] [none|usb|keys|-] [voodoo|voodoo-undither|novoodoo|-] [extra-qemu-args|-] [auto|dxvk|system|-] [clipboard|noclipboard|-] [shared-folder|none|-]";
             let path: PathBuf = args.next().expect(usage).into();
             let new_name = args.next().expect(usage);
             let mut form = wizard::Form::default();
@@ -324,6 +325,19 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 Some(other) => {
                     panic!("the Direct3D 9 is auto, dxvk or system, not {other:?}; {usage}")
                 }
+            }
+            // Windows 11's sharing (M23), after everything older, so
+            // every existing caller keeps the arguments it passes.
+            match args.next().as_deref() {
+                None | Some("-") => {}
+                Some("clipboard") => form.clipboard = true,
+                Some("noclipboard") => form.clipboard = false,
+                Some(other) => panic!("the clipboard is clipboard or noclipboard, not {other:?}; {usage}"),
+            }
+            match args.next().as_deref() {
+                None | Some("-") => {}
+                Some("none") => form.shared_folder.clear(),
+                Some(dir) => form.shared_folder = dir.to_string(),
             }
             match form.submit(&library::default_dir()) {
                 Some(saved) => println!("{}", saved.display()),

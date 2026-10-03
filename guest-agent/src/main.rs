@@ -18,6 +18,13 @@
 //! A change the agent made itself (its clipboard sequence number) is not
 //! sent back. Windows' text has CRLF line ends, the host's LF.
 //! It logs to C:\2KSBOX\agent.log. One instance per user session.
+//!
+//! vioser lets only SYSTEM and Administrators open the port, so this
+//! runs with the user's elevated token (a logon task with highest
+//! privileges, `install.ps1`). A drive mapped from that token's session
+//! is invisible to Explorer's, so `--map`, run by a second, unelevated
+//! logon task, maps the host's shared folder (`\\10.0.2.4\host`, served
+//! by the player when the machine has one) and exits.
 
 #![windows_subsystem = "windows"]
 
@@ -35,6 +42,10 @@ use windows_sys::Win32::System::IO::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const PORT: &str = r"\\.\Global\com.redhat.spice.0";
+/// The shared folder, and the account the player's server takes (doc 24 §2.1).
+const SHARE: &str = r"\\10.0.2.4\host";
+const SHARE_USER: &str = "2ksbox";
+const SHARE_PASSWORD: &str = "2ksbox";
 const CF_UNICODETEXT: u32 = 13;
 
 const VD_AGENT_PROTOCOL: u32 = 1;
@@ -59,9 +70,9 @@ static OFFERED: Mutex<Option<String>> = Mutex::new(None);
 static LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
 fn log(msg: &str) {
+    // one write per line: the elevated agent and `--map` share the file
     if let Some(f) = LOG.lock().unwrap().as_mut() {
-        let _ = writeln!(f, "{}", msg);
-        let _ = f.flush();
+        let _ = f.write_all(format!("{}\r\n", msg).as_bytes());
     }
 }
 
@@ -324,10 +335,54 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
+/// `--map`: the shared folder on a drive letter, if the machine has one.
+/// The network may come up after logon, so the server is given a minute.
+fn map_share() {
+    use windows_sys::Win32::NetworkManagement::WNet::*;
+    let addr: std::net::SocketAddr = "10.0.2.4:445".parse().unwrap();
+    let mut up = false;
+    for _ in 0..30 {
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok() {
+            up = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    if !up {
+        log("no shared folder (nothing answers at 10.0.2.4:445)");
+        return;
+    }
+    // the first free letter from Z: down
+    let used = unsafe { GetLogicalDrives() };
+    let Some(letter) = (b'D'..=b'Z').rev().find(|l| used & (1 << (l - b'A')) == 0) else {
+        log("no free drive letter for the shared folder");
+        return;
+    };
+    let local = wide(&format!("{}:", letter as char));
+    let remote = wide(SHARE);
+    let user = wide(SHARE_USER);
+    let pass = wide(SHARE_PASSWORD);
+    let mut nr: NETRESOURCEW = unsafe { std::mem::zeroed() };
+    nr.dwType = RESOURCETYPE_DISK;
+    nr.lpLocalName = local.as_ptr() as *mut u16;
+    nr.lpRemoteName = remote.as_ptr() as *mut u16;
+    let r = unsafe { WNetAddConnection2W(&nr, pass.as_ptr(), user.as_ptr(), 0) };
+    match r {
+        0 => log(&format!("shared folder on {}:", letter as char)),
+        // already connected (another session of this user's, a second run)
+        85 | 1219 => log(&format!("shared folder already connected ({})", r)),
+        e => log(&format!("mapping the shared folder failed: error {}", e)),
+    }
+}
+
 fn main() {
     let _ = std::fs::create_dir_all(r"C:\2KSBOX");
     *LOG.lock().unwrap() = std::fs::OpenOptions::new().create(true).append(true).open(r"C:\2KSBOX\agent.log").ok();
     log(&format!("2ksbox-agent {} starting", env!("CARGO_PKG_VERSION")));
+    if std::env::args().any(|a| a == "--map") {
+        map_share();
+        return;
+    }
 
     // one per session
     let mutex_name = wide(r"Local\2ksbox-agent");

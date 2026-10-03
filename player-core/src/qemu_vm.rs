@@ -809,6 +809,7 @@ pub fn start(
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             crate::clipboard::stop();
+            crate::share::stop();
             owner.destroy(status);
             status
         })

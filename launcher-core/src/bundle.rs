@@ -1315,6 +1315,16 @@ pub struct Machine {
     /// `tpm.permall` beside the disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tpm_state: Option<PathBuf>,
+    /// Windows 11 (M23): a host folder the guest sees as
+    /// `\\10.0.2.4\host`, served by the player itself (libsmb) and
+    /// reached through the machine's network, so only with `network`
+    /// (`share_folder`). Absent = none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_folder: Option<PathBuf>,
+    /// Windows 11 (M23): the clipboard shared with the host, through
+    /// QEMU's `qemu-vdagent` and our agent in the guest (doc 24 §3-4).
+    #[serde(default)]
+    pub clipboard: bool,
     /// Which of our own emulator fast paths this machine runs with
     /// (`Optimization`), holding only what differs from each one's
     /// default. Absent means all of them at their shipped setting.
@@ -1528,6 +1538,8 @@ impl Machine {
             music: Some(default_music(family)),
             soundfont: None,
             mt32_roms: None,
+            shared_folder: None,
+            clipboard: family.is_modern(),
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
             board: Some(CURRENT_BOARD.to_string()),
@@ -2114,6 +2126,7 @@ impl Machine {
         } else {
             args.extend(["-nic".into(), "none".into()]);
         }
+        args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
         args.extend(self.extra_qemu_args.iter().cloned());
@@ -2206,6 +2219,7 @@ impl Machine {
         } else {
             args.extend(["-nic".into(), "none".into()]);
         }
+        args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
         if let Some(iso) = crate::disc_library::arm_drivers_iso() {
@@ -2218,6 +2232,34 @@ impl Machine {
         }
         args.extend(self.extra_qemu_args.iter().cloned());
         args
+    }
+}
+
+impl Machine {
+    /// The clipboard's channel (M23, doc 24 §3): QEMU's `qemu-vdagent` on
+    /// a virtio-serial port named as the SPICE agent's, which the guest's
+    /// agent opens (virtio-win's vioser). The player joins QEMU's
+    /// clipboard when it sees the chardev. Modern machines only.
+    pub fn clipboard_args(&self) -> Vec<String> {
+        if !self.clipboard || !self.family.is_modern() {
+            return Vec::new();
+        }
+        [
+            "-chardev",
+            "qemu-vdagent,id=vda,clipboard=on,mouse=off",
+            "-device",
+            "virtio-serial-pci",
+            "-device",
+            "virtserialport,chardev=vda,name=com.redhat.spice.0",
+        ]
+        .map(String::from)
+        .to_vec()
+    }
+
+    /// The folder the player shares (M23): only on a modern machine with
+    /// its network, which the guest reaches it through.
+    pub fn share_folder(&self) -> Option<&Path> {
+        self.shared_folder.as_deref().filter(|_| self.network && self.family.is_modern())
     }
 }
 

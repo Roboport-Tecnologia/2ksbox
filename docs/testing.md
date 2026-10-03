@@ -140,6 +140,7 @@ What differs from Linux, so a failure there reads right:
 | `display-adapter` | each family's adapter choices and default; a foreign adapter refused; our adapter replaced, not added beside |
 | `d3d9` | the Direct3D picker: a new machine writes nothing (`auto`); `dxvk`/`system` reach only `d3dpt-vga`, whose `info qtree` shows the property |
 | `libsynth` | `synthx selftest`: AdLib detection, a 440 Hz FM note, the shipped bank through the MPU-401 path, running status; `--roms` adds the CM-32L (doc 20 §7) |
+| `sharing` | Windows 11's clipboard and shared folder (M23) through `launcherx`: a new machine has the `qemu-vdagent` channel and no share; a folder is the player's `--share <dir>` only with the network on; `noclipboard none` takes both away, in the bundle too; and our QEMU of the machine's architecture takes the channel's devices on a bare board |
 | `smb` | `tools/smb-host-test.sh`: libsmb's `smbserve` against the host's own SMB client (macOS `mount_smbfs`, else Samba's `smbclient`) on localhost, at 2.1 and at 3.1.1 with signing required: read, a 3 MB write and read-back, rename, delete, mkdir / rmdir, and the server's log with the login and no signature it could not verify (M23, doc 24); skipped with no client or no `target/release/smbserve` |
 | `music` | the sound-card and music pickers into a real QEMU; the monitor writes the ports and the note must be in QEMU's own `wav` |
 | `companions-env` | the bank the player names (`LIBSYNTH_SF2`, `companions.rs`) reaches QEMU's own `getenv()`: the real player, run from a folder with no `soundfonts/` and nothing in the environment, takes a General MIDI machine to the BIOS and quits. On Windows `set_var` never reached QEMU's C runtime (doc 11, "The C runtime boundary"). Needs the player and a display |
@@ -434,18 +435,19 @@ index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
 
-`tools/clipboard-win11-test.sh [build/w11d]` (M23 steps 4-5): the
-clipboard between this Mac and Windows 11 on Arm, end to end. The machine
-runs in the aarch64 player itself (`tools/player-as-qemu.sh` as
-`win11-spike.py`'s `QEMU=`, with `CLIPBOARD=1` adding `qemu-vdagent` and
-the virtio-serial port), so the embed library's clipboard peer is in the
-run; its window opens. `tools/win11-spike/clip.ps1` installs `vioser` from
-virtio-win's ISO and starts `guest-agent` elevated in the user's session.
-Checks: text on the Mac's clipboard at boot reaches the guest, text the
-guest sets reaches `pbpaste`, a second Mac text reaches the guest. The
-Mac's clipboard is the user's: its text is saved and put back. About 5
-minutes. Needs the aarch64 player, the agent (`cd guest-agent && cargo
-build --release --target x86_64-pc-windows-gnu`) and the ISO.
+`tools/clipboard-win11-test.sh [build/w11d]` (M23 steps 4-6): the
+clipboard and the shared folder between this Mac and Windows 11 on Arm,
+end to end, the way a user gets them. The machine runs in the aarch64
+player itself (`tools/player-as-qemu.sh` as `win11-spike.py`'s `QEMU=`,
+`PLAYER_OPTS=--share <dir>` as the launcher passes it, `CLIPBOARD=1`
+adding `qemu-vdagent` and the virtio-serial port); its window opens.
+`tools/win11-spike/clip.ps1` runs the drivers disc's
+`2ksbox\install.ps1`. Checks: the agent's tasks, text on the Mac's
+clipboard at boot in the guest, text the guest sets in `pbpaste`, a
+second Mac text in the guest, the share mapped by `--map` and a host file
+read through it. The Mac's clipboard is the user's: its text is saved and
+put back. About 5 minutes. Needs the aarch64 player and the drivers disc
+(`scripts/build-virtio-win.sh`, which builds the agent).
 
 `tools/smb-try.sh <folder> [build/w11d]` (M23): the shared folder by
 hand before the launcher has the setting. Windows 11 on Arm in the

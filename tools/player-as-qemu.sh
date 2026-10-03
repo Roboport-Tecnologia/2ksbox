@@ -4,4 +4,6 @@
 # player instead: its embed-library features (the clipboard peer, M23)
 # are then in the run. The player opens its window.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec "${PLAYER:-$ROOT/target/qemu-aarch64/release/player}" -- "$@"
+# PLAYER_OPTS: the player's own options, before the `--` (e.g. --share <dir>)
+# shellcheck disable=SC2086
+exec "${PLAYER:-$ROOT/target/qemu-aarch64/release/player}" ${PLAYER_OPTS:-} -- "$@"

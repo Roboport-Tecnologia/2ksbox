@@ -149,7 +149,9 @@ in the user's session it shares that session's clipboard. Red Hat's
 agent solves the same with a SYSTEM service plus a per-session process;
 ours is one process, started at logon by a task set to run with highest
 privileges, so the user must be an administrator (Windows 11's first
-user is). It does two jobs:
+user is). `2ksbox\install.cmd` on the drivers disc installs it
+(`install.ps1`: the drivers, the agent in `C:\Program Files\2ksbox`,
+and its logon tasks). It does two jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
    the agent protocol subset QEMU's `vdagent.c` implements: it announces
@@ -159,10 +161,12 @@ user is). It does two jobs:
    150 ms after the last change notice (a program still finishing its
    own write, .NET's for one, fails if the clipboard is opened under it),
    and does not send back a change it made itself.
-2. **The share:** at login, if `10.0.2.4:445` answers, it maps the share
-   to a drive letter (`WNetAddConnection2`, the fixed credentials). It
-   shows no UI, and a machine without a shared folder simply has no
-   drive.
+2. **The share:** `2ksbox-agent --map`, from a second logon task that
+   runs *unelevated*, since a drive mapped from the elevated token's
+   session is invisible to Explorer's. If `10.0.2.4:445` answers within a
+   minute it maps the share to the first free letter from Z: down
+   (`WNetAddConnection2`, the fixed credentials) and exits. It shows no
+   UI, and a machine without a shared folder simply has no drive.
 
 Its log goes to `C:\2KSBOX\agent.log`, the guest-output convention.
 

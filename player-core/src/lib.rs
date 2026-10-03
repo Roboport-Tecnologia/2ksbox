@@ -23,6 +23,7 @@ pub mod pattern;
 pub mod qemu_vm;
 pub mod qmp;
 pub mod session;
+pub mod share;
 pub mod sweep;
 
 pub use gpu::{Gpu, MinSize};
@@ -116,6 +117,12 @@ pub fn startup() -> Args {
         args.drain(0..2);
     }
     let pad_mode = pad::resolve_mode(pad_cli.as_deref());
+    // the machine's shared folder (M23): served here, forwarded to by QEMU
+    let mut share = None;
+    if args.first().map(String::as_str) == Some("--share") && args.len() >= 2 {
+        share = Some(std::path::PathBuf::from(args[1].clone()));
+        args.drain(0..2);
+    }
     let mut sweep = None;
     if args.first().map(String::as_str) == Some("--mode-sweep") && args.len() >= 2 {
         sweep = Some(std::path::PathBuf::from(args[1].clone()));
@@ -128,6 +135,12 @@ pub fn startup() -> Args {
     }
     if args.first().map(String::as_str) == Some("--") {
         args.remove(0);
+    }
+    if let Some(dir) = share {
+        // a folder that cannot be shared leaves the machine running without it
+        if let Err(e) = share::start(&dir, &mut args) {
+            eprintln!("[share] not shared: {e}");
+        }
     }
     Args {
         qemu: args,

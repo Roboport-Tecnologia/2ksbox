@@ -166,6 +166,13 @@ impl Server {
         let _ = std::fs::remove_file(path.as_ref());
         let l = std::os::unix::net::UnixListener::bind(path.as_ref())?;
         self.cfg.log(false, &format!("listening on {}", path.as_ref().display()));
+        self.serve_listener(l)
+    }
+
+    /// Accepts on a Unix socket the caller bound (so it exists before
+    /// anything connects); returns only on an accept error.
+    #[cfg(unix)]
+    pub fn serve_listener(&self, l: std::os::unix::net::UnixListener) -> io::Result<()> {
         let mut n = 0u64;
         for s in l.incoming() {
             n += 1;

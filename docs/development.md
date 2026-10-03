@@ -174,7 +174,7 @@ exact line a launcher machine runs.
 
 ```
 player [--shader <preset.slangp>] [--shader-params <k=v,...>]
-       [--pad usb|gameport|keys] [--pads] [--pad-sweep <frames>]
+       [--pad usb|gameport|keys] [--share <dir>] [--pads] [--pad-sweep <frames>]
        [--mode-sweep <dir>] [--calib <bmp|dir>] [--companions]
        [--] <qemu args...>
 ```
@@ -316,6 +316,20 @@ and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
 - `LIBSYNTH_MIDI_LOG=<file>` / `LIBSYNTH_OPL_LOG=<file>` capture what a
   guest wrote to a music device, for `synthx midilog` / `opllog` /
   `play` (doc 20 §7.2).
+
+### The shared folder and the clipboard (M23)
+
+- `--share <dir>` (after `--pad`) serves `<dir>` to the guest as
+  `\\10.0.2.4\host` (user `2ksbox`, password `2ksbox`): `libsmb` in the
+  player on a Unix socket in a 0700 directory under the temp dir, and
+  `guestfwd=tcp:10.0.2.4:445-unix:<socket>` added to the machine's
+  `-netdev user` (QEMU patch 79). No user-mode network or a Windows host:
+  `[share] not shared: …` and the machine runs without it.
+  `PLAYER_SMB_LOG=1` prints every request.
+- The clipboard needs no option: a command line with `-chardev
+  qemu-vdagent` gets the bridge to the host's clipboard
+  (`player-core/src/clipboard.rs`), which prints a `[clipboard]` line
+  per transfer.
 
 ### Gamepads
 

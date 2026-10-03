@@ -601,6 +601,51 @@ clone_check() { # "Clone…", from the model to a disk our QEMU reads (doc 07)
   fi
   return $rc
 }
+sharing_check() { # Windows 11's clipboard and shared folder, from the form to the player and a real QEMU (M23)
+  local dir="$OUT/sharing" bundle a o q board
+  rm -rf "$dir"; mkdir -p "$dir/library" "$dir/folder"
+  export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  export LAUNCHER_SHADER_PROFILES_DIR="$dir/profiles" LAUNCHER_QEMU_IMG_BIN="$QIMG"
+  bundle="$($LAUNCHERX --wizard-new win11 W11 64 2>/dev/null | tail -1)"
+  [ -f "$bundle" ] || { echo "--wizard-new made no bundle"; return 1; }
+  edit() { $LAUNCHERX --wizard-edit "$bundle" "$@" >/dev/null || { echo "--wizard-edit $* failed"; return 1; }; }
+  # a new Windows 11 machine has the clipboard's channel, and no share
+  a="$($LAUNCHERX --print-args "$bundle")"
+  case "$a" in *"-chardev qemu-vdagent,id=vda,clipboard=on,mouse=off"*"virtserialport,chardev=vda,name=com.redhat.spice.0"*) ;;
+    *) echo "no clipboard channel on a new machine: $a"; return 1 ;; esac
+  o="$($LAUNCHERX --print-player-args "$bundle")"
+  [ -z "$o" ] || { echo "player options nobody asked for: $o"; return 1; }
+  # a folder without the network is not shared; with it, the player serves it
+  edit - - - - - - - - - - - - - "$dir/folder" || return 1
+  o="$($LAUNCHERX --print-player-args "$bundle")"
+  [ -z "$o" ] || { echo "a share without the network: $o"; return 1; }
+  edit - - - net || return 1
+  o="$($LAUNCHERX --print-player-args "$bundle")"
+  [ "$o" = "--share $dir/folder" ] || { echo "the share's player option: '$o'"; return 1; }
+  grep -q "^shared_folder = \"$dir/folder\"" "$bundle" || { echo "no shared_folder in the bundle"; return 1; }
+  # both off again
+  edit - - - - - - - - - - - - noclipboard none || return 1
+  a="$($LAUNCHERX --print-args "$bundle")"; o="$($LAUNCHERX --print-player-args "$bundle")"
+  case "$a" in *qemu-vdagent*) echo "the clipboard stayed on"; return 1 ;; esac
+  [ -z "$o" ] || { echo "the share stayed: $o"; return 1; }
+  grep -q '^clipboard = false' "$bundle" || { echo "no clipboard = false in the bundle"; return 1; }
+  grep -q '^shared_folder' "$bundle" && { echo "shared_folder stayed in the bundle"; return 1; }
+  # our QEMU takes the channel the launcher writes (qemu-vdagent is built
+  # with spice-protocol's headers), on a bare board of the machine's own
+  # architecture, so nothing else of the machine is in the question
+  edit - - - - - - - - - - - - clipboard || return 1
+  a="$($LAUNCHERX --print-args "$bundle")"
+  case "$a" in *"virt,gic"*) q=$QDIR/qemu-system-aarch64; board=virt ;; *) q=$QDIR/qemu-system-x86_64; board=q35 ;; esac
+  [ -x "$q" ] || q=$QSYS
+  [ "$q" = "$QSYS" ] && board=q35
+  [ -x "$q" ] || { echo "the launcher's side passes (no QEMU to run)"; return 0; }
+  # shellcheck disable=SC2046
+  printf '{"execute":"qmp_capabilities"}\n{"execute":"quit"}\n' | timeout 30 $q -machine $board -m 128 -display none -S \
+    -qmp stdio -serial none $(printf '%s\n' $a | awk 'p && /^(qemu-vdagent|virtio-serial-pci|virtserialport)/ { print p; print } { p = ($0 == "-chardev" || $0 == "-device") ? $0 : "" }') \
+    >"$dir/qemu.out" 2>&1 || { echo "QEMU refused the clipboard channel:"; tail -3 "$dir/qemu.out"; return 1; }
+  grep -q '"return"' "$dir/qemu.out" || { echo "QEMU did not answer"; tail -3 "$dir/qemu.out"; return 1; }
+  echo "sharing: the form, the player's options and a real $(basename "$q") agree"
+}
 win11snap_check() { # a Windows 11 machine's offline snapshot holds its firmware variables and TPM (M20)
   local rc=0 dir="$OUT/win11snap" img=$QIMG bundle bdir vars tpm copy
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -2319,6 +2364,8 @@ host_stage() {
   # the shared folder's SMB server (M23, doc 24) against the host's own
   # client, both dialects, signing required. No guest, ~5 s.
   run_check smb smb.log tools/smb-host-test.sh "$OUT/smb" || true
+  if [ -x "$LAUNCHERX" ]; then run_check sharing sharing.log sharing_check || true
+  else skip sharing "needs $LAUNCHERX"; fi
 
   # the sound-card and MIDI-port pickers (doc 20 §6), and then the two
   # devices sounding into a wav QEMU recorded itself.

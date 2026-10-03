@@ -173,6 +173,13 @@ pub struct Form {
     /// default: `Music::Mt32` without it is a machine that refuses to
     /// start, so `submit` says so instead (doc 20 §4).
     pub mt32_roms: String,
+    /// Windows 11 (M23): a folder of this computer's the guest sees as
+    /// `\\10.0.2.4\host`, empty for none. A plain path field; what it
+    /// takes (the machine's network) is in `shared_folder_notes`.
+    pub shared_folder: String,
+    /// Windows 11 (M23): the clipboard shared with the host. A plain
+    /// checkbox; what it needs in the guest is in `clipboard_notes`.
+    pub clipboard: bool,
     /// What a host gamepad does for this machine (M13). Private for the
     /// same reason `video` is: `Usb` is offered on the Windows families
     /// and on `Other` but never on DOS, which has no USB stack, so a
@@ -280,6 +287,8 @@ impl Default for Form {
             music_chosen: false,
             soundfont: String::new(),
             mt32_roms: String::new(),
+            shared_folder: String::new(),
+            clipboard: true,
             pad: bundle::default_pad(Family::Win98),
             pad_chosen: false,
             existing_disk: false,
@@ -364,6 +373,8 @@ impl Form {
             music_chosen: true,
             soundfont: machine.soundfont.as_ref().map(|f| f.display().to_string()).unwrap_or_default(),
             mt32_roms: machine.mt32_roms.as_ref().map(|d| d.display().to_string()).unwrap_or_default(),
+            shared_folder: machine.shared_folder.as_ref().map(|d| d.display().to_string()).unwrap_or_default(),
+            clipboard: machine.clipboard,
             pad: machine.effective_pad(),
             pad_chosen: true,
             existing_disk: true,
@@ -793,6 +804,40 @@ impl Form {
     /// 1998 with drivers for 9x and XP, so not on Windows 11.
     pub fn voodoo2_applies(&self) -> bool {
         !self.family.is_modern()
+    }
+
+    /// Whether the shared folder and the clipboard are questions here:
+    /// both need our agent, which is for Windows 11 (M23; the era's
+    /// machines keep the folder disc).
+    pub fn integration_applies(&self) -> bool {
+        self.family.is_modern()
+    }
+
+    /// Under the "Shared folder" field.
+    pub fn shared_folder_notes(&self) -> &'static [&'static str] {
+        match (self.shared_folder.trim().is_empty(), self.network) {
+            (true, _) => &["No folder of this computer's is shared with the guest."],
+            (false, false) => &["Shared only with Networking on: the guest reaches the folder through the machine's network."],
+            (false, true) => &[
+                "Windows sees it as \\\\10.0.2.4\\host (user 2ksbox, password 2ksbox), and the 2ksbox agent puts it on a drive letter.",
+                "What Windows does in it happens to the folder itself.",
+            ],
+        }
+    }
+
+    /// Under the "Clipboard" checkbox: what the guest needs for it.
+    pub fn clipboard_notes(&self) -> &'static [&'static str] {
+        match (self.clipboard, self.arch()) {
+            (false, _) => &["Copy and paste stay inside the machine."],
+            (true, bundle::Arch::Aarch64) => &[
+                "Text copied on either side can be pasted on the other.",
+                "Needs the 2ksbox agent in Windows: run 2ksbox\\install.cmd from the drivers disc once.",
+            ],
+            (true, _) => &[
+                "Text copied on either side can be pasted on the other.",
+                "Needs virtio-win's serial driver and the 2ksbox agent in Windows, which there is no disc for on x64 Windows yet.",
+            ],
+        }
     }
 
     /// Whether the floppy field is: Windows 11's machine (a q35) has no
@@ -1501,6 +1546,8 @@ impl Form {
                 music: None,
                 soundfont: None,
                 mt32_roms: None,
+                shared_folder: None,
+                clipboard: false,
                 pad: None,
                 board: edit.board.clone(),
                 arch: edit.arch,
@@ -1559,6 +1606,11 @@ impl Form {
         // (`bundle::pad_choices`), so a family switch must not keep one.
         machine.pad = bundle::pad_choices(self.family).contains(&self.pad).then_some(self.pad);
         machine.floppy = Some(self.floppy.trim()).filter(|f| !f.is_empty()).map(PathBuf::from);
+        // Only where the family offers them (Windows 11, M23).
+        let modern = self.family.is_modern();
+        machine.shared_folder =
+            Some(self.shared_folder.trim()).filter(|d| modern && !d.is_empty()).map(PathBuf::from);
+        machine.clipboard = modern && self.clipboard;
         machine.shader_profile = self.shader_profile.clone();
         // The single slot this form has is the machine's boot disc;
         // everything else lives on the shared shelf (`disc_library.rs`).
