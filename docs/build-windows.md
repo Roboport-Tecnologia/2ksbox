@@ -642,16 +642,27 @@ The script finds a mounted EWDK on any drive (or `EWDK=E:`; or
 `EWDK_ISO=<path>` mounts it first), sets up its x86 environment and runs
 MSBuild on `guest-tools/src/d3dptvid/wddm/km/d3dptkmd.vcxproj`
 (`WindowsKernelModeDriver10.0`, `TargetVersion=Windows7`, Win32, `/W4
-/WX`, `displib.lib` for `DxgkInitialize`), into `build/wddm/x86/`:
-`d3dptkmd.sys` and `d3dptkmd.inf`. The driver is unsigned; 32-bit Windows
-7 loads it after a prompt. Notes:
+/WX`, `displib.lib` for `DxgkInitialize`) and on
+`wddm/um/d3dptumd.vcxproj`, Direct3D 9's user-mode driver (the kit's
+`v142` user-mode toolset, Win32, `/W4 /WX`, the C runtime linked in
+statically because Windows 7 has none of VS 2019's, subsystem 6.01; the
+shared core's `core_caps.c` / `core_surf.c` compiled in), into
+`build/wddm/x86/`: `d3dptkmd.sys`, `d3dptumd.dll` and `d3dptkmd.inf`
+(which installs both). The drivers are unsigned; 32-bit Windows 7 loads
+them after a prompt. Notes:
 
 - The kernel-mode include path has no `<stdint.h>`, which
   `d3dpt/d3dpt_fb.h` includes, and MSVC's own pulls in the user-mode CRT:
   `wddm/km/kinc/stdint.h` is the typedefs alone.
 - `dumpbin -headers -imports` (from the EWDK's MSVC `bin\Hostx86\x86`)
   is the check that a build still loads on Windows 7: machine `x86`,
-  subsystem version 6.01, imports from `ntoskrnl.exe` only.
+  subsystem version 6.01, imports from `ntoskrnl.exe` only (the DLL:
+  `KERNEL32.dll` and `GDI32.dll`'s two `D3DKMT*` calls, nothing
+  `api-ms-win-*`).
+- The shared core's `d3dpt_ddi.h` marks a nameless union with mingw's
+  `__GNU_EXTENSION`, which the DLL's project defines empty, and the core's
+  sources include `<windef.h>` first, which MSVC's SDK takes only after
+  `<windows.h>` (forced in for those two files).
 - MSBuild's "'pwsh.exe' is not recognized" after the link is a WDK
   post-build step looking for PowerShell 7; it changes nothing.
 

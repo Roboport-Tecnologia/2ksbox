@@ -39,8 +39,11 @@ if not exist "%OUT%" mkdir "%OUT%"
 msbuild "%ROOT%\guest-tools\src\d3dptvid\wddm\km\d3dptkmd.vcxproj" -nologo -v:minimal ^
   -p:Configuration=Release -p:Platform=Win32 "-p:D3DPT_OUT=%OUT%"
 if errorlevel 1 exit /b 1
+msbuild "%ROOT%\guest-tools\src\d3dptvid\wddm\um\d3dptumd.vcxproj" -nologo -v:minimal ^
+  -p:Configuration=Release -p:Platform=Win32 "-p:D3DPT_OUT=%OUT%"
+if errorlevel 1 exit /b 1
 copy /y "%ROOT%\guest-tools\src\d3dptvid\wddm\km\d3dptkmd.inf" "%OUT%\" >nul
-echo ==^> %OUT%\d3dptkmd.sys
+echo ==^> %OUT%\d3dptkmd.sys, %OUT%\d3dptumd.dll
 exit /b 0
 
 :find_ewdk

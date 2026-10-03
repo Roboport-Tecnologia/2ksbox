@@ -1,0 +1,3 @@
+LIBRARY d3dptumd
+EXPORTS
+    OpenAdapter

@@ -1,6 +1,6 @@
 ; d3dptkmd.inf - 2ksbox paravirtual display adapter (d3dpt-vga), WDDM,
-; Windows 7 32-bit (M18 step 2, ADR-022). Kernel-mode driver d3dptkmd.sys;
-; no user-mode driver yet (plan step 6). The XP-model driver
+; Windows 7 32-bit (M18 step 2, ADR-022). Kernel-mode driver d3dptkmd.sys,
+; Direct3D 9's user-mode driver d3dptumd.dll (plan step 6). The XP-model driver
 ; (../../nt/d3dptvid.inf) matches the same device and stays the fallback:
 ; Device Manager > Update Driver > "Let me pick" brings it back.
 
@@ -9,16 +9,18 @@ Signature="$WINDOWS NT$"
 Class=Display
 ClassGUID={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=10/02/2026,0.1.0.0
+DriverVer=10/03/2026,0.2.0.0
 
 [DestinationDirs]
 DefaultDestDir=12
+d3dpt.UserMode=11
 
 [SourceDisksNames]
 1=%DiskId%,,,
 
 [SourceDisksFiles]
 d3dptkmd.sys=1
+d3dptumd.dll=1
 
 [Manufacturer]
 %Mfg%=d3dpt.Mfg,NTx86
@@ -27,14 +29,17 @@ d3dptkmd.sys=1
 %d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
 
 [d3dpt_Install]
-CopyFiles=d3dpt.Miniport
+CopyFiles=d3dpt.Miniport, d3dpt.UserMode
 
 [d3dpt.Miniport]
 d3dptkmd.sys
 
+[d3dpt.UserMode]
+d3dptumd.dll
+
 ; dxgkrnl reads the user-mode driver's name before it asks the adapter
 ; anything (Windows 7 stops the adapter after QueryChildRelations without
-; one), so it is named before that driver exists (plan step 6).
+; one); d3d9.dll loads it by this name from System32.
 [d3dpt_Install.SoftwareSettings]
 AddReg=d3dpt_SoftwareDeviceSettings
 

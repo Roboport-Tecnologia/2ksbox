@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  d3dptumd.dll: the WDDM user-mode display driver for Direct3D 9 (M18
+  step 2, plan step 6). Built by guest-tools/build-wddm.cmd inside the
+  EWDK beside the kernel-mode driver: VS 2019's v142 user-mode toolset,
+  Win32, the C runtime linked in statically (Windows 7 has none of
+  VS 2019's), the Windows 7 subsystem version.
+  docs/build-windows.md "The WDDM driver".
+-->
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{6D3A2B1E-7C44-4E0B-9B57-3D00D3D7A002}</ProjectGuid>
+    <RootNamespace>d3dptumd</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>d3dptumd</TargetName>
+    <OutDir>$(D3DPT_OUT)\</OutDir>
+    <IntDir>$(D3DPT_OUT)\obj-um\</IntDir>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <Optimization>MaxSpeed</Optimization>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WIN32_WINNT=0x0601;__GNU_EXTENSION=;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- __GNU_EXTENSION: the core's DDI header marks a nameless union
+           with mingw's macro. 4201: the kit's nameless unions; 4214: its bit fields of other
+           types than int -->
+      <DisableSpecificWarnings>4201;4214;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <Link>
+      <ModuleDefinitionFile>d3dptumd.def</ModuleDefinitionFile>
+      <AdditionalDependencies>gdi32.lib;kernel32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="d3dptumd.c" />
+    <ClCompile Include="umd_core.c" />
+    <ClCompile Include="..\..\core\core_caps.c">
+      <!-- the core includes <windef.h> first, which MSVC's SDK takes only
+           after <windows.h> -->
+      <ForcedIncludeFiles>windows.h</ForcedIncludeFiles>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="..\..\core\core_surf.c">
+      <ForcedIncludeFiles>windows.h</ForcedIncludeFiles>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -230,6 +230,50 @@ device's half is plain QEMU C and builds anywhere.
    `D3DDDI` device functions, emitting the DP2 records the executor
    already decodes. Proved as step 1 was: D3DGAME9, D3DFEAT9 and the DX8 /
    DX7 programs give the native frames byte for byte.
+   **Started 2026-10-03.** `wddm/um/d3dptumd.c`, built by
+   `build-wddm.cmd` beside the kernel driver (MSVC user mode, static C
+   runtime; `docs/build-windows.md`), installed by the same INF. The
+   design, all of it in `wddm/d3dpt_wddm.h`:
+   - **The host side does not change.** The user-mode driver writes the
+     records the XP display driver writes into the window (CTX_CREATE,
+     DP2 with the DDI's tokens, DRAW8 draws, READBACK, VRAM_DIRTY), but
+     into the runtime's command buffer. Render copies them into a DMA
+     buffer behind a registration packet; SubmitCommand moves them into
+     the window and rings the doorbell, one batch per submission.
+   - **Every video-memory resource is one allocation, VRAM only**, its
+     levels / faces inside it at offsets the user-mode driver lays out
+     (the XP driver's lightweight-mip layout), carried in the allocation's
+     private data. The kernel driver gives each D3D allocation a host
+     handle at CreateAllocation and sends VRAM_SURFACE at submit time
+     whenever the allocation sits somewhere new to the host; a destroyed
+     one is released on the host by the next submission.
+   - **Allocations are named by allocation-list index plus a fix-up**
+     (D3DPT_PATCH_HANDLE / OFFSET). The handles are written at Render, the
+     addresses kept from the last Patch: dxgkrnl's slot-id optimisation
+     leaves out patch locations whose allocation did not move since it was
+     last patched in that slot, and then calls no Patch at all, so the
+     first boots had every buffer after the first carry handle 0.
+   - **The caps are the XP driver's DX9 face**, from the same code:
+     `core_caps.c` / `core_surf.c` link into the DLL, `umd_core.c` gives
+     them a register page holding the ddflags the kernel driver reports
+     (QueryAdapterInfo(UMDRIVERPRIVATE)) and answers GetCaps through
+     `core_gdi2_answer`.
+   - **Its log** goes through `D3DKMTEscape` to the kernel driver and the
+     DEBUG register, as `d3dptumd:` lines in the QEMU log.
+   - **Tokens before the host context** (d3d9.dll sets every render state
+     before it sets a render target) are kept and replayed into the
+     context's first DP2 record.
+   What the first boots taught: d3d9.dll opens the desktop's shared
+   primary (dxgkrnl's own allocation, our private data) with OpenResource
+   inside CreateDevice, and a failing OpenResource fails CreateDevice
+   (`0x80004001`). With it, D3DGAME9 creates its device (windowed
+   640x480, vs / ps 3.0 reported), runs its frames and presents, and with
+   the handles written at Render **its scene draws through the host**
+   (render-to-texture, textures, particles; ~70 fps under TCG, the host
+   at ~3000 draws a second). The windowed present is the backbuffer read
+   back into its VRAM, then dxgkrnl's Present blit to the primary.
+   Windows 7's UAC dialog is not always centred: the test loop answers it
+   with Alt+Y.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.**
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
