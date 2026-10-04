@@ -63,10 +63,17 @@ for part in parts:
         # same version in both lock files is one entry; the same path with
         # different contents is a real conflict (two versions of a crate
         # would land in differently named directories, so this can only be
-        # the cargo config, and both generators write the same one).
-        key = (e.get("dest"), e.get("dest-filename"), e["type"])
+        # the cargo config, and both generators write the same one). A
+        # shell step (a git crate copied into the vendor directory) lands
+        # nowhere of its own: its commands are its identity.
+        key = (e.get("dest"), e.get("dest-filename"), e["type"], tuple(e.get("commands", ())))
         if key in seen:
-            if seen[key] != e:
+            # the cargo config of a lock with git sources is the other's
+            # plus a section per git source: the longer one covers both
+            old = seen[key]
+            if old != e and key == ("cargo", "config", "inline", ()) and e["contents"].startswith(old["contents"].rstrip()):
+                old["contents"] = e["contents"]
+            elif old != e and not (key == ("cargo", "config", "inline", ()) and old["contents"].startswith(e["contents"].rstrip())):
                 clashes.append(key)
             continue
         seen[key] = e
