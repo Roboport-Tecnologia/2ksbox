@@ -39,8 +39,10 @@
 #
 #   2ksbox.exe                  the launcher
 #   2ksbox-player.exe           the player (player-mitsuami)
+#   2ksbox-player-x86_64.exe    the same player for Windows 11 (track M20)
 #   qemu-img.exe                ours, patched
 #   libqemu-embed-i386.dll      QEMU as a library, what the player runs
+#   libqemu-embed-x86_64.dll    ... and the Windows 11 player's (WHPX)
 #   d3dpt_exec.dll              the Direct3D executor (doc 14)
 #   dxvk_d3d9.dll               DXVK's d3d9, the executor's default,
 #                               renamed so it is never mistaken for
@@ -84,13 +86,16 @@ NAME="2ksbox-$VERSION-windows-x86_64"
 STAGE="$OUT/$NAME"
 LAUNCHER="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"
 PLAYER="$ROOT/player-mitsuami/target/release/player-mitsuami.exe"
+PLAYER64="$ROOT/player-mitsuami/target/qemu-x86_64/release/player-mitsuami.exe"
 Q="$ROOT/build/win/qemu-msvc"
 
 need() { [ -e "$1" ] || { echo "package-windows.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
 need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu-msvc"
+need "$Q/libqemu-embed-x86_64.dll" "scripts/build-windows.sh qemu-msvc"
 need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu-msvc"
 need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
 need "$PLAYER"                   "scripts/build-windows.sh mitsuami, on Windows"
+need "$PLAYER64"                 "scripts/build-windows.sh mitsuami, on Windows"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
 
 rm -rf "$STAGE"
@@ -98,8 +103,9 @@ mkdir -p "$STAGE/doc"
 
 install -m755 "$LAUNCHER" "$STAGE/2ksbox.exe"
 install -m755 "$PLAYER" "$STAGE/2ksbox-player.exe"
+install -m755 "$PLAYER64" "$STAGE/2ksbox-player-x86_64.exe"
 install -m755 "$Q/qemu-img.exe" "$STAGE/"
-install -m755 "$Q/libqemu-embed-i386.dll" "$STAGE/"
+install -m755 "$Q/libqemu-embed-i386.dll" "$Q/libqemu-embed-x86_64.dll" "$STAGE/"
 cp -a qemu/pc-bios "$STAGE/pc-bios"
 
 # The Direct3D executor is optional at run time (the device says "no
@@ -314,7 +320,7 @@ fail=0
     # Every companion must resolve inside the package; compare on the
     # path's tail, without the drive.
     while read -r what path; do
-      case "$what" in player|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
+      case "$what" in player|player-x86_64|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
       case "$path" in "("*) continue ;; esac
       win=$(printf '%s' "$path" | tr '\\' '/' | sed 's|^[A-Za-z]:||')
       case "$win" in
@@ -437,7 +443,8 @@ EOF
   # `build-windows.sh mitsuami` links it statically, and so do QEMU's
   # (`-Db_vscrt=mt`), the Direct3D pair's (`build-windows.sh exec`, /MT and
   # DXVK's own b_vscrt) and the WGL probe's; this keeps it so.
-  for exe in 2ksbox.exe 2ksbox-player.exe libqemu-embed-i386.dll qemu-img.exe \
+  for exe in 2ksbox.exe 2ksbox-player.exe 2ksbox-player-x86_64.exe \
+             libqemu-embed-i386.dll libqemu-embed-x86_64.dll qemu-img.exe \
              d3dpt_exec.dll dxvk_d3d9.dll tools/wgl-probe.exe; do
     [ -f "$STAGE/$exe" ] || continue        # the Direct3D pair: not built here; warned above
     if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
@@ -484,6 +491,19 @@ EOF
   else
     echo "package-windows.sh: the staged player did not run a machine to its BIOS and quit:" >&2
     grep -v '^\[audio\]' "$scratch/player.txt" | tail -5 >&2
+    fail=1
+  fi
+  # ... and Windows 11's player on the x86_64 DLL, which nothing above
+  # loads: the same BIOS run on a q35 board under TCG (the launcher asks
+  # for WHPX, which this PC need not have enabled).
+  if IN="$scratch" T=90 runpkg PLAYER_QMP_EXEC='{"execute":"quit"}' 2ksbox-player-x86_64.exe -- \
+       -L "$(winpath "$STAGE/pc-bios")" -M q35 -accel tcg -m 128 \
+       -netdev user,id=net0 -device e1000e,netdev=net0 \
+       > "$scratch/player64.txt" 2>&1; then
+    echo "player-x86_64  ran a q35 machine to its BIOS and quit (libqemu-embed-x86_64.dll)"
+  else
+    echo "package-windows.sh: the staged x86_64 player did not run a machine to its BIOS and quit:" >&2
+    grep -v '^\[audio\]' "$scratch/player64.txt" | tail -5 >&2
     fail=1
   fi
 

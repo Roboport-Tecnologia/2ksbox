@@ -30,7 +30,8 @@
 #   qemu-msvc the same tree against MSVC's runtime (build-deps.sh's
 #           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
 #           build/win/qemu-msvc: the QEMU the package ships, importing
-#           only Windows' own DLLs
+#           only Windows' own DLLs; with libqemu-embed-x86_64.dll, the
+#           Windows 11 player's (track M20, WHPX)
 #   rust   the winit player (test.sh's), cargo --target
 #           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
 #           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
@@ -39,7 +40,10 @@
 #   mitsuami (Windows only) cargo build --release in launcher-mitsuami/
 #           (its own workspace): the launcher every package ships
 #           (ADR-023), on WinUI 3, then player-mitsuami/ the same way
-#           (track M22). Both are MSVC (cargo
+#           (track M22), and that player a second time with
+#           --features qemu-x86_64 into player-mitsuami/target/qemu-x86_64,
+#           Windows 11's (track M20; a player links one QEMU, patch 63).
+#           All MSVC (cargo
 #           +stable-x86_64-pc-windows-msvc, Visual Studio's C++ tools),
 #           linked with a static C runtime so they need no vcruntime DLL,
 #           and run on the Windows App Runtime 2.4+, which a PC installs
@@ -282,7 +286,8 @@ if want qemu-msvc; then
     fi
     say "qemu-msvc: ninja"
     ninja -C $QM ${JOBS[@]+"${JOBS[@]}"} \
-      qemu-system-i386.exe qemu-img.exe qemu-io.exe libqemu-embed-i386.dll
+      qemu-system-i386.exe qemu-img.exe qemu-io.exe libqemu-embed-i386.dll \
+      libqemu-embed-x86_64.dll
     BUILT+=(qemu-msvc)
   fi
 fi
@@ -325,12 +330,18 @@ if want mitsuami; then
     ( cd launcher-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
         "$cargo" "+$MSVC" build --release )
     # ... and the player on mitsuami (track M22), the same way. It links
-    # QEMU's mingw DLL across two C runtimes (doc 11, "The C runtime
-    # boundary"). A launcher in a checkout starts it whenever it is built
-    # (launcher_core::player); packages still ship the winit player.
+    # QEMU's DLL by name, the package's MSVC one or the mingw one (two C
+    # runtimes, doc 11, "The C runtime boundary"). A launcher in a
+    # checkout starts it whenever it is built (launcher_core::player).
     say "mitsuami: cargo +$MSVC build --release (player-mitsuami)"
     ( cd player-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
         "$cargo" "+$MSVC" build --release )
+    # ... and again for Windows 11, on libqemu-embed-x86_64.dll: a player
+    # links one QEMU (patch 63), so another target is another binary, in
+    # its own target directory where launcher_core::player looks.
+    say "mitsuami: cargo +$MSVC build --release --features qemu-x86_64 (player-mitsuami, Windows 11)"
+    ( cd player-mitsuami && PATH="$nolink" CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static" \
+        "$cargo" "+$MSVC" build --release --features qemu-x86_64 --target-dir target/qemu-x86_64 )
     BUILT+=(mitsuami)
   fi
 fi

@@ -58,9 +58,9 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 | Stage | Output | Notes |
 |---|---|---|
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | the mingw QEMU `test.sh` runs; `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
-| `qemu-msvc` | the same in `build/win/qemu-msvc` | the package's QEMU: `build-deps.sh`, then `WIN_QEMU_CC=msvc configure-qemu.sh` when it never has or its inputs moved, then `ninja` ("QEMU under MSVC"); after `qemu`, which prepares the tree |
+| `qemu-msvc` | the same in `build/win/qemu-msvc`, and `libqemu-embed-x86_64.dll` (Windows 11's) | the package's QEMU: `build-deps.sh`, then `WIN_QEMU_CC=msvc configure-qemu.sh` when it never has or its inputs moved, then `ninja` ("QEMU under MSVC"); after `qemu`, which prepares the tree |
 | `rust` | `target/x86_64-pc-windows-gnu/release/player.exe`, `target/x86_64-pc-windows-msvc/release/{launcherx,discx,synthx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh`; the tools are MSVC (`scripts/cargo-msvc.sh`, rustup's `stable-x86_64-pc-windows-msvc`), skipped without it |
-| `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe` | the package's `2ksbox.exe` and `2ksbox-player.exe` (ADR-023, track M22); their own workspaces; MSVC ("The launcher") |
+| `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe`, `player-mitsuami/target/qemu-x86_64/release/player-mitsuami.exe` | the package's `2ksbox.exe`, `2ksbox-player.exe` and `2ksbox-player-x86_64.exe` (ADR-023, track M22; the last `--features qemu-x86_64`, Windows 11's, track M20); their own workspaces; MSVC ("The launcher") |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor and the offscreen-GL probe, MSVC; the executor's host test (mingw, so it loads the executor as QEMU does). Skipped without Visual Studio's C++ tools |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
@@ -71,8 +71,8 @@ the top, every DLL beside them (where the loader looks), data
 directories under it.
 
 ```
-2ksbox.exe  2ksbox-player.exe  qemu-img.exe
-libqemu-embed-i386.dll  d3dpt_exec.dll  dxvk_d3d9.dll
+2ksbox.exe  2ksbox-player.exe  2ksbox-player-x86_64.exe  qemu-img.exe
+libqemu-embed-i386.dll  libqemu-embed-x86_64.dll  d3dpt_exec.dll  dxvk_d3d9.dll
 pc-bios\  guest-tools\  shaders\  tools\  doc\
 2ksbox-debug.bat
 ```
@@ -144,7 +144,8 @@ environment:
   statically; "The launcher");
 - the launcher must draw its window, and the player must run a machine
   with a General MIDI port and `-netdev user` to its BIOS and quit, from
-  outside the package folder.
+  outside the package folder, and the x86_64 player (Windows 11's) a q35
+  machine under TCG the same way.
 
 ### Packaging on Windows
 
