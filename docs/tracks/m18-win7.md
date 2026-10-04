@@ -73,7 +73,8 @@ The user's decisions (ADR-022, amended 2026-10-02):
 The branch was `track/m18-win7` again, from `main` at the M21 merge,
 merged and deleted on 2026-10-04 (user); then `track/m18-wei` (WinSAT,
 SETUP's WDDM install, the launcher's Windows 7 family), merged and deleted
-the same day (user). The open items go on a new `track/m18-*` branch. The
+the same day (user), and `track/m18-install` (the fresh install, finding
+14), likewise. The open items go on a new `track/m18-*` branch. The
 driver work happens on the user's PC (Visual Studio + the WDK); the
 device's half is plain QEMU C and builds anywhere.
 
