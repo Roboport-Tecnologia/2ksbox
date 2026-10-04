@@ -590,6 +590,12 @@ What differs from the cross build, and why:
   the linker appends `/libqemu-embed-…` and `/` is not a separator in a
   verbatim path.
 - **Package versions follow MSYS2** (GCC 16 against Fedora's 15).
+- **Prepare is skipped by `build.sh`'s stamp** (`build/.stamp-qemu-prepare`,
+  the same inputs and file). It used to run every time, and since it
+  rewrites every patched file, ninja rebuilt all of QEMU (~1400 steps,
+  4 minutes) on each run. The stamp is removed before a prepare and
+  written once it finishes, so an interrupted prepare is redone; `-f`
+  prepares regardless.
 - `prepare-qemu.sh` runs every git through `qgit`, which retries on
   `Unable to create index.lock: File exists`, a scanner holding the lock
   of the git that just exited (00-status, "Building").

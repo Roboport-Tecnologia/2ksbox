@@ -16,6 +16,8 @@
 #   scripts/build-windows.sh                everything this host can build
 #   scripts/build-windows.sh qemu rust      only those stages
 #   scripts/build-windows.sh --package      ... and then roll the zip
+#   scripts/build-windows.sh -f qemu        prepare QEMU's tree even if its stamp
+#                                           says nothing changed
 #   scripts/build-windows.sh --msys2-deps   (Windows) install what the build needs
 #
 # Stages, in the order they must run:
@@ -87,17 +89,18 @@ MSYS2_PACKAGES=(git rsync diffutils
   mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd
   mingw-w64-x86_64-{mtools,imagemagick} libarchive)
 
-JOBS=(); PACKAGE=""; STAGES=(); EXPLICIT=""
+JOBS=(); PACKAGE=""; STAGES=(); EXPLICIT=""; FORCE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j) JOBS=(-j "$2"); shift 2 ;;
     -j*) JOBS=(-j "${1#-j}"); shift ;;
     -p|--package) PACKAGE=1; shift ;;
+    -f|--force) FORCE=1; shift ;;
     --msys2-deps)
       [ -n "$NATIVE" ] || { echo "build-windows.sh: --msys2-deps is for MSYS2's MINGW64 shell on Windows" >&2; exit 2; }
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
-    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     qemu|rust|mitsuami|exec|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
@@ -164,13 +167,31 @@ if [ -n "$NATIVE" ]; then
 fi
 
 # The patch queue is applied to the one qemu/ tree both builds compile
-# from, so it is prepared here as scripts/build.sh does it. build.sh skips
-# an unchanged queue by its stamp; here prepare is unconditional but cheap.
-# A Windows build is not the inner loop, and a tree left half-prepared by
-# an interrupted native build is the failure that costs an hour.
+# from, so it is prepared here as scripts/build.sh does it, skipped by the
+# same stamp (build/.stamp-qemu-prepare: same inputs, same file). A prepare
+# rewrites every patched file, and ninja then rebuilt all of QEMU (~1400
+# steps, 4 minutes) on every run. A tree left half-prepared by an
+# interrupted build is the failure that costs an hour, so the stamp is
+# removed before prepare starts and written only once it has finished:
+# the skip is taken only over a tree a prepare completed. -f prepares
+# regardless.
 if want qemu; then
-  say "qemu: prepare (overlay + patch queue)"
-  scripts/prepare-qemu.sh
+  qemu_stamp=$( { for g in qemu third_party/qemu-3dfx; do git -C "$g" rev-parse HEAD 2>/dev/null || echo none; done
+                  find patches/qemu embed d3dpt/hw d3dpt/d3dpt_proto.h \
+                       d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h libdisc/qemu libdisc/libdisc.h \
+                       libsynth/qemu libsynth/libsynth.h gamepad/qemu tpm/qemu voodoo firmware \
+                       scripts/prepare-qemu.sh patches/qemu-3dfx \
+                       -type f 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cat 2>/dev/null || true
+                } | sha256sum | cut -d' ' -f1)
+  if [ -z "$FORCE" ] && [ "$(cat build/.stamp-qemu-prepare 2>/dev/null || true)" = "$qemu_stamp" ]; then
+    say "qemu: prepare"
+    echo "    patch queue, overlays and submodules unchanged - skipping prepare"
+  else
+    say "qemu: prepare (overlay + patch queue)"
+    rm -f build/.stamp-qemu-prepare
+    scripts/prepare-qemu.sh
+    mkdir -p build && printf '%s\n' "$qemu_stamp" > build/.stamp-qemu-prepare
+  fi
 
   # meson will not switch a build directory's compiler (patch 68 moved the
   # Windows QEMU from GCC to clang), so a different one configures afresh
