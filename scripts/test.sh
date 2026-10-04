@@ -1564,7 +1564,9 @@ companions_env_check() { # what the player names reaches QEMU's own getenv (doc 
   # set with std::env::set_var never reached QEMU's getenv(), and the
   # packaged player refused every such machine run from anywhere but
   # its own folder. The player quits once the BIOS has drawn.
-  o="$(cd "$dir" && env -u LIBSYNTH_SF2 PLAYER_QMP_EXEC='{"execute":"quit"}' \
+  # No env(1) in front of timeout: on a Mac timeout is the function above,
+  # which env cannot run.
+  o="$(cd "$dir" && unset LIBSYNTH_SF2 && PLAYER_QMP_EXEC='{"execute":"quit"}' \
        timeout 120 "$ROOT/$PLAYER" -- -L "$(np "$ROOT/qemu/pc-bios")" -M pc -m 32 \
        -device mpu401,audiodev=embed0,synth=gm 2>&1)" \
     || { echo "the player did not run a General MIDI machine to the BIOS and quit"; rc=1; }
@@ -2652,15 +2654,18 @@ host_stage() {
         && c++ -std=c++17 -O2 -o build/d3dfeat9-native tools/d3dfeat9-native.cpp "${flags[@]}"; }
     fi
     if native_build; then
-      rm -f "$OUT/D3DGAME9.LOG" "$OUT/D3DFEAT9.LOG"
+      # an old frame must not pass for this run's
+      rm -f "$OUT/D3DGAME9.LOG" "$OUT/D3DFEAT9.LOG" "$OUT/g9-native.bmp" "$OUT/f9-native.bmp"
       local wsi=(DXVK_WSI_DRIVER="${DXVK_WSI_DRIVER:-Headless}"); [ "$OS" = Windows ] && wsi=()
-      ( cd "$OUT" && env BOXLOG="$OUT" "${wsi[@]}" ${nat}d3dgame9-native -frames 600 -dump 300 g9-native.bmp ) >"$OUT/d3dgame9-native.log" 2>&1
+      # export, not env(1): macOS strips DYLD_LIBRARY_PATH from a protected
+      # binary such as /usr/bin/env, and DXVK then finds no Vulkan loader
+      ( cd "$OUT" && export BOXLOG="$OUT" "${wsi[@]}" && ${nat}d3dgame9-native -frames 600 -dump 300 g9-native.bmp ) >"$OUT/d3dgame9-native.log" 2>&1
       if [ -f "$OUT/g9-native.bmp" ]; then
         run_check d3dgame9-nat d3dgame9-golden.log tools/bmpdiff.py "$GOLDEN" "$OUT/g9-native.bmp" \
           --mask "$HUD_MASK" --tolerance 8 --max-over "$BUDGET" -o "$OUT/g9-native-vs-rig.bmp" \
           && sed -n 1,2p "$OUT/d3dgame9-golden.log" | sed 's/^/       /'
       else FAIL+=(d3dgame9-nat); echo "  FAIL d3dgame9-nat (no frame) — $OUT/d3dgame9-native.log"; tail -3 "$OUT/d3dgame9-native.log"; fi
-      ( cd "$OUT" && env BOXLOG="$OUT" "${wsi[@]}" ${nat}d3dfeat9-native -frames 600 -dump 300 f9-native.bmp ) >"$OUT/d3dfeat9-native.log" 2>&1
+      ( cd "$OUT" && export BOXLOG="$OUT" "${wsi[@]}" && ${nat}d3dfeat9-native -frames 600 -dump 300 f9-native.bmp ) >"$OUT/d3dfeat9-native.log" 2>&1
       # the occlusion query must have *resolved* (S_OK), not merely been
       # logged: a window-less client that nothing paces runs so far ahead of
       # the CS thread that GetData spins out and reports S_FALSE with 0

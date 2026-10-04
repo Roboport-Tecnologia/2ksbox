@@ -47,6 +47,16 @@ Environment: `WINXP_IMG` (`~/vms/winxp.qcow2`), `GUEST_ISO` (newest
 `WIN98_DX9_MACHINE` (`base98-br`: the launcher machine the Win98 checks
 copy).
 
+Writing a check for a Mac: never start a program through `env(1)`.
+`/usr/bin/env` is protected by System Integrity Protection, so it strips
+the `DYLD_LIBRARY_PATH` the suite sets for the Vulkan loader (a DXVK
+program then fails with `vkGetInstanceProcAddr not found`), and it cannot
+run `timeout`, which on a Mac without coreutils is a shell function of
+the suite's. Export in a subshell, or prefix the assignments, instead.
+A check that reads a file its program writes deletes the old one first,
+or a crash passes on the last run's file (`d3dgame9-nat` did, until
+2026-10-04).
+
 ### On Windows
 
 Everything Windows is done natively on Windows (user decision,
