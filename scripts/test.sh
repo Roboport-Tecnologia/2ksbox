@@ -164,8 +164,10 @@ exec_no_device_check() { # the executor with a loader and no Vulkan device: refu
   # (Windows: DXVK by name; `auto` there falls back to the system's own
   # d3d9.dll, which d3dpt-dp2-system checks)
   local pick=(); [ "$OS" = Windows ] && pick=(D3DPT_D3D9=dxvk)
-  o="$(env "${pick[@]}" VK_DRIVER_FILES=/nonexistent.json VK_ICD_FILENAMES=/nonexistent.json \
-       $DP2 "$OUT/dp2-no-device.bmp" 2>&1)"; rc=$?
+  # export, not env(1): on a Mac it strips DYLD_LIBRARY_PATH (testing.md),
+  # and with no loader the executor never reaches the device it refuses
+  o="$(export "${pick[@]}" VK_DRIVER_FILES=/nonexistent.json VK_ICD_FILENAMES=/nonexistent.json \
+       && $DP2 "$OUT/dp2-no-device.bmp" 2>&1)"; rc=$?
   echo "$o" | grep -v "^info:" | tail -8
   if [ $rc -ge 128 ]; then echo "the dp2 test with no Vulkan device died of signal $((rc - 128))"; return 1; fi
   if [ $rc != 77 ]; then echo "the dp2 test with no Vulkan device exited $rc, not 77 (no executor)"; return 1; fi

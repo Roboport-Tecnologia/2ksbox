@@ -951,8 +951,13 @@ int main(int argc, char **argv) {
         hr = send_dp2(&enc, g2, vtx);
         hr |= readback(&enc, H_RT);
         uint32_t blue = hr ? 0xdeadbe : px(300, 300);
-        CHECK(near_(mixed, 0x7f7f00, 3) && near_(blue, 0x0000ff, 2),
-              "autogen texture: one pixel of its 64x64 0x%06x (want 0x7f7f00, the host's 1x1 level), after GENERATEMIPSUBLEVELS 0x%06x (want 0x0000ff)", mixed, blue);
+        /* D3D9 leaves an autogen texture's filter to the driver: DXVK and
+         * Windows' drivers average the stored values (0x7f), Wine's d3d9 on
+         * Apple's OpenGL averages in linear light and encodes the result as
+         * sRGB (0.5 -> 0xbc). Either is the two halves evenly mixed. */
+        bool even = near_(mixed, 0x7f7f00, 3) || near_(mixed, 0xbcbc00, 3);
+        CHECK(even && near_(blue, 0x0000ff, 2),
+              "autogen texture: one pixel of its 64x64 0x%06x (want 0x7f7f00, or 0xbcbc00 averaged in linear light; the host's 1x1 level), after GENERATEMIPSUBLEVELS 0x%06x (want 0x0000ff)", mixed, blue);
         Dp2Buf g3;
         g3.cmd(89, 2); g3.u32(H_TEX); g3.u32(D3DTEXF_LINEAR); g3.u32(0x7777); g3.u32(D3DTEXF_POINT);
         hr = send_dp2(&enc, g3, vtx);
