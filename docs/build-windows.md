@@ -1,18 +1,11 @@
 # Building and packaging for Windows
 
-Everything but the launcher is a **cross build from Linux**: QEMU with a
-mingw toolchain, Rust for `x86_64-pc-windows-gnu` and the Direct3D
-executor. The same stages also build **natively under MSYS2** on a
-Windows PC ("Building on Windows" below), with gdb. The launcher,
-`launcher-mitsuami` on WinUI 3 (ADR-023), is an MSVC binary and builds
-**only** there, so the portable zip is rolled on the PC too, with no
-container, checked by Windows itself rather than wine.
-
-**This is changing (ADR-026, 2026-10-02):** Windows builds move to MSVC,
-natively on Windows; QEMU stays on mingw clang under MSYS2, and the
-Windows 98 / XP guest programs on i686 mingw. The WDDM driver goes first
-(track M18; "The WDDM driver" below). Until the host build moves, this
-doc is the build that ships.
+Everything Windows is built **natively on a Windows PC** (ADR-026): in
+MSYS2's MINGW64 shell, with Visual Studio's C++ tools beside it
+("Building on Windows" below), and the zip and the MSIX are rolled and
+checked there too, by Windows itself. The cross build from Linux
+(`scripts/win-cross.sh` and its Fedora container) was retired on
+2026-10-03. What builds each part is under "The toolchains".
 
 The package runs on the user's PC (Ryzen 9 5900X, RTX 3090), 3D guests
 included; what has run there is in `docs/tracks/m11-windows-host.md`.
@@ -25,14 +18,7 @@ Names and the install layout are in doc 07.
 scripts/build-windows.sh          # qemu, rust, mitsuami, exec, guest-tools
 scripts/package-windows.sh        # the zip, checked on this PC
 scripts/package-windows.sh --msix # ... and the Store's MSIX layout ("The Store package")
-
-# on Linux, everything but the launcher:
-scripts/win-cross.sh --build      # once: the cross container (~5 min, ~3 GB)
-scripts/build-windows.sh          # qemu, rust, exec, guest-tools
 ```
-
-A Linux host can still roll the zip under wine, given a launcher built
-on a PC in `launcher-mitsuami/target/release/` (below, "The checks").
 
 The artefact is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
 Windows output goes to `build/win/` and `target/x86_64-pc-windows-gnu/`,
@@ -41,56 +27,36 @@ The *sources* are shared: never run `build-windows.sh` (which
 re-applies the patch queue) while another build reads `qemu/`
 (00-status, "Building").
 
-## Why a container
+## The toolchains
 
-QEMU needs glib, pixman, zlib and libepoxy **for the mingw target**.
-Arch packages only `mingw-w64-gcc`; Fedora packages them all and is
-QEMU's own Windows CI base
-(`qemu/tests/docker/dockerfiles/fedora-win64-cross.docker`).
-`packaging/windows/Dockerfile` adds:
+| Part | Built with | Why |
+|---|---|---|
+| QEMU, `libqemu-embed-i386.dll`, `qemu-img` | MSYS2's clang against its mingw runtime (msvcrt), lld | upstream QEMU builds on Windows only under mingw; clang because mingw GCC has only emulated TLS, which QEMU touches on every device access (a VGA register read cost 2.3x Linux's; patch 68). `WIN_QEMU_CC=gcc` builds the old way |
+| `libdisc`, `libsynth` (inside QEMU), `launcherx`, `discx`, the winit `player.exe` | Rust `x86_64-pc-windows-gnu` | the same mingw ABI as QEMU; the winit player is no longer shipped, but `test.sh` runs it |
+| `2ksbox.exe` (`launcher-mitsuami`), `2ksbox-player.exe` (`player-mitsuami`) | Rust `x86_64-pc-windows-msvc`, static C runtime | WinUI 3 needs MSVC (ADR-023, ADR-025); the player links QEMU's mingw DLL across the two C runtimes (doc 11, "The C runtime boundary") |
+| DXVK's `d3d9.dll`, `d3dpt_exec.dll` | MSYS2's mingw GCC | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the executor moves to MSVC only with DXVK (ADR-026's amendment) |
+| the guest-tools ISO | MSYS2's i686 GCC with Linux's i686 runtime, Open Watcom | Windows 9x and XP guests; modern MSVC targets neither |
+| the WDDM driver | the Enterprise WDK 10.0.19041 | Windows 7 and 32-bit kernel drivers ("The WDDM driver") |
 
-- **rustup with `x86_64-pc-windows-gnu`.** The player links the embed
-  DLL and `libdisc` links into QEMU, so Rust must share the mingw ABI.
-- **Python 3.13.** Fedora's default 3.14 is past QEMU 11.1's `mkvenv`
-  (3.9–3.13). The real `distlib` goes in at image build, the last moment
-  with a network, because pip ≥ 26's copy is incomplete ("found no
-  usable distlib").
-- **libslirp from source.** There is no `mingw64-libslirp`, and every
-  launcher machine asks for `-netdev user`. Without it a machine dies
-  with "network backend 'user' is not compiled into this binary" while
-  configure only said `slirp support: NO`; `package-windows.sh` checks
-  the embed DLL's import table for it.
-- **clang and lld**, through `packaging/windows/clang-mingw-cc` / `-cxx`.
-  mingw GCC has only emulated TLS, which QEMU touches on every device
-  access (a VGA register read cost 2.3x Linux's; patch 68).
-  `WIN_QEMU_CC=gcc` builds the old way.
+QEMU's libraries are MSYS2's (`--msys2-deps`), libslirp among them: every
+launcher machine asks for `-netdev user`, and a QEMU built without it
+dies with "network backend 'user' is not compiled into this binary"
+while configure only said `slirp support: NO`; `package-windows.sh`
+checks the embed DLL's import table for it.
 
-`scripts/win-cross.sh` runs a command in the container with the checkout
-bind-mounted **at the same absolute path** (meson records absolute
-paths), under rootless podman's `--userns=keep-id` so files come out
-owned by you. `CONTAINER=docker` switches engines;
-`WIN_CROSS_FEDORA=` picks another base.
-
-Three things that look like the build ignoring you:
-
-- `win-cross.sh` builds the image only when it is *missing*; after a
-  Dockerfile change run `scripts/win-cross.sh --build`.
-- It forwards a **whitelist** of environment variables (`JOBS`,
-  `QEMU_PYTHON`, `WIN_QEMU_CC`, …); an ignored knob is probably not on
-  it. Stages are positional: `scripts/build-windows.sh qemu`.
-- `build-windows.sh` configures QEMU only when `build/win/qemu/build.ninja`
-  is missing or the compiler changed. After a configure flag change, run
-  `scripts/win-cross.sh scripts/configure-qemu.sh --windows` by hand.
+`build-windows.sh` configures QEMU only when `build/win/qemu/build.ninja`
+is missing, the compiler or the QEMU release changed, or a meson file or
+`configure-qemu.sh` is newer than the last configure.
 
 ## What each stage produces
 
 | Stage | Output | Notes |
 |---|---|---|
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
-| `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu` |
-| `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe` | the package's `2ksbox.exe` (ADR-023); its own workspace; Windows only, MSVC ("The launcher") |
+| `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh` |
+| `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe` | the package's `2ksbox.exe` and `2ksbox-player.exe` (ADR-023, track M22); their own workspaces; MSVC ("The launcher") |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its host test, the offscreen-GL probe |
-| `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, built only if absent |
+| `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
 ## The package
 
@@ -155,27 +121,26 @@ name of any sysroot DLL not yet staged.
 
 ### The checks
 
-**`package-windows.sh` runs the staged package**, on Windows itself
-("Packaging on Windows") or under wine on Linux, from outside the
-checkout with an empty environment:
+**`package-windows.sh` runs the staged package** on Windows itself
+("Packaging on Windows"), from outside the checkout with an empty
+environment:
 
 - the launcher's `--paths` must answer inside the package;
 - the player's `--companions` must name the staged executor and
   `dxvk_d3d9.dll` (loaded by name, in no import table);
 - the display driver's host test must draw through that pair and read
-  the right pixels (through winevulkan; skipped without a Vulkan device);
+  the right pixels (skipped without a Vulkan device), and on the PC's
+  own `system32\d3d9.dll`;
 - the packaged `qemu-img.exe` must write a qcow2, which also proves the
   DLL closure;
-- `2ksbox.exe` must not import `vcruntime*` / `msvcp*` (it links its C
-  runtime statically; "The launcher").
-
-Wine is not the target, so a failure there is investigated, not
-believed; but a package that fails these is broken on every Windows.
-Wine has no WinUI 3, so the launcher's window is not tried there.
+- `2ksbox.exe` and `2ksbox-player.exe` must not import `vcruntime*` /
+  `msvcp*` (they link their C runtime statically; "The launcher");
+- the launcher must draw its window, and the player must run a machine
+  with a General MIDI port to its BIOS and quit, from outside the
+  package folder.
 
 ### Packaging on Windows
 
-In MSYS2's MINGW64 shell the script needs no container and no wine.
 The mingw runtime and the binutils are MSYS2's own (`/mingw64/bin`,
 `objdump`, `strip`), the ones the native build linked against. The DLL closure is the same
 walk; Windows' Vulkan loader is never staged although `/mingw64/bin`
@@ -194,12 +159,9 @@ NVIDIA's driver makes `NVIDIA Corporation\umdlogs` there) and
 `%LOCALAPPDATA%` point at the scratch directory, and the staged tree is listed before and after; a new
 entry is removed and fails the package.
 
-This is the target, so two reports become verdicts: the launcher must
-draw its window (`LAUNCHER_SHOT`, which starts WinUI 3 and the Windows
-App Runtime; the window shows for a moment), and the display driver's
-host test must pass on the PC's own `system32\d3d9.dll`
-(`D3DPT_D3D9=system`) as well as on DXVK. `wgl-probe` answers for the
-PC's real GL.
+The launcher's window is `LAUNCHER_SHOT`, which starts WinUI 3 and the
+Windows App Runtime (the window shows for a moment), and `wgl-probe`
+answers for the PC's real GL.
 
 The first run with the mitsuami launcher (2026-10-02) passed every
 check but one: 16 mingw DLLs where the Qt launcher needed 71, the window
@@ -324,10 +286,8 @@ it; `package-windows.sh --msix` runs it after the zip's checks.
 - `2ksbox-debug.bat` is left out: an installed package's folder is
   read-only. The launcher's log is where it always is.
 
-Packing needs `makeappx.exe`, which is the Windows SDK's, so a Linux host
-stops at the layout and the pack happens on the PC (Git Bash or MSYS2,
-the SDK installed; the script finds the newest one under `Windows
-Kits`). `makeappx` validates the manifest and every path it names, so a
+Packing needs `makeappx.exe`, which is the Windows SDK's (the script
+finds the newest one under `Windows Kits`). `makeappx` validates the manifest and every path it names, so a
 pack that succeeds is structurally what the Store's upload check
 accepts.
 
@@ -512,17 +472,16 @@ emulated regardless.
 ## Building on Windows
 
 `scripts/build-windows.sh` runs all its stages in **MSYS2's MINGW64
-shell** with no container, and `scripts/win-run.sh` runs the result out
+shell**, and `scripts/win-run.sh` runs the result out
 of the checkout. Every stage builds on the user's PC and the launcher
 runs there; the ISO this build makes installs the XP display driver in
 a guest and runs `test.sh`'s Direct3D checks (2026-10-03), its
 `SETUP.EXE` and the Win98 half untried. The launcher builds only here, so `scripts/package-windows.sh`
 rolls and checks the zip here too ("Packaging on Windows").
 
-**MINGW64, not UCRT64 or CLANG64**: it is the cross image's ABI (msvcrt,
-GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`), so a fault
-reproduced here is almost always one in the shipped build. The scripts
-refuse the other two shells.
+**MINGW64, not UCRT64 or CLANG64**: it is the package's ABI (msvcrt,
+GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`). The
+scripts refuse the other two shells.
 
 Once, on the PC:
 
@@ -576,7 +535,7 @@ QEMU. The launcher writes nothing to the terminal, so paste the
 `[player] …` line from `launcher.log` after `GDB=1 scripts/win-run.sh
 player`.
 
-What differs from the cross build, and why:
+Notes on the build, and why:
 
 - **Python is MSYS2's own 3.14**, with `python-distlib`. MSYS2 has no
   older one, and a python.org venv has `Scripts\` where configure looks
@@ -585,16 +544,14 @@ What differs from the cross build, and why:
   `file://C:/…` wheels URL, a host named `C:`; patch 69 fixed that
   until 11.0 passed a plain path.)
 - **Optional libraries are pinned off.** QEMU links what it detects, and
-  MSYS2 has zstd, gnutls and others the cross image lacks, so
-  native `configure-qemu.sh` disables each one the cross build lacks.
-- **lld is named through meson's `CC_LD`**, because a native meson
-  cannot run the `clang-mingw-cc` shell script as a compiler. Same
-  clang, linker and flags.
+  MSYS2 has zstd, gnutls and others the package does not ship, so
+  `configure-qemu.sh` disables each one.
+- **lld is named through meson's `CC_LD`.**
 - **Paths in meson's files are `C:/…`** (`cygpath -m`).
   `qemu-embed/build.rs` strips `canonicalize`'s `\\?\` prefix, because
   the linker appends `/libqemu-embed-…` and `/` is not a separator in a
   verbatim path.
-- **Package versions follow MSYS2** (GCC 16 against Fedora's 15).
+- **Package versions follow MSYS2.**
 - **Prepare is skipped by `build.sh`'s stamp** (`build/.stamp-qemu-prepare`,
   the same inputs and file). It used to run every time, and since it
   rewrites every patched file, ninja rebuilt all of QEMU (~1400 steps,

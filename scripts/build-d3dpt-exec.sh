@@ -7,7 +7,8 @@
 #                                           out-of-process one (libd3dpt_exec_remote,
 #                                           M15), and with mingw the PE pair it runs
 #   scripts/build-d3dpt-exec.sh --wine      the PE pair only
-#   scripts/build-d3dpt-exec.sh --windows   cross to build/win/d3dpt/d3dpt_exec.dll
+#   scripts/build-d3dpt-exec.sh --windows   build/win/d3dpt/d3dpt_exec.dll, in MSYS2's
+#                                           MINGW64 shell on Windows
 #
 # Under Rosetta on an Apple Silicon Mac (scripts/build.sh --x86_64, the
 # Intel build; docs/build-macos.md "The Intel build") the output is
@@ -19,17 +20,21 @@
 # <d3d9.h> instead of DXVK's native stand-ins for them, and loads DXVK's
 # d3d9.dll at run time under the name the package gives it,
 # `dxvk_d3d9.dll` (build/win/dxvk, scripts/configure-dxvk.sh --windows),
-# never as Windows' own d3d9.dll. Run it inside scripts/win-cross.sh, or
-# natively in MSYS2's MINGW64 shell (docs/build-windows.md).
+# never as Windows' own d3d9.dll. Natively, in MSYS2's MINGW64 shell
+# (docs/build-windows.md). mingw, not MSVC: DXVK throws C++ exceptions
+# out of Direct3DCreate9, which only an executor built by the same
+# compiler catches (ADR-026's amendment).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${1:-}" = "--windows" ]; then
   OUT="$ROOT/build/win/d3dpt"; mkdir -p "$OUT"
   LIB="$OUT/d3dpt_exec.dll"
+  [ "${MSYSTEM:-}" = MINGW64 ] || {
+    echo "build-d3dpt-exec.sh --windows: in MSYS2's MINGW64 shell on Windows (ADR-026)" >&2; exit 1; }
   # MSYS2's compilers carry no target prefix: the host is the target.
-  if [ "${MSYSTEM:-}" = MINGW64 ]; then CXX="${CXX:-g++}"; else CXX="${CXX:-x86_64-w64-mingw32-g++}"; fi
-  command -v "$CXX" >/dev/null || { echo "no $CXX — run this inside scripts/win-cross.sh"; exit 1; }
+  CXX="${CXX:-g++}"
+  command -v "$CXX" >/dev/null || { echo "no $CXX (scripts/build-windows.sh --msys2-deps)"; exit 1; }
   # -static-libgcc/-libstdc++: the DLL is loaded by qemu-system.exe, which
   # is a C program, so it must not need the C++ runtime DLLs beside it.
   # __USE_MINGW_ANSI_STDIO: msvcrt's printf has no %zu, and the DP2 trace

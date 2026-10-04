@@ -406,7 +406,7 @@ How it works, so it stays one build and not a second tree of scripts:
   `build/deps/x86_64/` and `target/x86_64-apple-darwin/` beside the
   native build's (`configure-qemu.sh`, `build-d3dpt-exec.sh`,
   `build-deps.sh`, `qemu-embed/build.rs`, `build.sh`,
-  `package-macos.sh`), the way the Windows cross build keeps
+  `package-macos.sh`), the way the Windows build keeps
   `build/win/`. The `qemu/` and `third_party/dxvk` trees and their
   prepare stamps are shared, so the two builds run one after the other,
   never at once.

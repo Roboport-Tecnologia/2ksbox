@@ -902,9 +902,11 @@ so those hosts wait for it to match.
 
 **Status.** Accepted (user: "we will switch windows builds to use msvc
 wholesale", then "natively on windows"). The WDDM driver goes first
-(track M18, ADR-022's amendment); the host build follows. Until it does,
-the Windows package is still the cross build `docs/build-windows.md`
-describes.
+(track M18, ADR-022's amendment); the host build follows. Done by
+2026-10-03: everything Windows builds, packages and is tested on the PC,
+the launcher and the player with MSVC, and the cross build from Linux
+(`win-cross.sh` and its container) is retired. The executor stays mingw
+(the amendment below).
 
 **Decision.** Windows binaries build on a Windows machine with Visual
 Studio's MSVC tools, not cross-compiled from Linux:

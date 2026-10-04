@@ -8,22 +8,19 @@
 #          (+ the LunarG SDK for the KosmicKrisp ICD on macOS 26)
 #   Arch:  pacman -S vulkan-headers vulkan-icd-loader glslang meson ninja
 #
-#   scripts/configure-dxvk.sh --windows   cross into build/win/dxvk (d3d9.dll),
-#          inside scripts/win-cross.sh: DXVK's own mingw cross file, and
-#          patch 08's headless WSI beside Win32, so the Windows executor
-#          runs the same d3d9 as every other host. In MSYS2's
-#          MINGW64 shell on Windows the same flag is a native build: no
-#          cross file, since meson's host is already Windows and DXVK's
-#          meson.build takes its platform flags from that
+#   scripts/configure-dxvk.sh --windows   build/win/dxvk (d3d9.dll), in
+#          MSYS2's MINGW64 shell on Windows (ADR-026), with patch 08's
+#          headless WSI beside Win32, so the Windows executor runs the
+#          same d3d9 as every other host. No cross file: meson's host is
+#          already Windows and DXVK's meson.build takes its platform
+#          flags from that
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cross=()
 if [ "${1:-}" = "--windows" ]; then
   shift
+  [ "${MSYSTEM:-}" = MINGW64 ] || {
+    echo "configure-dxvk.sh --windows: in MSYS2's MINGW64 shell on Windows (ADR-026)" >&2; exit 1; }
   BUILD="${1:-$ROOT/build/win/dxvk}"
-  # The image's PKG_CONFIG answers for the mingw sysroot, which has no
-  # libdisplay-info: meson falls back to DXVK's own subproject either way.
-  [ "${MSYSTEM:-}" = MINGW64 ] || cross=(--cross-file "$ROOT/third_party/dxvk/build-win64.txt")
 else
   BUILD="${1:-$ROOT/build/dxvk}"
 fi
@@ -38,7 +35,7 @@ if [ "$(uname -s)" = Darwin ]; then
           -Dc_link_args="-mmacosx-version-min=$T" -Dcpp_link_args="-mmacosx-version-min=$T")
 fi
 opts=(--buildtype release -Denable_dxgi=false -Denable_d3d8=false -Denable_d3d10=false -Denable_d3d11=false
-      -Dnative_sdl2=disabled -Dnative_glfw=disabled -Dnative_sdl3=disabled ${darwin[@]+"${darwin[@]}"} ${cross[@]+"${cross[@]}"})
+      -Dnative_sdl2=disabled -Dnative_glfw=disabled -Dnative_sdl3=disabled ${darwin[@]+"${darwin[@]}"})
 # A meson build directory holds absolute paths and cannot be relocated. In
 # a renamed or moved checkout its --reconfigure walks into directories that
 # no longer exist ("[Errno 2] No such file or directory: <old

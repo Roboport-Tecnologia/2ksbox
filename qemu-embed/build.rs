@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    // The Windows cross build keeps its own QEMU build directory so one
-    // checkout can hold both (scripts/win-cross.sh, docs/build-windows.md),
+    // The Windows build keeps its own QEMU build directory so one
+    // checkout can hold both (docs/build-windows.md),
     // and so does the Intel build made on an Apple Silicon Mac
     // (scripts/build.sh --x86_64, docs/build-macos.md "The Intel build").
     // On an Intel Mac itself the x86_64 target is the native one.

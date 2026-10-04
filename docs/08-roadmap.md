@@ -169,10 +169,11 @@ Carmageddon in Mode X, Blood in a DOS box.
 
 ## M11: Windows host
 
-`docs/build-windows.md`. A cross build from Linux (QEMU with clang,
-patch 68) into a portable zip: WHPX, the WGL backend, DXVK as
-`dxvk_d3d9.dll`, Windows' own Direct3D 9 below the floor (ADR-007). A
-native MSYS2 build serves debugging on the user's PC, where guests run.
+`docs/build-windows.md`. A native build on the user's PC, in MSYS2
+(QEMU with clang, patch 68), into a portable zip and a Store MSIX:
+WHPX, the WGL backend, DXVK as `dxvk_d3d9.dll`, Windows' own Direct3D 9
+below the floor (ADR-007). The cross build from Linux it began as was
+retired on 2026-10-03 (ADR-026).
 The launcher is WinUI 3, built with MSVC on the PC only (ADR-023, since
 2026-10-02; the Qt launcher before), so the zip is rolled there.
 

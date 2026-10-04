@@ -637,12 +637,10 @@ build".
 
 ### Windows (`.zip`)
 
-Cross-built from Linux in a Fedora mingw-w64 container
-(`scripts/win-cross.sh --build`, `scripts/build-windows.sh`,
-`scripts/package-windows.sh`, which also runs natively in MSYS2):
-`2ksbox.exe` (the launcher, WinUI 3, the one MSVC binary, built on a PC
-with `build-windows.sh mitsuami`; it needs the Windows App Runtime 2.4
-or later), `2ksbox-player.exe`, `libqemu-embed-i386.dll`, the executor
+Built on a Windows PC, in MSYS2's MINGW64 shell
+(`scripts/build-windows.sh`, `scripts/package-windows.sh`; ADR-026):
+`2ksbox.exe` (the launcher) and `2ksbox-player.exe` (`player-mitsuami`),
+WinUI 3 and MSVC, needing the Windows App Runtime 2.4 or later, `libqemu-embed-i386.dll`, the executor
 with DXVK, `qemu-img.exe`, firmware and guest tools in one portable
 folder. The
 same folder packs as an MSIX for the Microsoft Store

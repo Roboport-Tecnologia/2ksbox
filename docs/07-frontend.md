@@ -812,7 +812,7 @@ and the 256 px PNG), so under Wayland its `app_id` is
 2ksbox.png` is padded to 512×512, and every size (16–512 PNGs and a
 four-size `.ico`) is a downscale made by `scripts/gen-icons.sh`. All
 are checked in, because nothing that needs one (an offline Flatpak, a
-cross build without ImageMagick, `install.sh`) can draw it.
+build without ImageMagick, `install.sh`) can draw it.
 `gen-icons.sh --check` is the `icons` check. Linux
 installs the set under `share/icons/hicolor/` and writes one absolute
 path into the desktop entry's `Icon=` (a prefix outside `XDG_DATA_DIRS`
