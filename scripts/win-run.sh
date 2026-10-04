@@ -10,9 +10,15 @@
 #   scripts/win-run.sh qemu [args...]       qemu-system-i386.exe: no window of its
 #                                           own, -display vnc=:0 to look at a guest
 #   GDB=1 scripts/win-run.sh player ...     any of them under gdb
+#   WIN_QEMU_CC=msvc scripts/win-run.sh ... any of them on the QEMU built
+#                                           against MSVC's runtime,
+#                                           build/win/qemu-msvc
+#                                           (docs/build-windows.md "QEMU
+#                                           under MSVC")
 #
 # What it sets, each only when the caller has not:
-#   PATH                  build/win/qemu first, for libqemu-embed-i386.dll.
+#   PATH                  build/win/qemu (or qemu-msvc) first, for
+#                         libqemu-embed-i386.dll.
 #                         The mingw runtime comes from /mingw64/bin, already
 #                         on this shell's PATH
 #   LAUNCHER_PLAYER_BIN   the winit player, when player-mitsuami is not built
@@ -34,10 +40,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ "${MSYSTEM:-}" = MINGW64 ] || { echo "win-run.sh: run it in MSYS2's MINGW64 shell" >&2; exit 1; }
 
 REL="$ROOT/target/x86_64-pc-windows-gnu/release"
+QDIR="$ROOT/build/win/qemu"
+[ "${WIN_QEMU_CC:-}" = msvc ] && QDIR="$ROOT/build/win/qemu-msvc"
 case "${1:-}" in
   launcher|mitsuami) BIN="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"; STAGE=mitsuami ;;
   player)   BIN="$REL/player.exe"; STAGE=rust ;;
-  qemu)     BIN="$ROOT/build/win/qemu/qemu-system-i386.exe"; STAGE=qemu ;;
+  qemu)     BIN="$QDIR/qemu-system-i386.exe"; STAGE=qemu ;;
   *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 shift
@@ -49,7 +57,7 @@ fi
 # Native programs read these, so Windows paths rather than MSYS2's /c/...
 win() { cygpath -w "$1"; }
 
-export PATH="$ROOT/build/win/qemu:$REL:$PATH"
+export PATH="$QDIR:$REL:$PATH"
 # Only when there is no mitsuami player: once built it is the default,
 # and the launcher finds it in the checkout by its own rule
 # (launcher_core::player), which this variable would override.

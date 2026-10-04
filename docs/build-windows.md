@@ -292,7 +292,10 @@ again.
   (lld-link refuses its two resource objects), bzip2 (dmg's bz2 chunks).
   None ships.
 - `libqemu-embed-*.dll` keeps mingw's `lib` prefix, the name the players
-  import (`raw-dylib`), so a player runs either build unchanged.
+  import (`raw-dylib`), so a player runs either build unchanged: the
+  first one on `PATH` wins. `WIN_QEMU_CC=msvc scripts/win-run.sh
+  launcher` (or `player`, `qemu`) puts `build/win/qemu-msvc` there in
+  place of `build/win/qemu`; the launcher's players inherit it.
 
 **Tested (2026-10-04):** QEMU's own unit tests, 99 of 99 (the RCU ones
 with the arguments meson gives them, the subprocess ones with glib's
