@@ -21,7 +21,8 @@ scripts/package-windows.sh --msix # ... and the Store's MSIX layout ("The Store 
 ```
 
 The artefact is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
-Windows output goes to `build/win/` and `target/x86_64-pc-windows-gnu/`,
+Windows output goes to `build/win/`, `target/x86_64-pc-windows-gnu/` and
+`target/x86_64-pc-windows-msvc/`,
 never `build/qemu` or `target/release`, so a checkout holds both builds.
 The *sources* are shared: never run `build-windows.sh` (which
 re-applies the patch queue) while another build reads `qemu/`
@@ -32,7 +33,8 @@ re-applies the patch queue) while another build reads `qemu/`
 | Part | Built with | Why |
 |---|---|---|
 | QEMU, `libqemu-embed-i386.dll`, `qemu-img` | MSYS2's clang against its mingw runtime (msvcrt), lld | upstream QEMU builds on Windows only under mingw; clang because mingw GCC has only emulated TLS, which QEMU touches on every device access (a VGA register read cost 2.3x Linux's; patch 68). `WIN_QEMU_CC=gcc` builds the old way |
-| `libdisc`, `libsynth` (inside QEMU), `launcherx`, `discx`, the winit `player.exe` | Rust `x86_64-pc-windows-gnu` | the same mingw ABI as QEMU; the winit player is no longer shipped, but `test.sh` runs it |
+| `libdisc`, `libsynth` (inside QEMU), the winit `player.exe` | Rust `x86_64-pc-windows-gnu` | the same mingw ABI as QEMU; the winit player is not shipped, but `test.sh` runs it |
+| `launcherx`, `discx`, `synthx`, `tools\wgl-probe.exe` | Rust `x86_64-pc-windows-msvc` (`scripts/cargo-msvc.sh`) and `cl`, static C runtime | everything that does not link into QEMU is MSVC (ADR-026's second amendment) |
 | `2ksbox.exe` (`launcher-mitsuami`), `2ksbox-player.exe` (`player-mitsuami`) | Rust `x86_64-pc-windows-msvc`, static C runtime | WinUI 3 needs MSVC (ADR-023, ADR-025); the player links QEMU's mingw DLL across the two C runtimes (doc 11, "The C runtime boundary") |
 | DXVK's `d3d9.dll`, `d3dpt_exec.dll` | Visual Studio's `cl`, static C runtime, in the environment `scripts/msvc-env.sh` sets up | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the two moved to MSVC together (ADR-026's amendments). QEMU loads the executor by name; only C crosses that edge. DXVK under MSVC needed patch 15 ("DXVK under MSVC" below) |
 | the guest-tools ISO | MSYS2's i686 GCC with Linux's i686 runtime, Open Watcom | Windows 9x and XP guests; modern MSVC targets neither |
@@ -53,9 +55,9 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 | Stage | Output | Notes |
 |---|---|---|
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
-| `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh` |
+| `rust` | `target/x86_64-pc-windows-gnu/release/player.exe`, `target/x86_64-pc-windows-msvc/release/{launcherx,discx,synthx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh`; the tools are MSVC (`scripts/cargo-msvc.sh`, rustup's `stable-x86_64-pc-windows-msvc`), skipped without it |
 | `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe` | the package's `2ksbox.exe` and `2ksbox-player.exe` (ADR-023, track M22); their own workspaces; MSVC ("The launcher") |
-| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI) and the executor, MSVC; their host test (mingw, so it loads the executor as QEMU does) and the offscreen-GL probe. Skipped without Visual Studio's C++ tools |
+| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor and the offscreen-GL probe, MSVC; the executor's host test (mingw, so it loads the executor as QEMU does). Skipped without Visual Studio's C++ tools |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
 ## The package

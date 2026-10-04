@@ -23,7 +23,8 @@ keeps scope, test loop, traps and open items. The design:
   on 2026-10-03, ADR-026), the `--windows` mode of `scripts/configure-qemu.sh`,
   `scripts/configure-dxvk.sh` and `scripts/build-d3dpt-exec.sh` (DXVK and
   the executor MSVC since 2026-10-04, in `scripts/msvc-env.sh`'s
-  environment), `scripts/win-run.sh`,
+  environment), `scripts/cargo-msvc.sh` (the MSVC Rust tools),
+  `scripts/win-run.sh`,
   `guest-tools/msys2-i686.sh`.
 - Package: `scripts/package-windows.sh`; the Store's MSIX: `scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`, `packaging/windows/Assets/`,

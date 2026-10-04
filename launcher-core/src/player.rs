@@ -43,11 +43,18 @@ pub fn player_binary() -> PathBuf {
     if beside.exists() {
         return beside;
     }
+    // On Windows the tools (`launcherx`) are MSVC, in
+    // `target/x86_64-pc-windows-msvc`, while the winit player stays on
+    // QEMU's mingw target (`scripts/build-windows.sh rust`, ADR-026)
+    if cfg!(windows) {
+        let gnu = in_profile(crate::paths::checkout("target/x86_64-pc-windows-gnu"), name);
+        if gnu.exists() {
+            return gnu;
+        }
+    }
     // The same profile first, not a baked-in `release`: a debug launcher
     // finds the debug player, and the release one when that is all
-    // `scripts/build.sh` made. A cross-built tree
-    // (`target/x86_64-pc-windows-gnu/release`) keeps its player beside
-    // the launcher and so never reaches here.
+    // `scripts/build.sh` made.
     in_profile(crate::paths::checkout("target"), name)
 }
 

@@ -44,9 +44,10 @@ def qemu(root, name="qemu-system-i386"):
 
 def rust_bin(root, name):
     """this checkout's release build of a Rust tool (discx, synthx, ...):
-    the mingw target's directory on Windows (scripts/build-windows.sh)"""
+    the MSVC target's directory on Windows (scripts/build-windows.sh rust,
+    scripts/cargo-msvc.sh)"""
     if WINDOWS:
-        return os.path.join(root, "target", "x86_64-pc-windows-gnu", "release", name + ".exe")
+        return os.path.join(root, "target", "x86_64-pc-windows-msvc", "release", name + ".exe")
     return os.path.join(root, "target", "release", name)
 
 

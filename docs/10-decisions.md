@@ -977,10 +977,15 @@ name across the C runtime boundary, where only C crosses (doc 11).
 DXVK under MSVC first failed 8 oracle checks: an upstream `eq()` bug
 that only MSVC's STL reaches, fixed by our DXVK patch 15
 (`docs/build-windows.md`, "DXVK under MSVC"). The mingw toolchain is now
-used on Windows only by QEMU and what links into it, the host tests that
-stand in for QEMU (`d3dpt-dp2-test.exe`, `wgl-probe.exe`) and the guest
-code. The executor's PE pair for Wine on Linux and macOS (M15) stays
-mingw: it runs on Wine's d3d9, which throws nothing across.
+used on Windows only by QEMU and what links into it, the host test that
+stands in for QEMU (`d3dpt-dp2-test.exe`), the winit player and the
+guest code. The executor's PE pair for Wine on Linux and macOS (M15) stays
+mingw: it runs on Wine's d3d9, which throws nothing across. The same
+day the tools followed (user: "move wgl-probe and tools to msvc too,
+except player.exe"): `launcherx`, `discx` and `synthx` are Rust's
+`x86_64-pc-windows-msvc` (`scripts/cargo-msvc.sh`) and `wgl-probe.exe`
+is `cl`, all with a static C runtime. The winit player, which only
+`test.sh` runs, stays on the GNU target with `libdisc` and `libsynth`.
 
 ## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
 

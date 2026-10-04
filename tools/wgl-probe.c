@@ -16,9 +16,8 @@
  * red quad over the top-left quadrant (GL's y is up, so the quad is
  * y > 0 and lands in the *top* rows after the bottom-up flip).
  *
- * Build (in MSYS2's MINGW64 shell; scripts/build-windows.sh exec does it):
- *   gcc -O1 -o build/win/wgl-probe.exe tools/wgl-probe.c \
- *       -lopengl32 -lgdi32 -luser32
+ * Build: scripts/build-windows.sh exec, with MSVC (cl, static C runtime)
+ *   in MSYS2's MINGW64 shell, against opengl32, gdi32 and user32
  * Run:  wgl-probe.exe [width height]
  *
  * SPDX-License-Identifier: GPL-2.0-or-later

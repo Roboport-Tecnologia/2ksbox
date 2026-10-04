@@ -494,8 +494,8 @@ EOF
   # `build-windows.sh mitsuami` links it statically; this keeps it so.
   # The Direct3D executor and DXVK are MSVC too (`build-windows.sh exec`,
   # /MT and DXVK's own b_vscrt), and QEMU opens them by name, so the
-  # closure walk never saw them either.
-  for exe in 2ksbox.exe 2ksbox-player.exe d3dpt_exec.dll dxvk_d3d9.dll; do
+  # closure walk never saw them either; and so is the WGL probe.
+  for exe in 2ksbox.exe 2ksbox-player.exe d3dpt_exec.dll dxvk_d3d9.dll tools/wgl-probe.exe; do
     [ -f "$STAGE/$exe" ] || continue        # the Direct3D pair: not built here; warned above
     if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
       echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(link its C runtime statically: scripts/build-windows.sh mitsuami / exec)" >&2

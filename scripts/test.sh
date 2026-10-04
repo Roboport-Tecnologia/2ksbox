@@ -36,11 +36,16 @@ BUDGET="${D3D_GOLDEN_BUDGET:-1200}"
 case "$OS" in MINGW64_NT*) OS=Windows;; MINGW*|MSYS*|CYGWIN*)
   echo "test.sh: run it from MSYS2's MINGW64 shell" >&2; exit 2;; esac
 QDIR=build/qemu; RREL=target/release; CARGO_TGT=()
+# The tools (launcherx, discx, synthx) and how to build them: on Windows
+# MSVC (scripts/cargo-msvc.sh, target/x86_64-pc-windows-msvc), while the
+# winit player and launcher-capi's check stay on QEMU's mingw target
+TREL=target/release; TOOL_CARGO=(cargo)
 case "$OS" in
   Darwin) SO=dylib;;
   Windows)
     SO=dll; QDIR=build/win/qemu; RREL=target/x86_64-pc-windows-gnu/release
     CARGO_TGT=(--target x86_64-pc-windows-gnu)
+    TREL=target/x86_64-pc-windows-msvc/release; TOOL_CARGO=(scripts/cargo-msvc.sh)
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-gcc}"
     # the programs below find libqemu-embed and the executor's DLLs here
     export PATH="$ROOT/$QDIR:$ROOT/$RREL:$PATH";;
@@ -63,7 +68,7 @@ DP2=build/d3dpt-dp2-test; [ "$OS" = Windows ] && DP2=build/win/d3dpt-dp2-test
 # LAUNCHER_* variables.
 [ "$OS" = Windows ] && OUT="$(cygpath -m "$OUT")"
 [ "$OS" = Windows ] && QSYS_PIPE="python3 tools/qmp-pipe.py $QSYS"
-LAUNCHERX=$RREL/launcherx; DISCX=$RREL/discx; SYNTHX=$RREL/synthx; PLAYER=$RREL/player
+LAUNCHERX=$TREL/launcherx; DISCX=$TREL/discx; SYNTHX=$TREL/synthx; PLAYER=$RREL/player
 # Paths in one spelling. On Windows the launcher writes them its way
 # (C:/given/dir\joined\part, JSON's doubled backslashes) and bash its own
 # (/c/...): `normp` turns every backslash of a text into '/', `np` writes
@@ -2249,7 +2254,7 @@ host_stage() {
   fi
 
   # the CD-ROM model (M5, doc 17): images written and read back by discx
-  cargo build "${CARGO_TGT[@]}" --release -p libdisc -q 2>"$OUT/libdisc-build.log" \
+  "${TOOL_CARGO[@]}" build --release -p libdisc -q 2>"$OUT/libdisc-build.log" \
     && run_check libdisc libdisc.log $DISCX selftest "$OUT/disc" \
     || { [ -x $DISCX ] || { FAIL+=(libdisc); echo "  FAIL libdisc (build)"; }; }
   if [ -x $QIMG ] && [ -f "$OUT/disc/mixed.cue" ]; then
@@ -2305,7 +2310,7 @@ host_stage() {
   # exits non-zero and is told to install Wine, that a software
   # driver is warned about rather than refused, and that a report always
   # names the loader and the bar it was judged against.
-  cargo build "${CARGO_TGT[@]}" --release -p launcher-core --bin launcherx -q 2>"$OUT/host-check-build.log" \
+  "${TOOL_CARGO[@]}" build --release -p launcher-core --bin launcherx -q 2>"$OUT/host-check-build.log" \
     && run_check host-check host-check.log host_check_probe \
     || { [ -x $LAUNCHERX ] || { FAIL+=(host-check); echo "  FAIL host-check (build)"; }; }
 
@@ -2317,7 +2322,7 @@ host_stage() {
   # The switches' *effect* is the guest batteries' job (x87-guest,
   # sse-guest, rep-guest, smc-guest); this is the wiring between them and
   # a checkbox.
-  cargo build "${CARGO_TGT[@]}" --release -p launcher-core --bin launcherx -q 2>"$OUT/optimizations-build.log" \
+  "${TOOL_CARGO[@]}" build --release -p launcher-core --bin launcherx -q 2>"$OUT/optimizations-build.log" \
     && run_check optimizations optimizations.log optimizations_check \
     || { [ -x $LAUNCHERX ] || { FAIL+=(optimizations); echo "  FAIL optimizations (build)"; }; }
 

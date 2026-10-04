@@ -2,8 +2,9 @@
 # Build the Windows artefacts on Windows, in MSYS2's MINGW64 shell, in
 # dependency order (ADR-026). This is the Windows counterpart of
 # scripts/build.sh, which builds for the host it runs on. QEMU and the Rust
-# that links into it are mingw (MSYS2's, its msvcrt and libstdc++); the
-# launcher, player-mitsuami, the Direct3D executor and DXVK are MSVC; the
+# that links into it are mingw (MSYS2's, its msvcrt and libstdc++), and
+# the winit player test.sh runs; the launcher, player-mitsuami, the
+# Direct3D executor, DXVK and the tools are MSVC; the
 # guest-tools ISO is MSYS2's i686 toolchain (guest-tools/msys2-i686.sh).
 # The cross build from Linux (scripts/win-cross.sh and its container) was
 # retired on 2026-10-03. The package comes from here too
@@ -22,9 +23,11 @@
 #   qemu    configure-qemu.sh --windows -> ninja: qemu-system-i386.exe,
 #           qemu-img.exe, qemu-io.exe, libqemu-embed-i386.dll, into
 #           build/win/qemu (with libdisc built for windows-gnu first)
-#   rust    cargo build --release --target x86_64-pc-windows-gnu: the
-#           player, launcher-core, discx. Runs after `qemu`, because the
-#           player links the embed DLL from build/win/qemu.
+#   rust    the winit player (test.sh's), cargo --target
+#           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
+#           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
+#           target/x86_64-pc-windows-msvc). Runs after `qemu`, because
+#           the player links the embed DLL from build/win/qemu.
 #   mitsuami (Windows only) cargo build --release in launcher-mitsuami/
 #           (its own workspace): the launcher every package ships
 #           (ADR-023), on WinUI 3, then player-mitsuami/ the same way
@@ -226,10 +229,20 @@ if want qemu; then
 fi
 
 if want rust; then
-  say "rust: cargo build --release --target x86_64-pc-windows-gnu"
-  # Default members only (Cargo.toml): `launcher-capi` is left to the
-  # native `scripts/build.sh`, which keeps it from rotting.
-  cargo build --release --target x86_64-pc-windows-gnu ${JOBS[@]+"${JOBS[@]}"}
+  # The winit player stays on QEMU's mingw ABI: it is test.sh's player,
+  # not the package's (ADR-026's second amendment). libdisc and libsynth
+  # are linked into QEMU by its own stage.
+  say "rust: cargo build --release --target x86_64-pc-windows-gnu -p player"
+  cargo build --release --target x86_64-pc-windows-gnu ${JOBS[@]+"${JOBS[@]}"} -p player
+  # The tools are MSVC, as everything that does not link into QEMU
+  # (scripts/cargo-msvc.sh, target/x86_64-pc-windows-msvc).
+  if ! rustup run stable-x86_64-pc-windows-msvc rustc -V >/dev/null 2>&1; then
+    skip rust "no stable-x86_64-pc-windows-msvc toolchain for launcherx, discx and synthx (rustup toolchain install stable-x86_64-pc-windows-msvc; needs Visual Studio's C++ tools)" || true
+  else
+    say "rust: scripts/cargo-msvc.sh build --release (launcherx, discx, synthx)"
+    scripts/cargo-msvc.sh build --release ${JOBS[@]+"${JOBS[@]}"} \
+      -p launcher-core -p libdisc -p libsynth --bin launcherx --bin discx --bin synthx
+  fi
   BUILT+=(rust)
 fi
 
@@ -293,6 +306,13 @@ if want exec; then
     ( . scripts/msvc-env.sh && ninja -C build/win/dxvk ${JOBS[@]+"${JOBS[@]}"} src/d3d9/d3d9.dll )
     say "exec: d3dpt_exec.dll (the Direct3D decoder + executor, MSVC)"
     scripts/build-d3dpt-exec.sh --windows
+    # The WGL probe (tools/wgl-probe.c) rides along as one more compile,
+    # MSVC like every shipped tool (static C runtime). It is the first
+    # thing to run on a Windows machine whose Win98 guest gets no OpenGL.
+    # Options with '-', not '/', which MSYS2 would take for paths.
+    say "exec: wgl-probe.exe (the embed backend's WGL sequence, without QEMU)"
+    ( . scripts/msvc-env.sh && cd build/win && cl -nologo -O1 -MT -W3 -D_CRT_SECURE_NO_WARNINGS \
+        -Fewgl-probe.exe "$(cygpath -w "$ROOT/tools/wgl-probe.c")" opengl32.lib gdi32.lib user32.lib )
     BUILT+=(exec)
   fi
   # ... and the display driver's host test, which package-windows.sh runs
@@ -300,12 +320,6 @@ if want exec; then
   # mingw, as QEMU is: it loads the MSVC executor as QEMU does, so it
   # proves the boundary between the two (doc 11, "The C runtime boundary").
   "$WCXX" -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
-  # The WGL probe (tools/wgl-probe.c) rides along as one more compile. It
-  # is the first thing to run on a Windows machine whose Win98 guest gets
-  # no OpenGL.
-  say "exec: wgl-probe.exe (the embed backend's WGL sequence, without QEMU)"
-  "$WCC" -O1 -o build/win/wgl-probe.exe tools/wgl-probe.c \
-    -lopengl32 -lgdi32 -luser32
 fi
 
 # The ISO is guest code and identical whatever host built it, so it is

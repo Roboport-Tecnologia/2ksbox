@@ -84,7 +84,8 @@ the copy keeps it (`FRESH=1` makes a new copy).
 What differs from Linux, so a failure there reads right:
 
 - **Paths.** The script's own layer at its top names this platform's
-  build (`build/win/qemu`, `target/x86_64-pc-windows-gnu`, the executor
+  build (`build/win/qemu`, `target/x86_64-pc-windows-gnu` for the winit
+  player, `target/x86_64-pc-windows-msvc` for the tools, the executor
   and `dxvk_d3d9.dll` in `build/win/d3dpt`). `build/test` is spelled
   `C:/...`, which bash and the native programs both read, because MSYS2
   rewrites a `/c/...` argument for a native program but never an
