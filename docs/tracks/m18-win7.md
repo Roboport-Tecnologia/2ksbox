@@ -226,9 +226,10 @@ device's half is plain QEMU C and builds anywhere.
    MSVC; its own code is now `/arch:IA32` for the Pentium III floor, and
    the static C runtime picks its SSE2 routines by a CPU check); an ISO
    built on Linux has none. The drivers' three files are part of the ISO's
-   stamp in both build scripts. SETUP does not install it yet: the driver
-   starts only with `-device d3dpt-vga,irq=on`, which the launcher does
-   not pass yet; README.TXT on the disc gives the manual steps.
+   stamp in both build scripts. SETUP installs it (finding 12) when the
+   adapter has its interrupt: the driver starts only with `-device
+   d3dpt-vga,irq=on`, which the launcher does not pass yet; README.TXT on
+   the disc gives the manual steps too.
 4. **The device's additions** (`d3dpt/hw/d3dpt_vga.c`, `d3dpt/d3dpt_fb.h`,
    with M7): an interrupt line, a fence register, DMA command buffers read
    from guest memory. Registers are only added (`D3DPT_FB_VERSION`), so
@@ -531,14 +532,36 @@ device's half is plain QEMU C and builds anywhere.
    `win7` bundle on Linux), where its timer is real; or the launcher (or
    SETUP) setting `CompositionPolicy=2` for a Windows 7 machine on the
    WDDM driver, which is what the measured throughput would decide anyway
-   if the host's GPU is behind it.
+   if the host's GPU is behind it. **Decided 2026-10-04 (user): SETUP
+   sets the override** (finding 12).
+12. **SETUP installs the WDDM driver and turns Aero on** (2026-10-04,
+   `setup.c`). The display-driver component, on 32-bit Windows 7 with
+   `WDDM\` on the disc and the adapter's interrupt, runs `DRVINST.EXE` on
+   `WDDM\D3DPTKMD.INF` instead of the XP INF, then writes
+   `CompositionPolicy=2` to `Software\Microsoft\Windows\DWM` in HKLM and in
+   the HKCU of the user running it (DWM reads HKCU first and HKLM only
+   where a user has no value, and a Windows 7 profile has one, 0; read in
+   dwmapi's `DwmRegGetPreferenceDword`). The interrupt is found as an IRQ
+   in the configuration Plug and Play allocated to the present
+   `VEN_1234&DEV_3D00` devnode (cfgmgr32 at run time, so SETUP still
+   starts on 98). 64-bit Windows 7, a disc with no `WDDM\` or an adapter
+   with no interrupt get the XP driver, and the log says which and why.
+   Proved in one boot: SETUP's log "Windows 7: the WDDM driver ..., for
+   Aero", drvinst "installed" (the unsigned-driver prompt clicked on the
+   tablet, `w7d3d.sh EXTRA_CLICK=450,370`), CompositionPolicy 2 in both
+   hives, and after DWM's service restarted and `aero.theme` with no
+   override of our own, D3DGAME9 composed (DWM ~50 flips a second while
+   it ran, the window's shared surface made and opened) and 0 pixels off
+   native. Seen on the way, not chased: after drvinst reinstalls the
+   driver, the user-mode driver's log lines (its escape to the kernel
+   driver) no longer reach the QEMU log, while the kernel driver's do.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
-   the desktop since 2026-10-03 (finding 8 above), behind the
-   `CompositionPolicy` override, and every test program draws in it with
-   native frames (findings 9 and 10), paced by the device's own
-   vertical-blank interrupt (plan step 4); the Experience Index cannot be
-   measured under TCG (finding 11): next WinSAT under KVM, or the override
-   set by the launcher or SETUP (a user decision).
+   the desktop since 2026-10-03 (finding 8 above), and every test program
+   draws in it with native frames (findings 9 and 10), paced by the
+   device's own vertical-blank interrupt (plan step 4). The Experience
+   Index cannot be measured under TCG (finding 11), so SETUP sets DWM's
+   `CompositionPolicy` override when it installs the WDDM driver (finding
+   12). Next: the launcher passing `irq=on` for a Windows 7 machine.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

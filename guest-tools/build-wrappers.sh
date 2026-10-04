@@ -345,8 +345,9 @@ while IFS= read -r f; do check_crt "$f"; check_isa "$f"; done \
 # driver and the INF. Staged after the checks above, which are the mingw
 # rules for Win9x / XP guest code: the user-mode DLL is MSVC with a static
 # C runtime, whose own SSE2 routines are picked by a CPU check at run time
-# (its code is /arch:IA32). Not installed by SETUP yet: it starts only on
-# an adapter with an interrupt (-device d3dpt-vga,irq=on).
+# (its code is /arch:IA32). SETUP installs it on 32-bit Windows 7 when the
+# adapter has its interrupt (-device d3dpt-vga,irq=on), and the XP driver
+# otherwise (setup.c, wddm_wanted).
 WDDM_OUT="$ROOT/build/wddm/x86"
 if [ -f "$WDDM_OUT/d3dptkmd.sys" ] && [ -f "$WDDM_OUT/d3dptumd.dll" ] && [ -f "$WDDM_OUT/d3dptkmd.inf" ]; then
   mkdir -p "$OUT/iso/WDDM"

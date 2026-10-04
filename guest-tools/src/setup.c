@@ -53,6 +53,7 @@ static char g_root[MAX_PATH];    /* the folder SETUP.EXE lives in */
 static char g_sys[MAX_PATH];     /* WINDOWS\SYSTEM or WINDOWS\system32 */
 static char g_win[MAX_PATH];     /* WINDOWS */
 static int g_nt;                 /* 2000/XP rather than 98/Me */
+static DWORD g_osmaj, g_osmin;    /* the Windows version (6.1: Windows 7) */
 static int g_reboot;             /* a step said the machine must restart */
 static int g_installing;         /* inside install_selected: a locked system file may be replaced on the next boot rather than failing */
 static FILE *g_log;
@@ -371,7 +372,55 @@ static void find_3dfx_nt(void)
     if (cm) FreeLibrary(cm);
 }
 
-/* The device mapper: OPENGL32.DLL and our D3D DLLs reach the pass-through
+/* Whether the d3dpt-vga adapter has an interrupt: `-device
+ * d3dpt-vga,irq=on`, which Windows 7's WDDM driver needs (dxgkrnl will not
+ * start an adapter without one, track M18). The pin shows as an IRQ in the
+ * configuration Plug and Play allocated to the present devnode, whatever
+ * driver runs it. cfgmgr32 at run time, as in find_3dfx_nt. */
+typedef DWORD (WINAPI *CmGetFirstLogConf)(DWORD_PTR *, DWORD, ULONG);
+typedef DWORD (WINAPI *CmGetNextResDes)(DWORD_PTR *, DWORD_PTR, ULONG, ULONG *, ULONG);
+typedef DWORD (WINAPI *CmFreeHandle)(DWORD_PTR);
+
+static int adapter_has_irq(void)
+{
+    HMODULE cm = LoadLibraryA("cfgmgr32.dll");
+    CmLocateDevNodeA locate = cm ? (CmLocateDevNodeA)GetProcAddress(cm, "CM_Locate_DevNodeA") : NULL;
+    CmGetFirstLogConf first = cm ? (CmGetFirstLogConf)GetProcAddress(cm, "CM_Get_First_Log_Conf") : NULL;
+    CmGetNextResDes next = cm ? (CmGetNextResDes)GetProcAddress(cm, "CM_Get_Next_Res_Des") : NULL;
+    CmFreeHandle free_lc = cm ? (CmFreeHandle)GetProcAddress(cm, "CM_Free_Log_Conf_Handle") : NULL;
+    CmFreeHandle free_rd = cm ? (CmFreeHandle)GetProcAddress(cm, "CM_Free_Res_Des_Handle") : NULL;
+    HKEY pci, dev;
+    char d[200], inst[200], id[sizeof d + sizeof inst + 8];
+    DWORD i, j, dn;
+    DWORD_PTR lc, rd;
+    int irq = 0;
+
+    if (locate && first && next && free_lc && free_rd &&
+        RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Enum\\PCI", 0, KEY_READ, &pci) == ERROR_SUCCESS) {
+        for (i = 0; !irq && RegEnumKeyA(pci, i, d, sizeof d) == ERROR_SUCCESS; i++) {
+            if (strnicmp(d, "VEN_1234&DEV_3D00", 17)
+                || RegOpenKeyExA(pci, d, 0, KEY_READ, &dev) != ERROR_SUCCESS)
+                continue;
+            for (j = 0; !irq && RegEnumKeyA(dev, j, inst, sizeof inst) == ERROR_SUCCESS; j++) {
+                snprintf(id, sizeof id, "PCI\\%s\\%s", d, inst);
+                if (locate(&dn, id, 0 /* CM_LOCATE_DEVNODE_NORMAL */) != 0
+                    || first(&lc, dn, 2 /* ALLOC_LOG_CONF */) != 0)
+                    continue;
+                if (next(&rd, lc, 4 /* ResType_IRQ */, NULL, 0) == 0 /* CR_SUCCESS */) {
+                    irq = 1;
+                    free_rd(rd);
+                }
+                free_lc(lc);
+            }
+            RegCloseKey(dev);
+        }
+        RegCloseKey(pci);
+    }
+    if (cm) FreeLibrary(cm);
+    return irq;
+}
+
+/* The device mapper:OPENGL32.DLL and our D3D DLLs reach the pass-through
  * device through it, and without it they refuse to load (0xc0000142 on
  * NT). 9x has it as a VxD that only needs to be in SYSTEM; NT as a kernel
  * driver a service must point at.
@@ -421,28 +470,95 @@ static int step_mapper(void)
     return running ? 0 : 1;
 }
 
-/* The display adapter driver, 2000/XP only. DRVINST.EXE is the tested
+/* Windows 7's WDDM driver (WDDM\, track M18) instead of the XP one: on
+ * 32-bit Windows 7 only (the driver is 32-bit, and 64-bit Windows 7 loads
+ * no unsigned kernel driver), when the disc has it (a disc built on
+ * Windows) and the adapter has its interrupt. Anything else gets the XP
+ * driver, which runs on Windows 7 too, without Aero, and says why. */
+static int wddm_wanted(void)
+{
+    typedef BOOL (WINAPI *IsWow64)(HANDLE, BOOL *);
+    IsWow64 wow = (IsWow64)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsWow64Process");
+    char inf[PATHBUF];
+    BOOL w64 = FALSE;
+
+    if (g_osmaj != 6 || g_osmin != 1) return 0;
+    if (wow && wow(GetCurrentProcess(), &w64) && w64) {
+        say("    64-bit Windows 7: the WDDM driver is 32-bit only, so the XP driver (no Aero)");
+        return 0;
+    }
+    if (GetFileAttributesA(iso(inf, "WDDM\\D3DPTKMD.INF")) == INVALID_FILE_ATTRIBUTES) {
+        say("    no WDDM\\ on this disc (it is built on Windows only), so the XP driver (no Aero)");
+        return 0;
+    }
+    if (!adapter_has_irq()) {
+        say("    the adapter has no interrupt (-device d3dpt-vga,irq=on), so the XP driver (no Aero)");
+        return 0;
+    }
+    return 1;
+}
+
+/* Aero on the WDDM driver without the Experience Index. DWM composes only
+ * when its assessment of WinSAT's measured video memory bandwidth passes,
+ * and WinSAT cannot measure this adapter on an emulated CPU (its timer
+ * calibration reads 0, so every rate it reports is 0 or absurd; track M18
+ * finding 11). CompositionPolicy=2 is DWM's own switch for composing
+ * regardless. DWM reads it from HKCU first and from HKLM only where a user
+ * has no value, and a Windows 7 profile has one (0), so both: this user's,
+ * and the machine's for users who have none. */
+static void aero_policy(void)
+{
+    static const char *const names[2] = { "the machine", "this user" };
+    HKEY roots[2], k;
+    DWORD two = 2;
+    int i;
+
+    roots[0] = HKEY_LOCAL_MACHINE;
+    roots[1] = HKEY_CURRENT_USER;
+    for (i = 0; i < 2; i++) {
+        if (RegCreateKeyExA(roots[i], "Software\\Microsoft\\Windows\\DWM", 0, NULL, 0, KEY_SET_VALUE, NULL, &k, NULL)
+                != ERROR_SUCCESS) {
+            say("    Aero: cannot open DWM's key for %s (are you an Administrator?)", names[i]);
+            continue;
+        }
+        if (RegSetValueExA(k, "CompositionPolicy", 0, REG_DWORD, (const BYTE *)&two, sizeof two) == ERROR_SUCCESS)
+            say("    Aero: CompositionPolicy=2 for %s (DWM composes without the Experience Index)", names[i]);
+        else
+            say("    Aero: cannot set CompositionPolicy for %s", names[i]);
+        RegCloseKey(k);
+    }
+}
+
+/* The display adapter driver, 2000/XP and 7. DRVINST.EXE is the tested
  * installer (signing policy, the Logo dialog, UpdateDriverForPlugAndPlay)
  * and says 2 when the machine has to restart before the driver can take
- * the adapter over from the boot VGA one. */
+ * the adapter over from the boot VGA one. On Windows 7 it installs the
+ * WDDM driver when it can (wddm_wanted), and turns Aero on with it. */
 static int step_driver_nt(void)
 {
     char cmd[PATHBUF * 2 + 8], inf[PATHBUF], exe[PATHBUF];
-    int rc;
+    int rc, wddm;
 
     iso(exe, "DRIVER\\DRVINST.EXE");
-    iso(inf, "DRIVER\\D3DPTVID.INF");
     if (GetFileAttributesA(exe) == INVALID_FILE_ATTRIBUTES) {
         say("    not on this disc");
         return 1;
     }
+    wddm = wddm_wanted();
+    if (wddm) {
+        say("    Windows 7: the WDDM driver (WDDM\\D3DPTKMD.INF), for Aero");
+        iso(inf, "WDDM\\D3DPTKMD.INF");
+    } else {
+        iso(inf, "DRIVER\\D3DPTVID.INF");
+    }
     snprintf(cmd, sizeof cmd, "\"%s\" \"%s\"", exe, inf);
     rc = run_logged(cmd);
-    if (rc == 2) { g_reboot = 1; return 0; }
-    if (rc != 0) {
-        say("    failed. The machine must run with -vga none -device d3dpt-vga.");
+    if (rc != 0 && rc != 2) {
+        say("    failed. The machine must run with -vga none -device d3dpt-vga%s.", wddm ? ",irq=on" : "");
         return 1;
     }
+    if (rc == 2) g_reboot = 1;
+    if (wddm) aero_policy();
     return 0;
 }
 
@@ -1335,6 +1451,8 @@ int main(int argc, char **argv)
     ver.dwOSVersionInfoSize = sizeof ver;
     GetVersionExA(&ver);
     g_nt = ver.dwPlatformId == VER_PLATFORM_WIN32_NT;
+    g_osmaj = ver.dwMajorVersion;
+    g_osmin = ver.dwMinorVersion;
     os_name(osname, &ver);
 
     GetModuleFileNameA(NULL, g_root, sizeof g_root);

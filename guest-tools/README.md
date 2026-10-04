@@ -66,7 +66,8 @@ DRIVER9X\   the 98/Me display driver for d3dpt-vga: D3DPT9X.INF,
             and the blue-screen test VxDs
 WDDM\       the Windows 7 WDDM driver for d3dpt-vga,irq=on (track M18):
             D3DPTKMD.SYS, D3DPTUMD.DLL, D3DPTKMD.INF; MSVC, so only on an
-            ISO built on Windows (build-windows.sh's wddm stage)
+            ISO built on Windows (build-windows.sh's wddm stage);
+            SETUP installs it on 32-bit Windows 7 with the interrupt
 DINPUT\     per game: DINPUT.DLL, the DirectInput keyboard fix
 OPENGL\     per game: OPENGL32.DLL (the GL pass-through) and
             WRAPGL32.EXT, its extension-list cap
@@ -114,7 +115,7 @@ number moves.
 
 | `/I` 9x | `/I` NT | Component | What it does |
 |---|---|---|---|
-| 1 | 1 | Display adapter driver | NT: `DRVINST.EXE` on `DRIVER\D3DPTVID.INF`. 9x: the four `DRIVER9X\` files into `WINDOWS\INF` (and the three binaries into `SYSTEM`), where PnP installs them on the next boot (doc 19 §16). Restart required |
+| 1 | 1 | Display adapter driver | NT: `DRVINST.EXE` on `DRIVER\D3DPTVID.INF`; on 32-bit Windows 7 with `WDDM\` on the disc and the adapter's interrupt (`irq=on`, an IRQ in its allocated resources) on `WDDM\D3DPTKMD.INF` instead, then DWM's `CompositionPolicy=2` in HKLM and HKCU for Aero (track M18 finding 11), each choice and its reason in the log. 9x: the four `DRIVER9X\` files into `WINDOWS\INF` (and the three binaries into `SYSTEM`), where PnP installs them on the next boot (doc 19 §16). Restart required |
 | 2 | 2 | The device mapper | 9x: `FXMEMMAP.VXD` into the system folder (left alone where 3dfx's driver put one); NT: `FXPTL.SYS` and the `MAPMEM` service, checked running afterwards |
 | 3 | 3 | Disc shelf tool | `CDSHELF.EXE` into `WINDOWS`, on both families' search path |
 | 4 | 4 | Test programs | `TESTS\` into `C:\2KSBOX`; off in the menu, on with `/ALL` |

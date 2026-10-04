@@ -46,9 +46,14 @@ DRIVER9X\ the Windows 98/Me display driver for the same adapter, with the
 WDDM\     the Windows 7 display driver for the same adapter, the one
           Aero needs (32-bit Windows 7 only; on a disc built on Windows).
           The machine needs -vga none -device d3dpt-vga,irq=on: without
-          the interrupt Windows will not start it. SETUP does not
-          install it yet. By hand, from an administrator's prompt:
-          D:\DRIVER\DRVINST.EXE D:\WDDM\D3DPTKMD.INF, confirm the
+          the interrupt Windows will not start it. SETUP installs it on
+          such a machine instead of DRIVER\, and turns Aero on: it sets
+          DWM's CompositionPolicy to 2 (for the machine and for the user
+          running SETUP), because Windows' Experience Index cannot measure
+          this adapter on an emulated CPU and DWM would otherwise refuse.
+          Another user who wants Aero: HKCU\Software\Microsoft\Windows\DWM,
+          CompositionPolicy = 2 (DWORD). By hand, from an administrator's
+          prompt: D:\DRIVER\DRVINST.EXE D:\WDDM\D3DPTKMD.INF, confirm the
           unsigned driver prompt, restart. DRIVER\ (the XP driver) also
           runs on Windows 7, without Aero.
 
