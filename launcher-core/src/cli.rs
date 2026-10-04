@@ -45,6 +45,7 @@ pub fn parse_family(arg: Option<&str>, usage: &str) -> Family {
     match arg {
         Some("win98") => Family::Win98,
         Some("xp") => Family::Xp,
+        Some("win7") => Family::Win7,
         Some("dos") => Family::Dos,
         Some("other") => Family::Other,
         Some("win11") => Family::Win11,
@@ -180,7 +181,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             crate::fatal::record("--diagnose", &text);
         }
         "--new" => {
-            let usage = "usage: --new <win98|xp|dos|other|win11> <name> <disk.qcow2>";
+            let usage = "usage: --new <win98|xp|win7|dos|other|win11> <name> <disk.qcow2>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let disk = args.next().expect(usage).into();
@@ -190,7 +191,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
         "--wizard-new" => {
             // Headless equivalent of the "New machine" window: the real
             // form's `submit`, disk creation via qemu-img included.
-            let usage = "usage: --wizard-new <win98|xp|dos|other|win11> <name> <disk-size-gb>";
+            let usage = "usage: --wizard-new <win98|xp|win7|dos|other|win11> <name> <disk-size-gb>";
             let family = parse_family(args.next().as_deref(), usage);
             let name = args.next().expect(usage);
             let size_gb: u32 = args.next().expect(usage).parse().expect("disk size must be a number");

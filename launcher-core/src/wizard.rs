@@ -518,8 +518,15 @@ impl Form {
     /// note someone would find that out by installing an OS onto it.
     /// Windows 11 has its own: what the machine is, where its installer
     /// comes from, and that it needs the host's hardware virtualization.
+    /// Windows 7 says it is the 32-bit one (64-bit loads no unsigned
+    /// driver, so it would get no Aero) and what gives it Aero.
     pub fn family_note(&self) -> Option<&'static str> {
         match self.family {
+            Family::Win7 => Some(
+                "Windows 7, 32-bit. Install from a 32-bit Windows 7 ISO.\n\
+                 Then run SETUP from the guest tools: it installs the display driver Aero needs. \
+                 Confirm the unsigned driver prompt.",
+            ),
             Family::Other => Some(
                 "For an era OS other than Windows or DOS: BeOS, a period Linux, OS/2. \
                  Standard hardware these systems have drivers for: a VESA VGA, an RTL8139 network card \
@@ -703,7 +710,12 @@ impl Form {
             }
             (Accel::Kvm, false) => format!("No {hw} on this host. This machine won't start."),
             (Accel::Tcg, _) if self.family.is_modern() => TOO_SLOW.to_string(),
-            // Every era family runs `-cpu pentium3` (bundle::qemu_args).
+            // Windows 7 runs `-cpu max` (bundle::qemu_args): about three
+            // minutes to its desktop emulated (track M18's boots).
+            (Accel::Tcg, _) if self.family == Family::Win7 => {
+                "Emulated CPU. Windows 7 runs, slowly: a few minutes to the desktop.".to_string()
+            }
+            // Every other era family runs `-cpu pentium3`.
             (Accel::Tcg, _) => "Emulated Pentium 3 equivalent CPU. Suitable for older OSes.".to_string(),
         };
         // A modern guest emulated, picked or by default: a warning (user).
@@ -777,6 +789,11 @@ impl Form {
     pub fn network_notes(&self) -> &'static [&'static str] {
         if self.network && self.family.is_modern() {
             &["Outbound only, through the host (NAT). Nothing on the network can reach the guest."]
+        } else if self.network && self.family == Family::Win7 {
+            &[
+                "Outbound only, through the host (NAT). Nothing on the network can reach the guest.",
+                "Windows 7 hasn't had security updates since 2020. Don't browse the web on it.",
+            ]
         } else if self.network {
             &[
                 "Outbound only, through the host (NAT). Nothing on the network can reach the guest.",
@@ -1144,6 +1161,13 @@ impl Form {
     /// gives up our whole display path (docs 15, 19).
     pub fn video_notes(&self) -> &'static [&'static str] {
         match (self.video, self.family) {
+            (Video::D3dpt, Family::Win7) => &[
+                "2ksbox's own display adapter and driver: Aero, the full mode table and Direct3D through the driver.",
+                "Needs the driver from the guest-tools ISO (SETUP). Until it's installed, Windows uses a basic VGA driver.",
+            ],
+            (Video::Std, Family::Win7) => &[
+                "Windows drives it with its own VGA driver. 2D only: no Aero and no Direct3D through a driver.",
+            ],
             (Video::D3dpt, _) => &[
                 "2ksbox's own display adapter and driver: the full mode table, page flips that pace games, and Direct3D through the driver.",
                 "Needs the driver from the guest-tools ISO. Until it's installed, the guest sees a plain VGA.",

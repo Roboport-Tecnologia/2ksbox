@@ -83,6 +83,7 @@ impl Wizard {
         let mut parts = arg.split(':');
         let family = match parts.next() {
             Some("xp") => Some(Family::Xp),
+            Some("win7") => Some(Family::Win7),
             Some("dos") => Some(Family::Dos),
             Some("other") => Some(Family::Other),
             Some("win98") => Some(Family::Win98),

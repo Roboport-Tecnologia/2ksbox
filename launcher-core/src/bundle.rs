@@ -15,7 +15,16 @@ use std::path::{Path, PathBuf};
 pub enum Family {
     Win98,
     Xp,
-    /// A DOS machine: MS-DOS or FreeDOS on the same i440FX PC, with the
+    /// Windows 7, 32-bit (track M18): the era PC with a BIOS like XP's,
+    /// and the machine Aero runs on. Our adapter with its interrupt
+    /// (`irq=on`), which the WDDM display driver needs and which SETUP
+    /// installs it on, setting DWM's composition policy with it; Windows
+    /// 7's own HD Audio and Intel PRO/1000 drivers for the rest; the CPU
+    /// the Windows 7 work was proved on (`-cpu max`), since Windows 7's
+    /// software wants SSE2 and a Pentium III has none. 64-bit Windows 7
+    /// loads no unsigned kernel driver, so it would get no Aero here.
+    Win7,
+    /// A DOS machine:MS-DOS or FreeDOS on the same i440FX PC, with the
     /// SB16 the Win98 family already carries "for DOS boxes/games" (doc
     /// 06) and no network card. What makes it a DOS machine is
     /// `CpuSpeed`: the era's software paces itself by how fast the CPU
@@ -43,14 +52,16 @@ pub enum Family {
 }
 
 impl Family {
-    /// In the order a picker should offer them: the three the project is
-    /// built around first, then the era's catch-all, then the modern box.
-    pub const ALL: [Family; 5] = [Family::Win98, Family::Xp, Family::Dos, Family::Other, Family::Win11];
+    /// In the order a picker should offer them: the Windows the project is
+    /// built around first, oldest to newest, then DOS, the era's
+    /// catch-all, and the modern box.
+    pub const ALL: [Family; 6] = [Family::Win98, Family::Xp, Family::Win7, Family::Dos, Family::Other, Family::Win11];
 
     pub fn label(self) -> &'static str {
         match self {
             Family::Win98 => "Win98",
             Family::Xp => "XP",
+            Family::Win7 => "Windows 7",
             Family::Dos => "DOS",
             Family::Other => "Other (BeOS, Linux, …)",
             Family::Win11 => "Windows 11",
@@ -289,6 +300,11 @@ pub fn video_choices(family: Family) -> &'static [Video] {
         // Win98 starts on ours too (user decision). The Cirrus stays one
         // pick away as the in-box driver and the A/B.
         Family::Win98 => &[Video::D3dpt, Video::Cirrus],
+        // Windows 7 starts on ours, with its interrupt: the WDDM driver
+        // and Aero (track M18). The other choice is the standard VGA,
+        // which Windows 7's own VGA driver runs through VBE: Windows 7
+        // has no Cirrus driver.
+        Family::Win7 => &[Video::D3dpt, Video::Std],
         Family::Other => &[Video::Std, Video::Cirrus],
         // DOS starts on the standard VGA (user decision): its VBE 2.0
         // and linear frame buffer are the fuller of the two VESA BIOSes
@@ -519,7 +535,7 @@ pub fn pad_choices(family: Family) -> &'static [Pad] {
         // offer an adapter a family has no driver for.
         Family::Dos => &[Pad::None, Pad::Gameport, Pad::Keys],
         Family::Win98 => &[Pad::None, Pad::Usb, Pad::Gameport, Pad::Keys],
-        Family::Xp | Family::Other => &[Pad::None, Pad::Usb, Pad::Keys],
+        Family::Xp | Family::Win7 | Family::Other => &[Pad::None, Pad::Usb, Pad::Keys],
         Family::Win11 => &[Pad::None, Pad::Usb, Pad::Keys],
     }
 }
@@ -696,6 +712,9 @@ pub fn sound_choices(family: Family) -> &'static [Sound] {
         Family::Dos => &[Sound::Sb16, Sound::Gus, Sound::Adlib, Sound::None],
         // XP's own driver, and the card doc 06 has always given it.
         Family::Xp => &[Sound::Ac97, Sound::Sb16, Sound::None],
+        // Windows 7's own HD Audio driver; it has none for the AC'97 or
+        // the SB16.
+        Family::Win7 => &[Sound::Hda, Sound::None],
         // Standard hardware only, as everywhere else in this family:
         // both of these had a driver in the box on BeOS R5 and on a
         // period Linux, where nothing of ours can be installed after.
@@ -717,8 +736,9 @@ pub fn music_choices(family: Family) -> &'static [Music] {
         Family::Win98 | Family::Dos => &[Music::Gm, Music::Mt32, Music::None],
         Family::Xp | Family::Other => &[Music::None, Music::Gm, Music::Mt32],
         // An MPU-401 at 0x330 is an ISA device of the era; Windows 11
-        // has its own synthesizer and no driver for the port.
-        Family::Win11 => &[Music::None],
+        // has its own synthesizer and no driver for the port. Windows 7
+        // has its own synthesizer too, and the port is not tried there.
+        Family::Win7 | Family::Win11 => &[Music::None],
     }
 }
 
@@ -1363,7 +1383,7 @@ pub fn default_accel(family: Family) -> Accel {
         // Nothing here is tuned for an era Linux or BeOS, and neither
         // has Win9x's fast-CPU bugs: take the host's speed when it is
         // there, emulate when it isn't.
-        Family::Xp | Family::Other => Accel::Auto,
+        Family::Xp | Family::Win7 | Family::Other => Accel::Auto,
         // Hardware virtualization where the host has it. A host without
         // it still starts the machine, at a speed step 1 measured as
         // unusable for work, rather than refusing it.
@@ -1423,7 +1443,7 @@ pub fn default_seamless_mouse(family: Family) -> bool {
 pub fn default_cpu_speed(family: Family) -> CpuSpeed {
     match family {
         Family::Dos => CpuSpeed::Dx266,
-        Family::Win98 | Family::Xp | Family::Other | Family::Win11 => CpuSpeed::Unthrottled,
+        Family::Win98 | Family::Xp | Family::Win7 | Family::Other | Family::Win11 => CpuSpeed::Unthrottled,
     }
 }
 
@@ -1446,6 +1466,8 @@ pub fn default_disk_size_gb(family: Family) -> u32 {
     match family {
         Family::Win98 | Family::Other => 10,
         Family::Xp => 20,
+        // Setup wants 16 GB; room for the updates and the games.
+        Family::Win7 => 40,
         Family::Dos => 2,
         // Setup refuses a disk under 64 GB.
         Family::Win11 => 64,
@@ -1457,6 +1479,9 @@ pub fn default_ram_mb(family: Family) -> u32 {
     match family {
         Family::Win98 => 256, // doc 06: 256 MB default, ≤512 MB hard cap
         Family::Xp => 512,    // doc 06: 512 MB-1 GB default
+        // What the Windows 7 work ran with (track M18); Aero is
+        // comfortable in it, and setup wants 1 GB.
+        Family::Win7 => 2048,
         // DOS itself uses the first megabyte; the rest is XMS for the
         // extenders a mid-90s game ships with, and more of it buys
         // nothing. 64 MB is generous for the era and stays inside what
@@ -1488,6 +1513,8 @@ pub fn ram_mb_range(family: Family) -> std::ops::RangeInclusive<u32> {
     match family {
         Family::Win98 => 32..=512,
         Family::Xp => 64..=3072,
+        // Setup's 1 GB at the bottom, XP's 32-bit ceiling at the top.
+        Family::Win7 => 1024..=3072,
         Family::Dos => 4..=256,
         // We don't know what guest is going in, so the only limits are
         // the machine's. The bottom is where a 1995 kernel still boots,
@@ -1723,6 +1750,12 @@ impl Machine {
                     dev.push_str(",d3d9=");
                     dev.push_str(which);
                 }
+                // Windows 7's WDDM driver needs the adapter's interrupt:
+                // dxgkrnl starts no adapter without one (track M18). XP
+                // and 98 keep the PCI config they were installed on.
+                if self.family == Family::Win7 {
+                    dev.push_str(",irq=on");
+                }
                 args.extend([flag.to_string(), dev]);
             }
         }
@@ -1832,11 +1865,17 @@ impl Machine {
         args.extend([
             "-m".into(),
             self.ram_mb.to_string(),
-            // doc 06's floor for both families: avoids the fast-CPU Win9x
-            // bugs and CPUID-dispatched guest code that mis-decodes under
-            // -cpu host (the Max Payne JPEG decoder gotcha)
+            // doc 06's floor for the era families: avoids the fast-CPU
+            // Win9x bugs and CPUID-dispatched guest code that mis-decodes
+            // under -cpu host (the Max Payne JPEG decoder gotcha).
+            // Windows 7 gets `max`, what its work was proved on (track
+            // M18): its software wants SSE2, which a Pentium III lacks.
             "-cpu".into(),
-            format!("pentium3{}", self.optimization_props(Knob::Cpu)),
+            format!(
+                "{}{}",
+                if self.family == Family::Win7 { "max" } else { "pentium3" },
+                self.optimization_props(Knob::Cpu)
+            ),
             "-drive".into(),
             format!("file={},if=ide,index=0,media=disk", opt_value(&self.disk.display().to_string())),
         ]);
@@ -1963,6 +2002,19 @@ impl Machine {
                     args.extend(["-netdev".into(), "user,id=n0".into()]);
                     // in-box XP driver
                     args.extend(["-device".into(), "rtl8139,netdev=n0,addr=0x03".into()]);
+                }
+                args.extend(self.audio_args());
+            }
+            // XP's machine with Windows 7's in-box cards: the Intel
+            // PRO/1000 (e1000) for the network, HD Audio for sound
+            // (`sound_choices`). Our adapter carries its interrupt
+            // (`video_args`).
+            Family::Win7 => {
+                args.extend(self.video_args());
+                if self.network {
+                    args.extend(["-netdev".into(), "user,id=n0".into()]);
+                    // in-box Windows 7 driver
+                    args.extend(["-device".into(), "e1000,netdev=n0,addr=0x03".into()]);
                 }
                 args.extend(self.audio_args());
             }

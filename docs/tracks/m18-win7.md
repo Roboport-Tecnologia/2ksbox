@@ -555,13 +555,28 @@ device's half is plain QEMU C and builds anywhere.
    native. Seen on the way, not chased: after drvinst reinstalls the
    driver, the user-mode driver's log lines (its escape to the kernel
    driver) no longer reach the QEMU log, while the kernel driver's do.
+13. **A Windows 7 family in the launcher** (2026-10-04, user;
+   `bundle::Family::Win7`, doc 06 "Windows 7"). The era PC with `-cpu max`
+   (what this track's work ran on; Windows 7's software wants SSE2),
+   `d3dpt-vga,irq=on` by default (the standard VGA the other choice; no
+   Cirrus driver in Windows 7), HD Audio, an e1000 when networked, 2 GB
+   (1-3 GB), a 40 GB disk, Automatic acceleration; the family note says
+   32-bit and SETUP for Aero, the network note says 2020 for its last
+   security update. `launcherx --print-args` on such a bundle gives
+   `-cpu max ... -device d3dpt-vga,addr=0x02,irq=on -device
+   e1000,netdev=n0,addr=0x03 -device ich9-intel-hda,addr=0x1b -device
+   hda-duplex,audiodev=embed0`; the mitsuami form shows it (`wizard:win7`).
+   The user's `win7` bundle is XP-family (Cirrus, AC'97, no interrupt), so
+   it stays on the XP-model driver until it is remade as this family.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
    the desktop since 2026-10-03 (finding 8 above), and every test program
    draws in it with native frames (findings 9 and 10), paced by the
    device's own vertical-blank interrupt (plan step 4). The Experience
    Index cannot be measured under TCG (finding 11), so SETUP sets DWM's
    `CompositionPolicy` override when it installs the WDDM driver (finding
-   12). Next: the launcher passing `irq=on` for a Windows 7 machine.
+   12), and the launcher's Windows 7 family gives the adapter its
+   interrupt (finding 13). Next: a fresh install end to end on that family
+   (setup, SETUP, Aero) through the launcher and the player.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

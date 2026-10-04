@@ -1,8 +1,9 @@
-# 6. Guest machines: the four families
+# 6. Guest machines: the families
 
-The launcher ships four machine families with tested defaults; users
+The launcher ships its era machine families with tested defaults; users
 supply their own OS media and licences. The project is built around
-Win98, XP and DOS. **Other** is the catch-all for any other era OS
+Win98, XP and DOS; **Windows 7** (32-bit, track M18) is XP's PC with
+Aero on our WDDM driver. **Other** is the catch-all for any other era OS
 (BeOS, a period Linux, OS/2), with standard hardware and nothing of
 ours. The defaults live in `launcher-core/src/bundle.rs`
 (`video_choices`, `sound_choices`, `music_choices`, `pad_choices`,
@@ -10,8 +11,9 @@ ours. The defaults live in `launcher-core/src/bundle.rs`
 The machine form is doc 07, the sound and music devices doc 20, the
 display drivers docs 15 and 19, the Voodoo 2 doc 21.
 
-**Common to all four.** i440FX + PIIX (`-machine pc`), `-cpu pentium3`
-(with the form's optimization switches as its properties), IDE disk
+**Common to all of them.** i440FX + PIIX (`-machine pc`), `-cpu pentium3`
+(`max` on Windows 7; with the form's optimization switches as its
+properties), IDE disk
 (qcow2) and our ATAPI CD (doc 17). **No network card** on a new machine
 or a bundle that doesn't ask for one, so an unpatched guest stays off
 the network (`-nic none`; QEMU otherwise adds an e1000). **No gamepad**
@@ -115,6 +117,31 @@ Modeled as a ~2002–2005 PC.
 
 SP3 recommended; activation is the user's affair with their own licence.
 Uniprocessor ACPI HAL; SMP under TCG is a measured decision for later.
+
+## Windows 7
+
+32-bit Windows 7 (track M18, since 2026-10-04): XP's PC with Windows 7's
+in-box cards, and the machine Aero runs on.
+
+| Component | Default (alternatives) | Why |
+|---|---|---|
+| Machine | `pc-i440fx-<ver>` | as XP; Windows 7 drives the PIIX and the HPET in the box |
+| Accel | Automatic | as XP: KVM where the host has it, emulated on a Windows or macOS host (about three minutes to the desktop under TCG) |
+| CPU | `max` | what all of M18's Windows 7 work ran on. Windows 7's own software wants SSE2, which `pentium3` lacks |
+| RAM | 2048 MB (1024–3072) | setup wants 1 GB; the top is XP's 32-bit ceiling |
+| Disk | 40 GB | setup wants 16 GB |
+| Video | `d3dpt-vga,irq=on` + our WDDM driver (`std`) | the interrupt is what dxgkrnl starts a WDDM adapter on; SETUP installs the WDDM driver on such a machine and sets DWM's `CompositionPolicy=2`, so Aero composes (track M18 findings 11, 12). The standard VGA through Windows 7's VBE driver is the 2D fallback; Windows 7 has no Cirrus driver |
+| Sound | HD Audio, ICH9 + `hda-duplex` at `0x1b` (none) | Windows 7's in-box driver; it has none for the AC'97 or the SB16 |
+| Music | none | Windows 7 has its own synthesizer; the MPU-401 is not tried there |
+| Net | Intel PRO/1000 (e1000) when on | in-box driver |
+| Pointer | USB tablet (`seamless_mouse`) | as on XP |
+| Gamepad | none (USB HID pad, key mapping) | as on XP |
+
+64-bit Windows 7 boots on the same machine but loads no unsigned kernel
+driver, so it gets no Aero; SETUP says so and installs the XP-model
+driver instead. An XP-family bundle holding a Windows 7 install (the
+user's `win7`, from before this family) has no interrupt on its adapter,
+so SETUP gives it the XP-model driver too.
 
 ## DOS
 
