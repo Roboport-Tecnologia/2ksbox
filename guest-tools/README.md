@@ -64,6 +64,9 @@ DRIVER\     the 2000/XP display driver for d3dpt-vga (D3DPTVID.SYS,
 DRIVER9X\   the 98/Me display driver for d3dpt-vga: D3DPT9X.INF,
             D3DPT9X.DRV, D3DPT9V.VXD, the DirectDraw HAL D3DPT9HL.DLL;
             and the blue-screen test VxDs
+WDDM\       the Windows 7 WDDM driver for d3dpt-vga,irq=on (track M18):
+            D3DPTKMD.SYS, D3DPTUMD.DLL, D3DPTKMD.INF; MSVC, so only on an
+            ISO built on Windows (build-windows.sh's wddm stage)
 DINPUT\     per game: DINPUT.DLL, the DirectInput keyboard fix
 OPENGL\     per game: OPENGL32.DLL (the GL pass-through) and
             WRAPGL32.EXT, its extension-list cap

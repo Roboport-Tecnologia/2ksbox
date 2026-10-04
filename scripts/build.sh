@@ -548,7 +548,10 @@ if want guest; then
      stamp_stale guest-tools guest-tools/src d3dpt/d3dpt_proto.h \
        d3dpt/d3dpt_fb.h cdshelf/cdshelf_proto.h \
        guest-tools/build-wrappers.sh guest-tools/build-driver.sh \
-       guest-tools/build-driver9x.sh; then
+       guest-tools/build-driver9x.sh \
+       build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf; then
+    # (the WDDM driver is built only on Windows, build-windows.sh's wddm
+    # stage; absent here it adds nothing, so both scripts agree)
     GUEST_STALE=1
   fi
   # a stamp is no good without the artifacts it claims are current

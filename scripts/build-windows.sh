@@ -48,6 +48,14 @@
 #           package ships DXVK as dxvk_d3d9.dll, the executor's default.
 #           D3DPT_D3D9=system (or auto, when DXVK opens no adapter) runs it
 #           on Windows' own system32\d3d9.dll instead.
+#   wddm    (Windows only) guest-tools/build-wddm.cmd: the WDDM display
+#           driver for Windows 7 (track M18, ADR-022), d3dptkmd.sys and
+#           d3dptumd.dll into build/wddm/x86. MSVC through the Enterprise
+#           WDK for Windows 10 2004 (10.0.19041), the last kit that builds
+#           32-bit kernel drivers for Windows 7: one ISO, mounted (or
+#           EWDK_ISO=<iso> to mount it, EWDK=<drive:> to name it),
+#           nothing installed. Skipped with a note when none is mounted.
+#           The guest stage puts the result on the ISO, in WDDM\.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
 #           a default run rebuilds it when its sources move, by
@@ -100,11 +108,11 @@ while [ $# -gt 0 ]; do
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
     -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    qemu|rust|mitsuami|exec|guest) STAGES+=("$1"); shift ;;
+    qemu|rust|mitsuami|exec|wddm|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu rust mitsuami exec guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu rust mitsuami exec wddm guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -322,6 +330,28 @@ if want exec; then
   "$WCXX" -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
 fi
 
+# The WDDM driver (track M18): MSVC through the EWDK, whose own
+# environment build-wddm.cmd sets up (SetupBuildEnv), so no Visual Studio
+# install is involved. msbuild builds what changed, so the stage always
+# runs; it is skipped, with a note, when no EWDK 10.0.19041 is mounted
+# and none is named. The guest stage stages build/wddm/x86 on the ISO.
+if want wddm; then
+  ewdk="${EWDK:-}${EWDK_ISO:-}"
+  if [ -z "$ewdk" ]; then
+    for d in /{d..z}; do
+      if [ -f "$d/BuildEnv/SetupBuildEnv.cmd" ] &&
+         [ -f "$d/Program Files/Windows Kits/10/Include/10.0.19041.0/km/dispmprt.h" ]; then ewdk="$d"; fi
+    done
+  fi
+  if [ -z "$ewdk" ]; then
+    skip wddm "no EWDK 10.0.19041 mounted (mount it, or EWDK_ISO=<iso>; docs/build-windows.md \"The WDDM driver\")" || true
+  else
+    say "wddm: d3dptkmd.sys + d3dptumd.dll (MSVC, the EWDK)"
+    cmd //c "$(cygpath -w guest-tools/build-wddm.cmd)"
+    BUILT+=(wddm)
+  fi
+fi
+
 # The ISO is guest code and identical whatever host built it, so it is
 # rebuilt when its sources move, by scripts/build.sh's stamp (same file,
 # same hash): a protocol bump or a driver change makes it stale, and a
@@ -332,6 +362,7 @@ if want guest; then
                    find guest-tools/src d3dpt/d3dpt_proto.h d3dpt/d3dpt_fb.h \
                         cdshelf/cdshelf_proto.h guest-tools/build-wrappers.sh \
                         guest-tools/build-driver.sh guest-tools/build-driver9x.sh \
+                        build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf \
                         -type f 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cat 2>/dev/null
                  } | sha256sum | cut -d' ' -f1)
   guest_current=""

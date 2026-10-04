@@ -43,6 +43,15 @@ DRIVER9X\ the Windows 98/Me display driver for the same adapter, with the
           adapter's PCI resources, and without it Windows takes them
           away again.
 
+WDDM\     the Windows 7 display driver for the same adapter, the one
+          Aero needs (32-bit Windows 7 only; on a disc built on Windows).
+          The machine needs -vga none -device d3dpt-vga,irq=on: without
+          the interrupt Windows will not start it. SETUP does not
+          install it yet. By hand, from an administrator's prompt:
+          D:\DRIVER\DRVINST.EXE D:\WDDM\D3DPTKMD.INF, confirm the
+          unsigned driver prompt, restart. DRIVER\ (the XP driver) also
+          runs on Windows 7, without Aero.
+
 DINPUT\   DINPUT.DLL, per game. It fixes "the keyboard does nothing in
           the game" when the game polls a non-exclusive DirectInput
           keyboard from a loop that never pumps messages (FIFA 2000's

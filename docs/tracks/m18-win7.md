@@ -218,6 +218,17 @@ device's half is plain QEMU C and builds anywhere.
    the PC too (`build-windows.sh guest` already runs there), or copy the
    driver into the Linux checkout's `build/` for the ISO stage. SETUP's NT
    role then installs the WDDM driver on Windows 7 and the XP one on XP.
+   **Decided 2026-10-04: the ISO is built on the PC** (user: fold the
+   WDDM build into `build-windows.sh`). Its `wddm` stage runs
+   `build-wddm.cmd` when an EWDK is mounted (skipped with a note
+   otherwise), and the `guest` stage after it stages `build/wddm/x86` as
+   `WDDM\` on the ISO, after the ISO's mingw checks (the user-mode DLL is
+   MSVC; its own code is now `/arch:IA32` for the Pentium III floor, and
+   the static C runtime picks its SSE2 routines by a CPU check); an ISO
+   built on Linux has none. The drivers' three files are part of the ISO's
+   stamp in both build scripts. SETUP does not install it yet: the driver
+   starts only with `-device d3dpt-vga,irq=on`, which the launcher does
+   not pass yet; README.TXT on the disc gives the manual steps.
 4. **The device's additions** (`d3dpt/hw/d3dpt_vga.c`, `d3dpt/d3dpt_fb.h`,
    with M7): an interrupt line, a fence register, DMA command buffers read
    from guest memory. Registers are only added (`D3DPT_FB_VERSION`), so
@@ -490,12 +501,44 @@ device's half is plain QEMU C and builds anywhere.
    driver change was needed. The test loop runs them as one command line
    (`w7d3d.sh CHAIN=1`): typed one per program, a slow first start let
    the next line's keys go to the program still running.
+11. **The Experience Index: what DWM checks, and why WinSAT cannot tell
+   it under TCG** (2026-10-04, read in dwm.exe, dwmapi.dll and
+   dwmcore.dll of 7601 with Microsoft's symbols). Event 9016 is
+   `CDwmAppHost::VerifyGraphicsAssesment`. It asks dwmapi's `Assessor`
+   (`DwmpGetAssessment`), which is a formula, not a stored score:
+   - dwmcore reads two DWORDs from `HKLM\Software\Microsoft\Windows
+     NT\CurrentVersion\WinSAT`, `VideoMemoryBandwidth` and
+     `VideoMemorySize` (a missing value reads 0); `winsat dwm` writes them.
+   - The desktop's cost per frame is a fitted quadratic in its width
+     (0.4594 w^2 + 1538.1 w + 196 for one monitor with transparency, the
+     first try; 0.4594 w^2 + 18.783 w + 196 without, the second) times 4
+     bytes; at 30 frames a second it must take at most 65 % of the time at
+     `VideoMemoryBandwidth / 1000` MiB/s. At 1024x768 that is a value of
+     at least about 362000 (about 88000 without transparency). Video
+     memory must hold twice the desktop's surfaces, and system memory be
+     512 MB or more.
+   - `CompositionPolicy` (HKCU / HKLM `Software\Microsoft\Windows\DWM`)
+     is that check's switch, `DwmpGetAssessmentUsage`: 0 asks the
+     Assessor, 2 composes regardless (our override), 1 never.
+   `winsat dwm` runs on this driver to the end ("Assessment Completed",
+   24-33 s), but under TCG it reports `TSC Frequency : 0`, every CPU rate
+   as an absurd number and **Video Memory Throughput 0.00 MB/s**, and
+   writes `VideoMemoryBandwidth` 0 (Windows itself records the CPU at
+   3697 MHz, so it is WinSAT's own timer calibration that fails on the
+   emulated CPU, not the display driver). DWM then refuses as before. One
+   boot composed after WinSAT anyway; the next, the same commands, did
+   not, so that is not counted. What is left: WinSAT under KVM (the user's
+   `win7` bundle on Linux), where its timer is real; or the launcher (or
+   SETUP) setting `CompositionPolicy=2` for a Windows 7 machine on the
+   WDDM driver, which is what the measured throughput would decide anyway
+   if the host's GPU is behind it.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
    the desktop since 2026-10-03 (finding 8 above), behind the
    `CompositionPolicy` override, and every test program draws in it with
    native frames (findings 9 and 10), paced by the device's own
-   vertical-blank interrupt (plan step 4); next the Experience Index, in
-   place of the override.
+   vertical-blank interrupt (plan step 4); the Experience Index cannot be
+   measured under TCG (finding 11): next WinSAT under KVM, or the override
+   set by the launcher or SETUP (a user decision).
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation

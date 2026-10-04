@@ -64,7 +64,7 @@ Everything Windows is done natively on Windows (user decision,
 `scripts/build-windows.sh` built, with no Linux box involved.
 
 ```sh
-scripts/build-windows.sh                  # qemu rust mitsuami exec guest, as usual
+scripts/build-windows.sh                  # qemu rust mitsuami exec wddm guest, as usual
 scripts/test.sh all                       # in the MINGW64 shell
 ```
 

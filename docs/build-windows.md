@@ -515,7 +515,7 @@ finds converted.
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu rust mitsuami exec, and the ISO when its sources moved
+scripts/build-windows.sh                  # qemu rust mitsuami exec wddm, and the ISO when its sources moved
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, whatever the stamp says
 scripts/win-run.sh launcher               # the launcher, out of the checkout
@@ -598,7 +598,11 @@ which first sources `guest-tools/msys2-i686.sh`, the whole port:
 
 Windows 7's WDDM display driver (track M18 step 2, ADR-022) builds on
 the PC with Microsoft's toolchain and the WDK's own headers, read from
-the kit and never committed. It is not part of `build-windows.sh`.
+the kit and never committed. It is `build-windows.sh`'s `wddm` stage
+(since 2026-10-04), which runs `guest-tools/build-wddm.cmd` below when
+an EWDK is mounted (or named by `EWDK` / `EWDK_ISO`) and is skipped with
+a note otherwise; the `guest` stage after it puts the result on the
+guest-tools ISO, in `WDDM\`. An ISO built on Linux has no `WDDM\`.
 
 **The kit: the Enterprise WDK for Windows 10, version 2004**
 (10.0.19041, with VS 2019 Build Tools 16.7). It is the last WDK that
@@ -613,7 +617,8 @@ link under Windows 10 2004, accepting the license). On the user's PC it
 lives in `D:\stuff\downloads\`.
 
 ```sh
-cmd //c guest-tools\\build-wddm.cmd     # from MSYS2 or Git Bash; plain cmd works too
+scripts/build-windows.sh wddm           # the stage alone (MINGW64)
+cmd //c guest-tools\\build-wddm.cmd     # or the script itself, from MSYS2, Git Bash or cmd
 ```
 
 The script finds a mounted EWDK on any drive (or `EWDK=E:`; or
@@ -622,8 +627,11 @@ MSBuild on `guest-tools/src/d3dptvid/wddm/km/d3dptkmd.vcxproj`
 (`WindowsKernelModeDriver10.0`, `TargetVersion=Windows7`, Win32, `/W4
 /WX`, `displib.lib` for `DxgkInitialize`) and on
 `wddm/um/d3dptumd.vcxproj`, Direct3D 9's user-mode driver (the kit's
-`v142` user-mode toolset, Win32, `/W4 /WX`, the C runtime linked in
-statically because Windows 7 has none of VS 2019's, subsystem 6.01; the
+`v142` user-mode toolset, Win32, `/W4 /WX`, `/arch:IA32` for guest
+code's Pentium III floor, the C runtime linked in statically because
+Windows 7 has none of VS 2019's (its own SSE2 routines are picked by a
+CPU check at run time, so the ISO stages the DLL after its pentium3
+check), subsystem 6.01; the
 shared core's `core_caps.c` / `core_surf.c` compiled in), into
 `build/wddm/x86/`: `d3dptkmd.sys`, `d3dptumd.dll` and `d3dptkmd.inf`
 (which installs both). The drivers are unsigned; 32-bit Windows 7 loads
