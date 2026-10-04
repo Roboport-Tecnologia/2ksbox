@@ -2858,10 +2858,30 @@ win98_checks() { # the Win98 driver's Direct3D (M16 step 5): its own boots, what
   fi
 }
 
+win7_checks() { # Windows 7 from its install disc to Aero (M18 finding 14)
+  # `win7-aero`: a machine from the launcher's Windows 7 family, Windows
+  # setup unattended from WIN7_ISO (a 32-bit Windows 7 disc of the user's;
+  # the installed base is kept in build/win7-aero-test, ~20 min to make
+  # under TCG), then SETUP, one restart, and DWM composing on our WDDM
+  # driver with D3DGAME9's frame against the native one (tools/win7-aero-
+  # test.sh, ~15 min). The WDDM driver must be on the guest-tools ISO.
+  log "win7 checks"
+  if [ -z "${WIN7_ISO:-}" ]; then
+    skip win7-aero "needs WIN7_ISO=<a 32-bit Windows 7 install disc>"
+  elif ! command -v mcopy >/dev/null || [ ! -x $QSYS ] || [ ! -x "$TREL/launcherx" ]; then
+    skip win7-aero "needs mtools, $QSYS and $TREL/launcherx"
+  elif [ ! -f guest-tools/out/iso/WDDM/D3DPTKMD.SYS ]; then
+    skip win7-aero "no WDDM\\ on the guest-tools ISO (build-windows.sh's wddm stage, or scripts/wddm-prebuilt.sh)"
+  else
+    run_check win7-aero win7-aero.log tools/win7-aero-test.sh "$WIN7_ISO" || true
+    grep "^-- " "$OUT/win7-aero.log" | sed 's/^/     /'
+  fi
+}
+
 case "$STAGE" in
   host) host_stage;;
-  guest) guest_stage; win98_checks;;
-  all) host_stage; guest_stage; win98_checks;;
+  guest) guest_stage; win98_checks; win7_checks;;
+  all) host_stage; guest_stage; win98_checks; win7_checks;;
   *) echo "usage: $0 [host|guest|all]"; exit 2;;
 esac
 

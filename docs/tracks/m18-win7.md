@@ -605,8 +605,25 @@ device's half is plain QEMU C and builds anywhere.
    the CD and hangs the boot), and this disc's `install.wim` holds five
    editions, index 1 being Starter N ("This edition of Windows doesn't
    support themes"), so the image is chosen by name (`Windows 7
-   ULTIMATEN`, as `sources\ei.cfg` names the disc's own). The scripts are
-   in the session's `build/w7/` (`install.sh`, `aero.sh`, `probe.sh`).
+   ULTIMATEN`, as `sources\ei.cfg` names the disc's own). The run is now
+   the repo's `tools/win7-aero-test.sh` (finding 15).
+15. **The test loop as a repo tool** (2026-10-04):
+   `tools/win7-aero-test.sh <win7-x86.iso>`, and `scripts/test.sh`'s
+   `win7-aero` check when `WIN7_ISO` names the disc (skipped otherwise).
+   The base (Windows setup, unattended, on a machine from `launcherx
+   --wizard-new win7` in a library under `build/win7-aero-test`) is made
+   once per disc and edition and kept; each run boots an overlay of it
+   with the launcher's arguments and the guest-tools disc, runs SETUP, the
+   restart, and gives four verdicts: SETUP chose the WDDM driver, the
+   kernel driver started, `dwm.exe` has `d3dptumd.dll` loaded, and
+   D3DGAME9's frame 300 under composition against the native d3d9 frame
+   (from a FAT scratch disk the guest finds by a tag file, whatever letter
+   Windows gives it). First run on the PC under TCG: the base in 936 s,
+   the run in ~12 min, all four PASS, **D3DGAME9 0 of 307200 pixels off
+   native on a fresh install**. The edition comes from the disc's
+   `sources\ei.cfg`, which lives in UDF: xorriso and bsdtar see only the
+   ISO 9660 stub (`README.TXT`), so `tools/udfcat.py` reads it (stdlib
+   Python, one file to stdout).
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Done for 32-bit Windows
    7: DWM composes the desktop (finding 8), every test program draws in it
    with native frames (findings 9 and 10), paced by the device's own
@@ -614,10 +631,11 @@ device's half is plain QEMU C and builds anywhere.
    `CompositionPolicy` override, since the Experience Index cannot be
    measured under TCG (findings 11, 12), the launcher's Windows 7 family
    gives the adapter its interrupt (finding 13), and a fresh install on
-   that family reaches Aero with SETUP and one restart (finding 14). Left:
-   the test loop as a repo tool, and the loose ends of step 6 (full-screen
-   d3d9 swap chains, render targets on a level or face, 32-bit indices,
-   the depth StretchRect) and step 5 (timeout recovery).
+   that family reaches Aero with SETUP and one restart (finding 14),
+   checked by `tools/win7-aero-test.sh` (finding 15). Left: the loose ends
+   of step 6 (full-screen d3d9 swap chains, render targets on a level or
+   face, 32-bit indices, the depth StretchRect) and step 5 (timeout
+   recovery).
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation
@@ -626,7 +644,11 @@ and DWM there should run on a Direct3D 9-class user-mode driver through
 `d3d10level9` (unchecked: whether Windows 11 still loads a WDDM 1.x
 kernel driver). A Direct3D 11 user-mode driver is its own project.
 
-**Test loop.** Open in step 3. The headless loop is
-`tools/xp-driver-test.sh` on Linux (KVM, the `win7` bundle); a driver
-built on the PC is either carried there, or the PC boots the bundle with
-its own 2ksbox build (`scripts/win-run.sh`) by hand.
+**Test loop.** `tools/win7-aero-test.sh <win7-x86.iso>` (finding 15), the
+`win7-aero` check of `scripts/test.sh` with `WIN7_ISO` set: Windows 7 from
+its disc on the launcher's Windows 7 family, SETUP, Aero, D3DGAME9 under
+composition. Run on the PC under TCG; written for Linux too (KVM there,
+with an ISO carrying the PC's driver, `scripts/wddm-prebuilt.sh`), not
+yet run there. The XP-model
+driver on Windows 7 is still `tools/xp-driver-test.sh` on an XP-family
+bundle.
