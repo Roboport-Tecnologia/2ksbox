@@ -276,12 +276,11 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         input.push(("Gamepad", machine.effective_pad().label().to_owned()));
     }
     input.push(("Seamless mouse", on_off(machine.seamless_mouse)));
-    let mut network = vec![("Networking", on_off(machine.network))];
-    // Windows 11's sharing (M23), on the form's Network page too
+    // Windows 11's sharing (M23), on the form's Input and Network pages too
     if machine.family.is_modern() {
-        network.push(("Clipboard", on_off(machine.clipboard)));
+        input.push(("Clipboard", on_off(machine.clipboard)));
     }
-    let mut network = rows(network);
+    let mut network = rows(vec![("Networking", on_off(machine.network))]);
     if machine.family.is_modern() && machine.shared_folder.is_some() {
         network.push(file("Shared folder", machine.shared_folder.as_ref()));
     }

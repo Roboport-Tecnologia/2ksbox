@@ -601,6 +601,15 @@ fn InputPage() -> impl View {
                 "Seamless mouse"
             </Checkbox>
             <Note text=get(wiz, |f| joined(f.seamless_mouse_notes()))/>
+            // Windows 11's clipboard shared with this computer (M23)
+            <Show when=get(wiz, Form::integration_applies)>
+                <Column gap=Spacing::Md>
+                    <Checkbox checked=get(wiz, |f| f.clipboard) @change=move |on| wiz.edit(|f| f.clipboard = on)>
+                        "Clipboard"
+                    </Checkbox>
+                    <Note text=get(wiz, |f| joined(f.clipboard_notes()))/>
+                </Column>
+            </Show>
         </Column>
     }
 }
@@ -614,12 +623,8 @@ fn NetworkPage() -> impl View {
                 "Networking"
             </Checkbox>
             <Note text=get(wiz, |f| joined(f.network_notes()))/>
-            // Windows 11's sharing with this computer (M23)
+            // Windows 11's shared folder (M23)
             <Show when=get(wiz, Form::integration_applies)>
-                <Checkbox checked=get(wiz, |f| f.clipboard) @change=move |on| wiz.edit(|f| f.clipboard = on)>
-                    "Clipboard"
-                </Checkbox>
-                <Note text=get(wiz, |f| joined(f.clipboard_notes()))/>
                 <PathField
                     label_width=LABEL_W
                     label="Shared folder"

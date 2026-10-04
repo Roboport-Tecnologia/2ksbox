@@ -47,9 +47,9 @@ filesystem driver or a virtual disk).
    and two logon tasks for every user (the agent with highest
    privileges, `--map` limited), both started at once.
 6. **The launcher** (done 2026-10-03). `Machine::clipboard` (on for a
-   new Windows 11 machine) and `shared_folder`; the form's Network page
-   has both, with their notes in `launcher-core` and their rows in
-   `launcher-mitsuami`; `--wizard-edit` takes them last; the machine
+   new Windows 11 machine) and `shared_folder`; the form's Input page has
+   the first and its Network page the second (user), with their notes in
+   `launcher-core` and their rows in `launcher-mitsuami`; `--wizard-edit` takes them last; the machine
    details show them. The clipboard is QEMU arguments
    (`clipboard_args`); the folder is the player's `--share <dir>`
    (`player::share_args`), only with Networking on, which

@@ -346,8 +346,9 @@ The fields, and why each is what it is:
   none`, because QEMU otherwise adds a NIC. XP's PCI devices carry
   explicit addresses, so the NIC's absence does not slide the sound card
   into its slot and make an installed guest re-detect hardware.
-- **Clipboard and Shared folder** (`clipboard`, `shared_folder`), on the
-  Network page, Windows 11 only (M23, doc 24). The clipboard is on for a
+- **Clipboard and Shared folder** (`clipboard`, `shared_folder`), the
+  first on the Input page and the second on the Network page (user,
+  2026-10-03), Windows 11 only (M23, doc 24). The clipboard is on for a
   new Windows 11 machine: it adds QEMU's `qemu-vdagent` on a
   virtio-serial port (`Machine::clipboard_args`), which the player joins,
   and does nothing until the guest has the agent (`2ksbox\install.cmd`
