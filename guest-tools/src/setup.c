@@ -375,8 +375,11 @@ static void find_3dfx_nt(void)
 /* Whether the d3dpt-vga adapter has an interrupt: `-device
  * d3dpt-vga,irq=on`, which Windows 7's WDDM driver needs (dxgkrnl will not
  * start an adapter without one, track M18). The pin shows as an IRQ in the
- * configuration Plug and Play allocated to the present devnode, whatever
- * driver runs it. cfgmgr32 at run time, as in find_3dfx_nt. */
+ * configuration Plug and Play allocated to the present devnode, but a fresh
+ * install's adapter, before any driver of ours, may have none allocated;
+ * then the firmware's boot configuration, then the device's requirements
+ * (an IRQ there only when the PCI function has an interrupt pin). Returns
+ * which one had it, 0 for none. cfgmgr32 at run time, as in find_3dfx_nt. */
 typedef DWORD (WINAPI *CmGetFirstLogConf)(DWORD_PTR *, DWORD, ULONG);
 typedef DWORD (WINAPI *CmGetNextResDes)(DWORD_PTR *, DWORD_PTR, ULONG, ULONG *, ULONG);
 typedef DWORD (WINAPI *CmFreeHandle)(DWORD_PTR);
@@ -391,7 +394,8 @@ static int adapter_has_irq(void)
     CmFreeHandle free_rd = cm ? (CmFreeHandle)GetProcAddress(cm, "CM_Free_Res_Des_Handle") : NULL;
     HKEY pci, dev;
     char d[200], inst[200], id[sizeof d + sizeof inst + 8];
-    DWORD i, j, dn;
+    static const ULONG confs[3] = {2 /* ALLOC_LOG_CONF */, 3 /* BOOT_LOG_CONF */, 0 /* BASIC_LOG_CONF */};
+    DWORD i, j, k, dn;
     DWORD_PTR lc, rd;
     int irq = 0;
 
@@ -403,14 +407,17 @@ static int adapter_has_irq(void)
                 continue;
             for (j = 0; !irq && RegEnumKeyA(dev, j, inst, sizeof inst) == ERROR_SUCCESS; j++) {
                 snprintf(id, sizeof id, "PCI\\%s\\%s", d, inst);
-                if (locate(&dn, id, 0 /* CM_LOCATE_DEVNODE_NORMAL */) != 0
-                    || first(&lc, dn, 2 /* ALLOC_LOG_CONF */) != 0)
+                if (locate(&dn, id, 0 /* CM_LOCATE_DEVNODE_NORMAL */) != 0)
                     continue;
-                if (next(&rd, lc, 4 /* ResType_IRQ */, NULL, 0) == 0 /* CR_SUCCESS */) {
-                    irq = 1;
-                    free_rd(rd);
+                for (k = 0; !irq && k < 3; k++) {
+                    if (first(&lc, dn, confs[k]) != 0)
+                        continue;
+                    if (next(&rd, lc, 4 /* ResType_IRQ */, NULL, 0) == 0 /* CR_SUCCESS */) {
+                        irq = k + 1;
+                        free_rd(rd);
+                    }
+                    free_lc(lc);
                 }
-                free_lc(lc);
             }
             RegCloseKey(dev);
         }
@@ -491,9 +498,13 @@ static int wddm_wanted(void)
         say("    no WDDM\\ on this disc (it is built on Windows only), so the XP driver (no Aero)");
         return 0;
     }
-    if (!adapter_has_irq()) {
+    switch (adapter_has_irq()) {
+    case 0:
         say("    the adapter has no interrupt (-device d3dpt-vga,irq=on), so the XP driver (no Aero)");
         return 0;
+    case 1: say("    the adapter's interrupt: allocated"); break;
+    case 2: say("    the adapter's interrupt: in its boot configuration"); break;
+    default: say("    the adapter's interrupt: in its requirements"); break;
     }
     return 1;
 }

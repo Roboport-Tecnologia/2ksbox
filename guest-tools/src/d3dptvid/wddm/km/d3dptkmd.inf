@@ -28,20 +28,21 @@ d3dptumd.dll=1
 [d3dpt.Mfg.NTx86]
 %d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
 
+; The install section's own AddReg: its HKR is the adapter's software key,
+; where Direct3D looks up the user-mode driver (d3d9.dll loads it by this
+; name from System32; without it no process loads d3dptumd.dll and DWM
+; never composes). An XP-style <install>.SoftwareSettings section is not
+; processed for this driver on Windows 7: a fresh install left the key
+; without the value (track M18 finding 15).
 [d3dpt_Install]
 CopyFiles=d3dpt.Miniport, d3dpt.UserMode
+AddReg=d3dpt_SoftwareDeviceSettings
 
 [d3dpt.Miniport]
 d3dptkmd.sys
 
 [d3dpt.UserMode]
 d3dptumd.dll
-
-; dxgkrnl reads the user-mode driver's name before it asks the adapter
-; anything (Windows 7 stops the adapter after QueryChildRelations without
-; one); d3d9.dll loads it by this name from System32.
-[d3dpt_Install.SoftwareSettings]
-AddReg=d3dpt_SoftwareDeviceSettings
 
 [d3dpt_SoftwareDeviceSettings]
 HKR,,UserModeDriverName,%REG_MULTI_SZ%,d3dptumd.dll

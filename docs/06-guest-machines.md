@@ -137,6 +137,12 @@ in-box cards, and the machine Aero runs on.
 | Pointer | USB tablet (`seamless_mouse`) | as on XP |
 | Gamepad | none (USB HID pad, key mapping) | as on XP |
 
+Aero needs an edition that has it: Home Premium, Professional, Ultimate
+or Enterprise; Starter and Home Basic say "This edition of Windows doesn't
+support themes". On a fresh install, SETUP from the guest-tools disc and
+one restart are all it takes (track M18 finding 14): the desktop comes
+back at 1024x768 on the WDDM driver, composed.
+
 64-bit Windows 7 boots on the same machine but loads no unsigned kernel
 driver, so it gets no Aero; SETUP says so and installs the XP-model
 driver instead. An XP-family bundle holding a Windows 7 install (the

@@ -560,6 +560,8 @@ device's half is plain QEMU C and builds anywhere.
    native. Seen on the way, not chased: after drvinst reinstalls the
    driver, the user-mode driver's log lines (its escape to the kernel
    driver) no longer reach the QEMU log, while the kernel driver's do.
+   (Explained by finding 14: that boot's image still had
+   `UserModeDriverName` from the hand installs, which the INF never wrote.)
 13. **A Windows 7 family in the launcher** (2026-10-04, user;
    `bundle::Family::Win7`, doc 06 "Windows 7"). The era PC with `-cpu max`
    (what this track's work ran on; Windows 7's software wants SSE2),
@@ -573,15 +575,48 @@ device's half is plain QEMU C and builds anywhere.
    hda-duplex,audiodev=embed0`; the mitsuami form shows it (`wizard:win7`).
    The user's `win7` bundle is XP-family (Cirrus, AC'97, no interrupt), so
    it stays on the XP-model driver until it is remade as this family.
-7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
-   the desktop since 2026-10-03 (finding 8 above), and every test program
-   draws in it with native frames (findings 9 and 10), paced by the
-   device's own vertical-blank interrupt (plan step 4). The Experience
-   Index cannot be measured under TCG (finding 11), so SETUP sets DWM's
-   `CompositionPolicy` override when it installs the WDDM driver (finding
-   12), and the launcher's Windows 7 family gives the adapter its
-   interrupt (finding 13). Next: a fresh install end to end on that family
-   (setup, SETUP, Aero) through the launcher and the player.
+14. **A fresh install, end to end, on that family** (2026-10-04, on the
+   PC under TCG). A machine from the launcher's own form
+   (`launcherx --wizard-new win7 "Windows 7" 40`), booted with exactly
+   `launcherx --print-args` (the player's audio backend swapped for a null
+   one), Windows 7 Ultimate N SP1 x86 in its CD drive and an answer file
+   on a USB stick: Windows setup to its first desktop in 14-19 min; then
+   the guest-tools disc, `SETUP /ALL` from an administrator's console (the
+   unsigned-driver prompt clicked), one restart, and **Aero composes by
+   itself**: no theme applied, no service restarted, the desktop at
+   1024x768 from the driver's EDID, glass taskbar and Start menu,
+   `dwm.exe` with `d3dptumd.dll` loaded. Two bugs the earlier proofs hid,
+   because their image had been through hand installs:
+   - **SETUP saw no interrupt on a fresh install** and gave the XP driver:
+     before any driver of ours the adapter's devnode has no IRQ in its
+     *allocated* configuration. SETUP now also looks in its boot
+     configuration (where the fresh install had it) and its requirements,
+     and logs which one (`setup.c` `adapter_has_irq`).
+   - **The INF never wrote `UserModeDriverName`**: it sat in an XP-style
+     `[d3dpt_Install.SoftwareSettings]` section, which Windows 7 does not
+     process for this driver, so no process loaded the user-mode driver
+     and DWM ran without composing (a 3.7 MB `dwm.exe`, Basic look). The
+     `AddReg` is now in the install section, whose `HKR` is the adapter's
+     software key.
+   Two traps of the answer file, not of ours: Windows setup reads
+   `autounattend.xml` only from the root of a *removable* drive (QEMU's
+   `usb-storage` needs `removable=on`; a floppy is tried by SeaBIOS before
+   the CD and hangs the boot), and this disc's `install.wim` holds five
+   editions, index 1 being Starter N ("This edition of Windows doesn't
+   support themes"), so the image is chosen by name (`Windows 7
+   ULTIMATEN`, as `sources\ei.cfg` names the disc's own). The scripts are
+   in the session's `build/w7/` (`install.sh`, `aero.sh`, `probe.sh`).
+7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Done for 32-bit Windows
+   7: DWM composes the desktop (finding 8), every test program draws in it
+   with native frames (findings 9 and 10), paced by the device's own
+   vertical-blank interrupt (plan step 4); SETUP sets DWM's
+   `CompositionPolicy` override, since the Experience Index cannot be
+   measured under TCG (findings 11, 12), the launcher's Windows 7 family
+   gives the adapter its interrupt (finding 13), and a fresh install on
+   that family reaches Aero with SETUP and one restart (finding 14). Left:
+   the test loop as a repo tool, and the loose ends of step 6 (full-screen
+   d3d9 swap chains, render targets on a level or face, 32-bit indices,
+   the depth StretchRect) and step 5 (timeout recovery).
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation
