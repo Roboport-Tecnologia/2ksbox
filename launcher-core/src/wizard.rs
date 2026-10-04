@@ -820,7 +820,7 @@ impl Form {
             (false, false) => &["Shared only with Networking on: the guest reaches the folder through the machine's network."],
             (false, true) => &[
                 "Windows sees it as \\\\10.0.2.4\\host (user 2ksbox, password 2ksbox), and the 2ksbox agent puts it on a drive letter.",
-                "What Windows does in it happens to the folder itself.",
+                "The folder is shared with read and write permissions.",
             ],
         }
     }
