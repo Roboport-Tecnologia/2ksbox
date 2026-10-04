@@ -905,8 +905,8 @@ wholesale", then "natively on windows"). The WDDM driver goes first
 (track M18, ADR-022's amendment); the host build follows. Done by
 2026-10-03: everything Windows builds, packages and is tested on the PC,
 the launcher and the player with MSVC, and the cross build from Linux
-(`win-cross.sh` and its container) is retired. The executor stays mingw
-(the amendment below).
+(`win-cross.sh` and its container) is retired. The executor and DXVK
+moved to MSVC together on 2026-10-04 (the amendments below).
 
 **Decision.** Windows binaries build on a Windows machine with Visual
 Studio's MSVC tools, not cross-compiled from Linux:
@@ -967,6 +967,20 @@ Any exception DXVK throws later would end the process the same way. So
 the executor and DXVK move together or not at all: DXVK built with
 MSVC first, then the executor. Until then both stay mingw, as QEMU
 does.
+
+**Second amendment (2026-10-04): DXVK and the executor are MSVC**
+(user: "move the executor and dxvk to msvc"). Both are built with
+Visual Studio's `cl` and a static C runtime (`scripts/msvc-env.sh`,
+`build-windows.sh exec`), so DXVK's exceptions are caught again, and
+`exec-no-device` passes on the MSVC pair. QEMU opens the executor by
+name across the C runtime boundary, where only C crosses (doc 11).
+DXVK under MSVC first failed 8 oracle checks: an upstream `eq()` bug
+that only MSVC's STL reaches, fixed by our DXVK patch 15
+(`docs/build-windows.md`, "DXVK under MSVC"). The mingw toolchain is now
+used on Windows only by QEMU and what links into it, the host tests that
+stand in for QEMU (`d3dpt-dp2-test.exe`, `wgl-probe.exe`) and the guest
+code. The executor's PE pair for Wine on Linux and macOS (M15) stays
+mingw: it runs on Wine's d3d9, which throws nothing across.
 
 ## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
 

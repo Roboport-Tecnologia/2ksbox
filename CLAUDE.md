@@ -208,10 +208,10 @@ it, `scripts/test.sh all` tests it (`docs/testing.md` "On Windows") and
 `scripts/package-windows.sh` rolls and checks the package. The cross
 build from Linux (`win-cross.sh` and its container) was retired on
 2026-10-03; don't bring it back. The launcher and `player-mitsuami` are
-MSVC (WinUI 3); QEMU stays mingw clang under MSYS2, the 9x/XP guest code
-i686 mingw, and the Direct3D executor and DXVK mingw (DXVK's C++
-exceptions must be caught by a same-compiler executor; ADR-026's
-amendment). QEMU there is built with **clang**, not mingw GCC (GCC's
+MSVC (WinUI 3), and so are the Direct3D executor and DXVK, together
+(DXVK's C++ exceptions must be caught by a same-compiler executor;
+ADR-026's amendments; `scripts/msvc-env.sh`); QEMU stays mingw clang
+under MSYS2 and the 9x/XP guest code i686 mingw. QEMU there is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and

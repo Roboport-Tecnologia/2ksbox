@@ -152,8 +152,9 @@ Audited 2026-10-02, every channel the API or the process offers:
   is the caller's memory and only atomics cross it.
 - **Descriptors.** One: QMP's `fd=`, converted in the library
   (`socket_to_fd`, v7, "QMP" above). The dma-buf fds are Linux only.
-- **The environment: the hole.** QEMU, our devices and the Direct3D
-  executor read variables with their C runtime's `getenv()`, and msvcrt
+- **The environment: the hole.** QEMU and our devices read variables
+  with their C runtime's `getenv()` (the Direct3D executor did too until
+  it moved to MSVC; it now asks the process block), and msvcrt
   answers from a copy it made when the process started. Rust's
   `std::env::set_var` is `SetEnvironmentVariableW` on both Windows
   targets and never reaches that copy (checked: a DLL's `getenv` sees a
@@ -193,10 +194,14 @@ Audited 2026-10-02, every channel the API or the process offers:
 - **C++ exceptions** do not cross between the two compilers. None
   crosses this API (it is C, and Rust aborts on a panic at an `extern
   "C"` edge), but one boundary deeper it decides what may move: DXVK
-  (mingw) throws out of `Direct3DCreate9` on a host with no Vulkan
-  device, and only a mingw executor catches it. An MSVC executor ended
-  the player there (ADR-026's amendment), so the executor stays mingw
-  while DXVK does.
+  throws out of `Direct3DCreate9` on a host with no Vulkan device, and
+  only an executor built by the same compiler catches it. An MSVC
+  executor over the mingw DXVK ended the player there (ADR-026's
+  amendment), so the two moved to MSVC together (its second amendment,
+  2026-10-04). The executor's C API is the boundary QEMU (mingw) opens it
+  across: nothing it allocates is freed by QEMU, no `FILE *` crosses, and
+  it reads the environment from the process block
+  (`GetEnvironmentVariableA`, `d3dpt::env`), not from a C runtime's copy.
 
 **Linking across the toolchains.** The mingw build makes an import
 library only as `libqemu-embed-<target>.dll.a`, which `link.exe` does not

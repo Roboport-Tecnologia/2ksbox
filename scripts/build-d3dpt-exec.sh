@@ -16,33 +16,35 @@
 # are built: no Vulkan driver exists for an Intel Mac (ADR-019), so the
 # in-process executor could never open a device there.
 #
-# --windows compiles the same two files against mingw's own <windows.h> and
-# <d3d9.h> instead of DXVK's native stand-ins for them, and loads DXVK's
-# d3d9.dll at run time under the name the package gives it,
+# --windows compiles the same two files with MSVC (cl, the C runtime
+# static, as the launcher and the player) against the Windows SDK's own
+# <windows.h> and <d3d9.h> instead of DXVK's native stand-ins for them, and
+# loads DXVK's d3d9.dll at run time under the name the package gives it,
 # `dxvk_d3d9.dll` (build/win/dxvk, scripts/configure-dxvk.sh --windows),
 # never as Windows' own d3d9.dll. Natively, in MSYS2's MINGW64 shell
-# (docs/build-windows.md). mingw, not MSVC: DXVK throws C++ exceptions
-# out of Direct3DCreate9, which only an executor built by the same
-# compiler catches (ADR-026's amendment).
+# (docs/build-windows.md), in the environment scripts/msvc-env.sh sets
+# up. MSVC because DXVK is: DXVK throws C++ exceptions out of
+# Direct3DCreate9 on a host with no Vulkan device, and only an executor
+# built by the same compiler catches them (ADR-026's amendment). QEMU,
+# which loads it, stays mingw; nothing but C crosses that edge.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${1:-}" = "--windows" ]; then
   OUT="$ROOT/build/win/d3dpt"; mkdir -p "$OUT"
-  LIB="$OUT/d3dpt_exec.dll"
+  DLL="$OUT/d3dpt_exec.dll"   # not LIB: the MSVC environment has one
   [ "${MSYSTEM:-}" = MINGW64 ] || {
     echo "build-d3dpt-exec.sh --windows: in MSYS2's MINGW64 shell on Windows (ADR-026)" >&2; exit 1; }
-  # MSYS2's compilers carry no target prefix: the host is the target.
-  CXX="${CXX:-g++}"
-  command -v "$CXX" >/dev/null || { echo "no $CXX (scripts/build-windows.sh --msys2-deps)"; exit 1; }
-  # -static-libgcc/-libstdc++: the DLL is loaded by qemu-system.exe, which
-  # is a C program, so it must not need the C++ runtime DLLs beside it.
-  # __USE_MINGW_ANSI_STDIO: msvcrt's printf has no %zu, and the DP2 trace
-  # (doc 15) is written with it.
-  "$CXX" -std=c++17 -O2 -fvisibility=hidden -Wall -Wno-unused-function -shared \
-    -D__USE_MINGW_ANSI_STDIO=1 -static-libgcc -static-libstdc++ -o "$LIB" \
-    "$ROOT/d3dpt/exec/d3dpt_exec.cpp" "$ROOT/d3dpt/exec/d3dpt_exec_ddi.cpp"
-  echo "==> $LIB"
+  . "$ROOT/scripts/msvc-env.sh" || exit 1
+  # /MT: the C runtime static, so the DLL needs no vcruntime DLL beside
+  # it. /EHsc: what DXVK is built with (meson's default for MSVC).
+  # NOMINMAX: <windows.h>'s min/max macros against <algorithm>'s.
+  # Options with '-', not '/', which MSYS2 would take for paths.
+  ( cd "$OUT" && cl -nologo -std:c++17 -O2 -EHsc -MT -W3 -LD -utf-8 \
+      -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_WARNINGS -Fe"$(cygpath -w "$DLL")" \
+      "$(cygpath -w "$ROOT/d3dpt/exec/d3dpt_exec.cpp")" "$(cygpath -w "$ROOT/d3dpt/exec/d3dpt_exec_ddi.cpp")" \
+      user32.lib )
+  echo "==> $DLL"
   exit 0
 fi
 

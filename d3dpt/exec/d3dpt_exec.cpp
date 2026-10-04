@@ -308,7 +308,7 @@ static bool open_d3d9(Exec *x, const char *path, bool dxvk)
 
 static bool open_dxvk(Exec *x)
 {
-    const char *lib = getenv("D3DPT_DXVK_LIB");
+    const char *lib = env("D3DPT_DXVK_LIB");
     const char *candidates[] = { lib,
 #ifdef _WIN32
         /* not "d3d9.dll": that name is Windows' own implementation's too.
@@ -364,16 +364,8 @@ d3dpt_exec_t *d3dpt_exec_create(const d3dpt_exec_ops *ops)
     x->ops = *ops;
     /* D3DPT_D3D9=auto|dxvk|system (the adapter's `d3d9=` property is how a
      * machine says it); the file header has what each one means. QEMU sets
-     * it in the *process* environment, which is not this module's C
-     * runtime's copy of it on Windows. */
-    const char *pick = getenv("D3DPT_D3D9");
-#ifdef _WIN32
-    char picked[16];
-    if (!pick || !*pick) {
-        DWORD n = GetEnvironmentVariableA("D3DPT_D3D9", picked, sizeof picked);
-        if (n && n < sizeof picked) pick = picked;
-    }
-#endif
+     * it in the *process* environment (env()). */
+    const char *pick = env("D3DPT_D3D9");
     if (!pick || !*pick) pick = "auto";
     bool ok;
     if (!strcmp(pick, "system")) {

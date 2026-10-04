@@ -20,8 +20,10 @@ keeps scope, test loop, traps and open items. The design:
 
 - Build: `scripts/build-windows.sh` (natively under MSYS2 MINGW64; the
   cross build from Linux, `win-cross.sh` and its container, was retired
-  on 2026-10-03, ADR-026), the `--windows` mode of `scripts/configure-qemu.sh` and
-  `scripts/build-d3dpt-exec.sh`, `scripts/win-run.sh`,
+  on 2026-10-03, ADR-026), the `--windows` mode of `scripts/configure-qemu.sh`,
+  `scripts/configure-dxvk.sh` and `scripts/build-d3dpt-exec.sh` (DXVK and
+  the executor MSVC since 2026-10-04, in `scripts/msvc-env.sh`'s
+  environment), `scripts/win-run.sh`,
   `guest-tools/msys2-i686.sh`.
 - Package: `scripts/package-windows.sh`; the Store's MSIX: `scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`, `packaging/windows/Assets/`,
@@ -81,6 +83,10 @@ Detailed in `docs/build-windows.md`:
 - QEMU is built with clang because mingw GCC's emulated TLS made a VGA
   register read 2.3x Linux's (patch 68; `WIN_QEMU_CC=gcc` is the old
   build).
+- DXVK and the executor change compiler together or not at all (DXVK's
+  exceptions), and DXVK under MSVC reused wrong pipelines until patch 15:
+  an `eq()` that only MSVC's `unordered_map` calls without a hash match
+  ("DXVK under MSVC").
 
 Kept here:
 

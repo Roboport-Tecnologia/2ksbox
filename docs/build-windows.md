@@ -34,7 +34,7 @@ re-applies the patch queue) while another build reads `qemu/`
 | QEMU, `libqemu-embed-i386.dll`, `qemu-img` | MSYS2's clang against its mingw runtime (msvcrt), lld | upstream QEMU builds on Windows only under mingw; clang because mingw GCC has only emulated TLS, which QEMU touches on every device access (a VGA register read cost 2.3x Linux's; patch 68). `WIN_QEMU_CC=gcc` builds the old way |
 | `libdisc`, `libsynth` (inside QEMU), `launcherx`, `discx`, the winit `player.exe` | Rust `x86_64-pc-windows-gnu` | the same mingw ABI as QEMU; the winit player is no longer shipped, but `test.sh` runs it |
 | `2ksbox.exe` (`launcher-mitsuami`), `2ksbox-player.exe` (`player-mitsuami`) | Rust `x86_64-pc-windows-msvc`, static C runtime | WinUI 3 needs MSVC (ADR-023, ADR-025); the player links QEMU's mingw DLL across the two C runtimes (doc 11, "The C runtime boundary") |
-| DXVK's `d3d9.dll`, `d3dpt_exec.dll` | MSYS2's mingw GCC | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the executor moves to MSVC only with DXVK (ADR-026's amendment) |
+| DXVK's `d3d9.dll`, `d3dpt_exec.dll` | Visual Studio's `cl`, static C runtime, in the environment `scripts/msvc-env.sh` sets up | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the two moved to MSVC together (ADR-026's amendments). QEMU loads the executor by name; only C crosses that edge. DXVK under MSVC needed patch 15 ("DXVK under MSVC" below) |
 | the guest-tools ISO | MSYS2's i686 GCC with Linux's i686 runtime, Open Watcom | Windows 9x and XP guests; modern MSVC targets neither |
 | the WDDM driver | the Enterprise WDK 10.0.19041 | Windows 7 and 32-bit kernel drivers ("The WDDM driver") |
 
@@ -55,7 +55,7 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 | `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
 | `rust` | `target/x86_64-pc-windows-gnu/release/{player,launcherx,discx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh` |
 | `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe` | the package's `2ksbox.exe` and `2ksbox-player.exe` (ADR-023, track M22); their own workspaces; MSVC ("The launcher") |
-| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor, its host test, the offscreen-GL probe |
+| `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI) and the executor, MSVC; their host test (mingw, so it loads the executor as QEMU does) and the offscreen-GL probe. Skipped without Visual Studio's C++ tools |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
 ## The package
@@ -202,6 +202,34 @@ done
 
 Both must PASS, and the two BMPs should be byte-identical (they were on
 the RTX 3090).
+
+### DXVK under MSVC
+
+DXVK and the executor are built with Visual Studio's `cl` (2026-10-04,
+ADR-026's second amendment), so a C++ exception DXVK throws (a host with
+no Vulkan device, `test.sh`'s `exec-no-device`) is caught by the
+executor rather than ending QEMU. `scripts/msvc-env.sh`, sourced, puts
+`cl`, `link`, `rc` and the SDK on `PATH` with `INCLUDE`/`LIB` from
+`vcvars64.bat` (found by `vswhere`); `configure-dxvk.sh --windows` and
+`build-d3dpt-exec.sh --windows` source it, and `build-windows.sh` runs
+DXVK's ninja inside it. A `build/win/dxvk` configured before the move
+(no `.2ksbox-cc` saying `msvc`) is configured afresh. Both DLLs link the
+C runtime statically and import only system DLLs; `package-windows.sh`
+checks that. The host test `d3dpt-dp2-test.exe` stays mingw on purpose:
+it opens the executor as QEMU does, across the two C runtimes.
+
+The first MSVC DXVK failed 8 of the oracle's 127 checks (the fixed
+function on a two-stream declaration, cube and volume textures) with
+every CPU-side value identical to the mingw build's. The cause was an
+upstream bug that only MSVC's STL reaches: `DxvkGraphicsPipelineVertexInputState::eq`
+overwrote a `false` from the attribute comparison with the divisor
+loop's result, so two vertex layouts with the same counts and divisors
+compared equal. libstdc++'s `unordered_map` compares the stored hash
+before calling `eq`, MSVC's does not, so only the MSVC build reused the
+wrong pipeline (one `vkCreateGraphicsPipelines` fewer in a
+`VK_LAYER_LUNARG_api_dump` diff of the two builds). DXVK patch 15 fixes
+it. An MSVC-only rendering difference is most likely another such `eq`:
+diff the two builds' API dumps before reading code.
 
 ## OpenGL for a Win98 guest
 

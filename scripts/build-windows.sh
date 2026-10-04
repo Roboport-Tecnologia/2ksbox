@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build the Windows artefacts on Windows, in MSYS2's MINGW64 shell, in
 # dependency order (ADR-026). This is the Windows counterpart of
-# scripts/build.sh, which builds for the host it runs on. QEMU, the Rust
-# that links into it and the Direct3D executor are mingw (MSYS2's, its
-# msvcrt and libstdc++); the launcher and player-mitsuami are MSVC; the
+# scripts/build.sh, which builds for the host it runs on. QEMU and the Rust
+# that links into it are mingw (MSYS2's, its msvcrt and libstdc++); the
+# launcher, player-mitsuami, the Direct3D executor and DXVK are MSVC; the
 # guest-tools ISO is MSYS2's i686 toolchain (guest-tools/msys2-i686.sh).
 # The cross build from Linux (scripts/win-cross.sh and its container) was
 # retired on 2026-10-03. The package comes from here too
@@ -36,12 +36,15 @@
 #           player's command line; the player links QEMU's mingw DLL, two
 #           C runtimes in one process (docs/11-m1-embed-api.md, "The C
 #           runtime boundary").
-#   exec    DXVK's d3d9.dll into build/win/dxvk (configure-dxvk.sh
-#           --windows), then build-d3dpt-exec.sh --windows: d3dpt_exec.dll,
-#           the Direct3D executor (doc 14). The package ships DXVK as
-#           dxvk_d3d9.dll, the executor's default. D3DPT_D3D9=system (or
-#           auto, when DXVK opens no adapter) runs it on Windows' own
-#           system32\d3d9.dll instead.
+#   exec    (Windows only) DXVK's d3d9.dll into build/win/dxvk
+#           (configure-dxvk.sh --windows), then build-d3dpt-exec.sh
+#           --windows: d3dpt_exec.dll, the Direct3D executor (doc 14). Both
+#           MSVC with a static C runtime, in Visual Studio's environment
+#           (scripts/msvc-env.sh): DXVK throws C++ exceptions the executor
+#           must catch, so they share a compiler (ADR-026's amendment). The
+#           package ships DXVK as dxvk_d3d9.dll, the executor's default.
+#           D3DPT_D3D9=system (or auto, when DXVK opens no adapter) runs it
+#           on Windows' own system32\d3d9.dll instead.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
 #           a default run rebuilds it when its sources move, by
@@ -266,7 +269,7 @@ if want exec; then
   # stamp (same file, same hash). A prepare hands both builds fresh
   # mtimes, so one that changed nothing would cost the native DXVK a full
   # rebuild.
-  say "exec: DXVK d3d9.dll (prepare + mingw)"
+  say "exec: DXVK d3d9.dll (prepare + MSVC)"
   dxvk_stamp=$( { git -C third_party/dxvk rev-parse HEAD 2>/dev/null || echo none
                   find patches/dxvk scripts/prepare-dxvk.sh -type f | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cat
                 } | sha256sum | cut -d' ' -f1)
@@ -276,14 +279,26 @@ if want exec; then
   else
     echo "    patch queue and submodule unchanged - skipping prepare"
   fi
-  if [ ! -f build/win/dxvk/build.ninja ]; then
-    scripts/configure-dxvk.sh --windows
+  # DXVK and the executor are MSVC, together (ADR-026's amendment: DXVK
+  # throws C++ exceptions the executor must catch). ninja runs in Visual
+  # Studio's environment too (scripts/msvc-env.sh), since cl finds its
+  # headers and libraries through it. A directory configured before the
+  # move (mingw's gcc) is configured afresh by configure-dxvk.sh.
+  if ! ( . scripts/msvc-env.sh ) >/dev/null 2>&1; then
+    skip exec "no Visual Studio with the x64 C++ tools (DXVK and the executor are MSVC; docs/build-windows.md)" || true
+  else
+    if [ ! -f build/win/dxvk/build.ninja ] || [ "$(cat build/win/dxvk/.2ksbox-cc 2>/dev/null)" != msvc ]; then
+      scripts/configure-dxvk.sh --windows
+    fi
+    ( . scripts/msvc-env.sh && ninja -C build/win/dxvk ${JOBS[@]+"${JOBS[@]}"} src/d3d9/d3d9.dll )
+    say "exec: d3dpt_exec.dll (the Direct3D decoder + executor, MSVC)"
+    scripts/build-d3dpt-exec.sh --windows
+    BUILT+=(exec)
   fi
-  ninja -C build/win/dxvk ${JOBS[@]+"${JOBS[@]}"} src/d3d9/d3d9.dll
-  say "exec: d3dpt_exec.dll (the Direct3D decoder + executor)"
-  scripts/build-d3dpt-exec.sh --windows
   # ... and the display driver's host test, which package-windows.sh runs
-  # against the staged pair: a frame through the Windows DLLs.
+  # against the staged pair: a frame through the Windows DLLs. It stays
+  # mingw, as QEMU is: it loads the MSVC executor as QEMU does, so it
+  # proves the boundary between the two (doc 11, "The C runtime boundary").
   "$WCXX" -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
   # The WGL probe (tools/wgl-probe.c) rides along as one more compile. It
   # is the first thing to run on a Windows machine whose Win98 guest gets
@@ -291,7 +306,6 @@ if want exec; then
   say "exec: wgl-probe.exe (the embed backend's WGL sequence, without QEMU)"
   "$WCC" -O1 -o build/win/wgl-probe.exe tools/wgl-probe.c \
     -lopengl32 -lgdi32 -luser32
-  BUILT+=(exec)
 fi
 
 # The ISO is guest code and identical whatever host built it, so it is

@@ -18,7 +18,13 @@
 extern "C" {
 #endif
 
+/* exported: the library is built with hidden visibility, and on Windows
+ * with MSVC (ADR-026), which exports only what is marked */
+#ifdef _WIN32
+#define D3DPT_EXEC_API __declspec(dllexport)
+#else
 #define D3DPT_EXEC_API __attribute__((visibility("default")))
+#endif
 
 typedef struct d3dpt_exec_ops {
     void *ud;

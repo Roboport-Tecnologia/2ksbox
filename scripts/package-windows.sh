@@ -106,14 +106,11 @@ cp -a qemu/pc-bios "$STAGE/pc-bios"
 #
 # Both or neither, as on the other hosts. DXVK's d3d9 is the executor's default;
 # Windows' own system32 d3d9 is only the fallback below the Vulkan floor
-# (D3DPT_D3D9). DXVK's release build keeps its symbols, 21 MB of them, so
-# the staged copy is stripped.
+# (D3DPT_D3D9). Both are MSVC (ADR-026's amendment), whose symbols stay
+# in the PDB beside the build and are not shipped.
 if [ -f build/win/d3dpt/d3dpt_exec.dll ] && [ -f build/win/dxvk/src/d3d9/d3d9.dll ]; then
   install -m755 build/win/d3dpt/d3dpt_exec.dll "$STAGE/"
   install -m755 build/win/dxvk/src/d3d9/d3d9.dll "$STAGE/dxvk_d3d9.dll"
-  STRIP=${WIN_STRIP:-strip}
-  command -v "$STRIP" >/dev/null || { echo "package-windows.sh: no $STRIP (pacman -S mingw-w64-x86_64-binutils)" >&2; exit 1; }
-  "$STRIP" --strip-debug "$STAGE/dxvk_d3d9.dll"
 else
   echo "package-windows.sh: no build/win/d3dpt/d3dpt_exec.dll and build/win/dxvk/src/d3d9/d3d9.dll (scripts/build-windows.sh exec); packaging without Direct3D pass-through"
 fi
@@ -495,9 +492,13 @@ EOF
   # needs a Visual C++ redistributable no Windows comes with, and a PC
   # without it shows a loader dialog before any code of ours runs.
   # `build-windows.sh mitsuami` links it statically; this keeps it so.
-  for exe in 2ksbox.exe 2ksbox-player.exe; do
+  # The Direct3D executor and DXVK are MSVC too (`build-windows.sh exec`,
+  # /MT and DXVK's own b_vscrt), and QEMU opens them by name, so the
+  # closure walk never saw them either.
+  for exe in 2ksbox.exe 2ksbox-player.exe d3dpt_exec.dll dxvk_d3d9.dll; do
+    [ -f "$STAGE/$exe" ] || continue        # the Direct3D pair: not built here; warned above
     if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
-      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(build it with +crt-static: scripts/build-windows.sh mitsuami)" >&2
+      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(link its C runtime statically: scripts/build-windows.sh mitsuami / exec)" >&2
       fail=1
     else
       echo "c runtime      $exe links its C runtime statically"

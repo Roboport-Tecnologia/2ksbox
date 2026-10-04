@@ -11,9 +11,12 @@
 #   scripts/configure-dxvk.sh --windows   build/win/dxvk (d3d9.dll), in
 #          MSYS2's MINGW64 shell on Windows (ADR-026), with patch 08's
 #          headless WSI beside Win32, so the Windows executor runs the
-#          same d3d9 as every other host. No cross file: meson's host is
-#          already Windows and DXVK's meson.build takes its platform
-#          flags from that
+#          same d3d9 as every other host. Built with MSVC (cl, its C
+#          runtime static: DXVK's own b_vscrt), in the environment
+#          scripts/msvc-env.sh sets up, which ninja needs too: DXVK throws
+#          C++ exceptions out of Direct3DCreate9, and the executor, also
+#          MSVC, must catch them (ADR-026's amendment). A directory
+#          configured with another compiler is configured afresh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ "${1:-}" = "--windows" ]; then
@@ -21,9 +24,19 @@ if [ "${1:-}" = "--windows" ]; then
   [ "${MSYSTEM:-}" = MINGW64 ] || {
     echo "configure-dxvk.sh --windows: in MSYS2's MINGW64 shell on Windows (ADR-026)" >&2; exit 1; }
   BUILD="${1:-$ROOT/build/win/dxvk}"
+  . "$ROOT/scripts/msvc-env.sh" || exit 1
+  export CC=cl CXX=cl
+  # meson will not switch a directory's compiler; one from before the move
+  # to MSVC (no record) was mingw's gcc
+  if [ -f "$BUILD/build.ninja" ] && [ "$(cat "$BUILD/.2ksbox-cc" 2>/dev/null || echo gcc)" != msvc ]; then
+    echo "==> $BUILD was configured with $(cat "$BUILD/.2ksbox-cc" 2>/dev/null || echo gcc), not MSVC; configuring afresh"
+    rm -rf "$BUILD"
+  fi
+  WIN_CC=msvc
 else
   BUILD="${1:-$ROOT/build/dxvk}"
 fi
+WIN_CC="${WIN_CC:-}"
 darwin=()
 if [ "$(uname -s)" = Darwin ]; then
   export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -51,4 +64,5 @@ if [ -f "$BUILD/build.ninja" ]; then
 else
   meson setup "$BUILD" "$ROOT/third_party/dxvk" "${opts[@]}"
 fi
+[ -z "$WIN_CC" ] || echo "$WIN_CC" > "$BUILD/.2ksbox-cc"
 echo "==> ninja -C $BUILD"
