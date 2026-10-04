@@ -212,9 +212,12 @@ MSVC (WinUI 3), and so are the Direct3D executor and DXVK, together
 (DXVK's C++ exceptions must be caught by a same-compiler executor;
 ADR-026's amendments; `scripts/msvc-env.sh`), and the tools
 (`launcherx`, `discx`, `synthx` through `scripts/cargo-msvc.sh`,
-`wgl-probe`); QEMU (with `libdisc`/`libsynth` inside it) stays mingw
-clang under MSYS2, the winit player (test only) on the GNU target, and
-the 9x/XP guest code i686 mingw. QEMU there is built with **clang**, not mingw GCC (GCC's
+`wgl-probe`), and so is the package's QEMU (`build-windows.sh
+qemu-msvc` into `build/win/qemu-msvc`, ADR-026's third amendment): the
+package is all MSVC and ships no runtime DLL. The mingw clang QEMU
+under MSYS2 (`build/win/qemu`, with `libdisc`/`libsynth` inside it)
+stays for `test.sh` and the winit player (test only, GNU target), and
+the 9x/XP guest code is i686 mingw. The mingw QEMU is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and

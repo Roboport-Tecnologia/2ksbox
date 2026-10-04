@@ -8,7 +8,8 @@ the user's PC (Ryzen 9 5900X, RTX 3090, the `base98-br` image), 3D guests
 included on both Direct3D backends and the OpenGL pass-through. This file
 keeps scope, test loop, traps and open items. The design:
 
-- `docs/build-windows.md`: the container, the stages, the DLL closure,
+- `docs/build-windows.md`: the container, the stages, the package's
+  all-MSVC rule (no runtime DLL ships, QEMU from `build/win/qemu-msvc`),
   the WinUI launcher (MSVC, built on the PC), `2ksbox-debug.bat`, the
   Direct3D 9 backends, WGL, WHPX, the native MSYS2 build.
 - Patch 68 (clang-built QEMU) in `patches/qemu/README.md`.

@@ -10,11 +10,15 @@
 #                                              #     (scripts/package-msix.sh)
 #   scripts/package-windows.sh --out DIR       # default build/win/package
 #
-# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023), and
-# `2ksbox-player.exe` is `player-mitsuami` (track M22), the two MSVC
-# binaries here (`build-windows.sh mitsuami`, Windows only), each with a
-# static C runtime. The player links QEMU's mingw DLL across the two C
-# runtimes (doc 11). Both run on the Windows App Runtime 2.4 or later, a
+# Everything in it is MSVC with a static C runtime (ADR-026's third
+# amendment), so it ships no runtime DLL. `2ksbox.exe` is
+# `launcher-mitsuami`, the WinUI 3 launcher (ADR-023), and
+# `2ksbox-player.exe` is `player-mitsuami` (track M22), both from
+# `build-windows.sh mitsuami`; QEMU (`libqemu-embed-i386.dll`,
+# `qemu-img.exe`) is the build against MSVC's runtime in
+# build/win/qemu-msvc (`build-windows.sh qemu-msvc`), its libraries linked
+# in. The launcher and the player run on the Windows App Runtime 2.4 or
+# later, a
 # framework Microsoft installs once per PC; the zip cannot carry it, and
 # the Store's MSIX declares it as a dependency instead. So the package
 # comes from a Windows PC, where they are built.
@@ -41,7 +45,6 @@
 #   dxvk_d3d9.dll               DXVK's d3d9, the executor's default,
 #                               renamed so it is never mistaken for
 #                               Windows' own d3d9.dll (D3DPT_D3D9=system)
-#   *.dll                       the mingw runtime those need
 #   pc-bios\                    QEMU firmware
 #   soundfonts\                 the General MIDI bank (doc 20)
 #   guest-tools\                the guest-tools ISO
@@ -81,11 +84,11 @@ NAME="2ksbox-$VERSION-windows-x86_64"
 STAGE="$OUT/$NAME"
 LAUNCHER="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"
 PLAYER="$ROOT/player-mitsuami/target/release/player-mitsuami.exe"
-Q="$ROOT/build/win/qemu"
+Q="$ROOT/build/win/qemu-msvc"
 
 need() { [ -e "$1" ] || { echo "package-windows.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
-need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu"
-need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu"
+need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu-msvc"
+need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu-msvc"
 need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
 need "$PLAYER"                   "scripts/build-windows.sh mitsuami, on Windows"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
@@ -208,22 +211,22 @@ pause
 BAT
 chmod 644 "$STAGE/2ksbox-debug.bat"
 
-# --- the DLL closure --------------------------------------------------
-# Everything our four binaries import, transitively, that is not a
-# Windows system DLL. A missing one of these is the classic Windows
-# failure: a dialog naming a DLL, before a single line of ours runs. The
-# import tables, walked with objdump, are the source of truth. A closure
-# guessed from a package list goes stale.
+# --- no mingw DLLs ---------------------------------------------------
+# Everything in the package is MSVC with a static C runtime (ADR-026's
+# third amendment): QEMU from build/win/qemu-msvc, whose libraries are
+# linked in statically (build-deps.sh), the launcher and the player, the
+# Direct3D pair and the tools. So the package carries no runtime DLL at
+# all, and every DLL a staged binary imports is Windows' own. A mingw
+# binary slipping back in (the mingw QEMU, a tool built on the GNU
+# target) would want MSYS2's libraries beside it, the classic Windows
+# failure: a dialog naming a DLL before a single line of ours runs. The
+# import tables, walked with objdump, are the source of truth, and any
+# name MSYS2's /mingw64/bin has fails the package.
 #
-# The system set is matched by name. Anything under the mingw sysroot is
-# ours to ship. Anything else (kernel32, d3d9, opengl32, the api-ms-win-*
-# API sets) is Windows' own and must NOT be shipped; a system DLL copied
-# into the folder makes an app that only runs on the machine that built
-# it.
-#
-# Natively the sysroot is MSYS2's /mingw64/bin, where the build linked
-# against, and "not ours" is the same test: Windows' own DLLs are not in
-# it.
+# Seeded with what is Windows' even where MSYS2 carries a copy: the
+# Vulkan loader, which DXVK and the executor name, comes with the GPU
+# driver and must not ship ("vulkan (the system's loader)" in the
+# launcher's --paths).
 SYSROOT=${WIN_SYSROOT:-/mingw64/bin}
 OBJDUMP=${WIN_OBJDUMP:-objdump}
 command -v "$OBJDUMP" >/dev/null || { echo "package-windows.sh: no $OBJDUMP (WIN_OBJDUMP=)"; exit 1; }
@@ -231,73 +234,31 @@ command -v "$OBJDUMP" >/dev/null || { echo "package-windows.sh: no $OBJDUMP (WIN
 imports() { "$OBJDUMP" -p "$1" | sed -n 's/^\tDLL Name: //p'; }
 
 # Every binary in the package is a root, not just the ones at the top
-# (tools\wgl-probe.exe sits in a subdirectory). Its imports resolve from
-# the executable's own directory, which is where the closure puts
-# everything.
+# (tools\wgl-probe.exe sits in a subdirectory).
 staged_binaries() { find "$STAGE" \( -name '*.dll' -o -name '*.exe' \) -type f; }
 
-# Seeded with what is Windows' even where a sysroot carries a copy:
-# MSYS2's /mingw64/bin has the Vulkan loader, and DXVK and the executor
-# name vulkan-1.dll, but the one to load is the system's, which comes
-# with the GPU driver and matches it ("vulkan (the system's loader)" in
-# the launcher's --paths).
-declare -A seen=([vulkan-1.dll]=1)
-copied=0
-again=1
-while [ "$again" = 1 ]; do
-  again=0
-  while read -r file; do
-    [ -n "$file" ] || continue
-    while read -r dll; do
-      [ -n "$dll" ] || continue
-      key=$(printf '%s' "$dll" | tr 'A-Z' 'a-z')
-      [ -n "${seen[$key]:-}" ] && continue
-      seen[$key]=1
-      src=$(ls "$SYSROOT/$dll" 2>/dev/null || ls "$SYSROOT"/"$key" 2>/dev/null || true)
-      [ -n "$src" ] || continue        # a Windows system DLL: not ours
-      install -m755 "$src" "$STAGE/$(basename "$src")"
-      copied=$((copied + 1))
-      again=1
-    done < <(imports "$file")
-  done < <(staged_binaries)
-done
-
-# A DLL that is *loaded* rather than imported is invisible to the walk
-# above. Fedora's mingw64-SDL2 is sdl2-compat, an SDL2.dll that
-# LoadLibrary's SDL3.dll at run time, and a package with only the imported
-# DLLs had a player that died with "Failed loading SDL3 library" on a PC
-# with no SDL of its own. QEMU is now built --disable-sdl and neither DLL
-# is staged, but the pass stays as the net for the next such library.
-#
-# Every staged binary is searched for names of DLLs that exist in the
-# mingw sysroot and are not staged yet, and those ship too. It is broader
-# than an import table on purpose, so the next run-time load is caught
-# here instead of by a user.
+# A DLL that is *loaded* rather than imported is invisible to an import
+# table (Fedora's sdl2-compat once LoadLibrary'd SDL3.dll and a packaged
+# player died on "Failed loading SDL3 library"), so every DLL name in a
+# staged binary's strings is held to the same test.
 runtime_deps() { strings -a "$1" | grep -oiE '[A-Za-z0-9_.+-]+\.dll' | sort -u; }
-if command -v strings >/dev/null; then
-  again=1
-  while [ "$again" = 1 ]; do
-    again=0
-    while read -r file; do
-      [ -n "$file" ] || continue
-      while read -r dll; do
-        [ -n "$dll" ] || continue
-        key=$(printf '%s' "$dll" | tr 'A-Z' 'a-z')
-        [ -n "${seen[$key]:-}" ] && continue
-        seen[$key]=1
-        src=$(ls "$SYSROOT/$dll" 2>/dev/null || ls "$SYSROOT"/"$key" 2>/dev/null || true)
-        [ -n "$src" ] || continue        # Windows' own, or not a real name
-        install -m755 "$src" "$STAGE/$(basename "$src")"
-        echo "               + $(basename "$src") (loaded at run time, not imported)"
-        copied=$((copied + 1))
-        again=1
-      done < <(runtime_deps "$file")
-    done < <(staged_binaries)
-  done
-else
-  echo "package-windows.sh: no strings(1); run-time-loaded DLLs not checked for" >&2
-fi
-echo "runtime DLLs   $copied copied from $(basename "$SYSROOT")"
+command -v strings >/dev/null || { echo "package-windows.sh: no strings(1)"; exit 1; }
+
+mingw=0
+while read -r file; do
+  [ -n "$file" ] || continue
+  while read -r how dll; do
+    [ -n "$dll" ] || continue
+    key=$(printf '%s' "$dll" | tr 'A-Z' 'a-z')
+    [ "$key" != vulkan-1.dll ] || continue
+    if [ -e "$SYSROOT/$dll" ] || [ -e "$SYSROOT/$key" ]; then
+      echo "package-windows.sh: ${file#"$STAGE"/} $how $dll, a mingw DLL (build it with MSVC: scripts/build-windows.sh)" >&2
+      mingw=1
+    fi
+  done < <(imports "$file" | sed 's/^/imports /'; runtime_deps "$file" | sed 's/^/names /')
+done < <(staged_binaries)
+[ "$mingw" = 0 ] || exit 1
+echo "imports        Windows' own DLLs only, no runtime DLL shipped"
 
 # --- the check --------------------------------------------------------
 # The staged binaries, run as Windows binaries, from outside the checkout,
@@ -305,24 +266,6 @@ echo "runtime DLLs   $copied copied from $(basename "$SYSROOT")"
 # shell can make them work and nothing may resolve back into the build
 # tree.
 fail=0
-# The network backend every machine the launcher writes asks for
-# (`-netdev user`, bundle.rs) must exist in the QEMU beside it. It is a
-# *compiled-in* backend, through libslirp, which Fedora does not package
-# for mingw. Without it the first machine started on a real PC died on
-# "network backend 'user' is not compiled into this binary" with every
-# check here green. The import table answers rather than a running QEMU,
-# because the package holds no qemu-system-*.exe (QEMU is in-process,
-# inside libqemu-embed-i386.dll). net/slirp.c is libslirp's only
-# consumer, so the import is the backend.
-if imports "$STAGE/libqemu-embed-i386.dll" | grep -qi '^libslirp'; then
-  echo "qemu           -netdev user is compiled in (libslirp)"
-else
-  echo "package-windows.sh: the embed library does not link libslirp, so it has no" >&2
-  echo "  'user' network backend -- and every machine the launcher writes asks for one" >&2
-  echo "  (scripts/build-windows.sh --msys2-deps installs MSYS2's libslirp)" >&2
-  fail=1
-fi
-
 {
   scratch=$(mktemp -d)
   trap 'rm -rf "$scratch"' EXIT
@@ -487,18 +430,18 @@ EOF
     fail=1
   fi
 
-  # The launcher's C runtime, which the closure above cannot see: an MSVC
+  # The C runtime, which the mingw check above cannot see: an MSVC
   # binary that imports vcruntime140.dll (or a ucrt redistributable DLL)
   # needs a Visual C++ redistributable no Windows comes with, and a PC
   # without it shows a loader dialog before any code of ours runs.
-  # `build-windows.sh mitsuami` links it statically; this keeps it so.
-  # The Direct3D executor and DXVK are MSVC too (`build-windows.sh exec`,
-  # /MT and DXVK's own b_vscrt), and QEMU opens them by name, so the
-  # closure walk never saw them either; and so is the WGL probe.
-  for exe in 2ksbox.exe 2ksbox-player.exe d3dpt_exec.dll dxvk_d3d9.dll tools/wgl-probe.exe; do
+  # `build-windows.sh mitsuami` links it statically, and so do QEMU's
+  # (`-Db_vscrt=mt`), the Direct3D pair's (`build-windows.sh exec`, /MT and
+  # DXVK's own b_vscrt) and the WGL probe's; this keeps it so.
+  for exe in 2ksbox.exe 2ksbox-player.exe libqemu-embed-i386.dll qemu-img.exe \
+             d3dpt_exec.dll dxvk_d3d9.dll tools/wgl-probe.exe; do
     [ -f "$STAGE/$exe" ] || continue        # the Direct3D pair: not built here; warned above
     if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
-      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(link its C runtime statically: scripts/build-windows.sh mitsuami / exec)" >&2
+      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(link its C runtime statically: scripts/build-windows.sh mitsuami / qemu-msvc / exec)" >&2
       fail=1
     else
       echo "c runtime      $exe links its C runtime statically"
@@ -522,16 +465,22 @@ EOF
   # in: natively, a machine with a General MIDI port (the Win98 and DOS
   # default) to the BIOS screen and a clean exit, through QMP's quit once
   # the guest has drawn. That is WinUI 3, the surface's Direct3D 12, QEMU's
-  # mingw DLL across the player's own C runtime, and the bank the player
-  # names from the package. It runs from the scratch directory: from the
+  # DLL, the bank the player names from the package, and `-netdev user`,
+  # which every machine the launcher writes asks for (bundle.rs). That
+  # backend is compiled in through libslirp, now linked statically, so no
+  # import table shows it; without it the first machine started on a real
+  # PC once died on "network backend 'user' is not compiled into this
+  # binary" with every check here green. It runs from the scratch
+  # directory: from the
   # package's own, QEMU's relative soundfonts\ would find the bank anyway,
   # and outside it QEMU refused such a machine until the embed library set
   # the variable (doc 11, "The C runtime boundary"). The window shows for
   # a moment.
   if IN="$scratch" T=90 runpkg PLAYER_QMP_EXEC='{"execute":"quit"}' 2ksbox-player.exe -- \
        -L "$(winpath "$STAGE/pc-bios")" -M pc -m 32 -device mpu401,audiodev=embed0,synth=gm \
+       -netdev user,id=net0 -device rtl8139,netdev=net0 \
        > "$scratch/player.txt" 2>&1; then
-    echo "player         ran a machine to its BIOS and quit (WinUI 3, the embed DLL, the bank)"
+    echo "player         ran a machine to its BIOS and quit (WinUI 3, the embed DLL, the bank, -netdev user)"
   else
     echo "package-windows.sh: the staged player did not run a machine to its BIOS and quit:" >&2
     grep -v '^\[audio\]' "$scratch/player.txt" | tail -5 >&2
@@ -540,8 +489,7 @@ EOF
 
   # The bundle-creating path end to end: the staged launcher runs the
   # staged qemu-img to make a disk, and turns the result into a command
-  # line pointing at the staged firmware. This is also what proves the
-  # DLL closure: qemu-img.exe cannot start without every DLL beside it.
+  # line pointing at the staged firmware.
   runpkg 2ksbox.exe --wizard-new xp "Package check" 1 >/dev/null 2>&1 || true
   disk=$(find "$scratch" "$DATA" -name disk.qcow2 2>/dev/null | head -1)
   if [ -n "$disk" ] && [ -s "$disk" ]; then

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build the Windows artefacts on Windows, in MSYS2's MINGW64 shell, in
 # dependency order (ADR-026). This is the Windows counterpart of
-# scripts/build.sh, which builds for the host it runs on. QEMU and the Rust
-# that links into it are mingw (MSYS2's, its msvcrt and libstdc++), and
-# the winit player test.sh runs; the launcher, player-mitsuami, the
-# Direct3D executor, DXVK and the tools are MSVC; the
+# scripts/build.sh, which builds for the host it runs on. Everything the
+# package ships is MSVC: QEMU (built a second time against MSVC's runtime),
+# the launcher, player-mitsuami, the Direct3D executor, DXVK and the
+# tools. The mingw QEMU (MSYS2's msvcrt and libstdc++) stays for test.sh
+# and the winit player it runs; the
 # guest-tools ISO is MSYS2's i686 toolchain (guest-tools/msys2-i686.sh).
 # The cross build from Linux (scripts/win-cross.sh and its container) was
 # retired on 2026-10-03. The package comes from here too
@@ -24,8 +25,13 @@
 #
 #   qemu    configure-qemu.sh --windows -> ninja: qemu-system-i386.exe,
 #           qemu-img.exe, qemu-io.exe, libqemu-embed-i386.dll, into
-#           build/win/qemu (with libdisc built for windows-gnu first)
-#   rust    the winit player (test.sh's), cargo --target
+#           build/win/qemu (with libdisc built for windows-gnu first): the
+#           mingw build test.sh and the winit player run
+#   qemu-msvc the same tree against MSVC's runtime (build-deps.sh's
+#           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
+#           build/win/qemu-msvc: the QEMU the package ships, importing
+#           only Windows' own DLLs
+#   rust   the winit player (test.sh's), cargo --target
 #           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
 #           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
 #           target/x86_64-pc-windows-msvc). Runs after `qemu`, because
@@ -38,9 +44,10 @@
 #           linked with a static C runtime so they need no vcruntime DLL,
 #           and run on the Windows App Runtime 2.4+, which a PC installs
 #           once. The launcher talks to the rest only through the
-#           player's command line; the player links QEMU's mingw DLL, two
-#           C runtimes in one process (docs/11-m1-embed-api.md, "The C
-#           runtime boundary").
+#           player's command line; the player imports the embed DLL by
+#           name, so it runs either QEMU (the package's is the MSVC one;
+#           over the mingw one, two C runtimes in one process,
+#           docs/11-m1-embed-api.md, "The C runtime boundary").
 #   exec    (Windows only) DXVK's d3d9.dll into build/win/dxvk
 #           (configure-dxvk.sh --windows), then build-d3dpt-exec.sh
 #           --windows: d3dpt_exec.dll, the Direct3D executor (doc 14). Both
@@ -114,11 +121,11 @@ while [ $# -gt 0 ]; do
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
     -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    qemu|rust|mitsuami|exec|wddm|guest) STAGES+=("$1"); shift ;;
+    qemu|qemu-msvc|rust|mitsuami|exec|wddm|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu rust mitsuami exec wddm guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -240,6 +247,44 @@ if want qemu; then
   ninja -C build/win/qemu ${JOBS[@]+"${JOBS[@]}"} \
     qemu-system-i386.exe qemu-img.exe qemu-io.exe libqemu-embed-i386.dll
   BUILT+=(qemu)
+fi
+
+# The QEMU the package ships: the same prepared tree against MSVC's
+# runtime, into its own build/win/qemu-msvc (docs/build-windows.md "QEMU
+# under MSVC"). Its libraries come first, from build-deps.sh (each skipped
+# by its own stamp once built), and it configures as `qemu` does, when it
+# never has or its inputs moved; its regeneration needs no msvc-env.sh.
+if want qemu-msvc; then
+  if [ ! -f qemu/VERSION ] || [ ! -f build/.stamp-qemu-prepare ]; then
+    skip qemu-msvc "QEMU's tree is not prepared (run the qemu stage first)" || true
+  else
+    say "qemu-msvc: build-deps.sh (QEMU's libraries for MSVC)"
+    scripts/build-deps.sh
+    QM=build/win/qemu-msvc
+    want_qemu="$(cat qemu/VERSION)"
+    if [ -f $QM/build.ninja ] && [ "$(cat $QM/.2ksbox-qemu 2>/dev/null || echo none)" != "$want_qemu" ]; then
+      echo "    $QM was built from QEMU $(cat $QM/.2ksbox-qemu 2>/dev/null || echo another release), the tree is $want_qemu - configuring afresh"
+      rm -rf $QM
+    fi
+    needs_configure=""
+    [ -f $QM/build.ninja ] || needs_configure=1
+    for f in qemu/meson.build qemu/hw/mesa/meson.build scripts/configure-qemu.sh; do
+      if [ -f $QM/build.ninja ] && [ "$f" -nt $QM/build.ninja ]; then
+        needs_configure=1
+      fi
+    done
+    if [ -n "$needs_configure" ]; then
+      say "qemu-msvc: configure (clang for MSVC's ABI, static C runtime)"
+      WIN_QEMU_CC=msvc scripts/configure-qemu.sh
+      echo "$want_qemu" > $QM/.2ksbox-qemu
+    else
+      echo "    $QM is configured - skipping configure"
+    fi
+    say "qemu-msvc: ninja"
+    ninja -C $QM ${JOBS[@]+"${JOBS[@]}"} \
+      qemu-system-i386.exe qemu-img.exe qemu-io.exe libqemu-embed-i386.dll
+    BUILT+=(qemu-msvc)
+  fi
 fi
 
 if want rust; then

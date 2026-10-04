@@ -994,6 +994,22 @@ except player.exe"): `launcherx`, `discx` and `synthx` are Rust's
 is `cl`, all with a static C runtime. The winit player, which only
 `test.sh` runs, stays on the GNU target with `libdisc` and `libsynth`.
 
+**Third amendment (2026-10-04): the package's QEMU is MSVC too** (user:
+"package the mitsuami launcher and player ... with the msvc versions of
+everything"). "Upstream QEMU builds on Windows only in a mingw
+environment" stopped holding the same day: patch 83 builds it with
+MSYS2's clang for MSVC's ABI and runtime against libraries
+`build-deps.sh` builds statically (`build-windows.md` "QEMU under
+MSVC"), and `test.sh all` on it equalled the mingw build's run. So
+`build-windows.sh` gained a `qemu-msvc` stage and the zip and the MSIX
+ship its `libqemu-embed-i386.dll` and `qemu-img.exe`: everything in the
+package is MSVC with a static C runtime and it carries no runtime DLL
+(`package-windows.sh` fails on any import or DLL name that is MSYS2's).
+The player and QEMU now share a C runtime family, though each still has
+its own static copy, so doc 11's boundary rules stand. The mingw QEMU
+stays, built by the `qemu` stage, for `test.sh`, the winit player and
+the executor's host test; the guest code stays mingw as before.
+
 ## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
 
 **Status.** Accepted (user decisions: Windows 11 first; "In-process SMB
