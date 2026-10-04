@@ -350,7 +350,11 @@ update; a write inside the byte ranges read that way invalidates
 nothing. A block thrown away four times anyway goes back to constants. Covered: group-1 ALU ops, MOV, IMUL3, memory
 displacements, and the imm8 count of every shift and rotate (not RCL/RCR
 on 8/16-bit, not SHLD/SHRD). Jump targets, ports and SSE lane selectors
-stay constants. Needs a little-endian host with unaligned loads and a
+stay constants. An emitter that picks a shortcut from the immediate's
+value must not take it for a field read at run time: 11.1's ADC and SBB
+turn an immediate 0 into "add the carry" and drop the operand, so a block
+translated while the field was 0 ignored every later patch (Moto Racer's
+race drew wrong on 11.1; `soft_imm_op()` turns the shortcut off). Needs a little-endian host with unaligned loads and a
 single vCPU; covers only the block's first page. Moto Racer's race
 41 → 58 fps (TB invalidations 36,500/s → 1/s); Blood's corridor
 9.4 → 131 fps. Each page remembers up to eight byte ranges a write was

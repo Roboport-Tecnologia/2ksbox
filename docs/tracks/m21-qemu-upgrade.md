@@ -432,6 +432,13 @@ noise doc 22 gives is a stop: find it before the next group.
   `float_status.float_exception_flags` a 16-bit bit-field (`8c86fe2451`),
   so the TCG loads of it read the struct's first 16 bits, little-endian
   hosts only (a build assertion).
+- 11.1's `gen_ADC` / `gen_SBB` turn an immediate 0 into "add the carry"
+  and drop the operand. A soft block (patch 24) translated while its
+  field was 0 then ignored every later patch: Moto Racer's race drew
+  wrong (user, after the merge, Linux and Windows). Patch 24 turns the
+  shortcut off for a field read at run time (`soft_imm_op()`), and the
+  SMC battery's cases S and T patch adc / sbb between 0 and other values
+  (with the guard removed both fail, soft-imm runs only).
 - Code compiled once per mode since 10.1: 42's jump-cache generation is
   a run-time `target_long_bits() <= 32` (i386 keeps the generation
   scheme, x86_64 the clear), 20's inline probe addresses `CPUState` as

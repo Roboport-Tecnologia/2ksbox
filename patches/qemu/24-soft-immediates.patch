@@ -805,20 +805,33 @@ index 9282296900..91945ff8d5 100644
  
  struct X86DecodedInsn {
 diff --git a/target/i386/tcg/emit.c.inc b/target/i386/tcg/emit.c.inc
-index 236ced8fca..bae6bec8cc 100644
+index 236ced8fca..0d58593e2a 100644
 --- a/target/i386/tcg/emit.c.inc
 +++ b/target/i386/tcg/emit.c.inc
-@@ -239,6 +239,9 @@ static bool sse_needs_alignment(DisasContext *s, X86DecodedInsn *decode, MemOp o
+@@ -239,6 +239,22 @@ static bool sse_needs_alignment(DisasContext *s, X86DecodedInsn *decode, MemOp o
      }
  }
  
 +/* the instructions whose immediate may be read at run time; see below */
 +static bool insn_soft_imm_ok(const X86DecodedInsn *decode);
 +
++/*
++ * Operand @opn may be read from the guest's code at run time
++ * (exec/tb-softimm.h), so its value at translation is no promise: an emitter
++ * must not pick a shortcut from it.  ADC and SBB with an immediate 0 add only
++ * the carry and drop T1: a 0 the guest later patches into a step would keep
++ * adding nothing (Moto Racer's race drew wrong).
++ */
++static bool soft_imm_op(DisasContext *s, const X86DecodedInsn *decode, int opn)
++{
++    return s->soft_imm && decode->op[opn].imm_bytes &&
++           insn_soft_imm_ok(decode);
++}
++
  static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
  {
      X86DecodedOp *op = &decode->op[opn];
-@@ -294,7 +297,10 @@ static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
+@@ -294,7 +310,10 @@ static void gen_load(DisasContext *s, X86DecodedInsn *decode, int opn, TCGv v)
          }
          break;
      case X86_OP_IMM:
@@ -830,7 +843,17 @@ index 236ced8fca..bae6bec8cc 100644
          break;
  
      case X86_OP_MMX:
-@@ -3329,6 +3335,26 @@ static MemOp gen_shift_count_1(DisasContext *s, X86DecodedInsn *decode,
+@@ -1220,7 +1239,8 @@ static void gen_ADC(DisasContext *s, X86DecodedInsn *decode)
+      * - AF is bit 4 of dst^src1^src2, which is bit 4 of dst^src1 in both cases
+      * - OF is a function of the two MSBs, and in both cases they are zero for src2
+      */
+-    if (decode->e.op2 == X86_TYPE_I && decode->immediate == 0) {
++    if (decode->e.op2 == X86_TYPE_I && decode->immediate == 0 &&
++        !soft_imm_op(s, decode, 2)) {
+         gen_compute_eflags_c(s, s->T1);
+         gen_ADD(s, decode);
+         return;
+@@ -3329,6 +3349,26 @@ static MemOp gen_shift_count_1(DisasContext *s, X86DecodedInsn *decode,
          break;
  
      case X86_OP_IMM:
@@ -857,7 +880,17 @@ index 236ced8fca..bae6bec8cc 100644
          decode->immediate &= mask;
          if (mod < mask) {
              decode->immediate %= mod;
-@@ -4914,3 +4940,23 @@ static void gen_XSAVEOPT(DisasContext *s, X86DecodedInsn *decode)
+@@ -3931,7 +3971,8 @@ static void gen_SBB(DisasContext *s, X86DecodedInsn *decode)
+      * - AF is bit 4 of dst^src1^src2, which is bit 4 of dst^src1 in both cases
+      * - OF is a function of the two MSBs, and in both cases they are zero for src2
+      */
+-    if (decode->e.op2 == X86_TYPE_I && decode->immediate == 0) {
++    if (decode->e.op2 == X86_TYPE_I && decode->immediate == 0 &&
++        !soft_imm_op(s, decode, 2)) {
+         gen_compute_eflags_c(s, s->T1);
+         gen_SUB(s, decode);
+         return;
+@@ -4914,3 +4955,23 @@ static void gen_XSAVEOPT(DisasContext *s, X86DecodedInsn *decode)
      x87s_boundary(s);
      gen_helper_xsave(tcg_env, s->A0, features);
  }

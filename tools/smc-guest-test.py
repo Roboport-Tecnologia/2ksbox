@@ -13,7 +13,9 @@ immediate are both patched, one store that covers the tail of an
 immediate *and* the opcode bytes after it, an imm8 shift count and an imm8
 rotate count patched per call over every byte value (Build's column loops;
 a zero count must leave the carry alone), imul's imm32, and a 16-bit rcr
-whose count is reduced modulo 17 and so keeps its constant. It prints a
+whose count is reduced modulo 17 and so keeps its constant, and adc / sbb
+imm8 fields patched between 0 and other values (a block translated while
+one is 0 must not fold it into "add the carry"). It prints a
 checksum of what the patched code computed. Boots it on the FreeDOS test floppy (fetched by
 tools/x87-guest-test.py on first use) under all four combinations of
 `-accel tcg,smc-same-value=on|off,soft-imm=on|off`; every checksum must equal
@@ -67,6 +69,12 @@ def _rcr16(c):
     return v & 0xffff
 
 
+def _st(i):
+    """The imm8 cases S and T patch in: 0 on even calls, so the soft
+    translation (after four invalidating writes, call 4) sees a 0."""
+    return 0 if i % 2 == 0 else i & 0x7f
+
+
 N = 1000
 M = 0xffffffff
 EXPECTED = {
@@ -88,10 +96,12 @@ EXPECTED = {
     "P": sum(3 * i for i in range(N)) & M,                     # imul's imm32 patched per call
     "Q": sum(_rcr16(i & 0xff) for i in range(N)) & M,          # a 16-bit rcr count (modulo 17: stays a constant)
     "R": sum(2 * i for i in range(N)) & M,                     # one imm32 in two blocks two bytes apart
+    "S": sum(1000 + _st(i) + 1 for i in range(N)) & M,         # adc's imm8, 0 on every other call
+    "T": sum(1000 - _st(i) - 1 for i in range(N)) & M,         # sbb's imm8, the same
 }
 # the cases whose patched field has to be *absorbed* in the soft-imm runs, not
 # merely computed right: the program prints each field's address ("@N addr")
-ABSORBED = "NOPR"
+ABSORBED = "NOPRST"
 
 ASM = r"""
 org 100h
@@ -427,6 +437,36 @@ start:
     mov al, 'R'
     call report
 
+    ; S: adc eax, imm8 rewritten before every call, 0 on even calls: a block
+    ; translated while it is 0 must still add what is patched in later, not
+    ; only the carry (11.1's ADC shortcut for an immediate 0)
+    xor si, si
+    xor edi, edi
+.ls:
+    call st_value
+    mov [routS_imm], al
+    call routS
+    add edi, eax
+    inc si
+    cmp si, N
+    jb .ls
+    mov al, 'S'
+    call report
+
+    ; T: the same with sbb
+    xor si, si
+    xor edi, edi
+.lt:
+    call st_value
+    mov [routT_imm], al
+    call routT
+    add edi, eax
+    inc si
+    cmp si, N
+    jb .lt
+    mov al, 'T'
+    call report
+
     ; where the fields the soft-imm runs must absorb are
     mov al, 'N'
     mov bx, routN_imm
@@ -439,6 +479,12 @@ start:
     call report_addr
     mov al, 'R'
     mov bx, routR_imm
+    call report_addr
+    mov al, 'S'
+    mov bx, routS_imm
+    call report_addr
+    mov al, 'T'
+    mov bx, routT_imm
     call report_addr
 
     mov si, str_done
@@ -541,6 +587,29 @@ routR2:                         ; mov eax, imm32; ret
     db 66h, 0B8h
 routR_imm:
     dd 0
+    ret
+
+routS:                          ; 1000 + imm8 + CF(1)
+    mov eax, 1000
+    stc
+    db 66h, 83h, 0D0h           ; adc eax, imm8
+routS_imm:
+    db 0
+    ret
+routT:                          ; 1000 - imm8 - CF(1)
+    mov eax, 1000
+    stc
+    db 66h, 83h, 0D8h           ; sbb eax, imm8
+routT_imm:
+    db 0
+    ret
+st_value:                       ; al = 0 if si is even, else si & 7Fh
+    xor al, al
+    test si, 1
+    jz .z
+    mov ax, si
+    and al, 7Fh
+.z:
     ret
 
 report_addr:                    ; al = case letter, bx = a field's offset in CS
