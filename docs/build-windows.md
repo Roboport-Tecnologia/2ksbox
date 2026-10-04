@@ -295,7 +295,10 @@ again.
   import (`raw-dylib`), so a player runs either build unchanged: the
   first one on `PATH` wins. `WIN_QEMU_CC=msvc scripts/win-run.sh
   launcher` (or `player`, `qemu`) puts `build/win/qemu-msvc` there in
-  place of `build/win/qemu`; the launcher's players inherit it.
+  place of `build/win/qemu`; the launcher's players inherit it, and its
+  `qemu-img` comes from the same directory (`LAUNCHER_QEMU_IMG_BIN`).
+  The MSVC `qemu-img.exe` imports only Windows' DLLs; the mingw one
+  wants MSYS2's `mingw64/bin` on `PATH` (exit `0xc0000135` without it).
 
 **Tested (2026-10-04):** QEMU's own unit tests, 99 of 99 (the RCU ones
 with the arguments meson gives them, the subprocess ones with glib's

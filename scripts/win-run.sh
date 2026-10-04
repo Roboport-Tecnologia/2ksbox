@@ -26,6 +26,8 @@
 #                         is built into its own target/ and looks beside
 #                         itself and in target/<profile>, where a --target
 #                         build never puts the winit player
+#   LAUNCHER_QEMU_IMG_BIN qemu-img from the same QEMU build (the launcher's own
+#                         rule takes build/win/qemu's, the mingw one)
 #   D3DPT_EXEC_LIB        QEMU's own search is relative to the working directory
 #   D3DPT_DXVK_LIB        the executor loads DXVK only by the package's name for
 #                         it, dxvk_d3d9.dll (never plain d3d9.dll, which is
@@ -58,6 +60,9 @@ fi
 win() { cygpath -w "$1"; }
 
 export PATH="$QDIR:$REL:$PATH"
+if [ -z "${LAUNCHER_QEMU_IMG_BIN:-}" ] && [ -x "$QDIR/qemu-img.exe" ]; then
+  export LAUNCHER_QEMU_IMG_BIN="$(win "$QDIR/qemu-img.exe")"
+fi
 # Only when there is no mitsuami player: once built it is the default,
 # and the launcher finds it in the checkout by its own rule
 # (launcher_core::player), which this variable would override.
