@@ -271,11 +271,16 @@ guest on the user's PC reads `NVIDIA GeForce RTX 3090/PCIe/SSE2`.
 ## The launcher
 
 `2ksbox.exe` is `launcher-mitsuami` (ADR-023): WinUI 3 through
-mitsuami, the only MSVC binary in the package and the only one the
-Linux cross image cannot build. The same stage then builds
-`player-mitsuami` (track M22), MSVC as well, which links QEMU's mingw
-DLL (doc 11, "The C runtime boundary"); a launcher in the checkout
-starts it once built, and packages still ship the winit player. `build-windows.sh mitsuami` builds it in
+mitsuami. The same stage then builds `player-mitsuami` (track M22),
+which the package ships as `2ksbox-player.exe` (2026-10-03), MSVC as
+well, linking QEMU's mingw DLL across the two C runtimes (doc 11, "The
+C runtime boundary"); a launcher in the checkout starts it once built.
+They are the package's two MSVC binaries, each with a static C runtime.
+`package-windows.sh` checks both import no Visual C++ runtime DLL, and
+runs the staged player from outside the package folder on a machine
+with a General MIDI port to its BIOS and a clean exit, which is WinUI
+3, Direct3D 12 on its surface, QEMU's DLL and the packaged SoundFont at
+once. `build-windows.sh mitsuami` builds it in
 MSYS2's MINGW64 shell with `cargo +stable-x86_64-pc-windows-msvc` (Visual
 Studio's C++ tools must be installed; `rustup toolchain install
 stable-x86_64-pc-windows-msvc` once), into

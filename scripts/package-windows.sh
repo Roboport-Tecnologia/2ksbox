@@ -10,13 +10,14 @@
 #                                              #     (scripts/package-msix.sh)
 #   scripts/package-windows.sh --out DIR       # default build/win/package
 #
-# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023),
-# the one MSVC binary here (`build-windows.sh mitsuami`, Windows only),
-# with a static C runtime. It needs no DLL of ours, but it runs on the
-# Windows App Runtime 2.4 or later, a framework Microsoft installs once
-# per PC; the zip cannot carry it, and the Store's MSIX declares it as a
-# dependency instead. So the package comes from a Windows PC, where that
-# launcher is built.
+# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023), and
+# `2ksbox-player.exe` is `player-mitsuami` (track M22), the two MSVC
+# binaries here (`build-windows.sh mitsuami`, Windows only), each with a
+# static C runtime. The player links QEMU's mingw DLL across the two C
+# runtimes (doc 11). Both run on the Windows App Runtime 2.4 or later, a
+# framework Microsoft installs once per PC; the zip cannot carry it, and
+# the Store's MSIX declares it as a dependency instead. So the package
+# comes from a Windows PC, where they are built.
 #
 # It runs in two places, and builds nothing in either
 # (scripts/build-windows.sh does that, and this script says so if an
@@ -39,7 +40,7 @@
 # knows both shapes (launcher-core/src/paths.rs).
 #
 #   2ksbox.exe                  the launcher
-#   2ksbox-player.exe           the player
+#   2ksbox-player.exe           the player (player-mitsuami)
 #   qemu-img.exe                ours, patched
 #   libqemu-embed-i386.dll      QEMU as a library, what the player runs
 #   d3dpt_exec.dll              the Direct3D executor (doc 14)
@@ -85,22 +86,22 @@ esac
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 NAME="2ksbox-$VERSION-windows-x86_64"
 STAGE="$OUT/$NAME"
-TARGET="$ROOT/target/x86_64-pc-windows-gnu/release"
 LAUNCHER="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"
+PLAYER="$ROOT/player-mitsuami/target/release/player-mitsuami.exe"
 Q="$ROOT/build/win/qemu"
 
 need() { [ -e "$1" ] || { echo "package-windows.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
 need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu"
 need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu"
 need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
-need "$TARGET/player.exe"        "scripts/build-windows.sh rust"
+need "$PLAYER"                   "scripts/build-windows.sh mitsuami, on Windows"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/doc"
 
 install -m755 "$LAUNCHER" "$STAGE/2ksbox.exe"
-install -m755 "$TARGET/player.exe" "$STAGE/2ksbox-player.exe"
+install -m755 "$PLAYER" "$STAGE/2ksbox-player.exe"
 install -m755 "$Q/qemu-img.exe" "$STAGE/"
 install -m755 "$Q/libqemu-embed-i386.dll" "$STAGE/"
 cp -a qemu/pc-bios "$STAGE/pc-bios"
@@ -392,15 +393,16 @@ if [ -n "$RUN" ]; then
   # runpkg [VAR=value ...] program [args ...]: run a staged program from
   # the package folder with an empty environment, so no LAUNCHER_* or
   # PLAYER_* knob from this shell can make it work and nothing may resolve
-  # back into the build tree. T= bounds it (default 300 s). D=1 passes the
+  # back into the build tree. T= bounds it (default 300 s), and IN= runs
+  # it from another directory (natively). D=1 passes the
   # display through to wine, which a real window or a Vulkan device needs
   # there; natively Windows' own session is always there.
   runpkg() {
     local vars=() prog
     while [[ "${1:-}" == *=* ]]; do vars+=("$1"); shift; done
     if [ "$RUN" = native ]; then
-      case "$1" in /*) prog=$1 ;; *) prog=./$1 ;; esac
-      (cd "$STAGE" && timeout "${T:-300}" env -i SYSTEMROOT="$WINDOWS" WINDIR="$WINDOWS" \
+      case "$1" in /*) prog=$1 ;; *) prog=$STAGE/$1 ;; esac
+      (cd "${IN:-$STAGE}" && timeout "${T:-300}" env -i SYSTEMROOT="$WINDOWS" WINDIR="$WINDOWS" \
           PATH="$WINPATH" TEMP="$(winpath "$scratch")" TMP="$(winpath "$scratch")" \
           LOCALAPPDATA="$(winpath "$scratch")" PROGRAMDATA="$(winpath "$scratch")" \
           DXVK_LOG_PATH="$(winpath "$scratch")" \
@@ -555,12 +557,14 @@ EOF
   # needs a Visual C++ redistributable no Windows comes with, and a PC
   # without it shows a loader dialog before any code of ours runs.
   # `build-windows.sh mitsuami` links it statically; this keeps it so.
-  if imports "$STAGE/2ksbox.exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
-    echo "package-windows.sh: 2ksbox.exe imports $(imports "$STAGE/2ksbox.exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(build it with +crt-static: scripts/build-windows.sh mitsuami)" >&2
-    fail=1
-  else
-    echo "c runtime      2ksbox.exe links its C runtime statically"
-  fi
+  for exe in 2ksbox.exe 2ksbox-player.exe; do
+    if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
+      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(build it with +crt-static: scripts/build-windows.sh mitsuami)" >&2
+      fail=1
+    else
+      echo "c runtime      $exe links its C runtime statically"
+    fi
+  done
   # A window, which `--paths` never opens: WinUI 3 and the Windows App
   # Runtime start only then. The launcher's own headless grab
   # (`LAUNCHER_SHOT`, launcher-mitsuami/src/shot.rs) opens the machine
@@ -579,6 +583,29 @@ EOF
     fi
   else
     echo "window         (WinUI 3 does not run under wine; the real answer is 2ksbox-debug.bat on a PC)"
+  fi
+  # The player, which --companions above starts but never runs a machine
+  # in: natively, a machine with a General MIDI port (the Win98 and DOS
+  # default) to the BIOS screen and a clean exit, through QMP's quit once
+  # the guest has drawn. That is WinUI 3, the surface's Direct3D 12, QEMU's
+  # mingw DLL across the player's own C runtime, and the bank the player
+  # names from the package. It runs from the scratch directory: from the
+  # package's own, QEMU's relative soundfonts\ would find the bank anyway,
+  # and outside it QEMU refused such a machine until the embed library set
+  # the variable (doc 11, "The C runtime boundary"). The window shows for
+  # a moment.
+  if [ "$RUN" = native ]; then
+    if IN="$scratch" T=90 runpkg PLAYER_QMP_EXEC='{"execute":"quit"}' 2ksbox-player.exe -- \
+         -L "$(winpath "$STAGE/pc-bios")" -M pc -m 32 -device mpu401,audiodev=embed0,synth=gm \
+         > "$scratch/player.txt" 2>&1; then
+      echo "player         ran a machine to its BIOS and quit (WinUI 3, the embed DLL, the bank)"
+    else
+      echo "package-windows.sh: the staged player did not run a machine to its BIOS and quit:" >&2
+      grep -v '^\[audio\]' "$scratch/player.txt" | tail -5 >&2
+      fail=1
+    fi
+  else
+    echo "player         (WinUI 3 does not run under wine; not started)"
   fi
 
   # The bundle-creating path end to end: the staged launcher runs the

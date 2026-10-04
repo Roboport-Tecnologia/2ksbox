@@ -66,7 +66,7 @@ embed library, as for the winit player, into a target dir of its own:
   built, and the winit player only when it is not (`launcherx --paths`
   says which). `LAUNCHER_PLAYER_BIN` still overrides; the winit player is
   one `LAUNCHER_PLAYER_BIN=target/release/player` away. Packages still
-  ship the winit player until step 6.
+  ship the winit player until step 6, except Windows's (below).
 
 ## Steps
 
@@ -206,6 +206,14 @@ embed library, as for the winit player, into a target dir of its own:
 6. **The launcher's player, packaging, the flip:** a build stage, the
    packagers' run, `player-mitsuami` shipped as `2ksbox-player` (and the
    per-target players), and `player/`'s winit front end deleted.
+   **Windows done (2026-10-03, user: "go"):** the zip and the MSIX ship
+   it as `2ksbox-player.exe`, with the icon and manifest the winit
+   player had (`player-mitsuami/build.rs`, `win-icon.rs`), and
+   `package-windows.sh` checks its static C runtime and that it boots a
+   machine with a General MIDI port from outside the package folder and
+   quits. The winit player still builds on Windows for `test.sh` (the
+   `rust` stage). Left: Linux, macOS, the Flatpak, and deleting
+   `player/`.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)
 

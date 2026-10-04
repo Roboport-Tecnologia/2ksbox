@@ -1,7 +1,12 @@
+include!("../packaging/windows/win-icon.rs");
+
 // Where the binary finds libqemu-embed, as the winit player's build.rs
 // says it: `<prefix>/lib/2ksbox` once installed (origin-relative, first),
 // else the build directory it was linked from.
 fn main() {
+    // On Windows the icon Explorer shows and the manifest: this crate
+    // becomes 2ksbox-player.exe in the Windows package.
+    embed_windows_resources();
     let target = std::env::var("TARGET").unwrap_or_default();
     if !(target.contains("apple") || target.contains("linux")) {
         return;

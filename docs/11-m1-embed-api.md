@@ -190,6 +190,13 @@ Audited 2026-10-02, every channel the API or the process offers:
 - **Types.** Pointers, `int`, fixed-width integers and C `bool` (one
   byte in both compilers), no struct by value and no `long double`;
   function pointers on the Windows x64 convention both use.
+- **C++ exceptions** do not cross between the two compilers. None
+  crosses this API (it is C, and Rust aborts on a panic at an `extern
+  "C"` edge), but one boundary deeper it decides what may move: DXVK
+  (mingw) throws out of `Direct3DCreate9` on a host with no Vulkan
+  device, and only a mingw executor catches it. An MSVC executor ended
+  the player there (ADR-026's amendment), so the executor stays mingw
+  while DXVK does.
 
 **Linking across the toolchains.** The mingw build makes an import
 library only as `libqemu-embed-<target>.dll.a`, which `link.exe` does not

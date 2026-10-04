@@ -952,6 +952,20 @@ build packages. The PC needs MSYS2 (for QEMU) beside Visual Studio, and
 both Rust Windows targets. The embed API's C runtime boundary has to be
 audited before the player moves.
 
+**Amendment (2026-10-03): the executor stays mingw while DXVK does.**
+The boundary was audited (doc 11) and the players moved: the package
+ships `player-mitsuami`, MSVC, over QEMU's mingw DLL. The executor built
+with MSVC (`cl`, static C runtime) passed the Direct3D oracle on DXVK and
+on the system d3d9, but on a host with no Vulkan device the player
+terminated: DXVK reports that by throwing a C++ exception out of
+`Direct3DCreate9`, which a mingw executor catches and an MSVC one cannot
+(the two compilers' exceptions do not cross; `terminate called after
+throwing an instance of 'dxvk::DxvkError'`, test.sh's `exec-no-device`).
+Any exception DXVK throws later would end the process the same way. So
+the executor and DXVK move together or not at all: DXVK built with
+MSVC first, then the executor. Until then both stay mingw, as QEMU
+does.
+
 ## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
 
 **Status.** Accepted (user decisions: Windows 11 first; "In-process SMB
