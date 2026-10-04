@@ -565,8 +565,9 @@ scripts/package-linux.sh --with-shaders   # + the ~80 MB preset collection
 ```
 
 It stages the launcher, the player, the embed library, our `qemu-img`,
-the firmware, the guest-tools ISO and the libraries QEMU `dlopen`s
-(executor + DXVK, the Wine pair) into one relocatable
+the firmware, the guest-tools ISO, Windows 11's drivers disc
+(`build/virtio-win/2ksbox-drivers-x64.iso`, the `virtio` stage) and the
+libraries QEMU `dlopen`s (executor + DXVK, the Wine pair) into one relocatable
 prefix, checks that everything resolves inside it from a scrubbed
 environment (`docs/testing.md`), and rolls a tarball. **GTK 4 is not in
 it**: it needs the distribution's GTK 4, 4.10 or later (Arch and
@@ -624,6 +625,11 @@ rebuilds just the add-on onto the installed app. A user installs it from
 the app's page in the store, or with
 `flatpak install flathub com._2ksbox.Launcher.Wine`; the wizard's
 Direct3D note says so on a below-floor host.
+
+Windows 11's drivers disc is made on the host by
+`scripts/build-virtio-win.sh x64` (the SDK has no Windows target for the
+agent and no ISO writer) and comes in as a file, as the patched QEMU tree
+does; the script refuses to start without it.
 
 The launcher is GTK 4 there, and the KDE build is a second add-on,
 `com._2ksbox.Launcher.KDE` (`packaging/flatpak/com._2ksbox.Launcher.KDE.yml`,

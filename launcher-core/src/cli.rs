@@ -918,6 +918,13 @@ fn paths_text() -> String {
         None => writeln!(s, "guest-tools  (none built or shipped)"),
     }
     .ok();
+    // Windows 11's drivers disc for this host's processor, the one its
+    // machines get (M23)
+    match disc_library::drivers_iso(crate::bundle::Arch::native()) {
+        Some(iso) => writeln!(s, "drivers      {}", iso.display()),
+        None => writeln!(s, "drivers      (none built or shipped)"),
+    }
+    .ok();
     match shader_source::presets_dir() {
         Some(dir) => writeln!(s, "shaders      {}", dir.display()),
         None => writeln!(

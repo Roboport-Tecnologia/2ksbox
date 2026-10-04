@@ -145,6 +145,14 @@ modules:
       # `cargo/config` that redirects crates-io and the git repository at
       # them; `CARGO_HOME` above points at that directory.
       - cargo-sources.json
+      # Windows 11's drivers disc (M23: virtio-win's x64 serial driver and
+      # the 2ksbox agent), made on the host by scripts/build-virtio-win.sh
+      # like the patched QEMU tree above: the SDK has neither a Windows
+      # target for the agent nor an ISO writer. `package-linux.sh` below
+      # stages it from here into share/2ksbox/drivers.
+      - type: file
+        path: ../../build/virtio-win/2ksbox-drivers-x64.iso
+        dest: build/virtio-win
       # QEMU's own glib (scripts/build-deps.sh, which on Linux builds
       # pcre2, glib and libslirp, static, into build/deps/<arch>, and
       # configure-qemu.sh links by default): the tarballs it pins, where

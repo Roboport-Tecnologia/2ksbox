@@ -17,7 +17,8 @@
 #
 # It does not build QEMU. build/qemu (libqemu-embed-{i386,x86_64}.so + qemu-img)
 # and qemu/pc-bios must already be there (scripts/build.sh). The
-# guest-tools ISO is included when guest-tools/out has one.
+# guest-tools ISO is included when guest-tools/out has one, and Windows
+# 11's drivers disc when build/virtio-win has it (scripts/build-virtio-win.sh).
 #
 # The launcher is `launcher-mitsuami`, the front end on mitsuami over
 # `launcher-core` (ADR-023), on GTK 4 here. GTK itself is not in the
@@ -43,6 +44,8 @@
 #   libexec/2ksbox/qemu-img           ours, patched, kept off PATH
 #   share/2ksbox/pc-bios/             QEMU firmware (the player's -L)
 #   share/2ksbox/guest-tools/         the guest-tools ISO
+#   share/2ksbox/drivers/             Windows 11's drivers disc (x64: the
+#                                     clipboard's driver and the agent)
 #   share/2ksbox/shaders/             presets, with --with-shaders
 #   share/2ksbox/desktop/             .desktop + AppStream, for install.sh
 #   share/icons/hicolor/<n>x<n>/apps/ the application icon, at every size
@@ -98,6 +101,10 @@ need target/qemu-x86_64/release/player "scripts/build.sh rust"
 # somewhere that already exists and belongs to someone else (`/app`).
 [ -n "$PREFIX" ] || rm -rf "$STAGE"
 mkdir -p "$STAGE"/{bin,lib/2ksbox,libexec/2ksbox,share/2ksbox/desktop,share/doc/2ksbox}
+# Its real path: the binaries see theirs (and the launcher canonicalizes
+# some), so a stage reached through a symlink, a build/ on another disk,
+# would fail every "inside the package" check below
+STAGE=$(cd "$STAGE" && pwd -P)
 
 install -m755 launcher-mitsuami/target/release/launcher-mitsuami "$STAGE/bin/2ksbox"
 install -m755 target/release/player "$STAGE/bin/2ksbox-player"
@@ -151,6 +158,16 @@ else
   echo "package-linux.sh: no guest-tools ISO in guest-tools/out (guest-tools/build-wrappers.sh); packaging without it"
 fi
 
+# Windows 11's drivers disc for x64 (M23): virtio-win's serial driver and
+# the 2ksbox agent, which the launcher puts in a CD drive of every Windows
+# 11 machine (`disc_library::drivers_iso`). Under 1 MB.
+drivers=build/virtio-win/2ksbox-drivers-x64.iso
+if [ -f "$drivers" ]; then
+  install -Dm644 "$drivers" "$STAGE/share/2ksbox/drivers/2ksbox-drivers-x64.iso"
+else
+  echo "package-linux.sh: no $drivers (scripts/build-virtio-win.sh); packaging without it, so Windows 11 machines get no clipboard"
+fi
+
 # The shader presets are 80 MB and the launcher can fetch them itself, so
 # they are opt-in; a distro package that would rather ship them says so.
 if [ "$SHADERS" = 1 ]; then
@@ -200,7 +217,7 @@ resolved=$(cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machine
 echo "$resolved"
 while read -r what path; do
   case "$what" in
-    player|player-x86_64|qemu-img|pc-bios|guest-tools|prefix) ;;
+    player|player-x86_64|qemu-img|pc-bios|guest-tools|drivers|prefix) ;;
     *) continue ;;
   esac
   # `--paths` says "(none built or shipped)" where there is nothing to

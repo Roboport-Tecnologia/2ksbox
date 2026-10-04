@@ -78,7 +78,10 @@ smoke() {
   echo "$out"
   local fail=0
   while read -r what path; do
-    case "$what" in player|player-x86_64|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
+    case "$what" in player|player-x86_64|qemu-img|pc-bios|guest-tools|drivers|prefix) ;; *) continue ;; esac
+    case "$what $path" in "drivers ("*)
+      echo "package-flatpak.sh: the app ships no Windows 11 drivers disc" >&2; fail=1 ;;
+    esac
     case "$path" in "("*) continue ;; /app*) ;; *)
       echo "package-flatpak.sh: $what resolved outside /app: $path" >&2; fail=1 ;;
     esac
@@ -221,6 +224,9 @@ command -v flatpak-builder >/dev/null || { echo "flatpak-builder not installed" 
 # The patch queue runs on the host: it needs git and rsync, and the tree
 # flatpak-builder copies has neither a .git nor rsync in the SDK.
 [ -d qemu/hw/3dfx ] || { echo "qemu/ is not prepared: run scripts/prepare-qemu.sh first" >&2; exit 1; }
+# Windows 11's drivers disc is made on the host too (the manifest says why)
+[ "$APP" = 0 ] || [ -f build/virtio-win/2ksbox-drivers-x64.iso ] || {
+  echo "no build/virtio-win/2ksbox-drivers-x64.iso: run scripts/build-virtio-win.sh x64 first" >&2; exit 1; }
 [ -f guest-tools/out/guest-tools-3dfx-*.iso ] 2>/dev/null || \
   ls guest-tools/out/guest-tools-*.iso >/dev/null 2>&1 || \
   echo "package-flatpak.sh: no guest-tools ISO built; the app will ship without it"

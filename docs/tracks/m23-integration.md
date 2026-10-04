@@ -258,6 +258,16 @@ an x64 machine's clipboard had nothing to talk to.
 | A second host text, in the guest | 1.9 s |
 | The share mapped by `--map`, a host file read | Z:, pass |
 
+**Shipped (2026-10-04, user: "if our disc is so small, we can package
+it").** The Linux tarball and the Flatpak carry
+`share/2ksbox/drivers/2ksbox-drivers-x64.iso`. The Flatpak cannot make
+it in its SDK (no Windows target for the agent, no ISO writer), so it
+takes the disc `build-virtio-win.sh` made on the host, as it takes the
+patched QEMU tree. `launcherx --paths` names it (`drivers`), and both
+packagers' checks require it inside the package. The macOS app ships no
+Windows 11 on Arm yet (no aarch64 player or firmware) and Windows hosts
+run no Windows 11, so neither carries a disc.
+
 ## Leases (2026-10-03)
 
 Read-caching leases (`libsmb/src/lease.rs`; doc 24 §2.2). A/B with
