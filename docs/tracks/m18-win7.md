@@ -226,7 +226,11 @@ device's half is plain QEMU C and builds anywhere.
    `WDDM\` on the ISO, after the ISO's mingw checks (the user-mode DLL is
    MSVC; its own code is now `/arch:IA32` for the Pentium III floor, and
    the static C runtime picks its SSE2 routines by a CPU check); an ISO
-   built on Linux has none. The drivers' three files are part of the ISO's
+   built on Linux had none until 2026-10-04 (user): the PC publishes the
+   drivers by a hash of their sources (`build-windows.sh wddm --publish`)
+   and `build.sh` on Linux and macOS fetches the matching one
+   (`scripts/wddm-prebuilt.sh`, `docs/build-windows.md` "The WDDM
+   driver"). The drivers' three files are part of the ISO's
    stamp in both build scripts. SETUP installs it (finding 12) when the
    adapter has its interrupt: the driver starts only with `-device
    d3dpt-vga,irq=on`, which the launcher does not pass yet; README.TXT on

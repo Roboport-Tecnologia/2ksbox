@@ -14,6 +14,8 @@
 #   scripts/build-windows.sh                everything this host can build
 #   scripts/build-windows.sh qemu rust      only those stages
 #   scripts/build-windows.sh --package      ... and then roll the zip
+#   scripts/build-windows.sh wddm --publish the WDDM driver, then publish it for
+#                                           Linux and macOS (gh, logged in)
 #   scripts/build-windows.sh -f qemu        prepare QEMU's tree even if its stamp
 #                                           says nothing changed
 #   scripts/build-windows.sh --msys2-deps   (Windows) install what the build needs
@@ -54,8 +56,11 @@
 #           WDK for Windows 10 2004 (10.0.19041), the last kit that builds
 #           32-bit kernel drivers for Windows 7: one ISO, mounted (or
 #           EWDK_ISO=<iso> to mount it, EWDK=<drive:> to name it),
-#           nothing installed. Skipped with a note when none is mounted.
-#           The guest stage puts the result on the ISO, in WDDM\.
+#           nothing installed. With none mounted it fetches the driver
+#           the PC published for these sources (scripts/wddm-prebuilt.sh),
+#           or is skipped with a note. --publish then uploads the build
+#           for Linux and macOS ISOs. The guest stage puts the result on
+#           the ISO, in WDDM\.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
 #           a default run rebuilds it when its sources move, by
@@ -97,12 +102,13 @@ MSYS2_PACKAGES=(git rsync diffutils
   mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd
   mingw-w64-x86_64-{mtools,imagemagick} libarchive)
 
-JOBS=(); PACKAGE=""; STAGES=(); EXPLICIT=""; FORCE=""
+JOBS=(); PACKAGE=""; PUBLISH=""; STAGES=(); EXPLICIT=""; FORCE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j) JOBS=(-j "$2"); shift 2 ;;
     -j*) JOBS=(-j "${1#-j}"); shift ;;
     -p|--package) PACKAGE=1; shift ;;
+    --publish) PUBLISH=1; shift ;;
     -f|--force) FORCE=1; shift ;;
     --msys2-deps)
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
@@ -343,12 +349,20 @@ if want wddm; then
          [ -f "$d/Program Files/Windows Kits/10/Include/10.0.19041.0/km/dispmprt.h" ]; then ewdk="$d"; fi
     done
   fi
-  if [ -z "$ewdk" ]; then
+  if [ -z "$ewdk" ] && [ -z "$PUBLISH" ] && scripts/wddm-prebuilt.sh fetch; then
+    echo "    no EWDK mounted; the published driver for these sources is in build/wddm/x86"
+  elif [ -z "$ewdk" ]; then
     skip wddm "no EWDK 10.0.19041 mounted (mount it, or EWDK_ISO=<iso>; docs/build-windows.md \"The WDDM driver\")" || true
   else
     say "wddm: d3dptkmd.sys + d3dptumd.dll (MSVC, the EWDK)"
     cmd //c "$(cygpath -w guest-tools/build-wddm.cmd)"
+    # the sources it was built from, which a publish checks
+    scripts/wddm-prebuilt.sh key > build/wddm/x86/.key
     BUILT+=(wddm)
+    if [ -n "$PUBLISH" ]; then
+      say "wddm: publish for Linux and macOS (scripts/wddm-prebuilt.sh)"
+      scripts/wddm-prebuilt.sh publish
+    fi
   fi
 fi
 

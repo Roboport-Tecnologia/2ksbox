@@ -339,9 +339,10 @@ i686-w64-mingw32-gcc -O2 -Wall -o "$OUT/iso/setup.exe" "$ROOT/guest-tools/src/se
 while IFS= read -r f; do check_crt "$f"; check_isa "$f"; done \
   < <(find "$OUT/iso" -type f \( -iname '*.dll' -o -iname '*.exe' \))
 
-# The WDDM display driver for Windows 7 (track M18), when this host built
-# it (build-windows.sh's wddm stage: MSVC through the EWDK, so Windows
-# only), staged as WDDM\: the kernel driver, the Direct3D 9 user-mode
+# The WDDM display driver for Windows 7 (track M18), when build/wddm/x86
+# has it (build-windows.sh's wddm stage: MSVC through the EWDK, so Windows
+# only; Linux and macOS fetch the PC's build for the same sources,
+# scripts/wddm-prebuilt.sh), staged as WDDM\: the kernel driver, the Direct3D 9 user-mode
 # driver and the INF. Staged after the checks above, which are the mingw
 # rules for Win9x / XP guest code: the user-mode DLL is MSVC with a static
 # C runtime, whose own SSE2 routines are picked by a CPU check at run time
@@ -353,7 +354,7 @@ if [ -f "$WDDM_OUT/d3dptkmd.sys" ] && [ -f "$WDDM_OUT/d3dptumd.dll" ] && [ -f "$
   mkdir -p "$OUT/iso/WDDM"
   cp "$WDDM_OUT/d3dptkmd.sys" "$WDDM_OUT/d3dptumd.dll" "$WDDM_OUT/d3dptkmd.inf" "$OUT/iso/WDDM/"
 else
-  echo "note: the Windows 7 WDDM driver is not on this ISO (built on Windows only: build-windows.sh wddm)" >&2
+  echo "note: the Windows 7 WDDM driver is not on this ISO (built on Windows only: build-windows.sh wddm; elsewhere scripts/wddm-prebuilt.sh fetch)" >&2
 fi
 sed -e "s/@REV@/$REV/" "$ROOT/guest-tools/README-ISO.txt" \
   | crlf > "$OUT/iso/README.TXT"

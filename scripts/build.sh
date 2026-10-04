@@ -50,7 +50,10 @@
 #   exec    build-d3dpt-exec.sh: libd3dpt_exec, the D3D executor. Runs
 #           after `dxvk`, whose headers it compiles against.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO (it also
-#           calls build-driver.sh for the XP display driver)
+#           calls build-driver.sh for the XP display driver), with the
+#           Windows 7 WDDM driver the PC published for these sources
+#           (scripts/wddm-prebuilt.sh fetch; needs the network once per
+#           driver change, WDDM_PREBUILT=0 skips it)
 #
 # A stage whose tools are missing is skipped with the reason, or fails if
 # it was named on the command line. The summary at the end lists what
@@ -61,7 +64,9 @@
 # as "the guest will not boot", not as "you forgot a command".
 #
 # With everything up to date a run takes a couple of seconds thanks to the
-# stamps below, and needs no network.
+# stamps below, and needs no network once the WDDM driver for the
+# checkout's sources is fetched (until the PC publishes it, each run asks
+# once and goes on without it).
 #
 # `launcher-mitsuami/` stays its own cargo workspace (ADR-023), so a plain
 # `cargo build` at the root never needs GTK. The `rust` stage, the test
@@ -81,7 +86,7 @@ X86_64=""
 ARGS=("$@")
 
 usage() {
-  sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'
   cat <<EOF
 
 Options:
@@ -542,6 +547,11 @@ fi
 # calls build-driver.sh, so the XP display driver rides along.
 GUEST_STALE=""
 if want guest; then
+  # The Windows 7 WDDM driver builds only on Windows; the PC publishes it
+  # by a hash of its sources, and the one for this checkout is fetched
+  # into build/wddm/x86 before the stamp reads it. Nothing published
+  # means an ISO without WDDM\, as before (WDDM_PREBUILT=0 never asks).
+  scripts/wddm-prebuilt.sh fetch || true
   # the stamp is computed before the tool check, so a host that cannot
   # build the ISO can still say whether the one it has is out of date
   if STAMP_GITS="third_party/qemu-3dfx" \
@@ -551,7 +561,7 @@ if want guest; then
        guest-tools/build-driver9x.sh \
        build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf; then
     # (the WDDM driver is built only on Windows, build-windows.sh's wddm
-    # stage; absent here it adds nothing, so both scripts agree)
+    # stage, and fetched here; absent it adds nothing, so both scripts agree)
     GUEST_STALE=1
   fi
   # a stamp is no good without the artifacts it claims are current

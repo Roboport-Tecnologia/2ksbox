@@ -99,6 +99,7 @@ cargo check --release --workspace          # launcher-capi, the one non-default 
 # Direct3D pass-through (doc 14):
 scripts/prepare-dxvk.sh && scripts/configure-dxvk.sh && ninja -C build/dxvk && scripts/build-d3dpt-exec.sh
 # the guest-tools ISO (SETUP.EXE, the guest DLLs, both display drivers):
+scripts/wddm-prebuilt.sh fetch   # Windows 7's WDDM driver, the PC's build for these sources
 guest-tools/build-wrappers.sh
 ```
 

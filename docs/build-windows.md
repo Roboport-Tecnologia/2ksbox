@@ -602,7 +602,25 @@ the kit and never committed. It is `build-windows.sh`'s `wddm` stage
 (since 2026-10-04), which runs `guest-tools/build-wddm.cmd` below when
 an EWDK is mounted (or named by `EWDK` / `EWDK_ISO`) and is skipped with
 a note otherwise; the `guest` stage after it puts the result on the
-guest-tools ISO, in `WDDM\`. An ISO built on Linux has no `WDDM\`.
+guest-tools ISO, in `WDDM\`.
+
+**Linux and macOS ISOs get the PC's build** (2026-10-04, user):
+`scripts/wddm-prebuilt.sh` names the driver by a hash of the sources it
+is built from (`wddm/`, the shared `core/`, `d3dpt_fb.h`, `d3dpt_enc.h`,
+`d3dpt_proto.h`, `build-wddm.cmd`; `wddm-prebuilt.sh key`). The `wddm`
+stage writes that hash to `build/wddm/x86/.key`, and `build-windows.sh
+wddm --publish` uploads the three files as `wddm-<hash>.tar.gz` to the
+repository's `wddm-prebuilt` release (a prerelease that holds nothing
+else; `gh`, logged in). It refuses a build whose `.key` is not the
+checkout's and sources with uncommitted changes, so a name always means
+committed sources. `scripts/build.sh`'s `guest` stage on Linux or a Mac
+runs `wddm-prebuilt.sh fetch` first, which downloads the asset for its
+own hash into `build/wddm/x86` (and removes one fetched for other
+sources); the ISO's stamp then sees the driver. Nothing published for
+the hash means an ISO with no `WDDM\` and a note, so **after a commit
+that changes the driver's sources, publish from the PC** or the other
+hosts' ISOs lose it. `WDDM_PREBUILT=0` never fetches. On the PC with no
+EWDK mounted, the `wddm` stage fetches too.
 
 **The kit: the Enterprise WDK for Windows 10, version 2004**
 (10.0.19041, with VS 2019 Build Tools 16.7). It is the last WDK that
@@ -618,6 +636,7 @@ lives in `D:\stuff\downloads\`.
 
 ```sh
 scripts/build-windows.sh wddm           # the stage alone (MINGW64)
+scripts/build-windows.sh wddm --publish # ... then publish it for Linux and macOS
 cmd //c guest-tools\\build-wddm.cmd     # or the script itself, from MSYS2, Git Bash or cmd
 ```
 
