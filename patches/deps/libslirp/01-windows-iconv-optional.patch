@@ -1,0 +1,19 @@
+libslirp's meson asks for iconv on Windows, for a mingw static glib whose
+pkg-config line leaves it out. A glib built for MSVC's runtime (build-deps.sh
+on Windows) converts with its own win_iconv, and there is no iconv to find.
+Optional, so the MSVC build configures; mingw still finds and links its own.
+
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -85,7 +85,9 @@ libslirp_deps = [ dependency('glib-2.0', static : glib_static) ]
+ if host_system == 'windows'
+   # Windows: pkg-config fails us here because the static version of glib-2.0
+   # requires iconv, which is not emitted by 'pkg-config --libs --static'.
+-  libslirp_deps += [ dependency('iconv', static : glib_static) ]
++  # A glib built for MSVC's runtime converts with its own win_iconv and
++  # needs none.
++  libslirp_deps += [ dependency('iconv', static : glib_static, required : false) ]
+ endif
+ 
+ add_project_arguments(cc.get_supported_arguments('-Wmissing-prototypes', '-Wstrict-prototypes',

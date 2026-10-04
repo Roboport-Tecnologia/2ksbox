@@ -43,7 +43,10 @@ TREL=target/release; TOOL_CARGO=(cargo)
 case "$OS" in
   Darwin) SO=dylib;;
   Windows)
+    # WIN_QEMU_CC=msvc tests the QEMU built against MSVC's runtime
+    # (configure-qemu.sh, docs/build-windows.md "QEMU under MSVC")
     SO=dll; QDIR=build/win/qemu; RREL=target/x86_64-pc-windows-gnu/release
+    [ "${WIN_QEMU_CC:-}" = msvc ] && QDIR=build/win/qemu-msvc
     CARGO_TGT=(--target x86_64-pc-windows-gnu)
     TREL=target/x86_64-pc-windows-msvc/release; TOOL_CARGO=(scripts/cargo-msvc.sh)
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-gcc}"
@@ -2149,7 +2152,7 @@ no_optionals_check() { # the artefacts link only what we chose
   local rc=0 f
   local names="build/qemu/libqemu-embed-i386.$SO $QSYS $QIMG"
   names="$names build/dxvk/src/d3d9/libdxvk_d3d9.$SO$([ "$SO" = so ] && echo .0)"
-  names="$names build/win/qemu/libqemu-embed-i386.dll build/win/qemu/qemu-system-i386.exe"
+  names="$names $QDIR/libqemu-embed-i386.dll $QDIR/qemu-system-i386.exe"
   # displays (Cocoa is a framework, matched by name in the same list)
   local linked='libSDL|libgtk-|libgdk-|libvte|libspice-server|libncurses|Cocoa\.framework'
   # host audio

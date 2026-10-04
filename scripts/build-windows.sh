@@ -95,7 +95,7 @@ esac
 # icon check. Not here: Rust, which is rustup's own installer with the GNU
 # host, and Open Watcom, which is a snapshot to unpack (both in
 # docs/build-windows.md).
-MSYS2_PACKAGES=(git rsync diffutils
+MSYS2_PACKAGES=(git rsync diffutils patch
   mingw-w64-x86_64-{gcc,clang,lld,gdb,ninja,meson,pkgconf,python,python-distlib}
   mingw-w64-x86_64-{glib2,pixman,zlib,libepoxy,libslirp}
   mingw-w64-x86_64-glslang

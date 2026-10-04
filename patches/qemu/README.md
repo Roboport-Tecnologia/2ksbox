@@ -941,3 +941,45 @@ with the PPI on (no `TPM_PPI=off`): Windows 11 on Arm at its desktop in
 36.2 s and powered off clean on the Air (2026-10-04); before, QEMU
 aborted before the firmware.
 **Drop:** upstream skips unaligned sections in `hvf_set_phys_mem()`.
+
+### 83-msvc-runtime
+QEMU on Windows against MSVC's runtime instead of mingw's (`WIN_QEMU_CC=msvc`,
+`docs/build-windows.md` "QEMU under MSVC"): MSYS2's clang targeting
+`x86_64-pc-windows-msvc`, Visual Studio's headers, the UCRT and the static
+C runtime, lld-link. Everything is inert in the mingw build (`host_msvc`,
+`_MSC_VER`, `QEMU_ENUM_UNSIGNED` empty), except two changes that hold
+for every build: four enum fields migrate through `VMSTATE_UINT32_ENUM`
+(the same four bytes), and `accel_irqchip_begin_route_changes()` loses an
+`inline` that left clang's MSVC mode no body to link. What it adds:
+- `include/msvc/` (on the system include path for an MSVC compiler only)
+  and `util/oslib-msvc.c`: the POSIX parts of mingw-w64 QEMU uses
+  (`unistd.h`, `getopt_long` with glibc's argument permutation,
+  `sys/time.h`, `dirent.h`, `libgen.h`, `clock_gettime`, `mkstemp`,
+  `ssize_t`, `mode_t`, ...) and compiler-rt's 128-bit division
+  (`__udivti3` and friends, x64 `divq` when the quotient fits).
+- `setjmp` keeps mingw's `_setjmp(env, NULL)`, so a longjmp out of
+  generated code never unwinds; the UCRT's `_setjmp` is called under
+  another name, since MSVC's headers give it one parameter. Real
+  `__try`/`__except` for mingw's `__try1`/`__except1`.
+- **Enums.** MSVC's ABI makes every enum an `int`. An enum bit-field one
+  bit short of its largest value reads back negative: `TCGTemp.kind:3`
+  turned `TEMP_CONST` into -4 (`la_bb_end: code should not be reached`,
+  `test.sh`'s `pad`), `TCGOp.opc:8` every opcode past 127, and softfloat's
+  `float_status` its rounding and NaN rules; the Sound Blaster checks
+  (`sb16-irq`, `sb-mixer`, `music`) and `dirdisc` failed with them. An
+  enumerator past `INT_MAX` is truncated (559 of them, ~450 from
+  `FIELD()`'s 64-bit masks). `QEMU_ENUM_UNSIGNED(type)` in
+  `qemu/compiler.h` gives each such enum an unsigned underlying type; no
+  compiler flag changes the rule (clang applies it with or without
+  `-fms-compatibility`). The MSVC build makes `-Wbitfield-enum-conversion`,
+  `-Wbitfield-constant-conversion` and `-Wmicrosoft-enum-value` errors, so
+  a QEMU bump that adds one fails to build rather than to run; that is
+  also how a rebase finds the new ones.
+- meson: `host_msvc`, lld-link accepted beside ld.lld,
+  `_USE_MATH_DEFINES`, `dxguid` for the D-Bus display, no `qemu-nbd`
+  (POSIX threads), `libqemu-embed-*.dll` with mingw's `lib` prefix (the
+  name the players import).
+**Test:** `WIN_QEMU_CC=msvc scripts/test.sh all` matches the mingw build's
+run (47 passed, the same 1 failed, 28 skipped, 2026-10-04); QEMU's unit
+tests 99 of 99 under MSVC. **Drop:** upstream QEMU builds for MSVC's ABI
+(it supports only mingw on Windows).

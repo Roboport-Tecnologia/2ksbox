@@ -11,3 +11,4 @@ package on the next `scripts/build.sh` and nothing else.
 | Package | Patch | What / why | Drop when |
 |---|---|---|---|
 | libtpms 0.10.2 | `01-strstr-const` | recent glibc (2.44 on the Linux box) makes `strstr()` on a const string return `const char *` (C23), and libtpms builds with a fixed `-Werror`, so `TPMLIB_GetPlaintext()` stops the build. One declaration made `const`, the same change as libtpms's master | libtpms moves past 0.10.2 |
+| libslirp 4.9.5 | `01-windows-iconv-optional` | on Windows libslirp's meson requires iconv, for a mingw static glib whose `.pc` leaves it out; the glib `build-deps.sh` builds for MSVC's runtime (Windows) converts with its own win_iconv, so there is no iconv to find. Optional, so that build configures; mingw still finds and links its own | libslirp asks for iconv only when glib needs it |

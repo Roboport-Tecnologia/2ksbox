@@ -1,0 +1,1531 @@
+QEMU on Windows against MSVC's runtime (WIN_QEMU_CC=msvc, docs/build-windows.md
+"QEMU under MSVC"): MSYS2's clang targeting x86_64-pc-windows-msvc, Visual
+Studio's headers, the UCRT and the static C runtime, linked by lld-link, against
+libraries scripts/build-deps.sh builds for that runtime. Upstream supports only
+mingw on Windows; everything here is inert there (host_msvc / _MSC_VER).
+
+- include/msvc/: the POSIX parts of mingw-w64's headers QEMU uses (unistd.h,
+  getopt.h, sys/time.h, dirent.h, libgen.h, strings.h; ssize_t, mode_t,
+  SSIZE_MAX, O_ACCMODE, S_IRUSR, clock_gettime, mkstemp), on the system include
+  path for an MSVC-ABI compiler only. Headers the UCRT also has wrap it with
+  #include_next.
+- util/oslib-msvc.c: the functions behind them (getopt_long with glibc's
+  argument permutation, gettimeofday, clock_gettime, nanosleep, usleep, sleep,
+  mkstemp, basename/dirname, opendir over FindFirstFile) and compiler-rt's
+  128-bit division (__udivti3 and friends), which clang calls and MSVC's
+  libraries lack.
+- os-win32.h: setjmp keeps mingw's _setjmp(env, NULL), so longjmp out of TCG's
+  generated code never unwinds; MSVC's headers declare _setjmp with one
+  parameter, so the UCRT's is called under another name.
+- oslib-win32.c: real __try/__except for mingw's __try1/__except1.
+- Enums. MSVC's ABI makes every enum an int, whatever its values: an enum in a
+  bit-field one bit short of its largest enumerator reads back negative, and an
+  enumerator past INT_MAX is truncated (both ABIs' clang agrees; no flag
+  changes it). TCGTemp.kind:3 read TEMP_CONST (4) as -4 and TCGOp.opc:8 every
+  opcode past 127 as negative (an `la_bb_end: code should not be reached`
+  abort), and softfloat's float_status lost its rounding and NaN rules the
+  same way. QEMU_ENUM_UNSIGNED(type) (qemu/compiler.h) gives such an enum an
+  unsigned underlying type under _MSC_VER and is empty elsewhere: the nine
+  bit-field enums, FIELD()/SHARED_FIELD()'s 64-bit masks (about 450 of the
+  559 enumerators past INT_MAX), and 26 enums of 32-bit codes with the top
+  bit set (rtl8139, net/eth.h, QEMU_ARCH_ALL, Hyper-V's message types, ...).
+  The MSVC build makes -Wbitfield-enum-conversion,
+  -Wbitfield-constant-conversion and -Wmicrosoft-enum-value errors, so a new
+  one fails the build instead of miscompiling.
+- vmstate.h: VMSTATE_UINT32_ENUM(_TEST) for four enum fields (sb16, usb-storage,
+  xhci, virtio-gpu), which VMSTATE_UINT32's type check refuses as ints; the
+  stream is the same four bytes.
+- accel-irq.c: an `inline` external definition that clang's MSVC mode emits no
+  body for.
+- meson.build: host_msvc; lld-link accepted beside ld.lld; _USE_MATH_DEFINES;
+  no qemu-nbd (POSIX threads); dxguid for the D-Bus display's DXGI IDs;
+  libqemu-embed-*.dll keeps mingw's `lib` prefix, the name the players import.
+
+diff --git a/accel/accel-irq.c b/accel/accel-irq.c
+index 830be27..1650a83 100644
+--- a/accel/accel-irq.c
++++ b/accel/accel-irq.c
+@@ -90,7 +90,12 @@ int accel_irqchip_remove_irqfd_notifier_gsi(EventNotifier *n, int virq)
+     return -ENOSYS;
+ }
+ 
+-inline AccelRouteChange accel_irqchip_begin_route_changes(void)
++/*
++ * 2ksbox patch 83: not `inline`. A C `inline` definition beside the
++ * header's plain declaration is the external one, but clang compiling
++ * for MSVC's ABI treats inline as MSVC does and emits no body to link.
++ */
++AccelRouteChange accel_irqchip_begin_route_changes(void)
+ {
+     if (mshv_msi_via_irqfd_enabled()) {
+         return (AccelRouteChange) {
+diff --git a/block/dmg.c b/block/dmg.c
+index 5d7d3b8..40a110f 100644
+--- a/block/dmg.c
++++ b/block/dmg.c
+@@ -42,7 +42,7 @@ enum {
+     DMG_SECTORCOUNTS_MAX = DMG_LENGTHS_MAX / 512,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     /* DMG Block Type */
+     UDZE = 0, /* Zeroes */
+     UDRW,     /* RAW type */
+diff --git a/disas/nanomips.c b/disas/nanomips.c
+index db0c297..618b781 100644
+--- a/disas/nanomips.c
++++ b/disas/nanomips.c
+@@ -16125,7 +16125,7 @@ typedef enum  {
+     pool,
+ } TABLE_ENTRY_TYPE;
+ 
+-typedef enum {
++typedef enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     MIPS64_    = 0x00000001,
+     XNP_       = 0x00000002,
+     XMMS_      = 0x00000004,
+diff --git a/hw/audio/sb16.c b/hw/audio/sb16.c
+index 1252ee6..9ab54cf 100644
+--- a/hw/audio/sb16.c
++++ b/hw/audio/sb16.c
+@@ -1453,7 +1453,7 @@ static const VMStateDescription vmstate_sb16 = {
+         VMSTATE_INT32 (fmt_stereo, SB16State),
+         VMSTATE_INT32 (fmt_signed, SB16State),
+         VMSTATE_INT32 (fmt_bits, SB16State),
+-        VMSTATE_UINT32 (fmt, SB16State),
++        VMSTATE_UINT32_ENUM (fmt, SB16State),
+         VMSTATE_INT32 (dma_auto, SB16State),
+         VMSTATE_INT32 (block_size, SB16State),
+         VMSTATE_INT32 (fifo, SB16State),
+diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
+index f991baf..271b3f8 100644
+--- a/hw/display/virtio-gpu.c
++++ b/hw/display/virtio-gpu.c
+@@ -1306,8 +1306,8 @@ static const VMStateDescription vmstate_virtio_gpu_scanout = {
+         VMSTATE_UINT32(cursor.hot_y, struct virtio_gpu_scanout),
+         VMSTATE_UINT32(cursor.pos.x, struct virtio_gpu_scanout),
+         VMSTATE_UINT32(cursor.pos.y, struct virtio_gpu_scanout),
+-        VMSTATE_UINT32_TEST(fb.format, struct virtio_gpu_scanout,
+-                            scanout_vmstate_after_v2),
++        VMSTATE_UINT32_ENUM_TEST(fb.format, struct virtio_gpu_scanout,
++                                 scanout_vmstate_after_v2),
+         VMSTATE_UNUSED_TEST(scanout_vmstate_after_v2, 4),
+         VMSTATE_UINT32_TEST(fb.width, struct virtio_gpu_scanout,
+                             scanout_vmstate_after_v2),
+diff --git a/hw/misc/allwinner-a10-dramc.c b/hw/misc/allwinner-a10-dramc.c
+index 757f2ca..568ad63 100644
+--- a/hw/misc/allwinner-a10-dramc.c
++++ b/hw/misc/allwinner-a10-dramc.c
+@@ -47,7 +47,7 @@ enum {
+ };
+ 
+ /* DRAMC register reset values */
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     REG_SDR_CCR_RESET   = 0x80020000,
+     REG_SDR_ZQCR0_RESET = 0x07b00000,
+     REG_SDR_ZQSR_RESET  = 0x80000000
+diff --git a/hw/misc/allwinner-h3-ccu.c b/hw/misc/allwinner-h3-ccu.c
+index ac5ae01..39a5cfd 100644
+--- a/hw/misc/allwinner-h3-ccu.c
++++ b/hw/misc/allwinner-h3-ccu.c
+@@ -70,7 +70,7 @@ enum {
+ 
+ 
+ /* CCU register reset values */
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     REG_PLL_CPUX_RST         = 0x00001000,
+     REG_PLL_AUDIO_RST        = 0x00035514,
+     REG_PLL_VIDEO_RST        = 0x03006207,
+diff --git a/hw/net/opencores_eth.c b/hw/net/opencores_eth.c
+index 5a07bcd..cb4ad25 100644
+--- a/hw/net/opencores_eth.c
++++ b/hw/net/opencores_eth.c
+@@ -179,7 +179,7 @@ enum {
+     INT_SOURCE_TXB = 0x1,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     PACKETLEN_MINFL = 0xffff0000,
+     PACKETLEN_MINFL_LBN = 16,
+     PACKETLEN_MAXFL = 0xffff,
+@@ -214,7 +214,7 @@ enum {
+     MIISTATUS_LINKFAIL_LBN = 0,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     MAC_ADDR0_BYTE2 = 0xff000000,
+     MAC_ADDR0_BYTE2_LBN = 24,
+     MAC_ADDR0_BYTE3 = 0xff0000,
+@@ -232,7 +232,7 @@ enum {
+     MAC_ADDR1_BYTE1_LBN = 0,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     TXD_LEN = 0xffff0000,
+     TXD_LEN_LBN = 16,
+     TXD_RD = 0x8000,
+@@ -249,7 +249,7 @@ enum {
+     TXD_CS = 0x1,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     RXD_LEN = 0xffff0000,
+     RXD_LEN_LBN = 16,
+     RXD_E = 0x8000,
+diff --git a/hw/net/rtl8139.c b/hw/net/rtl8139.c
+index 1647928..f77d6a5 100644
+--- a/hw/net/rtl8139.c
++++ b/hw/net/rtl8139.c
+@@ -179,7 +179,7 @@ enum IntrStatusBits {
+     RxAckBits = RxFIFOOver | RxOverflow | RxOK,
+ };
+ 
+-enum TxStatusBits {
++enum TxStatusBits QEMU_ENUM_UNSIGNED(uint32_t) {
+     TxHostOwns = 0x2000,
+     TxUnderrun = 0x4000,
+     TxStatOK = 0x8000,
+diff --git a/hw/net/vmxnet3.h b/hw/net/vmxnet3.h
+index dbc69d5..a9ed80c 100644
+--- a/hw/net/vmxnet3.h
++++ b/hw/net/vmxnet3.h
+@@ -175,7 +175,7 @@ enum {
+ #define VMXNET3_IO_TYPE(addr)           ((addr) >> 24)
+ #define VMXNET3_IO_REG(addr)            ((addr) & 0xFFFFFF)
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     VMXNET3_CMD_FIRST_SET = 0xCAFE0000,
+     VMXNET3_CMD_ACTIVATE_DEV = VMXNET3_CMD_FIRST_SET, /* 0xCAFE0000 */
+     VMXNET3_CMD_QUIESCE_DEV,                          /* 0xCAFE0001 */
+@@ -509,7 +509,7 @@ union Vmxnet3_GenericDesc {
+ 
+ /* a list of reasons for queue stop */
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+  VMXNET3_ERR_NOEOP        = 0x80000000, /* cannot find the EOP desc of a pkt */
+  VMXNET3_ERR_TXD_REUSE    = 0x80000001, /* reuse TxDesc before tx completion */
+  VMXNET3_ERR_BIG_PKT      = 0x80000002, /* too many TxDesc for a pkt */
+diff --git a/hw/scsi/mpi.h b/hw/scsi/mpi.h
+index 0568e19..27a5001 100644
+--- a/hw/scsi/mpi.h
++++ b/hw/scsi/mpi.h
+@@ -98,7 +98,7 @@ enum {
+ /*  Registers                                                               */
+ /****************************************************************************/
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     MPI_IOC_STATE_RESET                 = 0x00000000,
+     MPI_IOC_STATE_READY                 = 0x10000000,
+     MPI_IOC_STATE_OPERATIONAL           = 0x20000000,
+@@ -181,7 +181,7 @@ typedef struct MPISGEntry {
+ 
+ /* Flags field bit definitions */
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     MPI_SGE_FLAGS_LAST_ELEMENT              = 0x80000000,
+     MPI_SGE_FLAGS_END_OF_BUFFER             = 0x40000000,
+     MPI_SGE_FLAGS_ELEMENT_TYPE_MASK         = 0x30000000,
+@@ -237,7 +237,7 @@ typedef struct MPIDefaultReply {
+ 
+ #define MPI_MSGFLAGS_CONTINUATION_REPLY         (0x80)
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+ 
+     /************************************************************************/
+     /*  Common IOCStatus values for all replies                             */
+@@ -977,7 +977,7 @@ typedef struct MPIMsgConfigReply {
+     uint8_t                 PageType;                   /* 17h */
+ } QEMU_PACKED MPIMsgConfigReply;
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     /* PageAddress field values */
+     MPI_CONFIG_PAGEATTR_READ_ONLY               = 0x00,
+     MPI_CONFIG_PAGEATTR_CHANGEABLE              = 0x10,
+diff --git a/hw/sd/allwinner-sdhost.c b/hw/sd/allwinner-sdhost.c
+index 87bb7df..1b32ae1 100644
+--- a/hw/sd/allwinner-sdhost.c
++++ b/hw/sd/allwinner-sdhost.c
+@@ -129,7 +129,7 @@ enum {
+ };
+ 
+ /* SD Host register reset values */
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     REG_SD_GCTL_RST         = 0x00000300,
+     REG_SD_CKCR_RST         = 0x0,
+     REG_SD_TMOR_RST         = 0xFFFFFF40,
+@@ -172,7 +172,7 @@ typedef struct TransferDescriptor {
+ } TransferDescriptor;
+ 
+ /* Data transfer descriptor flags */
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     DESC_STATUS_HOLD   = (1 << 31), /* Set when descriptor is in use by DMA */
+     DESC_STATUS_ERROR  = (1 << 30), /* Set when DMA transfer error occurred */
+     DESC_STATUS_CHAIN  = (1 << 4),  /* Indicates chained descriptor. */
+diff --git a/hw/usb/dev-network.c b/hw/usb/dev-network.c
+index 568a6ff..ce1801b 100644
+--- a/hw/usb/dev-network.c
++++ b/hw/usb/dev-network.c
+@@ -334,7 +334,7 @@ enum {
+ };
+ 
+ /* Message completion */
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     RNDIS_INITIALIZE_CMPLT      = 0x80000002U,
+     RNDIS_QUERY_CMPLT           = 0x80000004U,
+     RNDIS_SET_CMPLT             = 0x80000005U,
+diff --git a/hw/usb/dev-storage.c b/hw/usb/dev-storage.c
+index 040cf15..55368be 100644
+--- a/hw/usb/dev-storage.c
++++ b/hw/usb/dev-storage.c
+@@ -573,7 +573,7 @@ static const VMStateDescription vmstate_usb_msd = {
+     .minimum_version_id = 1,
+     .fields = (const VMStateField[]) {
+         VMSTATE_USB_DEVICE(dev, MSDState),
+-        VMSTATE_UINT32(mode, MSDState),
++        VMSTATE_UINT32_ENUM(mode, MSDState),
+         VMSTATE_UINT32(scsi_len, MSDState),
+         VMSTATE_UINT32(scsi_off, MSDState),
+         VMSTATE_UINT32(data_len, MSDState),
+diff --git a/hw/usb/hcd-xhci.c b/hw/usb/hcd-xhci.c
+index 624ce4e..a610f64 100644
+--- a/hw/usb/hcd-xhci.c
++++ b/hw/usb/hcd-xhci.c
+@@ -3572,8 +3572,8 @@ static const VMStateDescription vmstate_xhci_event = {
+     .name = "xhci-event",
+     .version_id = 1,
+     .fields = (const VMStateField[]) {
+-        VMSTATE_UINT32(type,   XHCIEvent),
+-        VMSTATE_UINT32(ccode,  XHCIEvent),
++        VMSTATE_UINT32_ENUM(type,  XHCIEvent),
++        VMSTATE_UINT32_ENUM(ccode, XHCIEvent),
+         VMSTATE_UINT64(ptr,    XHCIEvent),
+         VMSTATE_UINT32(length, XHCIEvent),
+         VMSTATE_UINT32(flags,  XHCIEvent),
+diff --git a/include/block/nvme.h b/include/block/nvme.h
+index 17a7c78..a6c1caf 100644
+--- a/include/block/nvme.h
++++ b/include/block/nvme.h
+@@ -360,7 +360,7 @@ enum NvmeCmbmscShift {
+     CMBMSC_CBA_SHIFT  = 12,
+ };
+ 
+-enum NvmeCmbmscMask {
++enum NvmeCmbmscMask QEMU_ENUM_UNSIGNED(uint64_t) {
+     CMBMSC_CRE_MASK  = 0x1,
+     CMBMSC_CMSE_MASK = 0x1,
+     CMBMSC_CBA_MASK  = ((1ULL << 52) - 1),
+diff --git a/include/fpu/softfloat-types.h b/include/fpu/softfloat-types.h
+index d7f5303..45c6066 100644
+--- a/include/fpu/softfloat-types.h
++++ b/include/fpu/softfloat-types.h
+@@ -137,7 +137,7 @@ typedef uint8_t float8_e5m2;
+  *Software IEC/IEEE floating-point rounding mode.
+  */
+ 
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     float_round_nearest_even = 0,
+     float_round_down         = 1,
+     float_round_up           = 2,
+@@ -186,7 +186,7 @@ typedef uint16_t FloatExceptionFlags;
+ /*
+  * Rounding precision for floatx80.
+  */
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     floatx80_precision_x,
+     floatx80_precision_d,
+     floatx80_precision_s,
+@@ -203,7 +203,7 @@ typedef enum __attribute__((__packed__)) {
+  * Further, some architectures (or modes of architectures) do not detect
+  * signaling NaNs at all.
+  */
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     float_snan_bit_is_zero,
+     float_snan_bit_is_one,
+     float_snan_never,
+@@ -221,7 +221,7 @@ typedef enum __attribute__((__packed__)) {
+  * not to set the rule in float_status, and we will assert if
+  * we need to handle an input NaN and no rule was selected.
+  */
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     /* No propagation rule specified */
+     float_2nan_prop_none = 0,
+     /* Prefer SNaN over QNaN, then operand A over B */
+@@ -280,7 +280,7 @@ FIELD(3NAN, SNAN, 6, 1)  /* do we prefer SNaN over QNaN ? */
+ #define PROPRULE(X, Y, Z) \
+     ((X << R_3NAN_1ST_SHIFT) | (Y << R_3NAN_2ND_SHIFT) | (Z << R_3NAN_3RD_SHIFT))
+ 
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     float_3nan_prop_none = 0,     /* No propagation rule specified */
+     float_3nan_prop_abc = PROPRULE(0, 1, 2),
+     float_3nan_prop_acb = PROPRULE(0, 2, 1),
+@@ -309,7 +309,7 @@ typedef enum __attribute__((__packed__)) {
+  * will assert if we need to handle an input NaN and no rule was
+  * selected.
+  */
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     /* No propagation rule specified */
+     float_infzeronan_none = 0,
+     /* Result is never the default NaN (so always the input NaN) */
+@@ -351,7 +351,7 @@ typedef enum __attribute__((__packed__)) {
+  * These flag values allow specification of the target's requirements
+  * and can be ORed together to set floatx80_behaviour.
+  */
+-typedef enum __attribute__((__packed__)) {
++typedef enum __attribute__((__packed__)) QEMU_ENUM_UNSIGNED(unsigned char) {
+     /* In the default Infinity value, is the Integer bit 0 ? */
+     floatx80_default_inf_int_bit_is_zero = 1,
+     /*
+diff --git a/include/hw/core/registerfields.h b/include/hw/core/registerfields.h
+index 1330ca7..1d1f4d1 100644
+--- a/include/hw/core/registerfields.h
++++ b/include/hw/core/registerfields.h
+@@ -39,10 +39,14 @@
+ /* This macro will define R_FOO_BAR_MASK, R_FOO_BAR_SHIFT and R_FOO_BAR_LENGTH
+  * constants for field BAR in register FOO.
+  */
++/*
++ * 2ksbox patch 83: the mask is a 64-bit value, which MSVC's ABI would
++ * truncate to an int enumerator (QEMU_ENUM_UNSIGNED).
++ */
+ #define FIELD(reg, field, shift, length)                                  \
+     enum { R_ ## reg ## _ ## field ## _SHIFT = (shift)};                  \
+     enum { R_ ## reg ## _ ## field ## _LENGTH = (length)};                \
+-    enum { R_ ## reg ## _ ## field ## _MASK =                             \
++    enum QEMU_ENUM_UNSIGNED(uint64_t) { R_ ## reg ## _ ## field ## _MASK = \
+                                         MAKE_64BIT_MASK(shift, length)};
+ 
+ /* Extract a field from a register */
+@@ -164,7 +168,8 @@
+ #define SHARED_FIELD(name, shift, length)   \
+     enum { name ## _ ## SHIFT = (shift)};   \
+     enum { name ## _ ## LENGTH = (length)}; \
+-    enum { name ## _ ## MASK = MAKE_64BIT_MASK(shift, length)};
++    enum QEMU_ENUM_UNSIGNED(uint64_t) {     \
++        name ## _ ## MASK = MAKE_64BIT_MASK(shift, length)};
+ 
+ /* Extract a shared field */
+ #define SHARED_FIELD_EX8(storage, field) \
+diff --git a/include/hw/hyperv/hvgdk_mini.h b/include/hw/hyperv/hvgdk_mini.h
+index f8838a3..ca71673 100644
+--- a/include/hw/hyperv/hvgdk_mini.h
++++ b/include/hw/hyperv/hvgdk_mini.h
+@@ -214,7 +214,7 @@ typedef enum hv_register_name {
+     HV_REGISTER_SIRBP       = 0x000A0015,
+ } hv_register_name;
+ 
+-enum hv_intercept_type {
++enum hv_intercept_type QEMU_ENUM_UNSIGNED(uint32_t) {
+     HV_INTERCEPT_TYPE_X64_IO_PORT       = 0X00000000,
+     HV_INTERCEPT_TYPE_X64_MSR           = 0X00000001,
+     HV_INTERCEPT_TYPE_X64_CPUID         = 0X00000002,
+@@ -698,7 +698,7 @@ union hv_port_id {
+ #define HV_MESSAGE_PAYLOAD_QWORD_COUNT  (30)
+ 
+ /* Define hypervisor message types. */
+-enum hv_message_type {
++enum hv_message_type QEMU_ENUM_UNSIGNED(uint32_t) {
+     HVMSG_NONE                          = 0x00000000,
+ 
+     /* Memory access messages. */
+diff --git a/include/hw/misc/imx7_ccm.h b/include/hw/misc/imx7_ccm.h
+index dcaebfb..736d2f6 100644
+--- a/include/hw/misc/imx7_ccm.h
++++ b/include/hw/misc/imx7_ccm.h
+@@ -16,7 +16,7 @@
+ #include "qemu/bitops.h"
+ #include "qom/object.h"
+ 
+-enum IMX7AnalogRegisters {
++enum IMX7AnalogRegisters QEMU_ENUM_UNSIGNED(uint32_t) {
+     ANALOG_PLL_ARM,
+     ANALOG_PLL_ARM_SET,
+     ANALOG_PLL_ARM_CLR,
+diff --git a/include/migration/vmstate.h b/include/migration/vmstate.h
+index 1b7f295..75c0b33 100644
+--- a/include/migration/vmstate.h
++++ b/include/migration/vmstate.h
+@@ -1027,6 +1027,18 @@ extern const VMStateInfo vmstate_info_g_byte_array;
+ #define VMSTATE_UINT64_V(_f, _s, _v)                                  \
+     VMSTATE_SINGLE(_f, _s, _v, vmstate_info_uint64, uint64_t)
+ 
++/*
++ * 2ksbox patch 83: an enum migrated as a uint32. MSVC's ABI makes every
++ * enum an int, where the SysV ABIs make one without negative values an
++ * unsigned int, so VMSTATE_UINT32's type check refuses it there. The
++ * stream is the same four bytes either way.
++ */
++#define VMSTATE_UINT32_ENUM(_f, _s)                                   \
++    VMSTATE_SINGLE(_f, _s, 0, vmstate_info_uint32, typeof_field(_s, _f))
++#define VMSTATE_UINT32_ENUM_TEST(_f, _s, _t)                          \
++    VMSTATE_SINGLE_TEST(_f, _s, _t, 0, vmstate_info_uint32,           \
++                        typeof_field(_s, _f))
++
+ #define VMSTATE_FD_V(_f, _s, _v)                                  \
+     VMSTATE_SINGLE(_f, _s, _v, vmstate_info_fd, int32_t)
+ 
+diff --git a/include/msvc/README b/include/msvc/README
+new file mode 100644
+index 0000000..d44e90c
+--- /dev/null
++++ b/include/msvc/README
+@@ -0,0 +1,12 @@
++POSIX headers for a build against MSVC's runtime (2ksbox patch 83)
++
++QEMU on Windows is written for mingw-w64, whose headers carry the parts
++of POSIX QEMU uses (unistd.h, getopt.h, sys/time.h, dirent.h, ssize_t,
++mode_t, ...). The UCRT and the Windows SDK do not. meson.build puts this
++directory on the system include path when the compiler targets MSVC's
++ABI (it defines _MSC_VER), and nowhere else; the functions behind these
++declarations are util/oslib-msvc.c.
++
++A header the UCRT also has (sys/types.h, sys/stat.h, fcntl.h, time.h)
++includes the UCRT's with #include_next and adds the missing names.
++Nothing here is used by a mingw build.
+diff --git a/include/msvc/dirent.h b/include/msvc/dirent.h
+new file mode 100644
+index 0000000..c3f2d87
+--- /dev/null
++++ b/include/msvc/dirent.h
+@@ -0,0 +1,27 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the directory reading
++ * mingw-w64 has and the UCRT does not (vvfat, the monitor's file name
++ * completion); util/oslib-msvc.c, over FindFirstFile.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_DIRENT_H
++#define QEMU_MSVC_DIRENT_H
++
++#include <sys/types.h>
++
++struct dirent {
++    long d_ino;
++    unsigned short d_reclen;
++    unsigned short d_namlen;
++    char d_name[260];
++};
++
++typedef struct QemuMsvcDir DIR;
++
++DIR *opendir(const char *name);
++struct dirent *readdir(DIR *dir);
++int closedir(DIR *dir);
++void rewinddir(DIR *dir);
++
++#endif
+diff --git a/include/msvc/fcntl.h b/include/msvc/fcntl.h
+new file mode 100644
+index 0000000..e3cdbd9
+--- /dev/null
++++ b/include/msvc/fcntl.h
+@@ -0,0 +1,17 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's fcntl.h plus
++ * what mingw-w64's io.h adds to it.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_FCNTL_H
++#define QEMU_MSVC_FCNTL_H
++
++#include_next <fcntl.h>
++#include <io.h>
++
++#ifndef O_ACCMODE
++#define O_ACCMODE (_O_RDONLY | _O_WRONLY | _O_RDWR)
++#endif
++
++#endif
+diff --git a/include/msvc/getopt.h b/include/msvc/getopt.h
+new file mode 100644
+index 0000000..057c380
+--- /dev/null
++++ b/include/msvc/getopt.h
+@@ -0,0 +1,27 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): getopt() and
++ * getopt_long(), which the UCRT lacks; util/oslib-msvc.c.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_GETOPT_H
++#define QEMU_MSVC_GETOPT_H
++
++extern char *optarg;
++extern int optind, opterr, optopt;
++
++struct option {
++    const char *name;
++    int has_arg;
++    int *flag;
++    int val;
++};
++#define no_argument 0
++#define required_argument 1
++#define optional_argument 2
++
++int getopt(int argc, char *const argv[], const char *optstring);
++int getopt_long(int argc, char *const argv[], const char *optstring,
++                const struct option *longopts, int *longindex);
++
++#endif
+diff --git a/include/msvc/libgen.h b/include/msvc/libgen.h
+new file mode 100644
+index 0000000..bade5e6
+--- /dev/null
++++ b/include/msvc/libgen.h
+@@ -0,0 +1,13 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): basename() for qemu-io;
++ * util/oslib-msvc.c.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_LIBGEN_H
++#define QEMU_MSVC_LIBGEN_H
++
++char *basename(char *path);
++char *dirname(char *path);
++
++#endif
+diff --git a/include/msvc/limits.h b/include/msvc/limits.h
+new file mode 100644
+index 0000000..ff2b85d
+--- /dev/null
++++ b/include/msvc/limits.h
+@@ -0,0 +1,20 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's limits.h plus
++ * SSIZE_MAX, which mingw-w64 defines there.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_LIMITS_H
++#define QEMU_MSVC_LIMITS_H
++
++#include_next <limits.h>
++
++#ifndef SSIZE_MAX
++#ifdef _WIN64
++#define SSIZE_MAX _I64_MAX
++#else
++#define SSIZE_MAX INT_MAX
++#endif
++#endif
++
++#endif
+diff --git a/include/msvc/stdlib.h b/include/msvc/stdlib.h
+new file mode 100644
+index 0000000..3ccbc96
+--- /dev/null
++++ b/include/msvc/stdlib.h
+@@ -0,0 +1,14 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's stdlib.h plus
++ * mkstemp(), which mingw-w64 has; util/oslib-msvc.c.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_STDLIB_H
++#define QEMU_MSVC_STDLIB_H
++
++#include_next <stdlib.h>
++
++int mkstemp(char *tmpl);
++
++#endif
+diff --git a/include/msvc/strings.h b/include/msvc/strings.h
+new file mode 100644
+index 0000000..e446518
+--- /dev/null
++++ b/include/msvc/strings.h
+@@ -0,0 +1,13 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README).
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_STRINGS_H
++#define QEMU_MSVC_STRINGS_H
++
++#include <string.h>
++#define strcasecmp _stricmp
++#define strncasecmp _strnicmp
++
++#endif
+diff --git a/include/msvc/sys/stat.h b/include/msvc/sys/stat.h
+new file mode 100644
+index 0000000..edca1da
+--- /dev/null
++++ b/include/msvc/sys/stat.h
+@@ -0,0 +1,37 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's sys/stat.h
++ * plus the POSIX mode bits mingw-w64 defines.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_SYS_STAT_H
++#define QEMU_MSVC_SYS_STAT_H
++
++#include <sys/types.h>
++#include_next <sys/stat.h>
++
++#ifndef S_IRUSR
++#define S_IRWXU (_S_IREAD | _S_IWRITE | _S_IEXEC)
++#define S_IRUSR _S_IREAD
++#define S_IWUSR _S_IWRITE
++#define S_IXUSR _S_IEXEC
++#define S_IRWXG 0
++#define S_IRGRP 0
++#define S_IWGRP 0
++#define S_IXGRP 0
++#define S_IRWXO 0
++#define S_IROTH 0
++#define S_IWOTH 0
++#define S_IXOTH 0
++#endif
++#ifndef S_ISDIR
++#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
++#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
++#define S_ISCHR(m) (((m) & _S_IFMT) == _S_IFCHR)
++#define S_ISFIFO(m) (((m) & _S_IFMT) == _S_IFIFO)
++#define S_ISBLK(m) 0
++#define S_ISLNK(m) 0
++#define S_ISSOCK(m) 0
++#endif
++
++#endif
+diff --git a/include/msvc/sys/time.h b/include/msvc/sys/time.h
+new file mode 100644
+index 0000000..01ba56d
+--- /dev/null
++++ b/include/msvc/sys/time.h
+@@ -0,0 +1,14 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): struct timeval comes
++ * with winsock2.h on Windows; gettimeofday() is util/oslib-msvc.c.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_SYS_TIME_H
++#define QEMU_MSVC_SYS_TIME_H
++
++#include <winsock2.h>
++
++int gettimeofday(struct timeval *tv, void *tz);
++
++#endif
+diff --git a/include/msvc/sys/types.h b/include/msvc/sys/types.h
+new file mode 100644
+index 0000000..df7bd86
+--- /dev/null
++++ b/include/msvc/sys/types.h
+@@ -0,0 +1,28 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's sys/types.h
++ * plus the POSIX types mingw-w64 declares.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_SYS_TYPES_H
++#define QEMU_MSVC_SYS_TYPES_H
++
++#include_next <sys/types.h>
++#include <stdint.h>
++
++#ifndef _SSIZE_T_DEFINED
++#define _SSIZE_T_DEFINED
++typedef intptr_t ssize_t;
++#endif
++#ifndef _PID_T_
++#define _PID_T_
++typedef int pid_t;
++#endif
++#ifndef _MODE_T_
++#define _MODE_T_
++typedef unsigned short mode_t;
++#endif
++typedef unsigned int useconds_t;
++typedef long long off64_t;
++
++#endif
+diff --git a/include/msvc/time.h b/include/msvc/time.h
+new file mode 100644
+index 0000000..539bee8
+--- /dev/null
++++ b/include/msvc/time.h
+@@ -0,0 +1,20 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): the UCRT's time.h plus
++ * clock_gettime() and nanosleep(), which mingw-w64 has from winpthreads.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_TIME_H
++#define QEMU_MSVC_TIME_H
++
++#include_next <time.h>
++
++#ifndef CLOCK_REALTIME
++typedef int clockid_t;
++#define CLOCK_REALTIME 0
++#define CLOCK_MONOTONIC 1
++int clock_gettime(clockid_t clock_id, struct timespec *tp);
++#endif
++int nanosleep(const struct timespec *req, struct timespec *rem);
++
++#endif
+diff --git a/include/msvc/unistd.h b/include/msvc/unistd.h
+new file mode 100644
+index 0000000..0f090d4
+--- /dev/null
++++ b/include/msvc/unistd.h
+@@ -0,0 +1,31 @@
++/*
++ * MSVC compat (2ksbox patch 83, see ../README): what QEMU takes from
++ * mingw-w64's unistd.h. The UCRT keeps these POSIX functions in io.h,
++ * process.h and direct.h.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef QEMU_MSVC_UNISTD_H
++#define QEMU_MSVC_UNISTD_H
++
++#include <sys/types.h>
++#include <io.h>
++#include <process.h>
++#include <direct.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#ifndef R_OK
++#define R_OK 4
++#define W_OK 2
++#define X_OK 0
++#define F_OK 0
++#endif
++#define STDIN_FILENO 0
++#define STDOUT_FILENO 1
++#define STDERR_FILENO 2
++
++int usleep(useconds_t usec);
++unsigned int sleep(unsigned int seconds);
++
++#endif
+diff --git a/include/net/eth.h b/include/net/eth.h
+index 46dc9ed..3e79d61 100644
+--- a/include/net/eth.h
++++ b/include/net/eth.h
+@@ -277,7 +277,7 @@ static inline int is_unicast_ether_addr(const uint8_t *addr)
+     return !is_multicast_ether_addr(addr);
+ }
+ 
+-typedef enum {
++typedef enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     ETH_PKT_UCAST = 0xAABBCC00,
+     ETH_PKT_BCAST,
+     ETH_PKT_MCAST
+diff --git a/include/qemu/base-arch-defs.h b/include/qemu/base-arch-defs.h
+index f334657..960e19d 100644
+--- a/include/qemu/base-arch-defs.h
++++ b/include/qemu/base-arch-defs.h
+@@ -9,7 +9,7 @@
+ 
+ #include "qapi/qapi-types-machine.h"
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     QEMU_ARCH_ALPHA =       (1UL << SYS_EMU_TARGET_ALPHA),
+     QEMU_ARCH_ARM =         (1UL << SYS_EMU_TARGET_ARM) |
+                             (1UL << SYS_EMU_TARGET_AARCH64),
+diff --git a/include/qemu/compiler.h b/include/qemu/compiler.h
+index 4c49f52..1d0c2b4 100644
+--- a/include/qemu/compiler.h
++++ b/include/qemu/compiler.h
+@@ -23,6 +23,19 @@
+ #endif
+ 
+ #define QEMU_PACKED __attribute__((packed))
++
++/*
++ * 2ksbox patch 83: an enum stored in a bit-field. MSVC's ABI makes every
++ * enum signed, so a 3-bit field holding 4 reads back -4; under it such an
++ * enum gets the unsigned underlying type named (a fixed type, an
++ * extension clang accepts in C), elsewhere nothing changes. Found with
++ * clang's -Wbitfield-enum-conversion.
++ */
++#ifdef _MSC_VER
++#define QEMU_ENUM_UNSIGNED(type) : type
++#else
++#define QEMU_ENUM_UNSIGNED(type)
++#endif
+ #define QEMU_ALIGNED(X) __attribute__((aligned(X)))
+ 
+ #ifndef glue
+diff --git a/include/standard-headers/linux/ethtool.h b/include/standard-headers/linux/ethtool.h
+index 55f608c..5bc001a 100644
+--- a/include/standard-headers/linux/ethtool.h
++++ b/include/standard-headers/linux/ethtool.h
+@@ -2436,7 +2436,7 @@ enum {
+  * in the hardware or because they cannot be reset independently.  The
+  * driver must never reset any components that were not requested.
+  */
+-enum ethtool_reset_flags {
++enum ethtool_reset_flags QEMU_ENUM_UNSIGNED(uint32_t) {
+ 	/* These flags represent components dedicated to the interface
+ 	 * the command is addressed to.  Shift any flag left by
+ 	 * ETH_RESET_SHARED_SHIFT to reset a shared component of the
+diff --git a/include/system/os-win32.h b/include/system/os-win32.h
+index 22d72ba..b8e24d7 100644
+--- a/include/system/os-win32.h
++++ b/include/system/os-win32.h
+@@ -78,7 +78,18 @@ void __attribute__((noreturn)) __mingw_longjmp(jmp_buf, int);
+  * lets longjmp try a stack unwinding which will crash with generated code.
+  */
+ # undef setjmp
+-# define setjmp(env) _setjmp(env, NULL)
++# ifdef _MSC_VER
++/*
++ * 2ksbox patch 83: MSVC's headers declare _setjmp() with one parameter
++ * and clang fills in the frame itself, so the UCRT's _setjmp is called
++ * under another name to pass the NULL. returns_twice, as for setjmp.
++ */
++int __attribute__((returns_twice)) qemu_setjmp_nounwind(jmp_buf env, void *frame)
++    __asm__("_setjmp");
++#  define setjmp(env) qemu_setjmp_nounwind(env, NULL)
++# else
++#  define setjmp(env) _setjmp(env, NULL)
++# endif
+ #endif /* __aarch64__ */
+ /* QEMU uses sigsetjmp()/siglongjmp() as the portable way to specify
+  * "longjmp and don't touch the signal masks". Since we know that the
+diff --git a/include/tcg/tcg.h b/include/tcg/tcg.h
+index 7669dc1..db148b5 100644
+--- a/include/tcg/tcg.h
++++ b/include/tcg/tcg.h
+@@ -56,7 +56,7 @@ typedef uint64_t TCGRegSet;
+ #error unsupported
+ #endif
+ 
+-typedef enum TCGOpcode {
++typedef enum TCGOpcode QEMU_ENUM_UNSIGNED(unsigned int) {
+ #define DEF(name, oargs, iargs, cargs, flags) INDEX_op_ ## name,
+ #include "tcg/tcg-opc.h"
+ #undef DEF
+@@ -250,7 +250,7 @@ typedef enum TCGTempVal {
+     TEMP_VAL_CONST,
+ } TCGTempVal;
+ 
+-typedef enum TCGTempKind {
++typedef enum TCGTempKind QEMU_ENUM_UNSIGNED(unsigned int) {
+     /*
+      * Temp is dead at the end of the extended basic block (EBB),
+      * the single-entry multiple-exit region that falls through
+diff --git a/meson.build b/meson.build
+index 372eb83..cb1f180 100644
+--- a/meson.build
++++ b/meson.build
+@@ -359,6 +359,23 @@ qemu_common_flags = [
+ qemu_cflags = []
+ qemu_ldflags = []
+ 
++# 2ksbox patch 83: Windows against MSVC's runtime rather than mingw's
++# (clang targeting x86_64-pc-windows-msvc, linked by lld-link). The POSIX
++# parts of mingw-w64's headers QEMU uses come from include/msvc.
++host_msvc = host_os == 'windows' and cc.get_define('_MSC_VER') != ''
++if host_msvc
++  qemu_common_flags += ['-isystem' + (meson.current_source_dir() / 'include' / 'msvc'),
++                        '-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE',
++                        '-D_USE_MATH_DEFINES',
++                        # every enum is a signed int in MSVC's ABI: an enum
++                        # in a bit-field one bit short, or with an enumerator
++                        # past INT_MAX, is a miscompile, not a warning
++                        # (QEMU_ENUM_UNSIGNED in qemu/compiler.h)
++                        '-Werror=bitfield-enum-conversion',
++                        '-Werror=bitfield-constant-conversion',
++                        '-Werror=microsoft-enum-value']
++endif
++
+ if host_os == 'darwin'
+   # Disable attempts to use ObjectiveC features in os/object.h since they
+   # won't work when we're compiling with gcc as a C compiler.
+@@ -374,7 +391,7 @@ elif host_os == 'haiku'
+   qemu_common_flags += ['-DB_USE_POSITIVE_POSIX_ERRORS', '-D_BSD_SOURCE', '-fPIC']
+ elif host_os == 'windows'
+   # plugins use delaylib, and clang needs to be used with lld to make it work.
+-  if compiler.get_id() == 'clang' and compiler.get_linker_id() != 'ld.lld'
++  if compiler.get_id() == 'clang' and compiler.get_linker_id() not in ['ld.lld', 'lld-link']
+     error('On windows, you need to use lld with clang - use msys2 clang64/clangarm64 env')
+   endif
+ endif
+@@ -4480,6 +4497,9 @@ foreach target : target_dirs
+                    # the OpenGL pass-through (hw/mesa) is the x86 targets' alone
+                    + (config_target['TARGET_BASE_ARCH'] == 'i386' ?
+                       files('embed/embedfx.c', 'embed/mglcntx_embed.c') : []),
++                   # 2ksbox patch 83: libqemu-embed-*.dll under MSVC too, the
++                   # name the players import (raw-dylib) and mingw gives it
++                   name_prefix: host_msvc ? 'lib' : [],
+                    c_args: c_args,
+                    include_directories: target_inc,
+                    dependencies: arch_deps + [target_stubs] + (opengl.found() ? [opengl] : []) + (gbm.found() ? [gbm] : []),
+@@ -4621,10 +4641,13 @@ if have_tools
+   qemu_io = executable('qemu-io', files('qemu-io.c'),
+              link_args: tools_link_args, link_depends: block_syms,
+              dependencies: [block, qemuutil], install: true)
+-  qemu_nbd = executable('qemu-nbd', files('qemu-nbd.c'),
+-               link_args: tools_link_args, link_depends: block_syms,
+-               dependencies: [blockdev, qemuutil, selinux],
+-               install: true)
++  # 2ksbox patch 83: qemu-nbd uses POSIX threads, which only mingw has
++  if not host_msvc
++    qemu_nbd = executable('qemu-nbd', files('qemu-nbd.c'),
++                 link_args: tools_link_args, link_depends: block_syms,
++                 dependencies: [blockdev, qemuutil, selinux],
++                 install: true)
++  endif
+ 
+   subdir('storage-daemon')
+ 
+diff --git a/tests/qtest/ide-test.c b/tests/qtest/ide-test.c
+index 99aa5e0..a7f3c0b 100644
+--- a/tests/qtest/ide-test.c
++++ b/tests/qtest/ide-test.c
+@@ -121,7 +121,7 @@ enum {
+     BM_STS_INTR     =  0x4,
+ };
+ 
+-enum {
++enum QEMU_ENUM_UNSIGNED(uint32_t) {
+     PRDT_EOT        = 0x80000000,
+ };
+ 
+diff --git a/ui/meson.build b/ui/meson.build
+index debd971..05f7a62 100644
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -145,6 +145,11 @@ if dbus_display
+                 'dbus-listener.c',
+                 'dbus.c',
+               ), opengl, gbm, pixman, dbus_display1])
++  if host_msvc
++    # 2ksbox patch 83: the DXGI interface IDs dbus-listener.c uses are in
++    # mingw-w64's default libuuid, and in MSVC's dxguid.lib
++    dbus_ss.add(cc.find_library('dxguid'))
++  endif
+   ui_modules += {'dbus' : dbus_ss}
+ endif
+ 
+diff --git a/util/meson.build b/util/meson.build
+index fa174c0..15984df 100644
+--- a/util/meson.build
++++ b/util/meson.build
+@@ -23,6 +23,9 @@ else
+   util_ss.add(files('aio-win32.c'))
+   util_ss.add(files('event_notifier-win32.c'))
+   util_ss.add(files('oslib-win32.c'))
++  if host_msvc
++    util_ss.add(files('oslib-msvc.c'))
++  endif
+   util_ss.add(files('qemu-thread-win32.c'))
+   util_ss.add(winmm, pathcch, synchronization)
+ endif
+diff --git a/util/oslib-msvc.c b/util/oslib-msvc.c
+new file mode 100644
+index 0000000..1824ac8
+--- /dev/null
++++ b/util/oslib-msvc.c
+@@ -0,0 +1,425 @@
++/*
++ * The POSIX functions mingw-w64 supplies and MSVC's runtime does not
++ * (2ksbox patch 83): built only when the compiler targets MSVC's ABI.
++ * Their declarations are include/msvc/.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include <dirent.h>
++#include <libgen.h>
++
++/* getopt() and getopt_long(), with glibc's argument permutation */
++
++char *optarg;
++int optind = 1, opterr = 1, optopt = '?';
++
++static int nextchar;    /* position inside a cluster of short options */
++
++/* Move argv[from] down to argv[to], shifting the ones between up by one. */
++static void permute(char **argv, int to, int from)
++{
++    char *arg = argv[from];
++
++    memmove(&argv[to + 1], &argv[to], (from - to) * sizeof(argv[0]));
++    argv[to] = arg;
++}
++
++static int long_option(int argc, char **argv, const char *optstring,
++                       const struct option *longopts, int *longindex)
++{
++    const char *name = argv[optind] + 2;
++    const char *eq = strchr(name, '=');
++    size_t len = eq ? (size_t)(eq - name) : strlen(name);
++    int found = -1, i;
++    bool exact = false, ambiguous = false;
++    bool colon = optstring[0] == ':';
++
++    for (i = 0; longopts[i].name; i++) {
++        if (strncmp(longopts[i].name, name, len) != 0) {
++            continue;
++        }
++        if (strlen(longopts[i].name) == len) {
++            found = i;
++            exact = true;
++            break;
++        }
++        if (found >= 0) {
++            ambiguous = true;
++        } else {
++            found = i;
++        }
++    }
++    optind++;
++    if (found < 0 || (ambiguous && !exact)) {
++        if (opterr && !colon) {
++            fprintf(stderr, "%s: %s option '--%.*s'\n", argv[0],
++                    found < 0 ? "unrecognized" : "ambiguous", (int)len, name);
++        }
++        optopt = 0;
++        return '?';
++    }
++    optarg = NULL;
++    if (eq) {
++        if (longopts[found].has_arg == no_argument) {
++            if (opterr && !colon) {
++                fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n",
++                        argv[0], longopts[found].name);
++            }
++            optopt = longopts[found].val;
++            return '?';
++        }
++        optarg = (char *)eq + 1;
++    } else if (longopts[found].has_arg == required_argument) {
++        if (optind >= argc) {
++            if (opterr && !colon) {
++                fprintf(stderr, "%s: option '--%s' requires an argument\n",
++                        argv[0], longopts[found].name);
++            }
++            optopt = longopts[found].val;
++            return colon ? ':' : '?';
++        }
++        optarg = argv[optind++];
++    }
++    if (longindex) {
++        *longindex = found;
++    }
++    if (longopts[found].flag) {
++        *longopts[found].flag = longopts[found].val;
++        return 0;
++    }
++    return longopts[found].val;
++}
++
++static int getopt_internal(int argc, char *const argv_[], const char *optstring,
++                           const struct option *longopts, int *longindex)
++{
++    char **argv = (char **)argv_;
++    bool permuting = true;
++    const char *spec;
++    int c;
++
++    if (optind == 0) {          /* glibc's way to start over */
++        optind = 1;
++        nextchar = 0;
++    }
++    if (*optstring == '+' || *optstring == '-') {
++        permuting = false;
++        optstring++;
++    }
++    if (getenv("POSIXLY_CORRECT")) {
++        permuting = false;
++    }
++    optarg = NULL;
++
++    if (nextchar == 0) {
++        if (optind >= argc) {
++            return -1;
++        }
++        if (permuting) {
++            /* skip non-options, bringing the next option to optind */
++            int i = optind;
++            while (i < argc && (argv[i][0] != '-' || argv[i][1] == '\0')) {
++                i++;
++            }
++            if (i >= argc) {
++                return -1;
++            }
++            if (i != optind) {
++                permute(argv, optind, i);
++            }
++        } else if (argv[optind][0] != '-' || argv[optind][1] == '\0') {
++            return -1;
++        }
++        if (strcmp(argv[optind], "--") == 0) {
++            optind++;
++            return -1;
++        }
++        if (longopts && argv[optind][1] == '-') {
++            return long_option(argc, argv, optstring, longopts, longindex);
++        }
++        nextchar = 1;
++    }
++
++    c = (unsigned char)argv[optind][nextchar++];
++    spec = c == ':' ? NULL : strchr(optstring, c);
++    if (argv[optind][nextchar] == '\0') {
++        optind++;
++        nextchar = 0;
++    }
++    if (!spec) {
++        if (opterr && *optstring != ':') {
++            fprintf(stderr, "%s: invalid option -- '%c'\n", argv[0], c);
++        }
++        optopt = c;
++        return '?';
++    }
++    if (spec[1] == ':') {
++        if (nextchar != 0) {
++            /* the rest of this argument is the option's */
++            optarg = &argv[optind][nextchar];
++            optind++;
++            nextchar = 0;
++        } else if (spec[2] != ':') {
++            if (optind >= argc) {
++                if (opterr && *optstring != ':') {
++                    fprintf(stderr, "%s: option requires an argument -- '%c'\n",
++                            argv[0], c);
++                }
++                optopt = c;
++                return *optstring == ':' ? ':' : '?';
++            }
++            optarg = argv[optind++];
++        }
++    }
++    return c;
++}
++
++int getopt(int argc, char *const argv[], const char *optstring)
++{
++    return getopt_internal(argc, argv, optstring, NULL, NULL);
++}
++
++int getopt_long(int argc, char *const argv[], const char *optstring,
++                const struct option *longopts, int *longindex)
++{
++    return getopt_internal(argc, argv, optstring, longopts, longindex);
++}
++
++/* Time */
++
++int gettimeofday(struct timeval *tv, void *tz)
++{
++    int64_t us = g_get_real_time();
++
++    tv->tv_sec = us / 1000000;
++    tv->tv_usec = us % 1000000;
++    return 0;
++}
++
++int clock_gettime(clockid_t clock_id, struct timespec *tp)
++{
++    int64_t ns;
++
++    if (clock_id == CLOCK_MONOTONIC) {
++        LARGE_INTEGER count, freq;
++        QueryPerformanceCounter(&count);
++        QueryPerformanceFrequency(&freq);
++        /* in two parts: no 128-bit division in MSVC's runtime */
++        ns = count.QuadPart / freq.QuadPart * 1000000000 +
++             count.QuadPart % freq.QuadPart * 1000000000 / freq.QuadPart;
++    } else if (clock_id == CLOCK_REALTIME) {
++        ns = g_get_real_time() * 1000;
++    } else {
++        errno = EINVAL;
++        return -1;
++    }
++    tp->tv_sec = ns / 1000000000;
++    tp->tv_nsec = ns % 1000000000;
++    return 0;
++}
++
++int nanosleep(const struct timespec *req, struct timespec *rem)
++{
++    g_usleep(req->tv_sec * G_USEC_PER_SEC + req->tv_nsec / 1000);
++    if (rem) {
++        rem->tv_sec = 0;
++        rem->tv_nsec = 0;
++    }
++    return 0;
++}
++
++int usleep(useconds_t usec)
++{
++    g_usleep(usec);
++    return 0;
++}
++
++unsigned int sleep(unsigned int seconds)
++{
++    g_usleep((gulong)seconds * G_USEC_PER_SEC);
++    return 0;
++}
++
++/* Files */
++
++int mkstemp(char *tmpl)
++{
++    return g_mkstemp(tmpl);
++}
++
++/* Path names, as POSIX's basename() and dirname(): in place */
++
++char *basename(char *path)
++{
++    char *end, *p;
++
++    if (!path || !*path) {
++        return (char *)".";
++    }
++    end = path + strlen(path) - 1;
++    while (end > path && (*end == '/' || *end == '\\')) {
++        *end-- = '\0';
++    }
++    for (p = end; p > path; p--) {
++        if (p[-1] == '/' || p[-1] == '\\' || (p == path + 2 && p[-1] == ':')) {
++            break;
++        }
++    }
++    return p;
++}
++
++char *dirname(char *path)
++{
++    char *base;
++
++    if (!path || !*path) {
++        return (char *)".";
++    }
++    base = basename(path);
++    if (base == path) {
++        return (char *)".";
++    }
++    while (base > path + 1 && (base[-1] == '/' || base[-1] == '\\')) {
++        base--;
++    }
++    *base = '\0';
++    if (base > path && (base[-1] == '/' || base[-1] == '\\') && base - 1 > path) {
++        base[-1] = '\0';
++    }
++    return path;
++}
++
++/* Directories, over FindFirstFile */
++
++struct QemuMsvcDir {
++    HANDLE find;
++    WIN32_FIND_DATAA data;
++    bool first;
++    char *pattern;
++    struct dirent ent;
++};
++
++DIR *opendir(const char *name)
++{
++    DIR *dir = g_new0(DIR, 1);
++
++    dir->pattern = g_build_filename(name, "*", NULL);
++    dir->find = FindFirstFileA(dir->pattern, &dir->data);
++    if (dir->find == INVALID_HANDLE_VALUE) {
++        errno = GetLastError() == ERROR_DIRECTORY ? ENOTDIR : ENOENT;
++        g_free(dir->pattern);
++        g_free(dir);
++        return NULL;
++    }
++    dir->first = true;
++    return dir;
++}
++
++struct dirent *readdir(DIR *dir)
++{
++    if (!dir->first) {
++        if (!FindNextFileA(dir->find, &dir->data)) {
++            return NULL;
++        }
++    }
++    dir->first = false;
++    g_strlcpy(dir->ent.d_name, dir->data.cFileName, sizeof(dir->ent.d_name));
++    dir->ent.d_namlen = strlen(dir->ent.d_name);
++    dir->ent.d_reclen = sizeof(dir->ent);
++    return &dir->ent;
++}
++
++void rewinddir(DIR *dir)
++{
++    FindClose(dir->find);
++    dir->find = FindFirstFileA(dir->pattern, &dir->data);
++    dir->first = dir->find != INVALID_HANDLE_VALUE;
++}
++
++int closedir(DIR *dir)
++{
++    if (dir->find != INVALID_HANDLE_VALUE) {
++        FindClose(dir->find);
++    }
++    g_free(dir->pattern);
++    g_free(dir);
++    return 0;
++}
++
++/*
++ * 128-bit division: clang calls these for __int128 / and %, from
++ * compiler-rt, which mingw links and MSVC's libraries do not have.
++ * The x64 DIV instruction when the quotient fits in 64 bits,
++ * the common case, and shift-and-subtract otherwise.
++ */
++typedef unsigned __int128 u128;
++typedef __int128 s128;
++
++static u128 udivmod128(u128 n, u128 d, u128 *rem)
++{
++    uint64_t nhi = n >> 64, nlo = n, dhi = d >> 64, dlo = d;
++    u128 q = 0, r = 0;
++    int i;
++
++    if (dhi == 0 && nhi < dlo) {
++        uint64_t q64, r64;
++        __asm__("divq %4" : "=a"(q64), "=d"(r64) : "a"(nlo), "d"(nhi), "rm"(dlo));
++        if (rem) {
++            *rem = r64;
++        }
++        return q64;
++    }
++    if (d > n) {
++        if (rem) {
++            *rem = n;
++        }
++        return 0;
++    }
++    for (i = 127; i >= 0; i--) {
++        r = (r << 1) | ((n >> i) & 1);
++        if (r >= d) {
++            r -= d;
++            q |= (u128)1 << i;
++        }
++    }
++    if (rem) {
++        *rem = r;
++    }
++    return q;
++}
++
++u128 __udivti3(u128 n, u128 d);
++u128 __umodti3(u128 n, u128 d);
++s128 __divti3(s128 n, s128 d);
++s128 __modti3(s128 n, s128 d);
++
++u128 __udivti3(u128 n, u128 d)
++{
++    return udivmod128(n, d, NULL);
++}
++
++u128 __umodti3(u128 n, u128 d)
++{
++    u128 r;
++
++    udivmod128(n, d, &r);
++    return r;
++}
++
++s128 __divti3(s128 n, s128 d)
++{
++    u128 q = udivmod128(n < 0 ? -(u128)n : (u128)n,
++                        d < 0 ? -(u128)d : (u128)d, NULL);
++
++    return (n < 0) != (d < 0) ? -(s128)q : (s128)q;
++}
++
++s128 __modti3(s128 n, s128 d)
++{
++    u128 r;
++
++    udivmod128(n < 0 ? -(u128)n : (u128)n, d < 0 ? -(u128)d : (u128)d, &r);
++    return n < 0 ? -(s128)r : (s128)r;
++}
+diff --git a/util/oslib-win32.c b/util/oslib-win32.c
+index 5f3e8f4..ae3fda5 100644
+--- a/util/oslib-win32.c
++++ b/util/oslib-win32.c
+@@ -503,6 +503,7 @@ int qemu_bind_wrap(int sockfd, const struct sockaddr *addr,
+     return ret;
+ }
+ 
++#ifndef _MSC_VER
+ QEMU_USED EXCEPTION_DISPOSITION
+ win32_close_exception_handler(struct _EXCEPTION_RECORD *exception_record,
+                               void *registration, struct _CONTEXT *context,
+@@ -510,6 +511,7 @@ win32_close_exception_handler(struct _EXCEPTION_RECORD *exception_record,
+ {
+     return EXCEPTION_EXECUTE_HANDLER;
+ }
++#endif
+ 
+ #undef close
+ int qemu_close_socket_osfhandle(int fd)
+@@ -536,6 +538,16 @@ int qemu_close_socket_osfhandle(int fd)
+         return -1;
+     }
+ 
++#ifdef _MSC_VER
++    /* 2ksbox patch 83: MSVC's ABI has structured exceptions themselves */
++    __try {
++        if (close(fd) < 0 && errno != EBADF) {
++            return -1;
++        }
++    }
++    __except (EXCEPTION_EXECUTE_HANDLER) {
++    }
++#else
+     __try1(win32_close_exception_handler) {
+         /*
+          * close() returns EBADF since we PROTECT_FROM_CLOSE the underlying
+@@ -547,6 +559,7 @@ int qemu_close_socket_osfhandle(int fd)
+     }
+     __except1 {
+     }
++#endif
+ 
+     if (!SetHandleInformation((HANDLE)s, flags, flags)) {
+         errno = EACCES;

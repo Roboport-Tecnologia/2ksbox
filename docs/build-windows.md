@@ -233,6 +233,70 @@ wrong pipeline (one `vkCreateGraphicsPipelines` fewer in a
 it. An MSVC-only rendering difference is most likely another such `eq`:
 diff the two builds' API dumps before reading code.
 
+### QEMU under MSVC
+
+QEMU also builds against MSVC's runtime (2026-10-04, user: "see if you
+can also make qemu compile on msvc"). It is opt-in, beside the mingw
+build that still ships, in its own `build/win/qemu-msvc`:
+
+```sh
+. scripts/msvc-env.sh               # not needed by hand: both scripts source it
+scripts/build-deps.sh               # zlib, pcre2, glib, pixman, libslirp, libepoxy
+WIN_QEMU_CC=msvc scripts/configure-qemu.sh
+ninja -C build/win/qemu-msvc        # in msvc-env.sh's environment
+WIN_QEMU_CC=msvc scripts/test.sh all
+```
+
+- **The compiler** is MSYS2's clang targeting `x86_64-pc-windows-msvc`
+  (its GNU driver, since QEMU's flags are GCC's; Visual Studio ships no
+  clang-cl here), with Visual Studio's headers, the UCRT and the static C
+  runtime (`-Db_vscrt=mt`), linked by lld-link. Not `cl`: QEMU is GNU C
+  throughout (statement expressions, `typeof`, `__attribute__`).
+- **The libraries** are ours, static, from `scripts/build-deps.sh` on
+  Windows into `build/deps/x86_64-msvc`, with clang-cl (glib's meson
+  takes only an MSVC-syntax compiler for MSVC). MSYS2's are mingw's. The
+  embed DLL then imports nothing but Windows' own DLLs, where the mingw
+  one needs glib, pixman, libslirp, libepoxy, zlib, bzip2, libgcc and
+  winpthread beside it. libslirp's and libepoxy's `.pc` files gain the
+  define that stops their headers declaring `dllimport`
+  (`LIBSLIRP_STATIC`, `EPOXY_PUBLIC=extern`); libslirp has a patch
+  making iconv optional (`patches/deps/README.md`); libepoxy's EGL half
+  builds against `third_party/khronos/EGL`.
+- **QEMU's side** is patch 83 (`patches/qemu/README.md`): POSIX headers
+  mingw has and the UCRT lacks (`qemu/include/msvc/`, functions in
+  `util/oslib-msvc.c`), compiler-rt's 128-bit division, `setjmp` without
+  unwinding, and the enums. **MSVC's ABI makes every enum an `int`**:
+  an enum bit-field one bit short reads back negative (`TCGTemp.kind`
+  turned `TEMP_CONST` into -4 and TCG aborted in `la_bb_end`; the Sound
+  Blaster raised no interrupt), and an enumerator past `INT_MAX` is
+  truncated. `QEMU_ENUM_UNSIGNED` types those enums, and the MSVC build
+  makes the three warnings that find them errors, so a QEMU bump that
+  adds one fails to build rather than to run.
+- **WHPX** needs the Windows SDK 10.0.26100 (its VMX capability codes);
+  `configure-qemu.sh` stops on an older SDK rather than build without it
+  (user).
+- Not built under MSVC: `qemu-nbd` (POSIX threads), the guest agent
+  (lld-link refuses its two resource objects), bzip2 (dmg's bz2 chunks).
+  None ships.
+- `libqemu-embed-*.dll` keeps mingw's `lib` prefix, the name the players
+  import (`raw-dylib`), so a player runs either build unchanged.
+
+**Tested (2026-10-04):** QEMU's own unit tests, 99 of 99 (the RCU ones
+with the arguments meson gives them, the subprocess ones with glib's
+`gspawn-win64-helper.exe` beside them); `WIN_QEMU_CC=msvc scripts/test.sh
+all`, which takes the MSVC build for the host checks and the guest
+tools (`tools/guestwait.sh`, `tools/qemuhost.py`; XP's Direct3D frames
+among them): 47 passed, 1 failed, 28 skipped, the same checks as the
+mingw build's run the same day (`sharing` fails on both: `qemu-vdagent`
+needs spice-protocol, which Windows builds without). The checks that
+boot a machine through a player skipped there (no player built in that
+checkout); by hand, `player-mitsuami` with `build/win/qemu-msvc` first on
+`PATH` boots the XP machine (`launcherx --print-args`, through an
+overlay) to its desktop, `PLAYER_DUMP` frame #3000 after 53 s, the mingw
+DLL's run 52 s with the same frame. Not done yet: a real speed
+comparison, and the package (`package-windows.sh` still rolls the mingw
+QEMU).
+
 ## OpenGL for a Win98 guest
 
 A Win98 guest's 3D is qemu-3dfx's Mesa pass-through, which needs a GL

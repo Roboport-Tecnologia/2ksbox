@@ -28,6 +28,13 @@
 # interpreter makes a venv with `Scripts\` where QEMU's configure looks for
 # `bin/`.
 #
+# WIN_QEMU_CC=msvc (Windows) builds QEMU against MSVC's runtime instead of
+# mingw's, into build/win/qemu-msvc (docs/build-windows.md, "QEMU under
+# MSVC"): MSYS2's clang targeting x86_64-pc-windows-msvc with Visual
+# Studio's headers, the UCRT and the static C runtime, linked by lld-link,
+# against the libraries scripts/build-deps.sh builds for it and the Rust
+# staticlibs for x86_64-pc-windows-msvc. The mingw build stays where it is.
+#
 # QEMU_PYTHON=<interpreter> uses that one and never consults uv. It is for
 # a sandbox that has a suitable Python and cannot fetch one (the Flatpak:
 # no uv in the SDK, no network during the build). Its version is checked,
@@ -53,7 +60,12 @@ esac
 
 ROSETTA=""
 [ "$(uname -s)" = Darwin ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ] && ROSETTA=1
-if [ -n "$WINDOWS" ]; then
+MSVC=""
+[ -z "$NATIVE" ] || [ "${WIN_QEMU_CC:-}" != msvc ] || MSVC=1
+if [ -n "$MSVC" ]; then
+  BUILD="${WIN_QEMU_BUILD:-$ROOT/build/win/qemu-msvc}"
+  CARGO_TARGET=x86_64-pc-windows-msvc
+elif [ -n "$WINDOWS" ]; then
   BUILD="${WIN_QEMU_BUILD:-$ROOT/build/win/qemu}"
   CARGO_TARGET=x86_64-pc-windows-gnu
 elif [ -n "$ROSETTA" ]; then
@@ -129,14 +141,25 @@ echo "==> python: $PYTHON ($("$PYTHON" -V 2>&1))"
 # libdisc (the CD-ROM image model, libdisc/): a Rust staticlib linked into
 # qemu-system-* and libqemu-embed-* for block/cdimage.c (patch 50). The crate
 # has no QEMU dependency, so no cycle with the player.
+# Under MSVC through scripts/cargo-msvc.sh: rustup's MSVC toolchain and
+# the static C runtime, as the rest of that build.
+CARGO=(cargo build); [ -z "$MSVC" ] || CARGO=("$ROOT/scripts/cargo-msvc.sh" build)
 echo "==> cargo build --release -p libdisc${CARGO_TARGET:+ --target $CARGO_TARGET}"
-(cd "$ROOT" && cargo build --release -p libdisc ${CARGO_TARGET:+--target "$CARGO_TARGET"})
+if [ -n "$MSVC" ]; then
+  (cd "$ROOT" && "${CARGO[@]}" --release -p libdisc)
+else
+  (cd "$ROOT" && cargo build --release -p libdisc ${CARGO_TARGET:+--target "$CARGO_TARGET"})
+fi
 
 # libsynth (the music engines, libsynth/): the same arrangement for
 # hw/audio/opl3.c and hw/audio/mpu401.c (patch 60, doc 20). Also no QEMU
 # dependency, so no cycle with the player.
 echo "==> cargo build --release -p libsynth${CARGO_TARGET:+ --target $CARGO_TARGET}"
-(cd "$ROOT" && cargo build --release -p libsynth ${CARGO_TARGET:+--target "$CARGO_TARGET"})
+if [ -n "$MSVC" ]; then
+  (cd "$ROOT" && "${CARGO[@]}" --release -p libsynth)
+else
+  (cd "$ROOT" && cargo build --release -p libsynth ${CARGO_TARGET:+--target "$CARGO_TARGET"})
+fi
 
 mkdir -p "$BUILD"
 cd "$BUILD"
@@ -161,7 +184,36 @@ if [ -n "$NATIVE" ]; then
   CFG=(--disable-zstd --disable-gnutls --disable-nettle --disable-gcrypt --disable-capstone
        --disable-libusb --disable-usb-redir --disable-lzo --disable-snappy --disable-smartcard
        --disable-libcbor --disable-lzfse)
-  if [ "${WIN_QEMU_CC:-clang}" = clang ]; then
+  if [ -n "$MSVC" ]; then
+    # MSVC's ABI and runtime (WIN_QEMU_CC=msvc above): clang's GNU driver,
+    # since QEMU's flags are GCC's, with Visual Studio's environment for
+    # the headers and libraries, and lld-link. The libraries are ours,
+    # built for the same runtime (build-deps.sh on Windows); MSYS2's are
+    # mingw's. The static C runtime, as every MSVC binary here (ADR-026).
+    . "$ROOT/scripts/msvc-env.sh" || exit 1
+    DEPS="$MROOT/build/deps/x86_64-msvc"
+    [ -f "$DEPS/lib/pkgconfig/glib-2.0.pc" ] || {
+      echo "no $DEPS/lib/pkgconfig/glib-2.0.pc: scripts/build-deps.sh first"; exit 1; }
+    export PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig"
+    unset PKG_CONFIG_PATH
+    export CC_LD=lld-link CXX_LD=lld-link
+    CFG+=(--cc="clang --target=x86_64-pc-windows-msvc" --cxx="clang++ --target=x86_64-pc-windows-msvc"
+          --disable-plugins --disable-bzip2 -Db_vscrt=mt
+          # qemu-ga links two resource objects, which lld-link refuses;
+          # no package ships the guest agent
+          --disable-guest-agent)
+    echo "==> MSVC runtime, libraries: $DEPS (static)"
+    # WHPX (Windows 11 guests under the host's hypervisor, track M20)
+    # needs the Windows SDK's VMX capability codes, which arrived after
+    # 10.0.22000 (mingw-w64's headers have them). WHPX is required, as
+    # in the mingw build: an older SDK stops the build here (user).
+    WHVDEFS="$(cygpath -u "${WindowsSdkDir:-}")/Include/${WindowsSDKVersion%\\}/um/WinHvPlatformDefs.h"
+    if ! grep -q WHvCapabilityCodeVmxBasic "$WHVDEFS" 2>/dev/null; then
+      echo "configure-qemu.sh: the Windows SDK ${WindowsSDKVersion%\\} has no WHvCapabilityCodeVmxBasic, which WHPX needs: install the Windows 11 SDK 10.0.26100 (Visual Studio Installer, Individual components)" >&2
+      exit 1
+    fi
+    CFG+=(--enable-whpx)
+  elif [ "${WIN_QEMU_CC:-clang}" = clang ]; then
     command -v clang >/dev/null && command -v ld.lld >/dev/null || {
       echo "no clang/lld: pacman -S mingw-w64-x86_64-clang mingw-w64-x86_64-lld"; exit 1; }
     export CC_LD=lld CXX_LD=lld

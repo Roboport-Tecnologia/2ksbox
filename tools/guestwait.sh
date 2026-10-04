@@ -54,6 +54,8 @@ gw_dead() { [ -n "$GW_PID" ] && ! kill -0 "$GW_PID" 2>/dev/null; }
 # program are written C:/... (docs/testing.md "On Windows").
 GW_WIN=0; case "$(uname -s)" in MINGW64_NT*) GW_WIN=1;; esac
 if [ "$GW_WIN" = 1 ]; then GW_QDIR="$GW_ROOT/build/win/qemu"; else GW_QDIR="$GW_ROOT/build/qemu"; fi
+# WIN_QEMU_CC=msvc: the build against MSVC's runtime (scripts/configure-qemu.sh)
+[ "$GW_WIN" = 1 ] && [ "${WIN_QEMU_CC:-}" = msvc ] && GW_QDIR="$GW_ROOT/build/win/qemu-msvc"
 gw_path() { if [ "$GW_WIN" = 1 ]; then cygpath -m "$1"; else echo "$1"; fi; }
 gw_qmp_addr() { python3 "$GW_ROOT/tools/qemuhost.py" addr "$(gw_path "$1")" ${2:+"$2"}; }   # <dir> [name]
 gw_qmp_opt() { python3 "$GW_ROOT/tools/qemuhost.py" opt "$1"; }                            # <addr>
