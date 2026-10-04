@@ -201,6 +201,16 @@ pub fn pad_args(machine: &Machine) -> Vec<String> {
     }
 }
 
+/// The machine's shared folder (M23, doc 24 §2): `--share <dir>`, after
+/// `--pad` (the player reads its options in a fixed order). The player
+/// serves it and adds the forward to the machine's `-netdev user`.
+pub fn share_args(machine: &Machine) -> Vec<String> {
+    match machine.share_folder() {
+        Some(dir) => vec!["--share".to_string(), dir.display().to_string()],
+        None => Vec::new(),
+    }
+}
+
 /// The player that runs `machine`. Each player binary links one QEMU
 /// (`libqemu-embed-<target>`), because QEMU has to be loaded with the
 /// process, not opened later: patch 63 reserves TCG's code buffer next to
@@ -362,6 +372,7 @@ pub fn spawn(
     let bin = player_binary_for(machine);
     let mut argv: Vec<String> = shader_args(machine);
     argv.extend(pad_args(machine));
+    argv.extend(share_args(machine));
     argv.push("--".into());
     argv.extend(args);
     // Log the command line before anything is spawned: it is the first

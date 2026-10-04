@@ -1,6 +1,0 @@
-#!/bin/sh
-# The C compiler QEMU's Windows build uses (scripts/configure-qemu.sh
-# --windows, patch 68): clang for x86_64-w64-mingw32 against the mingw
-# sysroot and GCC's runtime libraries, linked by lld. clang because it
-# emits native TLS where mingw GCC 15 has only emulated TLS.
-exec clang --target=x86_64-w64-mingw32 -fuse-ld=lld "$@"

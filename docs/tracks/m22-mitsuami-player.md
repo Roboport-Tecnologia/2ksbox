@@ -66,7 +66,7 @@ embed library, as for the winit player, into a target dir of its own:
   built, and the winit player only when it is not (`launcherx --paths`
   says which). `LAUNCHER_PLAYER_BIN` still overrides; the winit player is
   one `LAUNCHER_PLAYER_BIN=target/release/player` away. Packages still
-  ship the winit player until step 6.
+  ship the winit player until step 6, except Windows's (below).
 
 ## Steps
 
@@ -140,7 +140,51 @@ embed library, as for the winit player, into a target dir of its own:
    arrows to the system (the player turns the window server's hot keys
    off). Either mitsuami takes the player's ways, or `kbcapture`'s halves
    move into `player-core` on the surface's raw handle. Windows also needs
-   the native MSVC build mitsuami requires (ADR-023's cost).
+   the native MSVC build mitsuami requires (ADR-023's cost), which puts
+   the player and QEMU (mingw, ADR-026) on two C runtimes. **The boundary
+   was audited first (2026-10-02, doc 11 "The C runtime boundary")**: the
+   API shares no memory or descriptor across it, but the environment did.
+   The companions the player names never reached QEMU's `getenv()` on
+   Windows, even from today's `windows-gnu` player, and the packaged
+   player refused every General MIDI machine run from outside its folder.
+   Fixed by `qemu_embed_setenv` (embed API v10) and checked by
+   `test.sh`'s `companions-env`. The link needs no import library: the
+   bindings import the DLL through `raw-dylib` on Windows (2026-10-03),
+   and the winit player built for `x86_64-pc-windows-msvc` ran mingw
+   QEMU to the BIOS and quit cleanly (doc 11). `player-mitsuami` builds
+   with MSVC unchanged, in `build-windows.sh`'s `mitsuami` stage after the
+   launcher (static C runtime), and runs a machine to its BIOS and quits
+   there; a checkout's launcher on Windows starts it once built.
+   Repeated exits found two crashes, both older than this step and in
+   every player: `PLAYER_QMP_EXEC` ran its requests on the UI thread, so a
+   `quit` blocked it while QEMU's thread waited 5 s for the VM's release,
+   then tore down and left the UI reading a freed surface (the requests
+   now run on a thread of their own); and QEMU's Windows threads queued
+   our QEMU thread's exit notifiers for process exit, after its TLS was
+   gone (patch 80). 72 of 72 exits clean afterwards, against about one
+   in twelve crashing. The user's first run through the launcher
+   (2026-10-03) crashed twice and then showed an empty window:
+   - **Empty window:** the surface is a child window of the XAML window,
+     and frames wgpu's Vulkan backend presents there never show
+     (acquired and presented without an error). Direct3D 12's do, so
+     the player asks for it on Windows (`Gpu::with_backends`;
+     `WGPU_BACKEND` still overrides). The winit player's top-level window
+     shows Vulkan's.
+   - **Crash at boot:** QEMU's `vga_draw_blank()` blanked 720x400 rows
+     into an allocated 640x400 surface, 320 bytes past its file mapping
+     (gdb; the `strncpy+1108` frame Windows logged). Three boots of six
+     with the MSVC winit player, none with the GNU one; patch 81. Six
+     boots of `base98-br` on each player afterwards, none ending early.
+   - Win98 offered "Add New Hardware" for a standard PCI VGA adapter on
+     every one of those boots (through `-snapshot`), not yet looked at.
+
+   **On the desktop by hand (2026-10-03, user):** "everything seems to be
+   working, including keyboard capture. even alt+f4 went to the guest".
+   So mitsuami's `WH_KEYBOARD_LL` grab holds while the player's window
+   has focus on this PC, where doc 03 measured such a hook going blind;
+   the winit player's Alt+F4 asks before closing instead (00-status,
+   "Player"). Left that way (user, 2026-10-03): in the mitsuami player
+   Alt+F4 is the guest's. Windows' half of this step is done; macOS's is left.
    **The locked mouse on the Air (2026-10-02, user, Win98):** it lagged,
    and `PLAYER_INPUT_LOG` (now with times) showed why: 18 draws back to
    back, each 16.5 ms waiting for its drawable (no Mailbox on macOS), and
@@ -162,6 +206,14 @@ embed library, as for the winit player, into a target dir of its own:
 6. **The launcher's player, packaging, the flip:** a build stage, the
    packagers' run, `player-mitsuami` shipped as `2ksbox-player` (and the
    per-target players), and `player/`'s winit front end deleted.
+   **Windows done (2026-10-03, user: "go"):** the zip and the MSIX ship
+   it as `2ksbox-player.exe`, with the icon and manifest the winit
+   player had (`player-mitsuami/build.rs`, `win-icon.rs`), and
+   `package-windows.sh` checks its static C runtime and that it boots a
+   machine with a General MIDI port from outside the package folder and
+   quits. The winit player still builds on Windows for `test.sh` (the
+   `rust` stage). Left: Linux, macOS, the Flatpak, and deleting
+   `player/`.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)
 

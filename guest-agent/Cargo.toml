@@ -1,0 +1,36 @@
+[package]
+name = "guest-agent"
+version = "0.0.1"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "2ksbox's agent in a modern Windows guest: the clipboard over QEMU's vdagent (track M23)"
+
+[[bin]]
+name = "2ksbox-agent"
+path = "src/main.rs"
+
+# Its own workspace: a Windows program, so the root build never meets it.
+# Built with `cargo build --release --target x86_64-pc-windows-gnu` (doc 24 §4).
+[workspace]
+
+[dependencies.windows-sys]
+version = "0.59"
+features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Threading",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Security",
+  "Win32_Graphics_Gdi",
+  "Win32_NetworkManagement_WNet",
+]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -276,6 +276,14 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         input.push(("Gamepad", machine.effective_pad().label().to_owned()));
     }
     input.push(("Seamless mouse", on_off(machine.seamless_mouse)));
+    // Windows 11's sharing (M23), on the form's Input and Network pages too
+    if machine.family.is_modern() {
+        input.push(("Clipboard", on_off(machine.clipboard)));
+    }
+    let mut network = rows(vec![("Networking", on_off(machine.network))]);
+    if machine.family.is_modern() && machine.shared_folder.is_some() {
+        network.push(file("Shared folder", machine.shared_folder.as_ref()));
+    }
     vec![
         DetailGroup {
             title: Section::System.label(),
@@ -301,7 +309,7 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         DetailGroup { title: Section::Display.label(), rows: rows(display) },
         DetailGroup { title: Section::Audio.label(), rows: audio },
         DetailGroup { title: Section::Input.label(), rows: rows(input) },
-        DetailGroup { title: Section::Network.label(), rows: rows(vec![("Networking", on_off(machine.network))]) },
+        DetailGroup { title: Section::Network.label(), rows: network },
     ]
 }
 

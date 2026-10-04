@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 9;
+pub const API_VERSION: u32 = 11;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -51,6 +51,23 @@ pub struct qemu_embed_t {
     _private: [u8; 0],
 }
 
+// On Windows rustc writes the imports itself (`raw-dylib`), so no import
+// library is needed: mingw's `.dll.a` is one MSVC's link.exe would not
+// take, and the player links QEMU's mingw DLL from either toolchain
+// (ADR-026, doc 11 "The C runtime boundary"). Still a load-time import,
+// never a run-time open (patch 63). Elsewhere build.rs links it.
+#[cfg_attr(
+    all(windows, not(any(feature = "qemu-x86_64", feature = "qemu-aarch64"))),
+    link(name = "libqemu-embed-i386", kind = "raw-dylib")
+)]
+#[cfg_attr(
+    all(windows, feature = "qemu-x86_64"),
+    link(name = "libqemu-embed-x86_64", kind = "raw-dylib")
+)]
+#[cfg_attr(
+    all(windows, feature = "qemu-aarch64", not(feature = "qemu-x86_64")),
+    link(name = "libqemu-embed-aarch64", kind = "raw-dylib")
+)]
 extern "C" {
     fn qemu_embed_api_version() -> u32;
     fn qemu_embed_new(
@@ -78,6 +95,12 @@ extern "C" {
     fn qemu_embed_input_flush(e: *mut qemu_embed_t);
     fn qemu_embed_set_refresh_ms(e: *mut qemu_embed_t, ms: u32);
     fn qemu_embed_set_window_size(e: *mut qemu_embed_t, w: u32, h: u32, dpi: u32);
+    fn qemu_embed_set_clipboard_cb(
+        e: *mut qemu_embed_t,
+        f: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize)>,
+        ud: *mut c_void,
+    );
+    fn qemu_embed_clipboard_set_text(e: *mut qemu_embed_t, utf8: *const c_char, len: usize);
     fn qemu_embed_display_follows_window(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_set_audio_ring(
         base: *mut c_void,
@@ -86,6 +109,7 @@ extern "C" {
         rd_idx: *const u32,
     );
     fn qemu_embed_socket_to_fd(sock: u64) -> c_int;
+    fn qemu_embed_setenv(name: *const c_char, value: *const c_char) -> bool;
 }
 
 /// A socket the caller owns, as the `fd=` of `-chardev socket,fd=N`.
@@ -98,6 +122,26 @@ extern "C" {
 pub fn socket_to_fd(sock: u64) -> Option<i32> {
     let fd = unsafe { qemu_embed_socket_to_fd(sock) };
     (fd >= 0).then_some(fd)
+}
+
+/// Set an environment variable where QEMU, our devices and the Direct3D
+/// executor read it (v10), and in the process's environment as well.
+///
+/// Not `std::env::set_var`: they read it with their C runtime's
+/// `getenv()`, which on Windows answers from a copy made when the process
+/// started, and `set_var` (`SetEnvironmentVariableW`) never updates that
+/// copy. The library sets it on its own runtime's side. Call before
+/// [`Qemu::new`], while no other thread exists. `false` if it failed or a
+/// string holds a NUL.
+///
+/// # Safety
+/// As `std::env::set_var`: no other thread may be reading or writing the
+/// environment.
+pub unsafe fn setenv(name: &str, value: &std::ffi::OsStr) -> bool {
+    let (Ok(name), Some(Ok(value))) = (CString::new(name), value.to_str().map(CString::new)) else {
+        return false;
+    };
+    qemu_embed_setenv(name.as_ptr(), value.as_ptr())
 }
 
 /// Install the audio ring. Must be called BEFORE [`Qemu::new`] on any
@@ -232,6 +276,23 @@ impl Qemu {
     /// the window should not be held to the guest's mode (v9).
     pub fn display_follows_window(&self) -> bool {
         unsafe { qemu_embed_display_follows_window(self.0) }
+    }
+    /// Hear the guest's clipboard text (v11, track M23), through QEMU's
+    /// `qemu-vdagent`. `f` runs on QEMU's thread with the BQL held: it
+    /// must not block. One handler per process, set once after `new`.
+    pub fn set_clipboard_handler(&self, f: Box<dyn Fn(String) + Send + Sync>) {
+        unsafe extern "C" fn tramp(ud: *mut c_void, p: *const c_char, len: usize) {
+            let f = unsafe { &*(ud as *const Box<dyn Fn(String) + Send + Sync>) };
+            let bytes = unsafe { std::slice::from_raw_parts(p as *const u8, len) };
+            f(String::from_utf8_lossy(bytes).into_owned());
+        }
+        // one VM per process: the handler lives as long as it
+        let ud = Box::into_raw(Box::new(f)) as *mut c_void;
+        unsafe { qemu_embed_set_clipboard_cb(self.0, Some(tramp), ud) }
+    }
+    /// Offer the host's clipboard text to the guest (v11). Any thread.
+    pub fn set_clipboard_text(&self, text: &str) {
+        unsafe { qemu_embed_clipboard_set_text(self.0, text.as_ptr() as *const c_char, text.len()) }
     }
 }
 

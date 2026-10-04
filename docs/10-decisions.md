@@ -902,9 +902,11 @@ so those hosts wait for it to match.
 
 **Status.** Accepted (user: "we will switch windows builds to use msvc
 wholesale", then "natively on windows"). The WDDM driver goes first
-(track M18, ADR-022's amendment); the host build follows. Until it does,
-the Windows package is still the cross build `docs/build-windows.md`
-describes.
+(track M18, ADR-022's amendment); the host build follows. Done by
+2026-10-03: everything Windows builds, packages and is tested on the PC,
+the launcher and the player with MSVC, and the cross build from Linux
+(`win-cross.sh` and its container) is retired. The executor and DXVK
+moved to MSVC together on 2026-10-04 (the amendments below).
 
 **Decision.** Windows binaries build on a Windows machine with Visual
 Studio's MSVC tools, not cross-compiled from Linux:
@@ -951,3 +953,61 @@ rewritten, and `win-cross.sh` with its container retires once the native
 build packages. The PC needs MSYS2 (for QEMU) beside Visual Studio, and
 both Rust Windows targets. The embed API's C runtime boundary has to be
 audited before the player moves.
+
+**Amendment (2026-10-03): the executor stays mingw while DXVK does.**
+The boundary was audited (doc 11) and the players moved: the package
+ships `player-mitsuami`, MSVC, over QEMU's mingw DLL. The executor built
+with MSVC (`cl`, static C runtime) passed the Direct3D oracle on DXVK and
+on the system d3d9, but on a host with no Vulkan device the player
+terminated: DXVK reports that by throwing a C++ exception out of
+`Direct3DCreate9`, which a mingw executor catches and an MSVC one cannot
+(the two compilers' exceptions do not cross; `terminate called after
+throwing an instance of 'dxvk::DxvkError'`, test.sh's `exec-no-device`).
+Any exception DXVK throws later would end the process the same way. So
+the executor and DXVK move together or not at all: DXVK built with
+MSVC first, then the executor. Until then both stay mingw, as QEMU
+does.
+
+**Second amendment (2026-10-04): DXVK and the executor are MSVC**
+(user: "move the executor and dxvk to msvc"). Both are built with
+Visual Studio's `cl` and a static C runtime (`scripts/msvc-env.sh`,
+`build-windows.sh exec`), so DXVK's exceptions are caught again, and
+`exec-no-device` passes on the MSVC pair. QEMU opens the executor by
+name across the C runtime boundary, where only C crosses (doc 11).
+DXVK under MSVC first failed 8 oracle checks: an upstream `eq()` bug
+that only MSVC's STL reaches, fixed by our DXVK patch 15
+(`docs/build-windows.md`, "DXVK under MSVC"). The mingw toolchain is now
+used on Windows only by QEMU and what links into it, the host tests that
+stand in for QEMU (`d3dpt-dp2-test.exe`, `wgl-probe.exe`) and the guest
+code. The executor's PE pair for Wine on Linux and macOS (M15) stays
+mingw: it runs on Wine's d3d9, which throws nothing across.
+
+## ADR-027: Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent (2026-10-02)
+
+**Status.** Accepted (user decisions: Windows 11 first; "In-process SMB
+server"). Work in track M23, design in doc 24.
+
+**Decision.** A host folder reaches the guest as an SMB share served by
+`libsmb`, our own Rust server running in the player. The guest's TCP
+connection to `10.0.2.4:445` is forwarded by slirp, one connection at a
+time, to a Unix socket the player listens on (`slirp_add_unix`, through a
+QEMU patch to `guestfwd=`). The clipboard uses QEMU's own `qemu-vdagent`
+chardev and `ui/clipboard.c`, with the player as a clipboard peer through
+the embed API, and a guest agent of ours speaking the SPICE agent
+protocol over virtio-serial.
+
+**Why.** Windows' own SMB client is in every guest family, so no guest
+filesystem driver is needed. In-process, the server ships on all three
+hosts, unlike virtiofsd (Linux only) or Samba (an external install,
+GPLv3). QEMU already implements the clipboard's host half.
+
+**Rejected.** virtiofs; QEMU's `smb=` with the host's Samba; a guest
+filesystem driver per family; a writable virtual FAT disk; Red Hat's
+`vdagent-win` (x86 / x64 only, a service plus an installer). Reasons are
+in doc 24 §2–3.
+
+**Costs.** An SMB2 server to write and keep compatible with Windows
+11's tightening defaults: signing now, maybe more later. SMB1 for the
+vintage guests is a second dialect on top. One QEMU patch, one libslirp
+patch for Windows hosts, and spice-protocol's headers as a new pinned
+dependency.

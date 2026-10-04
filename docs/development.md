@@ -174,7 +174,7 @@ exact line a launcher machine runs.
 
 ```
 player [--shader <preset.slangp>] [--shader-params <k=v,...>]
-       [--pad usb|gameport|keys] [--pads] [--pad-sweep <frames>]
+       [--pad usb|gameport|keys] [--share <dir>] [--pads] [--pad-sweep <frames>]
        [--mode-sweep <dir>] [--calib <bmp|dir>] [--companions]
        [--] <qemu args...>
 ```
@@ -278,7 +278,10 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
 `player-mitsuami/` takes the same command line and every `PLAYER_*`
 knob, which are `player-core`'s. It is its own cargo workspace: `cd
 player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
---features kde,gilrs` for Kirigami). It is the default player: once it
+--features kde,gilrs` for Kirigami); on Windows `build-windows.sh
+mitsuami` builds it with MSVC after the launcher (`docs/build-windows.md`),
+and there it presents through Direct3D 12 unless `WGPU_BACKEND` says
+otherwise (Vulkan's frames never show on its child window). It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
 (Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
@@ -315,6 +318,20 @@ and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
 - `LIBSYNTH_MIDI_LOG=<file>` / `LIBSYNTH_OPL_LOG=<file>` capture what a
   guest wrote to a music device, for `synthx midilog` / `opllog` /
   `play` (doc 20 §7.2).
+
+### The shared folder and the clipboard (M23)
+
+- `--share <dir>` (after `--pad`) serves `<dir>` to the guest as
+  `\\10.0.2.4\host` (user `2ksbox`, password `2ksbox`): `libsmb` in the
+  player on a Unix socket in a 0700 directory under the temp dir, and
+  `guestfwd=tcp:10.0.2.4:445-unix:<socket>` added to the machine's
+  `-netdev user` (QEMU patch 79). No user-mode network or a Windows host:
+  `[share] not shared: …` and the machine runs without it.
+  `PLAYER_SMB_LOG=1` prints every request.
+- The clipboard needs no option: a command line with `-chardev
+  qemu-vdagent` gets the bridge to the host's clipboard
+  (`player-core/src/clipboard.rs`), which prints a `[clipboard]` line
+  per transfer.
 
 ### Gamepads
 
@@ -362,7 +379,8 @@ socket file). A script adds its own `-qmp unix:…,server,nowait`.
   regardless).
 - `PLAYER_QMP_EXEC='{"execute":"query-status"}'` (or a JSON array) runs
   requests once the guest has drawn its first frame and prints the
-  replies.
+  replies, from a thread of its own (a `quit`'s reply comes only after
+  QEMU has torn down, which waits for the UI thread).
 
 ### Direct3D pass-through (doc 14)
 
@@ -619,12 +637,10 @@ build".
 
 ### Windows (`.zip`)
 
-Cross-built from Linux in a Fedora mingw-w64 container
-(`scripts/win-cross.sh --build`, `scripts/build-windows.sh`,
-`scripts/package-windows.sh`, which also runs natively in MSYS2):
-`2ksbox.exe` (the launcher, WinUI 3, the one MSVC binary, built on a PC
-with `build-windows.sh mitsuami`; it needs the Windows App Runtime 2.4
-or later), `2ksbox-player.exe`, `libqemu-embed-i386.dll`, the executor
+Built on a Windows PC, in MSYS2's MINGW64 shell
+(`scripts/build-windows.sh`, `scripts/package-windows.sh`; ADR-026):
+`2ksbox.exe` (the launcher) and `2ksbox-player.exe` (`player-mitsuami`),
+WinUI 3 and MSVC, needing the Windows App Runtime 2.4 or later, `libqemu-embed-i386.dll`, the executor
 with DXVK, `qemu-img.exe`, firmware and guest tools in one portable
 folder. The
 same folder packs as an MSIX for the Microsoft Store

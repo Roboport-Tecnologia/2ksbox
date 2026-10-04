@@ -81,9 +81,15 @@ fn set_if_unset_and_present(var: &str, path: PathBuf) {
     if std::env::var_os(var).is_some() || !path.exists() {
         return;
     }
+    // Through the library, not `std::env::set_var`: QEMU and the executor
+    // read these with their C runtime's getenv(), which on Windows never
+    // sees a variable set after the process started (doc 11, "The C
+    // runtime boundary").
     // SAFETY: main() calls this before any thread exists. The event loop
     // and QEMU's own thread are both started after it returns.
-    unsafe { std::env::set_var(var, path) };
+    if !unsafe { qemu_embed::setenv(var, path.as_os_str()) } {
+        eprintln!("[companions] could not set {var}={}", path.display());
+    }
 }
 
 /// The names `--companions` prints, in the order this module sets them.

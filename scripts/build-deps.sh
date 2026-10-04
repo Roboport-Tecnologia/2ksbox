@@ -4,7 +4,8 @@
 # libffi and stub libintl its own tarball carries as subprojects, pinned
 # by its wrap files), pixman, libslirp, zstd, and libtpms with its
 # libcrypto, static, so libqemu-embed and qemu-img carry them and the app ships no
-# dependency dylib for QEMU's side. The launcher needs nothing here: it
+# dependency dylib for QEMU's side; and spice-protocol's headers, for the
+# clipboard's `qemu-vdagent` (nothing of it is linked). The launcher needs nothing here: it
 # is AppKit (launcher-mitsuami, ADR-023). Every version is pinned with its
 # checksum below, and nothing is fetched after the tarballs.
 #
@@ -32,7 +33,8 @@
 #
 # On Linux it builds QEMU's glib (pcre2, glib, and libslirp, the one
 # other library QEMU links that links glib) and libtpms with its
-# libcrypto (the TPM 2.0 of a Windows 11 box), static, into
+# libcrypto (the TPM 2.0 of a Windows 11 box), static, and
+# spice-protocol's headers (the clipboard), into
 # build/deps/<arch>, which scripts/configure-qemu.sh links by default
 # there. QEMU's main loop iterates glib's global default GMainContext on
 # QEMU's thread; with one glib shared with its process, that is the
@@ -84,9 +86,10 @@ pixman 0.46.4 pixman-0.46.4.tar.gz d09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55
 libslirp 4.9.5 libslirp-v4.9.5.tar.gz f43e68b60b580647574ec4a0e2b6c600a56281e6c39f79426510832dc810f483 https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v4.9.5/libslirp-v4.9.5.tar.gz
 openssl 3.5.9 openssl-3.5.9.tar.gz 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
 libtpms 0.10.2 libtpms-0.10.2.tar.gz edac03680f8a4a1c5c1d609a10e3f41e1a129e38ff5158f0c8deaedc719fb127 https://github.com/stefanberger/libtpms/archive/refs/tags/v0.10.2.tar.gz
+spice-protocol 0.14.5 spice-protocol-0.14.5.tar.xz baf58449f6e89d19f475899ad5fb9196fdc46c03cc53233f4e39cf2978f9cff7 https://www.spice-space.org/download/releases/spice-protocol-0.14.5.tar.xz
 zstd 1.5.7 zstd-1.5.7.tar.gz eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3 https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
 '
-[ "$OS" = Darwin ] || PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp|openssl|libtpms) ')
+[ "$OS" = Darwin ] || PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp|openssl|libtpms|spice-protocol) ')
 
 # Our patches on a package: patches/deps/<name>/*.patch (git-format
 # diffs, filename order; patches/deps/README.md). The set is named by a
@@ -235,6 +238,14 @@ while read -r name ver tar sha url; do
       ( cd "$src" && run ./autogen.sh --prefix="$PREFIX" --libdir="$PREFIX/lib" \
           --disable-shared --enable-static --with-openssl --with-tpm2 \
           && run make -j8 && run make install && run make distclean ) ;;
+    spice-protocol)
+      # Headers only, nothing linked: QEMU's `qemu-vdagent` chardev (the
+      # clipboard, track M23) builds when they are there. The .pc goes to
+      # share/pkgconfig, outside the prefix's search path, so it moves.
+      run "${MESON[@]}" "$b" "$src"
+      run ninja -C "$b" install
+      mkdir -p "$PREFIX/lib/pkgconfig"
+      mv -f "$PREFIX/share/pkgconfig/spice-protocol.pc" "$PREFIX/lib/pkgconfig/" ;;
     zstd)
       # The library alone: no programs, no shared build.
       run make -C "$src/lib" -j8 libzstd.a CFLAGS="$CFLAGS"

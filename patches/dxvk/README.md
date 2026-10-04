@@ -3,7 +3,8 @@
 DXVK's d3d9 is the host executor's Direct3D 9 for the paravirtual
 Direct3D device (doc 14, ADR-006/007) on Linux, macOS and Windows. Only
 `d3d9` is built: `scripts/configure-dxvk.sh` → `build/dxvk`, and with
-`--windows` → `build/win/dxvk` (shipped as `dxvk_d3d9.dll`). The macOS
+`--windows` → `build/win/dxvk`, built with MSVC (shipped as
+`dxvk_d3d9.dll`). The macOS
 Vulkan setup (KosmicKrisp, the SDK, the app's own loader) is in
 `docs/build-macos.md`.
 
@@ -29,6 +30,7 @@ compiler), paths relative to that repository.
 | `12-depth-clip-tl-vertices` | depth clip is per draw (`WantDepthClip`): untransformed geometry is always clipped, pre-transformed vertices only while `D3DRS_CLIPPING` and the Z test are on. Upstream always clipped, and flattened a pre-transformed vertex's Z to 0 with the Z test off to escape the clip, which table fog then read as 0. The executor turns `D3DRS_CLIPPING` off for pre-transformed draws, since the display driver claims no `D3DPMISCCAPS_CLIPTLVERTS` and the guest runtime clipped them already; the rig then draws them unclipped in depth (Wine's `z_range_test`, `depth_clamp_test`; M16 finding 24). Under Wine, where DXVK claims the cap, `depth_clamp_test`'s cap branch fails 5 checks by design | never: it follows our driver's caps |
 | `13-flat-shading-programmable-ps` | `D3DSHADE_FLAT` never reached a programmable pixel shader: the pipeline asks the fragment shader's metadata for flat inputs, and `DxvkIrShader` never filled it; and ps_1_x / ps_2_x colour inputs, which have no semantic `dcl`, were never in the mask (Wine's `test_shademode`) | upstream fixes both |
 | `14-ffp-position-w` | the fixed-function vertex path takes an untransformed position's W as 1.0 whatever the vertex carries (an XYZW FVF, a FLOAT4 position); DXVK used the input W, so such geometry drew at 1/W the size (Wine's `test_ffp_w`) | upstream matches the hardware |
+| `15-vertex-input-eq-divisors` | `DxvkGraphicsPipelineVertexInputState::eq` stops at the first difference in the divisor loop too. It assigned `eq` there without `&& eq`, so a matching divisor overwrote a `false` from the attributes and two vertex layouts with the same counts and divisors compared equal (d3d9's null binding gives every fixed-function draw a divisor). libstdc++'s `unordered_map` compares stored hashes before calling `eq`, MSVC's does not, so only the MSVC build (the Windows one since 2026-10-04) reused the wrong pipeline: the oracle's two-stream fixed-function, cube and volume checks failed. `docs/build-windows.md` "DXVK under MSVC" | upstream adds `&& eq` |
 | `dxbc-spirv/01-vs-fog-default` | a vertex shader that never writes `oFog` leaves fog at 0.0 (fully fogged), not 1.0, as the cards of the era do (`fog_with_shader_test`). Applied inside `subprojects/dxbc-spirv` | upstream matches the hardware |
 | `dxbc-spirv/02-ps2-point-sprite-texcoords` | point sprites replace a ps_2_x shader's `t` registers too (declared as `eTexture`, which the adjustment skipped), so a particle system's ps_2_0 read one texel over the whole sprite (`test_pointsize`) | upstream fixes it |
 

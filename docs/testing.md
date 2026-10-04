@@ -140,7 +140,10 @@ What differs from Linux, so a failure there reads right:
 | `display-adapter` | each family's adapter choices and default; a foreign adapter refused; our adapter replaced, not added beside |
 | `d3d9` | the Direct3D picker: a new machine writes nothing (`auto`); `dxvk`/`system` reach only `d3dpt-vga`, whose `info qtree` shows the property |
 | `libsynth` | `synthx selftest`: AdLib detection, a 440 Hz FM note, the shipped bank through the MPU-401 path, running status; `--roms` adds the CM-32L (doc 20 §7) |
+| `sharing` | Windows 11's clipboard and shared folder (M23) through `launcherx`: a new machine has the `qemu-vdagent` channel and no share; a folder is the player's `--share <dir>` only with the network on; `noclipboard none` takes both away, in the bundle too; and our QEMU of the machine's architecture takes the channel's devices on a bare board |
+| `smb` | `tools/smb-host-test.sh`: libsmb's `smbserve` against the host's own SMB client (macOS `mount_smbfs`, else Samba's `smbclient`) on localhost, at 2.1 and at 3.1.1 with signing required: read, a 3 MB write and read-back, rename, delete, mkdir / rmdir, and the server's log with the login and no signature it could not verify (M23, doc 24); with macOS's client a lease granted and broken when the host changes the file, whose next read is the new contents; skipped with no client or no `target/release/smbserve` |
 | `music` | the sound-card and music pickers into a real QEMU; the monitor writes the ports and the note must be in QEMU's own `wav` |
+| `companions-env` | the bank the player names (`LIBSYNTH_SF2`, `companions.rs`) reaches QEMU's own `getenv()`: the real player, run from a folder with no `soundfonts/` and nothing in the environment, takes a General MIDI machine to the BIOS and quits. On Windows `set_var` never reached QEMU's C runtime (doc 11, "The C runtime boundary"). Needs the player and a display |
 | `sb-mixer` | the SB16's FM, master and SB Pro FM volumes at −12 dB come out 12 dB down (patch 61) |
 | `sb16-irq` | a DSP reset over auto-init DMA raises no IRQ 5 edge; each silence block exactly one (patch 25) |
 | `bios-date` | F000:FFF5 as a guest reads it is ≥ 12/01/99, Win98's `ACPICheckDate` (doc 06) |
@@ -390,7 +393,7 @@ another.
 | `scripts/package-macos.sh` | the app: the dylib closure rewritten to `@rpath`, then every image the loader touches under `DYLD_PRINT_LIBRARIES=1` must be inside the app, for the player and for the launcher drawing its window (`LAUNCHER_SHOT`; AppKit, nothing deployed); `LSMinimumSystemVersion` measured, and every Mach-O's architecture checked; `package` on a Mac (`docs/build-macos.md` "The app"). `--x86_64` is the Intel app from `scripts/build.sh --x86_64`, checked the same way under Rosetta; `package-x86_64` |
 | `scripts/package-flatpak.sh` | the offline Flatpak build against `org.gnome.Sdk` 49, then the Wine add-on (`com._2ksbox.Launcher.Wine`, Wine from source plus the executor's PE pair through the mingw SDK extension; `--no-wine` skips it), then the installed app's `--paths` and `--companions` in its sandbox, its window through `LAUNCHER_SHOT` on a Broadway display inside the sandbox (GTK 4 from the runtime), where `wine`, `wine-host` and `d3dpt-remote` must resolve under /app and the pair must start under the add-on's Wine, and `--picked` on a file exported through the document portal must print the file's own path; regenerate `packaging/flatpak/cargo-sources.json` with `scripts/gen-flatpak-cargo-sources.sh` after any dependency change; `FLATPAK_BUILD_DIR` |
 | `scripts/gen-icons.sh [--check]` | every icon size derived from `packaging/icon/2ksbox.png`, the Store's four logos (`packaging/windows/Assets/`) included; `icons` |
-| `scripts/package-windows.sh` | the Windows zip: the DLL closure (import tables, then names loaded at run time), then the staged launcher's `--paths`, `LAUNCHER_PACKAGED=1`'s library, the player's `--companions`, the display driver's host test through the staged executor on DXVK and on the system d3d9, `launcher.log`, a static C runtime in `2ksbox.exe`, the launcher's window (`LAUNCHER_SHOT`, WinUI 3), `--wizard-new` through the staged `qemu-img`, `wgl-probe`. Natively in MSYS2's MINGW64 shell, where the launcher is built, with Windows-only `PATH` and `LAUNCHER_DATA_DIR` in scratch, where the window and the system-d3d9 run fail the package; or under wine on Linux with a launcher built on the PC, where the window is not tried (`build-windows.md` "Packaging on Windows") |
+| `scripts/package-windows.sh` | the Windows zip: the DLL closure (import tables, then names loaded at run time), then the staged launcher's `--paths`, `LAUNCHER_PACKAGED=1`'s library, the player's `--companions`, the display driver's host test through the staged executor on DXVK and on the system d3d9, `launcher.log`, a static C runtime in `2ksbox.exe`, the player, `d3dpt_exec.dll` and `dxvk_d3d9.dll`, the launcher's window (`LAUNCHER_SHOT`, WinUI 3), `--wizard-new` through the staged `qemu-img`, `wgl-probe`. Natively in MSYS2's MINGW64 shell, where the launcher is built, with Windows-only `PATH` and `LAUNCHER_DATA_DIR` in scratch, where the window and the system-d3d9 run fail the package; which is the only place it runs since the cross build was retired (`build-windows.md` "Packaging on Windows") |
 | `scripts/package-msix.sh <staged> [--pfx …]` | the Windows package as an MSIX: `makeappx` validates the manifest and every path it names, and with `--pfx` the package is signed for a sideload; on Linux the layout only (`build-windows.md` "The Store package"). `package-windows.sh`'s checks also run the staged launcher with `LAUNCHER_PACKAGED=1`, and its `library` line must be `<profile>\2ksbox (packaged)`, outside the AppData an uninstall deletes |
 | `scripts/win-sideload.ps1 [<msix>] [-Check\|-NoInstall\|-Remove]` | on the PC: certificate, trust (one UAC prompt), sign, install. With `-Check`, the installed launcher's `--diagnose` run with package identity must write its `library … (packaged)` line into `%USERPROFILE%\2ksbox\launcher.log`; the real answer to "where does a Store install keep the machines" |
 | `appcert.exe test -appxpackagepath <signed msix> -reportoutputpath <xml>` | the Windows App Certification Kit on the sideload's signed copy: the checks Store certification runs. `OVERALL_RESULT` must be `PASS` (a WARNING also certifies; the DPI one was fixed by the executables' manifest); the two optional tests that fail by the package's nature are named in `build-windows.md` "The Store package" |
@@ -431,6 +434,53 @@ trip (PCR and index come back, and a third QEMU reads the snapshot's
 index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
+
+`tools/clipboard-win11-test.sh [build/w11d]` (M23 steps 4-6): the
+clipboard and the shared folder between this Mac and Windows 11 on Arm,
+end to end, the way a user gets them. The machine runs in the aarch64
+player itself (`tools/player-as-qemu.sh` as `win11-spike.py`'s `QEMU=`,
+`PLAYER_OPTS=--share <dir>` as the launcher passes it, `CLIPBOARD=1`
+adding `qemu-vdagent` and the virtio-serial port); its window opens.
+`tools/win11-spike/clip.ps1` runs the drivers disc's
+`2ksbox\install.ps1`. Checks: the agent's tasks, text on the Mac's
+clipboard at boot in the guest, text the guest sets in `pbpaste`, a
+second Mac text in the guest, the share mapped by `--map` and a host file
+read through it. The Mac's clipboard is the user's: its text is saved and
+put back. About 5 minutes. Needs the aarch64 player and the drivers disc
+(`scripts/build-virtio-win.sh`, which builds the agent).
+
+`tools/smb-try.sh <folder> [build/w11d]` (M23): the shared folder by
+hand before the launcher has the setting. Windows 11 on Arm in the
+aarch64 player, on the launcher's board, booted from a fresh overlay in
+`build/w11s`, with `<folder>` at `\\10.0.2.4\host` (user `smb`, password
+`smb`). smbserve's log is `build/w11s/smb.log`.
+
+`tools/smb-win11-test.sh [build/w11d]` (M23 step 3): the shared folder
+under Windows 11 on Arm's own use, on a fresh overlay of an installed
+spike machine in `OUT=build/w11s`. smbserve serves a host tree with
+awkward names and a 3000-file folder, and adds a file every 3 s for the
+change-notification item. `tools/win11-spike/smb-explorer.ps1` (run as
+`main.ps1` under `stub.ps1`) copies through Explorer's engine both ways,
+times 512 MB, hashes 512 MB through the share twice (the lease's cache),
+checks that a cached read sees another open's write and the host's
+rewrite of `live.txt`, edits in place, watches the folder, and opens Explorer on
+the share for `shots/desktop-hvf.png`. The host then checks the guest's
+upload and lists what the server refused. About 10 minutes; macOS on
+Apple Silicon only so far. `PROBE_PS1=` runs another guest script
+(`smb-open.ps1`: Notepad and Paint on files of the share;
+`smb-unc.ps1`: the share used by its `\\10.0.2.4\host` path, as typed
+into Explorer), and `SEED=<folder>` copies a folder's files into the share
+first.
+
+`tools/win11-spike.py boot` with `SMB=<socket> PROBE=1
+PROBE_PS1=tools/win11-spike/smb.ps1 NET=1 ARCH=aarch64` (M23 step 2): the
+guest's `10.0.2.4:445` reaches `smbserve --unix <socket>` through QEMU
+patch 79, and `smb.ps1`, elevated on the desktop, maps
+`\\10.0.2.4\host` as `smb` / `smb`, reports `Get-SmbConnection`'s
+dialect and signing, lists, reads, writes, copies `notepad.exe` and
+compares hashes, then makes, renames and removes a folder. Run it on a
+scratch overlay of an installed machine (`OUT=build/w11s`, a qcow2 on
+`build/w11d`'s disk with copies of its `vars.fd` and `tpm.permall`).
 
 `tools/win11-spike.py install <iso>` / `boot` (M20 step 1): stock
 Windows 11 on our `qemu-system-x86_64` with q35, the secure EDK2 and a

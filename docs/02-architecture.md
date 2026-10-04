@@ -61,12 +61,14 @@ GPL-2.0 for everything that links it.
 
 ## The embed boundary: `libqemu_embed.h`
 
-A small C API on the QEMU fork (`embed/`, **v8**; the version history
+A small C API on the QEMU fork (`embed/`, **v10**; the version history
 and every call are doc 11): lifecycle from a plain `qemu-system`
 command line, VM control, a 2D display listener and a 3D frame copy or
 zero-copy ring (dma-buf on Linux, IOSurface on macOS), keyboard,
 pointer and gamepad input, a caller-owned audio ring, and
-`qemu_embed_socket_to_fd()` for the QMP socket on Windows. Media,
+`qemu_embed_socket_to_fd()` for the QMP socket on Windows and
+`qemu_embed_setenv()` for the environment QEMU reads (doc 11, "The C
+runtime boundary"). Media,
 snapshots and status go over QMP. The Rust bindings in the
 `qemu-embed` crate are hand-written (no libclang), and
 `qemu_embed_api_version()` guards drift. The player never reaches past

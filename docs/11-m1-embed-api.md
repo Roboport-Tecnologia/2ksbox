@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v9** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v11** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references are to
@@ -48,6 +48,9 @@ not block. Everything else may come from any thread.
 | 6 | macOS zero-copy: `on_3d_iosurface` |
 | 7 | `socket_to_fd` for the QMP socket on Windows (below) |
 | 8 | `pad_state`, `pad_present`: the gamepad (M13); the same bytes feed the gameport |
+| 9 | `set_window_size`, `display_follows_window`: the window's size as a monitor's (M20, below) |
+| 10 | `setenv`: an environment variable set on the library's C runtime ("The C runtime boundary") |
+| 11 | `set_clipboard_cb`, `clipboard_set_text`: the clipboard, text, through QEMU's own (M23, below) |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -98,6 +101,18 @@ Windows has no zero-copy slot; its 3D frames arrive through
   presses, drops) only when something is off.
   `qemu_input_is_absolute()` plus the mouse-mode notifier say whether the
   guest wants tablet or PS/2 semantics.
+- **The clipboard** (v11, track M23, doc 24 §3). The library is a peer
+  of QEMU's clipboard (`ui/clipboard.c`), which `-chardev
+  qemu-vdagent,clipboard=on` joins for a guest agent once the agent
+  announces its capabilities. Guest text: an update owned by another peer
+  is requested if it has no data, and handed to the callback once it
+  has (QEMU thread, BQL held). Host text: a new `QemuClipboardInfo` of
+  ours with the data attached, from a bottom half. When an agent comes up
+  vdagent broadcasts `RESET_SERIAL` and then joins; the library answers
+  that, from a bottom half that runs after the join, with a *new* info
+  carrying its last text, since vdagent sends the guest a grab only for
+  an info that is not the current one. Notifications go out only while
+  the VM runs.
 - **VM control.** `qemu_system_{vmstop,reset,powerdown,shutdown}_request()`
   are async and thread-safe; `vm_start()` needs the BQL, so it goes
   through a bottom-half.
@@ -121,6 +136,83 @@ whichever CRT the module links, which the player cannot know. The handle
 crosses as a handle and **`qemu_embed_socket_to_fd()` converts it inside
 the library**. A raw `SOCKET` is refused at startup as `File descriptor
 'N' is not a socket`.
+
+## The C runtime boundary
+
+On Windows the player and the library are two C runtimes apart, or
+will be. QEMU stays mingw (msvcrt) under ADR-026, and the player moves
+to MSVC with its static UCRT when the mitsuami player builds there (M22
+step 4). Today's winit player is `windows-gnu` and shares QEMU's
+`msvcrt.dll`, which hides any state the two sides happen to share.
+Audited 2026-10-02, every channel the API or the process offers:
+
+- **Memory.** Nothing allocated on one side is freed on the other.
+  `new` copies `argv` (`g_strdup`) and `destroy` frees the copies; the
+  callbacks' pixels and cursor are borrowed for the call; the audio ring
+  is the caller's memory and only atomics cross it.
+- **Descriptors.** One: QMP's `fd=`, converted in the library
+  (`socket_to_fd`, v7, "QMP" above). The dma-buf fds are Linux only.
+- **The environment: the hole.** QEMU and our devices read variables
+  with their C runtime's `getenv()` (the Direct3D executor did too until
+  it moved to MSVC; it now asks the process block), and msvcrt
+  answers from a copy it made when the process started. Rust's
+  `std::env::set_var` is `SetEnvironmentVariableW` on both Windows
+  targets and never reaches that copy (checked: a DLL's `getenv` sees a
+  variable inherited at start, not one set after). So every companion
+  the player named (`player-core/src/companions.rs`) was invisible to
+  QEMU on Windows, already with the `windows-gnu` player. The executor
+  and DXVK were saved by `LoadLibrary`'s bare-name search; the SoundFont
+  was not, and the packaged player refused every General MIDI machine
+  (the Win98 and DOS default) with `mpu401: synth=gm found no
+  SoundFont` unless it ran from the package's own folder, where the
+  in-tree relative path happened to resolve. **`qemu_embed_setenv`**
+  (v10) sets a variable through GLib's `g_setenv` inside the library,
+  which on Windows updates its runtime's copy and the process's block.
+  The rule: a variable QEMU or anything it loads reads goes through
+  `qemu_embed::setenv`; `std::env::set_var` only for what Rust reads.
+  An environment given at spawn (the launcher's `DXVK_LOG_PATH`, a
+  developer's `D3DPT_EXEC_LIB=`) is inherited by both runtimes and fine.
+- **stdio.** QEMU writes its runtime's `stderr`, bound to the process's
+  standard handle when that runtime started. The launcher redirects the
+  player's at spawn, so both runtimes write `player.log`. A player must
+  never redirect its own stderr in-process (`SetStdHandle`, `freopen`):
+  QEMU's runtime would not follow. None does.
+- **Exit.** `hard_exit` is `std::process::exit` on Windows, so
+  `ExitProcess` on either target.
+- **Threads.** QEMU's thread is Rust's `std::thread` (`CreateThread`
+  either way), and the library is linked at load, never opened later
+  (patch 63), so its static TLS is set up as for any thread. But QEMU on
+  Windows took a thread it did not create for the process's main thread
+  and queued that thread's exit notifiers, `__thread` variables, for
+  `atexit`. Ours ends before the process, so at exit QEMU walked freed
+  TLS: a segfault in `notifier_list_notify()` from the DLL's onexit table
+  in about one exit in twelve, with either player toolchain. **Patch 80**
+  runs such a thread's list when it exits (2026-10-03).
+- **Types.** Pointers, `int`, fixed-width integers and C `bool` (one
+  byte in both compilers), no struct by value and no `long double`;
+  function pointers on the Windows x64 convention both use.
+- **C++ exceptions** do not cross between the two compilers. None
+  crosses this API (it is C, and Rust aborts on a panic at an `extern
+  "C"` edge), but one boundary deeper it decides what may move: DXVK
+  throws out of `Direct3DCreate9` on a host with no Vulkan device, and
+  only an executor built by the same compiler catches it. An MSVC
+  executor over the mingw DXVK ended the player there (ADR-026's
+  amendment), so the two moved to MSVC together (its second amendment,
+  2026-10-04). The executor's C API is the boundary QEMU (mingw) opens it
+  across: nothing it allocates is freed by QEMU, no `FILE *` crosses, and
+  it reads the environment from the process block
+  (`GetEnvironmentVariableA`, `d3dpt::env`), not from a C runtime's copy.
+
+**Linking across the toolchains.** The mingw build makes an import
+library only as `libqemu-embed-<target>.dll.a`, which `link.exe` does not
+look for. So on Windows the bindings import the DLL themselves
+(`#[link(kind = "raw-dylib")]` in `qemu-embed/src/lib.rs`): rustc writes
+the import table under either toolchain, and no import library is needed
+at all. It is still a load-time import, never a run-time open (patch
+63). Proved 2026-10-03: the winit player built with
+`x86_64-pc-windows-msvc` (UCRT) ran mingw QEMU to the BIOS screen, with
+QMP connected through `socket_to_fd` and the General MIDI bank set
+through `setenv`, and quit cleanly.
 
 ## What needs patches
 

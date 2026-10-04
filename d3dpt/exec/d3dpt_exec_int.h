@@ -14,13 +14,42 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
+#include <cstdlib>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "d3dpt_exec.h"
 #include "../d3dpt_proto.h"
 
+/* printf checking where the compiler has it (not MSVC) */
+#ifdef __GNUC__
+#define D3DPT_PRINTF(f, a) __attribute__((format(printf, f, a)))
+#else
+#define D3DPT_PRINTF(f, a)
+#endif
+
 namespace d3dpt {
+
+/* A variable of the process environment. On Windows not getenv(): the
+ * executor is MSVC with its own static C runtime (ADR-026), whose copy of
+ * the environment is taken when the DLL loads and never sees what QEMU or
+ * the player set after (doc 11, "The C runtime boundary"). The value
+ * stays valid for the life of the process; a later change is read again. */
+inline const char *env(const char *name)
+{
+#ifdef _WIN32
+    static std::unordered_map<std::string, std::string> seen;
+    char buf[1024];
+    DWORD n = GetEnvironmentVariableA(name, buf, sizeof buf);
+    if (!n || n >= sizeof buf) return nullptr;
+    std::string &v = seen[name];
+    if (v != buf) v = buf;
+    return v.c_str();
+#else
+    return getenv(name);
+#endif
+}
 
 struct Exec;
 void exec_ddi_release(Exec &x);

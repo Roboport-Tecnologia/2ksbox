@@ -346,6 +346,16 @@ The fields, and why each is what it is:
   none`, because QEMU otherwise adds a NIC. XP's PCI devices carry
   explicit addresses, so the NIC's absence does not slide the sound card
   into its slot and make an installed guest re-detect hardware.
+- **Clipboard and Shared folder** (`clipboard`, `shared_folder`), the
+  first on the Input page and the second on the Network page (user,
+  2026-10-03), Windows 11 only (M23, doc 24). The clipboard is on for a
+  new Windows 11 machine: it adds QEMU's `qemu-vdagent` on a
+  virtio-serial port (`Machine::clipboard_args`), which the player joins,
+  and does nothing until the guest has the agent (`2ksbox\install.cmd`
+  on the drivers disc, as `clipboard_notes` says). The shared folder is
+  the player's `--share <dir>` (`player::share_args`), and only with
+  Networking on, which the guest reaches it through (`share_folder`,
+  `shared_folder_notes`). An absent field means off and none.
 - **A floppy and a boot order** (`floppy`, `boot`). *Boot from* is
   Automatic / Hard disk / Floppy / CD. Automatic emits no `-boot`, which
   is what booting a blank new disk's installer from the CD relies on.
@@ -802,7 +812,7 @@ and the 256 px PNG), so under Wayland its `app_id` is
 2ksbox.png` is padded to 512×512, and every size (16–512 PNGs and a
 four-size `.ico`) is a downscale made by `scripts/gen-icons.sh`. All
 are checked in, because nothing that needs one (an offline Flatpak, a
-cross build without ImageMagick, `install.sh`) can draw it.
+build without ImageMagick, `install.sh`) can draw it.
 `gen-icons.sh --check` is the `icons` check. Linux
 installs the set under `share/icons/hicolor/` and writes one absolute
 path into the desktop entry's `Icon=` (a prefix outside `XDG_DATA_DIRS`
@@ -873,6 +883,7 @@ Store upload itself (a Partner Center identity).
 
 ## Out of scope for v1
 
-Shared folders and drag-and-drop, clipboard sync, USB passthrough,
-multi-monitor guests, and recording/streaming helpers. Recording pairs
+Drag-and-drop, USB passthrough, multi-monitor guests, and
+recording/streaming helpers. (Shared folders and the clipboard are track
+M23 since 2026-10-02, doc 24.) Recording pairs
 with the shader pipeline and is the first post-v1 candidate.

@@ -265,7 +265,7 @@ struct Ddi {
     /* D3DPT_DP2_TRACE=<flag file>: while the file exists, every token of
      * the next frame (DP2 records up to the next READBACK) is logged with
      * its arguments; the file is removed when the frame ends */
-    const char *trace_flag = getenv("D3DPT_DP2_TRACE");
+    const char *trace_flag = env("D3DPT_DP2_TRACE");
     bool trace = false, trace_armed = false;
     uint32_t trace_draws = 0;               /* draw-<n>.ppm snapshots of the traced frame */
     /* the render / stage states seen so far (a snapshot at the start of a
@@ -277,10 +277,10 @@ struct Ddi {
     bool clip_tl = false;
     uint32_t clip_host = ~0u;
     /* D3DPT_DDI_NOFOG=1: FOGENABLE forced off (an experiment switch) */
-    bool nofog = getenv("D3DPT_DDI_NOFOG") && atoi(getenv("D3DPT_DDI_NOFOG")) != 0;
+    bool nofog = env("D3DPT_DDI_NOFOG") && atoi(env("D3DPT_DDI_NOFOG")) != 0;
     /* D3DPT_DDI_REREAD=1: every texture is re-read from VRAM at every bind
      * (the experiment that tells a stale host copy from never-written VRAM) */
-    bool reread_all = getenv("D3DPT_DDI_REREAD") && atoi(getenv("D3DPT_DDI_REREAD")) != 0;
+    bool reread_all = env("D3DPT_DDI_REREAD") && atoi(env("D3DPT_DDI_REREAD")) != 0;
     /* a rate line every 5 s of host time while frames are read back (the
      * frame rate of the guest's Direct3D, one readback per presented frame) */
     std::chrono::steady_clock::time_point stat_t0{};
@@ -351,8 +351,8 @@ namespace {
 static Ddi &ddi(Exec &x) {
     if (!x.ddi) {
         x.ddi = new Ddi;
-        if (const char *e = getenv("D3DPT_DDI_FLUSH_DRAWS")) x.ddi->flush_draws = (uint32_t)atoi(e);
-        if (const char *e = getenv("D3DPT_DDI_FLUSH_AB")) { x.ddi->flush_ab = true; x.ddi->flush_alt = (uint32_t)atoi(e); }
+        if (const char *e = env("D3DPT_DDI_FLUSH_DRAWS")) x.ddi->flush_draws = (uint32_t)atoi(e);
+        if (const char *e = env("D3DPT_DDI_FLUSH_AB")) { x.ddi->flush_ab = true; x.ddi->flush_alt = (uint32_t)atoi(e); }
     }
     return *x.ddi;
 }
@@ -1212,7 +1212,7 @@ struct Dp2 {
         }
         x.log("ddi: dp2:   tokens before it (offset:op x count):%s", line);
     }
-    void tr(const char *fmt, ...) __attribute__((format(printf, 2, 3))) {
+    D3DPT_PRINTF(2, 3) void tr(const char *fmt, ...) {
         if (!d.trace) return;
         char buf[400]; va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
         x.log("ddi: trace: %6u %s", pos, buf);

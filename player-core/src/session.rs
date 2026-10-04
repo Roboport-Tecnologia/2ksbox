@@ -320,15 +320,26 @@ impl Session {
             if !*qmp_exec_done && *last_seq > 0 {
                 *qmp_exec_done = true;
                 if let Ok(spec) = std::env::var("PLAYER_QMP_EXEC") {
-                    match serde_json::from_str::<serde_json::Value>(&spec) {
-                        Ok(serde_json::Value::Array(reqs)) => {
-                            for r in &reqs {
-                                eprintln!("[qmp] {r} -> {:?}", qmp.execute_raw(r));
-                            }
+                    let reqs = match serde_json::from_str::<serde_json::Value>(&spec) {
+                        Ok(serde_json::Value::Array(reqs)) => reqs,
+                        Ok(r) => vec![r],
+                        Err(e) => {
+                            eprintln!("[qmp] PLAYER_QMP_EXEC is not JSON: {e}");
+                            Vec::new()
                         }
-                        Ok(r) => eprintln!("[qmp] {r} -> {:?}", qmp.execute_raw(&r)),
-                        Err(e) => eprintln!("[qmp] PLAYER_QMP_EXEC is not JSON: {e}"),
-                    }
+                    };
+                    // On a thread of their own, not this one: a `quit`'s
+                    // reply comes only once QEMU has torn down, and QEMU's
+                    // thread waits for this one to release the VM before
+                    // it does. Blocked here, this thread let it tear down
+                    // after 5 s anyway and then read a freed surface: a
+                    // segfault at exit in about one run in twelve.
+                    let qmp = qmp.clone();
+                    std::thread::spawn(move || {
+                        for r in &reqs {
+                            eprintln!("[qmp] {r} -> {:?}", qmp.execute_raw(r));
+                        }
+                    });
                 }
             }
         }

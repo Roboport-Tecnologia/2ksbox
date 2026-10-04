@@ -177,10 +177,8 @@ scripts/package-windows.sh
 
 The result is `build/win/package/2ksbox-<version>-windows-x86_64.zip`.
 Unzip it anywhere and run `2ksbox.exe`; it needs the Windows App
-Runtime 2.4 or later, which Microsoft installs once per PC. The rest of
-the build can also be cross-built on Linux in a podman (or docker)
-container; the details are in
-[docs/build-windows.md](docs/build-windows.md).
+Runtime 2.4 or later, which Microsoft installs once per PC. The details
+are in [docs/build-windows.md](docs/build-windows.md).
 
 ## First run
 

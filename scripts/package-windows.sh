@@ -10,28 +10,23 @@
 #                                              #     (scripts/package-msix.sh)
 #   scripts/package-windows.sh --out DIR       # default build/win/package
 #
-# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023),
-# the one MSVC binary here (`build-windows.sh mitsuami`, Windows only),
-# with a static C runtime. It needs no DLL of ours, but it runs on the
-# Windows App Runtime 2.4 or later, a framework Microsoft installs once
-# per PC; the zip cannot carry it, and the Store's MSIX declares it as a
-# dependency instead. So the package comes from a Windows PC, where that
-# launcher is built.
+# `2ksbox.exe` is `launcher-mitsuami`, the WinUI 3 launcher (ADR-023), and
+# `2ksbox-player.exe` is `player-mitsuami` (track M22), the two MSVC
+# binaries here (`build-windows.sh mitsuami`, Windows only), each with a
+# static C runtime. The player links QEMU's mingw DLL across the two C
+# runtimes (doc 11). Both run on the Windows App Runtime 2.4 or later, a
+# framework Microsoft installs once per PC; the zip cannot carry it, and
+# the Store's MSIX declares it as a dependency instead. So the package
+# comes from a Windows PC, where they are built.
 #
-# It runs in two places, and builds nothing in either
-# (scripts/build-windows.sh does that, and this script says so if an
-# artefact is missing):
-#
-#   - a Linux host, not inside scripts/win-cross.sh, given a launcher
-#     built on Windows in launcher-mitsuami/target/release: the checks need
-#     wine, which the cross image does not carry, and the mingw sysroot and
-#     strip come out of that image (podman) when the host has none;
-#   - MSYS2's MINGW64 shell on Windows, after a native build: the sysroot
-#     and binutils are MSYS2's own (/mingw64), no container, and the
-#     checks run the package itself, with nothing but Windows on PATH and
-#     the launcher's data in a scratch directory (LAUNCHER_DATA_DIR), not
-#     the user's %APPDATA%. There the window grab and the system-Direct3D
-#     run are verdicts, because this is the target.
+# It runs in MSYS2's MINGW64 shell on Windows, after a native build, and
+# builds nothing (scripts/build-windows.sh does that, and this script says
+# so if an artefact is missing). Windows packages are made only there
+# (ADR-026; the cross build from Linux and its wine checks are retired).
+# The mingw runtime and binutils are MSYS2's own (/mingw64), and the
+# checks run the package itself, with nothing but Windows on PATH and the
+# launcher's data in a scratch directory (LAUNCHER_DATA_DIR), not the
+# user's %APPDATA%. Every check is a verdict, because this is the target.
 #
 # A Windows package is one folder, not a Unix prefix. The executables sit
 # at the top with every DLL beside them, which is where the loader looks
@@ -39,7 +34,7 @@
 # knows both shapes (launcher-core/src/paths.rs).
 #
 #   2ksbox.exe                  the launcher
-#   2ksbox-player.exe           the player
+#   2ksbox-player.exe           the player (player-mitsuami)
 #   qemu-img.exe                ours, patched
 #   libqemu-embed-i386.dll      QEMU as a library, what the player runs
 #   d3dpt_exec.dll              the Direct3D executor (doc 14)
@@ -68,39 +63,38 @@ while [ $# -gt 0 ]; do
     --with-shaders) SHADERS=1; shift ;;
     --msix) MSIX=1; shift ;;
     --out) OUT=$2; shift 2 ;;
-    -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "package-windows.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-# Native on Windows (MSYS2's MINGW64 shell, the C runtime and libstdc++
-# the package ships) or on a Linux host. As in build-windows.sh.
-NATIVE=""
+# MSYS2's MINGW64 shell only: the C runtime and libstdc++ the package
+# ships, and the Windows that runs its checks. As in build-windows.sh.
 case "${MSYSTEM:-}" in
-  "") ;;
-  MINGW64) NATIVE=1 ;;
+  MINGW64) ;;
+  "") echo "package-windows.sh: Windows packages are made on Windows, in MSYS2's MINGW64 shell (ADR-026)" >&2; exit 1 ;;
   *) echo "package-windows.sh: this is MSYS2's $MSYSTEM shell; open the MINGW64 one" >&2; exit 1 ;;
 esac
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 NAME="2ksbox-$VERSION-windows-x86_64"
 STAGE="$OUT/$NAME"
-TARGET="$ROOT/target/x86_64-pc-windows-gnu/release"
 LAUNCHER="$ROOT/launcher-mitsuami/target/release/launcher-mitsuami.exe"
+PLAYER="$ROOT/player-mitsuami/target/release/player-mitsuami.exe"
 Q="$ROOT/build/win/qemu"
 
 need() { [ -e "$1" ] || { echo "package-windows.sh: missing $1${2:+ ($2)}" >&2; exit 1; }; }
 need "$Q/libqemu-embed-i386.dll" "scripts/build-windows.sh qemu"
 need "$Q/qemu-img.exe"           "scripts/build-windows.sh qemu"
 need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
-need "$TARGET/player.exe"        "scripts/build-windows.sh rust"
+need "$PLAYER"                   "scripts/build-windows.sh mitsuami, on Windows"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/doc"
 
 install -m755 "$LAUNCHER" "$STAGE/2ksbox.exe"
-install -m755 "$TARGET/player.exe" "$STAGE/2ksbox-player.exe"
+install -m755 "$PLAYER" "$STAGE/2ksbox-player.exe"
 install -m755 "$Q/qemu-img.exe" "$STAGE/"
 install -m755 "$Q/libqemu-embed-i386.dll" "$STAGE/"
 cp -a qemu/pc-bios "$STAGE/pc-bios"
@@ -110,17 +104,13 @@ cp -a qemu/pc-bios "$STAGE/pc-bios"
 # failure. Say so anyway, because "3D does nothing" is hard to trace back
 # to a packaging step.
 #
-# Both or neither, as on Linux. DXVK's d3d9 is the executor's default;
+# Both or neither, as on the other hosts. DXVK's d3d9 is the executor's default;
 # Windows' own system32 d3d9 is only the fallback below the Vulkan floor
-# (D3DPT_D3D9). DXVK's release build keeps its symbols, 21 MB of them, so
-# the staged copy is stripped.
+# (D3DPT_D3D9). Both are MSVC (ADR-026's amendment), whose symbols stay
+# in the PDB beside the build and are not shipped.
 if [ -f build/win/d3dpt/d3dpt_exec.dll ] && [ -f build/win/dxvk/src/d3d9/d3d9.dll ]; then
   install -m755 build/win/d3dpt/d3dpt_exec.dll "$STAGE/"
   install -m755 build/win/dxvk/src/d3d9/d3d9.dll "$STAGE/dxvk_d3d9.dll"
-  STRIP=${WIN_STRIP:-$([ -n "$NATIVE" ] && echo strip || echo x86_64-w64-mingw32-strip)}
-  if command -v "$STRIP" >/dev/null; then "$STRIP" --strip-debug "$STAGE/dxvk_d3d9.dll"
-  elif [ -n "$NATIVE" ]; then echo "package-windows.sh: no $STRIP (pacman -S mingw-w64-x86_64-binutils)" >&2; exit 1
-  else scripts/win-cross.sh x86_64-w64-mingw32-strip --strip-debug "$STAGE/dxvk_d3d9.dll"; fi
 else
   echo "package-windows.sh: no build/win/d3dpt/d3dpt_exec.dll and build/win/dxvk/src/d3d9/d3d9.dll (scripts/build-windows.sh exec); packaging without Direct3D pass-through"
 fi
@@ -234,25 +224,8 @@ chmod 644 "$STAGE/2ksbox-debug.bat"
 # Natively the sysroot is MSYS2's /mingw64/bin, where the build linked
 # against, and "not ours" is the same test: Windows' own DLLs are not in
 # it.
-if [ -n "$NATIVE" ]; then
-  SYSROOT=${WIN_SYSROOT:-/mingw64/bin}
-  OBJDUMP=${WIN_OBJDUMP:-objdump}
-else
-  SYSROOT=${WIN_SYSROOT:-/usr/x86_64-w64-mingw32/sys-root/mingw/bin}
-  OBJDUMP=${WIN_OBJDUMP:-x86_64-w64-mingw32-objdump}
-fi
-if [ ! -d "$SYSROOT" ] && [ -z "$NATIVE" ]; then
-  # The sysroot lives in the cross container, so ask it for a copy every
-  # time. A kept copy is a snapshot of an older image; one from before Qt
-  # was in the image once quietly packaged the old Qt launcher with no
-  # Qt6Core.dll.
-  SYSROOT="$ROOT/build/win/sysroot-bin"
-  echo "==> copying the mingw runtime out of the cross image"
-  rm -rf "$SYSROOT"
-  mkdir -p "$SYSROOT"
-  scripts/win-cross.sh bash -c \
-    "cp -a /usr/x86_64-w64-mingw32/sys-root/mingw/bin/*.dll '$SYSROOT/'"
-fi
+SYSROOT=${WIN_SYSROOT:-/mingw64/bin}
+OBJDUMP=${WIN_OBJDUMP:-objdump}
 command -v "$OBJDUMP" >/dev/null || { echo "package-windows.sh: no $OBJDUMP (WIN_OBJDUMP=)"; exit 1; }
 
 imports() { "$OBJDUMP" -p "$1" | sed -n 's/^\tDLL Name: //p'; }
@@ -330,10 +303,7 @@ echo "runtime DLLs   $copied copied from $(basename "$SYSROOT")"
 # The staged binaries, run as Windows binaries, from outside the checkout,
 # with an empty environment, so no LAUNCHER_*/PLAYER_* knob from this
 # shell can make them work and nothing may resolve back into the build
-# tree. Wine is the only Windows on a Linux build host. It is not the
-# target, so a failure here is investigated rather than trusted, but "the
-# launcher starts and answers about itself" and "the packaged qemu-img
-# writes a qcow2" are what a broken package fails at.
+# tree.
 fail=0
 # The network backend every machine the launcher writes asks for
 # (`-netdev user`, bundle.rs) must exist in the QEMU beside it. It is a
@@ -342,45 +312,30 @@ fail=0
 # "network backend 'user' is not compiled into this binary" with every
 # check here green. The import table answers rather than a running QEMU,
 # because the package holds no qemu-system-*.exe (QEMU is in-process,
-# inside libqemu-embed-i386.dll) and wine hangs in the player that would
-# load it. net/slirp.c is libslirp's only consumer, so the import is the
-# backend.
+# inside libqemu-embed-i386.dll). net/slirp.c is libslirp's only
+# consumer, so the import is the backend.
 if imports "$STAGE/libqemu-embed-i386.dll" | grep -qi '^libslirp'; then
   echo "qemu           -netdev user is compiled in (libslirp)"
 else
   echo "package-windows.sh: the embed library does not link libslirp, so it has no" >&2
   echo "  'user' network backend -- and every machine the launcher writes asks for one" >&2
-  echo "  (packaging/windows/Dockerfile builds it; Fedora has no mingw package)" >&2
+  echo "  (scripts/build-windows.sh --msys2-deps installs MSYS2's libslirp)" >&2
   fail=1
 fi
 
-RUN=""
-if [ -n "$NATIVE" ]; then RUN=native
-elif command -v wine >/dev/null; then RUN=wine
-fi
-if [ -n "$RUN" ]; then
+{
   scratch=$(mktemp -d)
   trap 'rm -rf "$scratch"' EXIT
-  if [ "$RUN" = wine ]; then
-    export WINEPREFIX="$scratch/wine" WINEDEBUG=-all
-    # One prefix, created once, so every check below runs in the same one.
-    wine wineboot -i >/dev/null 2>&1 || true
-    # Where the staged launcher keeps its data: the prefix's AppData.
-    DATA="$WINEPREFIX/drive_c/users"
-    # Z: is wine's view of /.
-    winpath() { printf 'Z:%s' "$1" | tr '/' '\\'; }
-  else
-    # Windows' known folders place %APPDATA%, so the environment cannot
-    # move it; LAUNCHER_DATA_DIR does (paths::data_dir). Without it every
-    # check below would write into the user's own library and log.
-    DATA="$scratch/data"
-    winpath() { cygpath -w "$1"; }
-    # Windows and nothing else on PATH: a DLL the package lacks must fail
-    # here, not be found in /mingw64/bin.
-    WINDOWS=$(cygpath -W)              # from Windows, not the environment
-    sysroot_u=$(cygpath -u "$WINDOWS")
-    WINPATH="$sysroot_u/System32:$sysroot_u:$sysroot_u/System32/Wbem"
-  fi
+  # Windows' known folders place %APPDATA%, so the environment cannot
+  # move it; LAUNCHER_DATA_DIR does (paths::data_dir). Without it every
+  # check below would write into the user's own library and log.
+  DATA="$scratch/data"
+  winpath() { cygpath -w "$1"; }
+  # Windows and nothing else on PATH: a DLL the package lacks must fail
+  # here, not be found in /mingw64/bin.
+  WINDOWS=$(cygpath -W)              # from Windows, not the environment
+  sysroot_u=$(cygpath -u "$WINDOWS")
+  WINPATH="$sysroot_u/System32:$sysroot_u:$sysroot_u/System32/Wbem"
 
   # The checks run *in* the package folder, and whatever a program there
   # writes into its working directory would ship: a DXVK log, and with no
@@ -392,27 +347,17 @@ if [ -n "$RUN" ]; then
   # runpkg [VAR=value ...] program [args ...]: run a staged program from
   # the package folder with an empty environment, so no LAUNCHER_* or
   # PLAYER_* knob from this shell can make it work and nothing may resolve
-  # back into the build tree. T= bounds it (default 300 s). D=1 passes the
-  # display through to wine, which a real window or a Vulkan device needs
-  # there; natively Windows' own session is always there.
+  # back into the build tree. T= bounds it (default 300 s), and IN= runs
+  # it from another directory.
   runpkg() {
     local vars=() prog
     while [[ "${1:-}" == *=* ]]; do vars+=("$1"); shift; done
-    if [ "$RUN" = native ]; then
-      case "$1" in /*) prog=$1 ;; *) prog=./$1 ;; esac
-      (cd "$STAGE" && timeout "${T:-300}" env -i SYSTEMROOT="$WINDOWS" WINDIR="$WINDOWS" \
-          PATH="$WINPATH" TEMP="$(winpath "$scratch")" TMP="$(winpath "$scratch")" \
-          LOCALAPPDATA="$(winpath "$scratch")" PROGRAMDATA="$(winpath "$scratch")" \
-          DXVK_LOG_PATH="$(winpath "$scratch")" \
-          LAUNCHER_DATA_DIR="$(winpath "$DATA")" "${vars[@]}" "$prog" "${@:2}")
-    else
-      local disp=()
-      [ -z "${D:-}" ] || disp=(DISPLAY="${DISPLAY:-}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
-                               XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}")
-      (cd "$STAGE" && timeout "${T:-300}" env -i HOME="$scratch" WINEPREFIX="$WINEPREFIX" \
-          WINEDEBUG=-all DXVK_LOG_PATH="$(winpath "$scratch")" PATH="$PATH" \
-          "${disp[@]}" "${vars[@]}" wine "$@")
-    fi
+    case "$1" in /*) prog=$1 ;; *) prog=$STAGE/$1 ;; esac
+    (cd "${IN:-$STAGE}" && timeout "${T:-300}" env -i SYSTEMROOT="$WINDOWS" WINDIR="$WINDOWS" \
+        PATH="$WINPATH" TEMP="$(winpath "$scratch")" TMP="$(winpath "$scratch")" \
+        LOCALAPPDATA="$(winpath "$scratch")" PROGRAMDATA="$(winpath "$scratch")" \
+        DXVK_LOG_PATH="$(winpath "$scratch")" \
+        LAUNCHER_DATA_DIR="$(winpath "$DATA")" "${vars[@]}" "$prog" "${@:2}")
   }
 
   resolved=$(runpkg 2ksbox.exe --paths 2>/dev/null || true)
@@ -423,8 +368,8 @@ if [ -n "$RUN" ]; then
     fail=1
   else
     printf '%s\n' "$resolved"
-    # Every companion must resolve inside the package. Wine reports them
-    # as Z:\... paths for a Unix directory, so compare on the tail.
+    # Every companion must resolve inside the package; compare on the
+    # path's tail, without the drive.
     while read -r what path; do
       case "$what" in player|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
       case "$path" in "("*) continue ;; esac
@@ -445,13 +390,11 @@ if [ -n "$RUN" ]; then
   # so the run leaves it as it found it: a %USERPROFILE%\2ksbox this run
   # made is removed again, and an existing launcher.log there is put back.
   made="" kept=""
-  if [ "$RUN" = native ]; then
-    # The profile from Windows itself (CSIDL_PROFILE), as the launcher
-    # asks for it: USERPROFILE is not always in an MSYS2 environment.
-    home=$(cygpath -u "$(cygpath -F 40)")/2ksbox
-    if [ ! -e "$home" ]; then made=$home
-    elif [ -f "$home/launcher.log" ]; then kept=$home/launcher.log; cp -p "$kept" "$scratch/kept.log"
-    fi
+  # The profile from Windows itself (CSIDL_PROFILE), as the launcher
+  # asks for it: USERPROFILE is not always in an MSYS2 environment.
+  home=$(cygpath -u "$(cygpath -F 40)")/2ksbox
+  if [ ! -e "$home" ]; then made=$home
+  elif [ -f "$home/launcher.log" ]; then kept=$home/launcher.log; cp -p "$kept" "$scratch/kept.log"
   fi
   packaged=$(runpkg LAUNCHER_PACKAGED=1 LAUNCHER_DATA_DIR= 2ksbox.exe --paths 2>/dev/null \
       | awk '$1 == "library" { print }' || true)
@@ -495,16 +438,15 @@ EOF
   # package's own d3dpt_exec.dll and dxvk_d3d9.dll and checks the pixels
   # it reads back. The Windows executor's first real run drew black with
   # every check here green, because nothing had put a batch through it.
-  # Under wine this reaches the host GPU through winevulkan; a host with no
-  # Vulkan device skips (77).
+  # A PC with no Vulkan device skips (77).
   if [ -f "$STAGE/dxvk_d3d9.dll" ] && [ -f build/win/d3dpt-dp2-test.exe ]; then
     cp build/win/d3dpt-dp2-test.exe "$scratch/"
     rc=0
-    D=1 runpkg D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_DXVK_LIB=dxvk_d3d9.dll \
+    runpkg D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_DXVK_LIB=dxvk_d3d9.dll \
        "$scratch/d3dpt-dp2-test.exe" "$(winpath "$scratch/dp2.bmp")" > "$scratch/dp2.log" 2>&1 || rc=$?
     ok=$(grep -c '^ok:' "$scratch/dp2.log" || true); bad=$(grep -c '^FAIL' "$scratch/dp2.log" || true)
     if [ "$rc" = 77 ]; then
-      echo "direct3d       SKIP: no Vulkan device$([ "$RUN" = wine ] && echo ' under wine')"
+      echo "direct3d       SKIP: no Vulkan device"
     elif [ "$rc" = 0 ] && [ "$bad" = 0 ] && [ "$ok" -gt 0 ]; then
       echo "direct3d       $ok checks through the staged d3dpt_exec.dll + dxvk_d3d9.dll"
     else
@@ -514,24 +456,19 @@ EOF
     fi
     # ... and the same records on the *other* backend, the system
     # Direct3D 9 the executor runs on on a real Windows host below the
-    # Vulkan 1.3 floor. Natively that is this PC's own system32 d3d9, the
-    # real thing, so a failure fails the package. Under wine that name is
-    # wine's own d3d9 over WineD3D, a third implementation rather than the
-    # user's, so it is reported and never fails the package. It needs a
-    # display and GL, which are often absent where a package is rolled.
+    # Vulkan 1.3 floor: this PC's own system32 d3d9, the real thing, so
+    # a failure fails the package.
     rc=0
-    D=1 runpkg D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_D3D9=system \
+    runpkg D3DPT_EXEC_LIB=d3dpt_exec.dll D3DPT_D3D9=system \
        "$scratch/d3dpt-dp2-test.exe" "$(winpath "$scratch/dp2-system.bmp")" > "$scratch/dp2-system.log" 2>&1 || rc=$?
     sysbad=$(grep -c '^FAIL' "$scratch/dp2-system.log" || true)
     sysok=$(grep -c '^ok:' "$scratch/dp2-system.log" || true)
     if [ "$rc" = 0 ] && [ "$sysbad" = 0 ] && [ "$sysok" -gt 0 ]; then
-      echo "direct3d/sys   $sysok checks on $([ "$RUN" = wine ] && echo "wine's own d3d9 (the system-Direct3D-9 backend)" || echo "this PC's system32 d3d9")"
-    elif [ "$RUN" = native ]; then
+      echo "direct3d/sys   $sysok checks on this PC's system32 d3d9"
+    else
       echo "package-windows.sh: the staged executor failed on the system Direct3D 9 (exit $rc, $sysbad failed):" >&2
       { grep '^FAIL' "$scratch/dp2-system.log"; grep '^exec: \|^dlopen\|^bad \|mismatch' "$scratch/dp2-system.log"; } | head -20 >&2
       fail=1
-    else
-      echo "direct3d/sys   not run here (exit $rc, $sysbad failed): wine's d3d9 needs a display and GL — the real check is on Windows"
     fi
   fi
 
@@ -555,30 +492,50 @@ EOF
   # needs a Visual C++ redistributable no Windows comes with, and a PC
   # without it shows a loader dialog before any code of ours runs.
   # `build-windows.sh mitsuami` links it statically; this keeps it so.
-  if imports "$STAGE/2ksbox.exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
-    echo "package-windows.sh: 2ksbox.exe imports $(imports "$STAGE/2ksbox.exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(build it with +crt-static: scripts/build-windows.sh mitsuami)" >&2
-    fail=1
-  else
-    echo "c runtime      2ksbox.exe links its C runtime statically"
-  fi
+  # The Direct3D executor and DXVK are MSVC too (`build-windows.sh exec`,
+  # /MT and DXVK's own b_vscrt), and QEMU opens them by name, so the
+  # closure walk never saw them either.
+  for exe in 2ksbox.exe 2ksbox-player.exe d3dpt_exec.dll dxvk_d3d9.dll; do
+    [ -f "$STAGE/$exe" ] || continue        # the Direct3D pair: not built here; warned above
+    if imports "$STAGE/$exe" | grep -qiE '^(vcruntime|msvcp)[0-9]+'; then
+      echo "package-windows.sh: $exe imports $(imports "$STAGE/$exe" | grep -iE '^(vcruntime|msvcp)[0-9]+' | tr '\n' ' ')(link its C runtime statically: scripts/build-windows.sh mitsuami / exec)" >&2
+      fail=1
+    else
+      echo "c runtime      $exe links its C runtime statically"
+    fi
+  done
   # A window, which `--paths` never opens: WinUI 3 and the Windows App
   # Runtime start only then. The launcher's own headless grab
   # (`LAUNCHER_SHOT`, launcher-mitsuami/src/shot.rs) opens the machine
-  # window, draws it into a PNG and exits. Natively that is a verdict (it
-  # shows for a moment on this desktop). Wine has no WinUI, so there it is
-  # not tried, and the real answer is 2ksbox-debug.bat on a PC.
+  # window, draws it into a PNG and exits (it shows for a moment on this
+  # desktop).
   shot="$scratch/window.png"
-  if [ "$RUN" = native ]; then
-    T=90 runpkg LAUNCHER_SHOT="$(winpath "$shot")" 2ksbox.exe >/dev/null 2>&1 || true
-    if [ -s "$shot" ]; then
-      echo "window         drawn by the staged launcher on WinUI 3"
-      rm -f "$shot"
-    else
-      echo "package-windows.sh: the staged launcher drew no window (LAUNCHER_SHOT); is the Windows App Runtime 2.4+ installed?" >&2
-      fail=1
-    fi
+  T=90 runpkg LAUNCHER_SHOT="$(winpath "$shot")" 2ksbox.exe >/dev/null 2>&1 || true
+  if [ -s "$shot" ]; then
+    echo "window         drawn by the staged launcher on WinUI 3"
+    rm -f "$shot"
   else
-    echo "window         (WinUI 3 does not run under wine; the real answer is 2ksbox-debug.bat on a PC)"
+    echo "package-windows.sh: the staged launcher drew no window (LAUNCHER_SHOT); is the Windows App Runtime 2.4+ installed?" >&2
+    fail=1
+  fi
+  # The player, which --companions above starts but never runs a machine
+  # in: natively, a machine with a General MIDI port (the Win98 and DOS
+  # default) to the BIOS screen and a clean exit, through QMP's quit once
+  # the guest has drawn. That is WinUI 3, the surface's Direct3D 12, QEMU's
+  # mingw DLL across the player's own C runtime, and the bank the player
+  # names from the package. It runs from the scratch directory: from the
+  # package's own, QEMU's relative soundfonts\ would find the bank anyway,
+  # and outside it QEMU refused such a machine until the embed library set
+  # the variable (doc 11, "The C runtime boundary"). The window shows for
+  # a moment.
+  if IN="$scratch" T=90 runpkg PLAYER_QMP_EXEC='{"execute":"quit"}' 2ksbox-player.exe -- \
+       -L "$(winpath "$STAGE/pc-bios")" -M pc -m 32 -device mpu401,audiodev=embed0,synth=gm \
+       > "$scratch/player.txt" 2>&1; then
+    echo "player         ran a machine to its BIOS and quit (WinUI 3, the embed DLL, the bank)"
+  else
+    echo "package-windows.sh: the staged player did not run a machine to its BIOS and quit:" >&2
+    grep -v '^\[audio\]' "$scratch/player.txt" | tail -5 >&2
+    fail=1
   fi
 
   # The bundle-creating path end to end: the staged launcher runs the
@@ -595,15 +552,13 @@ EOF
   fi
   # Offscreen GL, which is what a Win98 guest's 3D needs (the embed
   # library's WGL backend). Reported, never fatal. It is a property of the
-  # machine that runs the package, and wine's GL is not the target's; a
-  # Windows user runs tools\wgl-probe.exe there for the real answer.
-  # Unlike the checks above, this one needs a display. It opens a real,
-  # invisible window, which wine with no DISPLAY makes impossible.
+  # machine that runs the package; a user runs tools\wgl-probe.exe on
+  # theirs for the real answer.
   if [ -f "$STAGE/tools/wgl-probe.exe" ]; then
-    if out=$(D=1 runpkg tools/wgl-probe.exe 2>/dev/null); then
+    if out=$(runpkg tools/wgl-probe.exe 2>/dev/null); then
       echo "wgl-probe      $(printf '%s\n' "$out" | tail -1)"
     else
-      echo "wgl-probe      no offscreen GL$([ "$RUN" = wine ] && echo ' under wine'): $(printf '%s\n' "$out" | tail -1)"
+      echo "wgl-probe      no offscreen GL: $(printf '%s\n' "$out" | tail -1)"
     fi
   fi
   if ! find "$STAGE" | sort | diff "$scratch/stage-before" - > "$scratch/stage-diff"; then
@@ -612,17 +567,15 @@ EOF
     sed -n 's/^> //p' "$scratch/stage-diff" | sort -r | while IFS= read -r f; do rm -rf "$f"; done
     fail=1
   fi
-else
-  echo "checks         (no wine on this host; the package was not run)"
-fi
+}
 [ "$fail" = 0 ] || exit 1
 echo "checks passed"
 
 du -sh "$STAGE" | sed 's/^/staged  /'
 if [ "$ZIP" = 1 ]; then
-  # A zip, because that is what a Windows user is handed. `zip` is not on
-  # every Linux (this project's own host has none); Python's zipfile makes
-  # the same archive and is always there, so it is the fallback.
+  # A zip, because that is what a Windows user is handed. MSYS2 may have
+  # no `zip`; Python's zipfile makes the same archive and is always
+  # there, so it is the fallback.
   archive="$OUT/$NAME.zip"
   rm -f "$archive"
   if command -v zip >/dev/null; then
@@ -635,9 +588,7 @@ if [ "$ZIP" = 1 ]; then
 fi
 # The same tree as an MSIX layout for the Store (docs/build-windows.md,
 # "The Store package"). Only after the checks: the MSIX is the zip's
-# contents and no more, so the zip's evidence is its evidence. A Linux
-# host has no makeappx, so this stops at the layout and says how to
-# finish on a PC.
+# contents and no more, so the zip's evidence is its evidence.
 if [ "$MSIX" = 1 ]; then
   scripts/package-msix.sh "$STAGE" --out "$OUT"
 fi

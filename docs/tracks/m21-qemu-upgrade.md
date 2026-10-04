@@ -557,9 +557,9 @@ reaches the desktop in 25.3 s and powers off clean.
 
 Still open after the merge:
 - Step 4: the Air (App Store, community, the Intel build), where 76 has
-  never compiled, the Windows cross build and package (the native
-  `qemu` and `rust` stages build, above), the Linux package and the
-  Flatpak.
+  never compiled, the Windows package (the native build packages
+  since 2026-10-03; the cross build was retired), the Linux package and
+  the Flatpak.
 - A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
   so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
   (`Machine::board`) does not cover it. User's call.

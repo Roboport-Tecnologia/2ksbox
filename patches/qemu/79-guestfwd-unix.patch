@@ -1,0 +1,31 @@
+QEMU's `guestfwd=` gains a `unix:<path>` target: each TCP connection the
+guest opens to server:port becomes a new connection to the host's Unix
+socket at <path>, through libslirp's slirp_add_unix(). A chardev target
+carries one connection for the machine's whole life, and `cmd:` spawns a
+process; the player's SMB server (libsmb, track M23) wants ordinary
+per-connection streams in its own process. `slirp_add_unix` is Unix-only
+in libslirp 4.9.5, so on Windows the rule is refused.
+
+diff --git a/net/slirp.c b/net/slirp.c
+index 9e9941f..d1ebab6 100644
+--- a/net/slirp.c
++++ b/net/slirp.c
+@@ -1154,6 +1154,18 @@ static int slirp_guestfwd(SlirpState *s, const char *config_str, Error **errp)
+                        "forwarding rule '%s'", config_str);
+             return -1;
+         }
++    } else if (g_str_has_prefix(p, "unix:")) {
++        /*
++         * 2ksbox: every guest connection becomes a new connection to the
++         * host's Unix socket, where a chardev would carry one connection
++         * for the machine's whole life (the player's SMB server, M23)
++         */
++        if (slirp_add_unix(s->slirp, &p[5], &server, port) < 0) {
++            error_setg(errp, "Conflicting/invalid host:port in guest "
++                       "forwarding rule '%s', or no Unix sockets here",
++                       config_str);
++            return -1;
++        }
+     } else {
+         Error *err = NULL;
+         /*

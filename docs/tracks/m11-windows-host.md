@@ -1,8 +1,9 @@
 # Track M11: the Windows host (build, package, run)
 
-Windows as a *host*: the stack cross-built from Linux into a portable zip,
-the same stages built natively on a Windows PC for debugging, and the
-Windows branches of shared code. The track is done: the package runs on
+Windows as a *host*: the stack built natively on a Windows PC into a
+portable zip and a Store MSIX (it began as a cross build from Linux,
+retired on 2026-10-03, ADR-026), and the Windows branches of shared
+code. The track is done: the package runs on
 the user's PC (Ryzen 9 5900X, RTX 3090, the `base98-br` image), 3D guests
 included on both Direct3D backends and the OpenGL pass-through. This file
 keeps scope, test loop, traps and open items. The design:
@@ -17,11 +18,12 @@ keeps scope, test loop, traps and open items. The design:
 
 ## Scope and files
 
-- Cross toolchain: `packaging/windows/Dockerfile`, `scripts/win-cross.sh`,
-  `packaging/windows/clang-mingw-cc` / `-cxx`.
-- Build: `scripts/build-windows.sh` (cross, and native under MSYS2
-  MINGW64), the `--windows` mode of `scripts/configure-qemu.sh` and
-  `scripts/build-d3dpt-exec.sh`, `scripts/win-run.sh`,
+- Build: `scripts/build-windows.sh` (natively under MSYS2 MINGW64; the
+  cross build from Linux, `win-cross.sh` and its container, was retired
+  on 2026-10-03, ADR-026), the `--windows` mode of `scripts/configure-qemu.sh`,
+  `scripts/configure-dxvk.sh` and `scripts/build-d3dpt-exec.sh` (DXVK and
+  the executor MSVC since 2026-10-04, in `scripts/msvc-env.sh`'s
+  environment), `scripts/win-run.sh`,
   `guest-tools/msys2-i686.sh`.
 - Package: `scripts/package-windows.sh`; the Store's MSIX: `scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`, `packaging/windows/Assets/`,
@@ -40,26 +42,14 @@ keeps scope, test loop, traps and open items. The design:
 
 ## Test loop
 
-```sh
-scripts/win-cross.sh --build          # once, and after a Dockerfile change
-scripts/build-windows.sh              # qemu rust exec guest (cross; the launcher is the PC's)
-scripts/build-windows.sh rust         # one stage (stages are positional)
-scripts/package-windows.sh            # the zip under wine, given a launcher built on the PC
-scripts/package-windows.sh --msix     # ... and the Store MSIX layout, packed on the PC
-```
-
-`package-windows.sh` gives the Windows evidence `scripts/test.sh` cannot,
-running the staged package under wine (`docs/build-windows.md` "The
-package" lists the checks: 107 Direct3D checks with frames byte-identical
-to Linux's, among others). Wine is not the target, so a wine failure is
-investigated, not believed.
-
 On the PC, in MSYS2's MINGW64 shell (setup in `docs/build-windows.md`
 "Building on Windows"):
 
 ```sh
-scripts/build-windows.sh              # natively
-scripts/package-windows.sh            # the zip, checked by Windows itself (no podman, no wine)
+scripts/build-windows.sh              # every stage
+scripts/build-windows.sh rust         # one stage (stages are positional)
+scripts/package-windows.sh            # the zip, checked by Windows itself
+scripts/package-windows.sh --msix     # ... and the Store MSIX
 scripts/win-run.sh launcher           # the launcher out of the checkout
 GDB=1 scripts/win-run.sh player ...   # the [player] line from launcher.log
 build/win/d3dpt-dp2-test.exe                  # with D3DPT_D3D9=dxvk and =system
@@ -93,9 +83,10 @@ Detailed in `docs/build-windows.md`:
 - QEMU is built with clang because mingw GCC's emulated TLS made a VGA
   register read 2.3x Linux's (patch 68; `WIN_QEMU_CC=gcc` is the old
   build).
-- `win-cross.sh` forwards a whitelist of environment variables; a changed
-  configure flag needs `scripts/win-cross.sh scripts/configure-qemu.sh
-  --windows` by hand ("Why a container").
+- DXVK and the executor change compiler together or not at all (DXVK's
+  exceptions), and DXVK under MSVC reused wrong pipelines until patch 15:
+  an `eq()` that only MSVC's `unordered_map` calls without a hash match
+  ("DXVK under MSVC").
 
 Kept here:
 
@@ -109,9 +100,6 @@ Kept here:
   player is in front**, cause unknown. The player takes the Windows keys
   with raw input and `RIDEV_NOHOTKEYS` (doc 03 "Input path"). System
   hotkeys (Alt+Tab, Alt+F4, Ctrl+Alt+Del, Win+L) reach no program.
-- A `wine` command piped into another looks like a hang, so redirect it
-  to a file. Unset `DISPLAY`/`WAYLAND_DISPLAY` for anything under wine
-  that might crash, or its crash dialog lands on the user's desktop.
 
 ## What stayed open
 
@@ -127,11 +115,14 @@ Kept here:
    has no AF_UNIX (`socket()` answers 10047). Start a machine, take a
    snapshot, swap a disc; `live control off: …` in `launcher.log` means
    the trial bind failed.
-3. **The Windows-built guest-tools ISO in a guest** (its `SETUP.EXE` and a
-   driver it installs). The native build builds every stage and runs the
-   launcher; its ISO has not been booted.
-4. **An installer** beside the zip (doc 07). QEMU's own `mingw32-nsis`
-   recipe is within the cross image's reach.
+3. **The Windows-built guest-tools ISO in a guest.** Half done
+   (2026-10-03): `test.sh all` on the PC installs the XP display driver
+   from an ISO built natively there and runs Direct3D 9 and 8 scenes
+   through it (`guest-G9`, `-G8`, `-F9`, `guest-ddvm` pass). Left: its
+   `SETUP.EXE`, and the Win98 half (the checks need the winetests and a
+   FreeDOS floppy that PC's checkout lacked).
+4. **An installer** beside the zip (doc 07). QEMU's own NSIS recipe
+   (`mingw-w64-x86_64-nsis` in MSYS2) is one way.
 5. **Zero-copy frames** through a DXGI shared handle, the counterpart of
    the dma-buf ring and IOSurface. Frames take the readback path today.
 6. **A Windows check that boots a guest**, shaped like

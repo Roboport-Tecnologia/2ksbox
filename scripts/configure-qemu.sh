@@ -6,13 +6,12 @@
 #
 # Usage: scripts/configure-qemu.sh [--windows] [extra configure flags...]
 #
-# --windows cross-compiles for Windows x86_64 with mingw-w64 into
-# build/win/qemu instead of build/qemu, against the Rust staticlib built
-# for x86_64-pc-windows-gnu. Run it inside the cross container
-# (scripts/win-cross.sh), which has the mingw glib/pixman/epoxy the build
-# needs (docs/build-windows.md). The two build
-# directories are independent, so one checkout holds a Linux build and a
-# Windows build at once.
+# --windows builds for Windows x86_64 with mingw-w64 into build/win/qemu
+# instead of build/qemu, against the Rust staticlib built for
+# x86_64-pc-windows-gnu, in MSYS2's MINGW64 shell on Windows, where it is
+# implied (below). The cross build from Linux was retired (ADR-026). The
+# two build directories are independent, so one checkout holds a Linux
+# build and a Windows build at once.
 #
 # On an Apple Silicon Mac the Intel build (scripts/build.sh --x86_64,
 # docs/build-macos.md "The Intel build") runs this whole script under
@@ -23,9 +22,9 @@
 # x86_64 without being told. On an Intel Mac nothing runs translated and
 # the build is the plain native one.
 #
-# On Windows itself, in MSYS2's MINGW64 shell, the same build is native
-# (docs/build-windows.md, "Building on Windows"): --windows is implied, no
-# cross prefix, and MSYS2's own Python rather than uv's. A python.org
+# On Windows, in MSYS2's MINGW64 shell (docs/build-windows.md, "Building
+# on Windows"): --windows is implied, and MSYS2's own Python is used
+# rather than uv's. A python.org
 # interpreter makes a venv with `Scripts\` where QEMU's configure looks for
 # `bin/`.
 #
@@ -43,11 +42,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WINDOWS=""; NATIVE=""
 if [ "${1:-}" = "--windows" ]; then WINDOWS=1; shift; fi
 case "${MSYSTEM:-}" in
-  "") ;;
+  "") [ -z "$WINDOWS" ] || {
+        echo "configure-qemu.sh --windows: in MSYS2's MINGW64 shell on Windows (ADR-026)"; exit 1; } ;;
   MINGW64) WINDOWS=1; NATIVE=1 ;;
   # UCRT64 and CLANG64 are other C runtimes and C++ libraries than the
-  # cross image's msvcrt + libstdc++, so a debugging build there would not
-  # be the build that ships.
+  # package's msvcrt + libstdc++, so a build there would not be the build
+  # that ships.
   *) echo "MSYS2 $MSYSTEM shell: build from the MINGW64 one (docs/build-windows.md)"; exit 1 ;;
 esac
 
@@ -146,15 +146,18 @@ cd "$BUILD"
 EXTRA_CFLAGS="-I$ROOT/third_party/khronos -fPIC"
 CFG=(-Db_staticpic=true)
 if [ -n "$NATIVE" ]; then
-  # On Windows, in MSYS2's MINGW64 shell, this is the cross build below
-  # without the cross. Same compiler (clang against GCC's mingw runtime), same linker
-  # (lld, named through meson's CC_LD rather than a wrapper script, which a
-  # native meson cannot execute), same flags.
+  # Windows, in MSYS2's MINGW64 shell. clang, not GCC (patch 68): mingw
+  # GCC 15 has only emulated TLS, a call on every __thread access, and
+  # QEMU makes several on every device access (one VGA register read took
+  # 121.6 ns against clang's 64.3; Linux: 52.7). Against GCC's mingw
+  # runtime, linked by lld, named through meson's CC_LD. No TCG plugins:
+  # lld has no --dynamic-list, and nothing here loads a plugin.
+  # WIN_QEMU_CC=gcc builds the old way.
   EXTRA_CFLAGS="-I$MROOT/third_party/khronos"
-  # And the same libraries: MSYS2 with Qt installed has several the cross
-  # image lacks (zstd and friends arrive as Qt's dependencies), and QEMU
-  # links whatever it detects. Each of these said NO in the cross build's
-  # configure summary, so they are pinned to it here.
+  # Only the libraries the package ships: MSYS2 may have more (zstd and
+  # friends arrive as other packages' dependencies), and QEMU links
+  # whatever it detects, so each is pinned off. These are the ones the
+  # retired cross build had none of.
   CFG=(--disable-zstd --disable-gnutls --disable-nettle --disable-gcrypt --disable-capstone
        --disable-libusb --disable-usb-redir --disable-lzo --disable-snappy --disable-smartcard
        --disable-libcbor --disable-lzfse)
@@ -163,26 +166,6 @@ if [ -n "$NATIVE" ]; then
       echo "no clang/lld: pacman -S mingw-w64-x86_64-clang mingw-w64-x86_64-lld"; exit 1; }
     export CC_LD=lld CXX_LD=lld
     CFG+=(--cc=clang --cxx=clang++ --disable-plugins)
-  fi
-elif [ -n "$WINDOWS" ]; then
-  # PE code is position-independent by construction and gcc says so on every
-  # file it compiles ("-fPIC ignored for target"), so the native build's flag
-  # goes away here rather than being repeated a few thousand times.
-  EXTRA_CFLAGS="-I$ROOT/third_party/khronos"
-  CFG=(--cross-prefix=x86_64-w64-mingw32-)
-  command -v x86_64-w64-mingw32-gcc >/dev/null || {
-    echo "no x86_64-w64-mingw32-gcc — run this inside scripts/win-cross.sh"; exit 1; }
-  # clang, not GCC (patch 68). mingw GCC 15 has only emulated TLS, a call
-  # on every __thread access, and QEMU makes several on every device
-  # access. One VGA register read took 121.6 ns against clang's 64.3
-  # (Linux: 52.7). The cross prefix still names the binutils and the
-  # mingw sysroot. WIN_QEMU_CC=gcc builds the old way. No TCG plugins:
-  # lld has no --dynamic-list, and nothing here loads a plugin.
-  if [ "${WIN_QEMU_CC:-clang}" = clang ]; then
-    command -v clang >/dev/null && command -v ld.lld >/dev/null || {
-      echo "no clang/lld in the cross image — scripts/win-cross.sh --build"; exit 1; }
-    CFG+=(--cc="$ROOT/packaging/windows/clang-mingw-cc" --cxx="$ROOT/packaging/windows/clang-mingw-cxx"
-          --host-cc=gcc --disable-plugins)
   fi
 elif [ "$(uname -s)" = Darwin ]; then
   # Every Mac build targets the floor, the oldest macOS the app runs on
@@ -244,6 +227,15 @@ elif [ "$(uname -s)" = Linux ] && [ "${QEMU_DEPS:-}" != system ]; then
   HIDE=libglib-2.0.a:libgio-2.0.a:libgobject-2.0.a:libgmodule-2.0.a:libpcre2-8.a:libslirp.a:libtpms.a:libcrypto.a
   CFG+=(--disable-smartcard --enable-libtpms --extra-ldflags="-Wl,--exclude-libs,$HIDE")
   echo "==> glib, libslirp and libtpms: $DEPS (static, hidden)"
+fi
+# spice-protocol's headers, and nothing of SPICE's server: they are what
+# `qemu-vdagent` builds with, the chardev that carries the clipboard to a
+# guest agent (track M23, doc 24 §3). build-deps.sh puts them in the prefix
+# on macOS and Linux; Windows hosts come later (M23 step 7).
+if [ -n "$WINDOWS" ]; then
+  CFG+=(--disable-spice-protocol)
+else
+  CFG+=(--enable-spice-protocol)
 fi
 # No QEMU user interface at all. The player is the front end. It embeds
 # QEMU, the embed library appends `-display none` itself
@@ -311,7 +303,6 @@ case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
   --disable-cocoa \
   --disable-curses \
   --disable-spice \
-  --disable-spice-protocol \
   --disable-alsa \
   --disable-pa \
   --disable-pipewire \

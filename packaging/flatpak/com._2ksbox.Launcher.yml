@@ -142,7 +142,8 @@ modules:
       # libslirp is here rather than a module of its own, because the
       # runtime's has to be built against this glib. OpenSSL's libcrypto
       # and libtpms are the TPM 2.0 of a Windows 11 machine (patch 75,
-      # track M20), built the same way. Versions and checksums are
+      # track M20), built the same way, and spice-protocol's headers are
+      # the clipboard's (track M23). Versions and checksums are
       # build-deps.sh's.
       - type: file
         url: https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2
@@ -165,6 +166,10 @@ modules:
         sha256: edac03680f8a4a1c5c1d609a10e3f41e1a129e38ff5158f0c8deaedc719fb127
         dest: build/deps/src
         dest-filename: libtpms-0.10.2.tar.gz
+      - type: file
+        url: https://www.spice-space.org/download/releases/spice-protocol-0.14.5.tar.xz
+        sha256: baf58449f6e89d19f475899ad5fb9196fdc46c03cc53233f4e39cf2978f9cff7
+        dest: build/deps/src
     build-commands:
       - scripts/build-deps.sh
       # The steps a developer runs, then the tarball's staging script

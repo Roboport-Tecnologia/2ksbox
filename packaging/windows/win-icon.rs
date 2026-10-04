@@ -1,7 +1,8 @@
 // The application icon and manifest, inside the .exe.
 //
 // `include!`d by the build script of every crate that produces a Windows
-// binary someone sees in Explorer (`launcher-mitsuami`, `player`).
+// binary someone sees in Explorer (`launcher-mitsuami`, `player-mitsuami`,
+// `player`).
 // An `include!` rather than a crate on purpose. A build-dependency would
 // land in `Cargo.lock`, and the Flatpak's offline build declares every
 // crate there with a checksum (`packaging/flatpak/cargo-sources.json`), so
@@ -22,8 +23,8 @@
 // of the crate. A host with no windres gets a warning and a binary with no
 // icon and the default manifest, not a failed build.
 //
-// The launcher is the one MSVC binary (WinUI 3, `build-windows.sh
-// mitsuami`). There windres writes a `.res`, which Microsoft's linker
+// The launcher and player-mitsuami are MSVC binaries (WinUI 3,
+// `build-windows.sh mitsuami`). There windres writes a `.res`, which Microsoft's linker
 // takes as an input file as it is, and the linker is told to make no
 // manifest of its own, since ours is resource 1 already. The MSVC build
 // runs in MSYS2's MINGW64 shell, whose `windres` is on PATH.

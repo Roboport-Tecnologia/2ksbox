@@ -17,10 +17,10 @@
  *          -Ithird_party/dxvk/include/native/directx -ldl
  * Run:   build/d3dpt-dp2-test [out.bmp]   (from the repo root, or D3DPT_EXEC_LIB / D3DPT_DXVK_LIB)
  *
- * Windows (the Windows executor on DXVK's d3d9.dll), inside
- * scripts/win-cross.sh, then under wine or on the PC:
- *        x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
- *        D3DPT_EXEC_LIB=build/win/d3dpt/d3dpt_exec.dll D3DPT_DXVK_LIB=<dxvk_d3d9.dll> wine build/win/d3dpt-dp2-test.exe
+ * Windows (the Windows executor on DXVK's d3d9.dll), in MSYS2's MINGW64
+ * shell (scripts/build-windows.sh exec builds it):
+ *        g++ -std=c++17 -O2 -static -o build/win/d3dpt-dp2-test.exe tools/d3dpt-dp2-test.cpp
+ *        D3DPT_EXEC_LIB=build/win/d3dpt/d3dpt_exec.dll D3DPT_DXVK_LIB=<dxvk_d3d9.dll> build/win/d3dpt-dp2-test.exe
  */
 #include <windows.h>
 #include <d3d9.h>

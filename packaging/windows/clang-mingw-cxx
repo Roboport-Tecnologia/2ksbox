@@ -1,3 +1,0 @@
-#!/bin/sh
-# C++ beside packaging/windows/clang-mingw-cc (QEMU's configure asks for one).
-exec clang++ --target=x86_64-w64-mingw32 -fuse-ld=lld "$@"

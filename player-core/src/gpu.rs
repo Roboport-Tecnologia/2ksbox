@@ -68,8 +68,23 @@ impl Gpu {
     /// A device for `target`'s surface, configured at `size` (physical
     /// pixels).
     pub fn new(target: impl Into<wgpu::SurfaceTarget<'static>>, size: (u32, u32)) -> Self {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        Self::with_backends(target, size, None)
+    }
+
+    /// As [`Gpu::new`], on `backends` unless `WGPU_BACKEND` names others:
+    /// a front end whose surface only one backend presents to says so
+    /// (player-mitsuami on Windows, a child window Vulkan's frames never
+    /// reach the screen through).
+    pub fn with_backends(
+        target: impl Into<wgpu::SurfaceTarget<'static>>,
+        size: (u32, u32),
+        backends: Option<wgpu::Backends>,
+    ) -> Self {
+        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+        if let (Some(backends), None) = (backends, std::env::var_os("WGPU_BACKEND")) {
+            instance_desc.backends = backends;
+        }
+        let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(target).expect("create surface");
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,

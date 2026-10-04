@@ -30,6 +30,10 @@ bytemuck = "1"
 png = "0.18"
 cpal = "0.18.2"
 shader-chain = { path = "../shader-chain" }
+# the host's clipboard, for the guest agent's (M23)
+arboard = { version = "3", default-features = false }
+# the machine's shared folder, served in this process (M23)
+libsmb = { path = "../libsmb" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Media"] }

@@ -18,7 +18,7 @@ on Apple Silicon as ARM64 under HVF.
 - `docs/tracks/`: one doc per work track (scope, owned files, test loop).
 - `docs/testing.md`: **every test tool**, what it proves, how to run it.
 - `docs/development.md`: build stages, player env/CLI, logs, packaging.
-- `docs/01` to `23`: design docs. Decisions/ADRs in `docs/10`, roadmap
+- `docs/01` to `24`: design docs. Decisions/ADRs in `docs/10`, roadmap
   in `08`.
 - `patches/qemu/README.md`: every QEMU patch, what it does, when to drop
   it. `patches/deps/README.md`: the same for the libraries
@@ -202,16 +202,16 @@ knobs, `QEMU_PYTHON` and the macOS floor: `docs/development.md`,
 `docs/build-macos.md` ("The floor"). `README.md` is for end users and
 carries no developer content.
 
-Windows is moving to **native MSVC builds on Windows** (ADR-026: QEMU
-stays mingw clang under MSYS2, the 9x/XP guest code i686 mingw; the WDDM
-driver first, track M18). **Everything Windows is done natively on
-Windows** (user decision 2026-10-02): in MSYS2's MINGW64 shell
-`scripts/build-windows.sh` builds it, `scripts/test.sh all` tests it
-(`docs/testing.md` "On Windows") and `scripts/package-windows.sh` rolls
-and checks the package, with no Linux box and no podman involved. The
-cross build from Linux (`scripts/win-cross.sh`) still works, into the
-same `build/win/` and `target/x86_64-pc-windows-gnu/`, never over native
-artefacts; the launcher (WinUI 3, MSVC) builds only on Windows. QEMU there is built with **clang**, not mingw GCC (GCC's
+Windows builds **natively on Windows** (ADR-026, user decision
+2026-10-02): in MSYS2's MINGW64 shell `scripts/build-windows.sh` builds
+it, `scripts/test.sh all` tests it (`docs/testing.md` "On Windows") and
+`scripts/package-windows.sh` rolls and checks the package. The cross
+build from Linux (`win-cross.sh` and its container) was retired on
+2026-10-03; don't bring it back. The launcher and `player-mitsuami` are
+MSVC (WinUI 3), and so are the Direct3D executor and DXVK, together
+(DXVK's C++ exceptions must be caught by a same-compiler executor;
+ADR-026's amendments; `scripts/msvc-env.sh`); QEMU stays mingw clang
+under MSYS2 and the 9x/XP guest code i686 mingw. QEMU there is built with **clang**, not mingw GCC (GCC's
 emulated TLS made every device access 2.3x slower, patch 68). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and
