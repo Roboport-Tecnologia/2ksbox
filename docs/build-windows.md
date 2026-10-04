@@ -414,8 +414,7 @@ APIs: the launcher starts the player). The first run was a WARNING for
 default manifest) answers it, and the second run passed.
 
 **The submission** (the steps, and the text and answers Partner Center
-asks for) is kept in a private repository, `davidrios/2ksbox-stores`,
-since 2026-10-04 (user), so the listing copy is no ready-made kit for an
+asks for) is kept in the store repo since 2026-10-04 (user), so the listing copy is no ready-made kit for an
 impostor listing. Everything that makes the package stays here.
 
 Microsoft lets the listing carry the app's own licence terms, and its
