@@ -305,9 +305,9 @@ environment and system directories. The packager requires that
   no offscreen mode, so the window shows for a moment on the
   packager's screen.
 
-The script has not yet had its first run with the AppKit launcher
-(M19, 2026-10-02); everything above about the launcher is what the
-script does, not yet what a run has shown.
+The script's first runs with the AppKit launcher (2026-10-04, on QEMU
+11.1, track M21 step 4) passed every check above for the App Store, the
+community and the Intel app, unsigned (`--no-sign --no-dmg`).
 
 Signing is inside-out, every nested Mach-O before the bundle that seals
 it, with `--options runtime` and `packaging/macos/2ksbox.entitlements`
@@ -374,8 +374,8 @@ glib asks for), its Python from uv, its Rust from the same rustup. The
 staged app passes every packager check under Rosetta (every Mach-O
 x86_64, minimum macOS 12.0, the loader's images all inside the app, the
 window), and `scripts/test.sh` runs that as `package-x86_64`. That was
-measured with the Qt launcher; the AppKit one has not been through it
-yet.
+measured with the Qt launcher, and again with the AppKit one on QEMU
+11.1 (2026-10-04).
 What is left is an Intel Mac for the reference scene; the DMG stays
 "untested" until then.
 

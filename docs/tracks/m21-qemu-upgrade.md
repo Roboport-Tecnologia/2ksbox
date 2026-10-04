@@ -530,6 +530,45 @@ line), the picker offers no hardware entry for it, and the note says
 "WHPX runs only Windows 11 here" (`Machine::accel_args`,
 `Form::hw_accel`).
 
+#### The Mac (2026-10-04, the M1 Air, macOS 26)
+
+`scripts/build.sh` builds 11.1.2 at the macOS 12 floor with
+`-Werror=unguarded-availability-new`: the i386 and aarch64 targets, both
+embed libraries, EDK2 and the drivers disc. Patch 76 (Arm HVF on macOS
+12, rewritten for 11.1) compiles. 46's drop is confirmed: `HAVE_STRCHRNUL`
+is unset in both builds' `config-host.h`, because 11.1's own check sees
+the declaration's availability.
+
+**Windows 11 on Arm did not start on the Mac under 11.1** (found by M23):
+HVF aborted on `tpm-tis-device`'s 1 KiB `tpm-ppi` region. 11.1's
+`hvf_set_phys_mem()` dropped 9.2's slot list and unmaps every section that
+is not page aligned, which HVF refuses for a range it never mapped. Patch
+82 leaves such a section alone. Upstream master is unchanged. With it,
+`ARCH=aarch64 tools/win11-spike.py boot` on an overlay of M23's disk,
+the PPI on, reaches the desktop in 36.2 s (27.2 s on a second boot) and
+powers off clean. The `REPORT=1` run's Win+R never opened a Run box on
+that disk (the keystrokes went nowhere, every UAC shot is the bare
+desktop), so Windows' own `Get-Tpm` line was not read this time.
+
+`scripts/test.sh all`: 53 passed, 4 failed, 9 skipped. The four are the
+Mac's failures from before this step: `exec-wine` and `d3dfeat9-nat`
+failed on 9.2 too (2026-10-01), `exec-no-device` is the 9.2 baseline's
+on Linux as well, and `companions-env` (M22's) calls GNU `timeout`, which
+macOS lacks. Every guest check passes: x87, rep, smc, sse, atapi, midi,
+pit, the four Voodoo 2 runs, vbe-palette, pad.
+
+The packagers, `--no-sign --no-dmg`, their first runs with the AppKit
+launcher (M19) and on 11.1, all pass every check:
+
+| build | app | minimum macOS | window |
+|---|---|---|---|
+| App Store (`package-macos.sh`) | 160 MB, arm64, KosmicKrisp | 12.0 | 36K PNG |
+| community (`--community`) | 162 MB, plus the Wine pair | 12.0 | 36K PNG |
+| Intel (`build.sh --x86_64`, 1192 s under Rosetta; `--x86_64`) | 144 MB, x86_64, no Vulkan | 12.0 | 32K PNG |
+
+Not done here: signing and notarization (credentials, and nothing in them
+depends on QEMU's version), and a game by hand.
+
 ### 5. Merge
 
 `scripts/test.sh all` green (or at the known failures in
@@ -556,15 +595,16 @@ disk through an overlay, KVM, the libtpms TPM, EDK2 from `qemu/pc-bios`)
 reaches the desktop in 25.3 s and powers off clean.
 
 Still open after the merge:
-- Step 4: the Air (App Store, community, the Intel build), where 76 has
-  never compiled, the Windows package (the native build packages
-  since 2026-10-03; the cross build was retired), the Linux package and
-  the Flatpak.
+- Step 4: the Linux package and the Flatpak (Linux only). The Air is
+  done (2026-10-04, above: patch 82, all three apps), and the Windows
+  package is built and checked natively since 2026-10-03.
 - A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
   so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
   (`Machine::board`) does not cover it. User's call.
-- Doc 22's numbers are 9.2's; the README's "Drop" lines not re-checked
-  row by row; x87 softfloat ~1.7x slower on 11.1 with the fast path off.
+- Doc 22's numbers are 9.2's; x87 softfloat ~1.7x slower on 11.1 with
+  the fast path off. The README's "Drop" lines were re-checked row by row
+  against pristine 11.1.2 (2026-10-04): none is met, and the stale wording
+  (9.2 names, "not compiled yet", `tpm-qtest` "not yet run") is fixed.
 - A hand test by the user.
 
 ## Owns

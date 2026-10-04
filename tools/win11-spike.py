@@ -65,8 +65,8 @@ Environment:
                        socket an SMB server listens on (smbserve --unix,
                        track M23; QEMU patch 79)
   TPM_PPI=off          aarch64: the TPM without its 1 KiB PPI RAM region, which
-                       11.1's HVF aborts on (HV_BAD_ARGUMENT unmapping a range
-                       smaller than a 16 KiB page; M21's Mac item)
+                       11.1's HVF aborted on before QEMU patch 82 (unmapping a
+                       range smaller than a 16 KiB page); kept for an A/B
   REPORT=1             boot: on the desktop, an elevated PowerShell (Win+R,
                        Ctrl+Shift+Enter, UAC's Yes clicked on the tablet;
                        Windows 11's UAC has no Alt+Y) writes Get-Tpm and the

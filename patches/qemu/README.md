@@ -4,8 +4,10 @@ Every change 2ksbox makes to QEMU. The tree is the pinned submodule
 `qemu/` at v11.1.2, plus qemu-3dfx's OpenGL device (`third_party/qemu-3dfx`)
 wired in by our port of its patch (`patches/qemu-3dfx/`: qemu-3dfx stops
 at 9.2), plus the patches in this directory. Every row was written on 9.2;
-where 11.1 changed a patch's shape, the row says so, and the measurements
-are 9.2's until track M21's step 3 re-takes them. The larger patches are designed in the numbered docs
+where 11.1 changed a patch's shape, the row says so. Each row's **Drop**
+was re-checked against pristine 11.1.2 (2026-10-04, track M21): none is
+met yet. Rows 11 and 24 carry 11.1 numbers; the rest, and doc 22, are
+9.2's. The larger patches are designed in the numbered docs
 (x87 doc 13, SSE doc 16, pinned registers doc 18, CD-ROM doc 17, music
 doc 20, Voodoo 2 doc 21); doc 22 measures the TCG patches as a whole.
 The test tools named here are in `docs/testing.md`.
@@ -229,7 +231,7 @@ Four cuts to TB invalidation on guest writes:
 - The DMA path no longer rounds the first page's range down to the page
   start, which made every XP guest, idle too, retranslate the vAPIC ROM's
   TPR stubs thousands of times a second (they sit below the state the
-  APIC writes per interrupt). Upstream master still has it.
+  APIC writes per interrupt). 11.1.2 still has it.
 - A per-page code map (patch 35) lets a write that misses every TB skip
   the page collection and list walk.
 - A write that cannot hit a TB shared with a neighbouring page runs under
@@ -304,7 +306,7 @@ The jump-cache probe of indirect branches (`ret`, `call *`, `jmp *`, a
 jump leaving its page) as TCG ops instead of a call to
 `helper_lookup_tb_ptr` (~70 host instructions, 13.9 % of 7-Zip's vCPU).
 `translator_lookup_and_goto_ptr` computes pc, cs_base and flags the way
-`cpu_get_tb_cpu_state()` does and folds every mismatch (pc, cs_base,
+`x86_get_tb_cpu_state()` (`target/i386/tcg/tcg-cpu.c`) does and folds every mismatch (pc, cs_base,
 flags, cflags, breakpoints, single-step) into one word **branch-free**,
 since a `brcond` ends a TCG block and spills every temp. One `goto_ptr`
 takes the TB or the epilogue, where the main loop's lookup fills the
@@ -326,11 +328,12 @@ not the feature bit, so the next POST finds no APIC, SeaBIOS skips
 is dropped at the masked LVT0: a spin at 100 % behind a blinking caret
 (`info pic`: `irr` set, `isr=00`; `info lapic`: `LVT0 masked`). The fix
 records the CPU model's APIC bit at realize and restores it on reset,
-leaving `-cpu …,-apic` alone. Reproduces on stock QEMU 11.1.0. **Test:**
+leaving `-cpu …,-apic` alone. Reproduces on stock QEMU 11.1.0; `apic_reset_common()` is unchanged in
+11.1.2. **Test:**
 `tools/win98-reboot-test.sh`. **Drop:** upstream takes it (worth sending).
 
 ### 23-upstream-dsound-option
-`--disable-dsound` was a no-op: 9.2's guard `if not
+`--disable-dsound` was a no-op: the guard (unchanged in 11.1.2) `if not
 get_option('dsound').auto() or …` is true for *disabled* too, so every
 Windows build compiled `dsoundaudio.c` and linked `-lole32 -ldxguid`.
 Disabled now skips the block. **Test:** the
@@ -509,12 +512,14 @@ SysBus Direct3D device on the pc machine for the retired guest DLLs
 
 ### 41-disas-context-uninit
 QEMU builds with `-ftrivial-auto-var-init=zero`, and
-`gen_intermediate_code`'s `DisasContext` is ~13.6 KB since patch 06's
+`x86_translate_code`'s `DisasContext` is ~13.6 KB since patch 06's
 slow blocks: a memset per translation (8.7 GB in one 3DMark 99
 run). The patch opts out (`__attribute__((uninitialized))`); the
 translator initialises what it reads and `x87s_new_slow` clears each slow
-block it hands out. **Drop:** upstream
-marks it too.
+block it hands out. **Drop:** never while
+06's slow blocks live in `DisasContext` (upstream's is small, so it has
+no reason to mark it; 11.1's `QEMU_UNINITIALIZED` could replace the
+attribute).
 
 ### 42-jump-cache-keep
 A TLB flush no longer empties the jump cache. An entry carries the
@@ -827,19 +832,19 @@ file, replaced atomically; snapshots carry the permanent and volatile
 state, and `loadvm` writes the snapshot's permanent state back to the
 file. libtpms and libcrypto come static and hidden from
 `scripts/build-deps.sh` on Linux and macOS (`QEMU_DEPS=system` leaves
-the feature on auto). Everything is behind `CONFIG_TPM`, which QEMU 9.2
-refuses on a Windows host, so the Windows build has no TPM yet.
+the feature on auto). Everything is behind `CONFIG_TPM`, which QEMU
+refuses on a Windows host (still in 11.1.2, `have_tpm`), so the Windows build has no TPM yet.
 **Test:** `tools/tpm-qtest.py` (the `tpm-qtest` host check): a fresh
 TPM, a restart on the same file and a savevm / loadvm round trip
 through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
 with `TPM=libtpms` for Windows 11. **Drop:** never (upstream QEMU has no
 in-process TPM). **On 11.1:** the backend includes `system/` headers (11.1
 renamed `sysemu/`) and its `class_init` takes `const void *`; the patch
-applies with offsets. Not yet run on 11.1 (the `tpm-qtest` check).
+applies with offsets. `tpm-qtest` passes on 11.1 (Linux, 2026-10-02).
 
 ### 76-hvf-arm-macos12
-Arm HVF on the macOS 12 floor (track M20 step 4). QEMU 9.2's Arm
-Hypervisor.framework accelerator sizes the VM's IPA space with the VM
+Arm HVF on the macOS 12 floor (track M20 step 4). QEMU's Arm
+Hypervisor.framework accelerator (9.2 and 11.1.2) sizes the VM's IPA space with the VM
 configuration calls macOS 13 added, unguarded, so `aarch64-softmmu` (the
 Windows 11 on Arm target, built on Arm hosts) failed the floor's
 `-Werror=unguarded-availability-new`. Each call now runs under
@@ -851,7 +856,8 @@ The macOS 12 path is unrun (no macOS 12 host with HVF here).
 **On 11.1:** `hvf_arch_vm_create` also sets up nested virtualization and
 the in-kernel GIC (both macOS 15); the configuration path moved whole into
 `hvf_arm_vm_create_config` (marked macOS 13), and before 13 a VM asking
-for either is refused too. Not compiled yet (no macOS here).
+for either is refused too. Compiles at the macOS 12 floor on the Air
+(2026-10-04).
 
 ### 77-arm-target-no-era-devices
 The era's devices stay out of a target with no ISA bus (track M20 step
@@ -920,3 +926,18 @@ allocated surface of another size is now replaced, as a shared one
 always was. How `last_scr` and the surface part is not yet known.
 **Test:** six boots of `base98-br` on each player, none ending early.
 **Drop:** upstream checks the surface's size in `vga_draw_blank()`.
+
+### 82-hvf-unaligned-section
+HVF tried to unmap a memory section that is not page aligned, and HVF
+aborts on that (track M21, step 4 on the Mac). 11.1's `hvf_set_phys_mem()`
+dropped 9.2's slot list and turns such a section into `hv_vm_unmap()`,
+which refuses a range it never mapped (`HV_BAD_ARGUMENT`, an abort in
+`assert_hvf_ok`). `tpm-tis-device`'s `tpm-ppi` RAM region is 1 KiB,
+under Apple Silicon's 16 KiB page, so Windows 11 on Arm with its TPM
+could not start on the Mac at all (found by M23; `win11-spike.py`'s
+`TPM_PPI=off` was the workaround). Such a section is now left alone: it
+was never mapped, and its accesses trap as before. **Test:** `ARCH=aarch64 tools/win11-spike.py boot`
+with the PPI on (no `TPM_PPI=off`): Windows 11 on Arm at its desktop in
+36.2 s and powered off clean on the Air (2026-10-04); before, QEMU
+aborted before the firmware.
+**Drop:** upstream skips unaligned sections in `hvf_set_phys_mem()`.

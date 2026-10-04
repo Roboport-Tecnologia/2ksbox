@@ -1,0 +1,28 @@
+hvf_set_phys_mem() turned a section that is not page aligned into an
+unmap, and hv_vm_unmap() refuses a range it never mapped with
+HV_BAD_ARGUMENT, which assert_hvf_ok() turns into an abort. Such a
+section is never mapped, so there is nothing to undo. tpm-tis-device's
+tpm-ppi RAM region is 1 KiB, under Apple Silicon's 16 KiB page, so every
+virt machine with a TPM aborted under HVF at start (Windows 11 on Arm,
+2ksbox tracks M20, M21, M23). QEMU 9.2 kept a slot list and unmapped
+only what it had mapped. Accesses to the section trap, as before.
+
+diff --git a/accel/hvf/hvf-all.c b/accel/hvf/hvf-all.c
+index 8bd9154..2fcf625 100644
+--- a/accel/hvf/hvf-all.c
++++ b/accel/hvf/hvf-all.c
+@@ -113,8 +113,12 @@ static void hvf_set_phys_mem(MemoryRegionSection *section, bool add)
+ 
+     if (!QEMU_IS_ALIGNED(size, page_size) ||
+         !QEMU_IS_ALIGNED(gpa, page_size)) {
+-        /* Not page aligned, so we can not map as RAM */
+-        add = false;
++        /*
++         * Not page aligned, so it was never mapped as RAM, and HVF
++         * refuses to unmap it (HV_BAD_ARGUMENT): a 1 KiB tpm-ppi region
++         * aborted every boot with a tpm-tis-device. Accesses trap.
++         */
++        return;
+     }
+ 
+     if (!add) {

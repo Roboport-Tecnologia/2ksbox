@@ -96,9 +96,9 @@ failed to verify. Notes:
   `tpm-tis-device` (`HV_BAD_ARGUMENT`, `accel/hvf/hvf-all.c:123`). Its
   `tpm-ppi` RAM region is 1 KiB, smaller than a 16 KiB page, so HVF
   unmaps a range it never mapped. Windows 11 on Arm then does not start
-  on the Mac at all, through the launcher too. It belongs to M21's Mac
-  item. The spike ran with `TPM_PPI=off` (`ppi=off`, a `win11-spike.py`
-  knob).
+  on the Mac at all, through the launcher too. The spike ran with
+  `TPM_PPI=off` (`ppi=off`, a `win11-spike.py` knob). Fixed by QEMU patch
+  82 (M21, 2026-10-04): the PPI on, the spike's disk reaches the desktop.
 
 ## Step 3's results (2026-10-02)
 
