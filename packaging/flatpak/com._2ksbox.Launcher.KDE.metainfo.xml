@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for the KDE add-on. An addon component extends the
+     app, which is how Flathub lists it on the app's page instead of as a
+     second app. -->
+<component type="addon">
+  <id>com._2ksbox.Launcher.KDE</id>
+  <extends>com._2ksbox.Launcher</extends>
+
+  <name>KDE Plasma launcher</name>
+  <summary>The launcher drawn with KDE's Kirigami in a Plasma session</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- Qt and the KDE Frameworks are LGPL-3.0 / LGPL-2.1 (Qt's base also
+       GPL); Breeze GPL-2.0-or-later; the launcher the app's own. -->
+  <project_license>LGPL-3.0-only AND LGPL-2.1-or-later AND GPL-2.0-or-later</project_license>
+
+  <developer id="com._2ksbox">
+    <name>2ksbox</name>
+  </developer>
+
+  <description>
+    <p>
+      In a KDE Plasma session, the launcher's windows use Kirigami and the
+      Breeze style, with the session's colors, instead of GTK. Other
+      desktops keep the GTK launcher.
+    </p>
+  </description>
+
+  <url type="homepage">https://2ksbox.com</url>
+
+  <releases>
+    <release version="0.0.1" date="2026-10-04"/>
+  </releases>
+</component>

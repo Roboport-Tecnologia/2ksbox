@@ -625,6 +625,26 @@ the app's page in the store, or with
 `flatpak install flathub com._2ksbox.Launcher.Wine`; the wizard's
 Direct3D note says so on a below-floor host.
 
+The launcher is GTK 4 there, and the KDE build is a second add-on,
+`com._2ksbox.Launcher.KDE` (`packaging/flatpak/com._2ksbox.Launcher.KDE.yml`,
+user decision 2026-10-04): the launcher built with `--features kde`, and
+the Qt 6.10.3 and KDE Frameworks it needs (Qt's base, SVG, shader tools
+and Quick, and Linguist's tools to build the frameworks' translations;
+Kirigami, qqc2-desktop-style and their frameworks, Sonnet among them for
+the desktop style's QML; Breeze's widget style and its icons as a
+library), about 190 MB installed, built from source at the commits
+`org.kde.Platform` 6.10 uses, since an add-on runs on its app's runtime.
+It mounts at `/app/kde` with `lib` on the loader's path. The app's
+`2ksbox` is a script (`packaging/flatpak/2ksbox.sh`) that starts
+`/app/kde/2ksbox` when `XDG_CURRENT_DESKTOP` names KDE and the add-on is
+there, and the GTK launcher (`bin/2ksbox-gtk`) otherwise. There is no
+plasma-integration (Plasma's platform theme would bring KIO and some
+thirty frameworks), so the script asks for the Breeze style and lets
+KDE's settings read the session's `~/.config/kdeglobals` (the colour
+scheme, the icon theme). `--no-kde` skips it, `--kde-only` rebuilds just
+the add-on; the check runs `2ksbox` with `XDG_CURRENT_DESKTOP=KDE` on Qt's
+offscreen platform and wants the add-on's launcher and a window grab.
+
 ### macOS (`2ksbox.app` / `.dmg`)
 
 `scripts/package-macos.sh` on Apple Silicon bundles the whole non-system

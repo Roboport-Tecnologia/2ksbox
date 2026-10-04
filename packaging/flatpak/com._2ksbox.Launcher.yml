@@ -39,6 +39,16 @@ add-extensions:
     directory: lib/2ksbox/wine
     no-autodownload: true
     autodelete: true
+  # The KDE add-on (user decision, 2026-10-04): the launcher on Kirigami,
+  # which `2ksbox` (packaging/flatpak/2ksbox.sh) starts in a Plasma
+  # session, with the Qt and KDE Frameworks it needs, which GNOME's
+  # runtime does not have (`com._2ksbox.Launcher.KDE.yml`). Its `lib` goes
+  # on the loader's path. Not downloaded with the app either.
+  com._2ksbox.Launcher.KDE:
+    directory: kde
+    add-ld-path: lib
+    no-autodownload: true
+    autodelete: true
 
 finish-args:
   # A machine is the point of the app: KVM when the host has it, the GPU
@@ -206,6 +216,12 @@ modules:
       # app must carry is staged by hand, into the same place.
       - install -Dm755 build/d3dpt/libd3dpt_exec_remote.so -t /app/lib/2ksbox
       - mkdir -p /app/lib/2ksbox/wine
+      # `2ksbox` picks the launcher: the KDE add-on's in a Plasma session,
+      # this GTK one otherwise. The GTK one stays in bin/, where it finds
+      # the prefix; the add-on mounts on the directory made here.
+      - mv /app/bin/2ksbox /app/bin/2ksbox-gtk
+      - install -Dm755 packaging/flatpak/2ksbox.sh /app/bin/2ksbox
+      - mkdir -p /app/kde
       # Flatpak exports these three by name, so they go where it looks
       # rather than through packaging/linux/install.sh (which rewrites
       # Exec/Icon to absolute paths for a plain prefix install; inside

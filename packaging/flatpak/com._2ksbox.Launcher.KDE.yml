@@ -1,0 +1,334 @@
+# The KDE add-on of the Flatpak: the launcher on Kirigami (ADR-023's
+# `kde` build), for a Plasma session (user decision, 2026-10-04).
+#
+#   scripts/package-flatpak.sh          builds the app, then this, and checks both
+#
+# The app is GTK 4 on GNOME's runtime, and an add-on runs on its app's
+# runtime, so the Qt and KDE Frameworks the Kirigami launcher needs are
+# built here, from the same sources (Qt 6.10.3, the frameworks at the
+# same commits) as `org.kde.Platform` 6.10 builds them. Only what the
+# launcher loads: Qt's base, SVG, shader tools and Quick (and Linguist's
+# tools, for building the frameworks' translations); Kirigami and its
+# desktop style (qqc2-desktop-style) with the frameworks those need; the
+# Breeze widget style and icons. Not plasma-integration, Plasma's own
+# platform theme, which would bring KIO and some thirty frameworks more:
+# the app's `2ksbox` sets the Breeze style and reads the session's
+# colours from `~/.config/kdeglobals` instead (packaging/flatpak/2ksbox.sh).
+#
+# The app is this extension's runtime, as with any Flatpak add-on, so the
+# app must be installed (`stable`) before this builds. The app mounts it
+# at /app/kde, with `lib` on the loader's path:
+#
+#   kde/2ksbox             the launcher, built with `--features kde`. One
+#                          directory below /app, so it finds the app's
+#                          prefix (`paths::install_prefix`: share/2ksbox
+#                          two levels up) and every companion with it
+#   kde/lib/               Qt and the frameworks
+#   kde/lib/plugins/       Qt's plugins (Wayland, XCB, the Breeze style)
+#   kde/lib/qml/           Qt Quick, Kirigami, the desktop style
+#   kde/share/             Breeze's colour schemes, the frameworks'
+#                          translations (the icons are a library)
+id: com._2ksbox.Launcher.KDE
+branch: stable
+runtime: com._2ksbox.Launcher
+runtime-version: stable
+sdk: org.gnome.Sdk//49
+build-extension: true
+separate-locales: false
+appstream-compose: false
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+build-options:
+  prefix: /app/kde
+  append-path: /usr/lib/sdk/rust-stable/bin
+  # Qt is built without an RPATH (as the KDE runtime's is); the app's
+  # `add-ld-path` finds it at run time, this while building
+  prepend-ld-library-path: /app/kde/lib
+  prepend-pkg-config-path: /app/kde/lib/pkgconfig
+  env:
+    CMAKE_PREFIX_PATH: /app/kde
+  strip: true
+
+cleanup:
+  # Qt's and KDE's build tools (moc, qmake, qmlcachegen, kconfig_compiler
+  # and the like); nothing runs them once the launcher is built
+  - /bin
+  - /lib/libexec
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /lib/metatypes
+  - /mkspecs
+  - /modules
+  - /share/doc
+  - /share/man
+  - /share/applications
+  - /share/qlogging-categories6
+  - '*.a'
+  - '*.la'
+  - '*.prl'
+
+modules:
+  # Qt, as `org.kde.Platform` 6.10 configures it, without SQL and with no
+  # RPATH. The Wayland platform plugin is in qtbase since 6.10.
+  - name: qt6-qtbase
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DINSTALL_ARCHDATADIR=lib
+      - -DQT_DISABLE_RPATH=ON
+      - -DBUILD_WITH_PCH=FALSE
+      - -DQT_FEATURE_openssl_linked=ON
+      - -DFEATURE_sql=OFF
+    # Qt installs some tools under two names as one file (qtpaths and
+    # qtpaths6, qmake and qmake6), and `strip` cannot rewrite a file that
+    # has another name in the build's read-only tree: a copy for each.
+    post-install:
+      - find ${FLATPAK_DEST} -type f -links +1 -exec sh -c 'cp -p "$1" "$1.copy" && mv -f "$1.copy" "$1"' _ {} \;
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtbase-everywhere-src-6.10.3.tar.xz
+        sha256: 383dc907816338f0cba72088a524c07458dfc69ce684ca9132fcc4fe91c24b0b
+
+  - name: qt6-qtshadertools
+    buildsystem: cmake-ninja
+    builddir: true
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtshadertools-everywhere-src-6.10.3.tar.xz
+        sha256: c75837e2ea493ec0b9747b227c455d4a12cafe90068abf607992da9a403616c6
+
+  - name: qt6-qtsvg
+    buildsystem: cmake-ninja
+    builddir: true
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtsvg-everywhere-src-6.10.3.tar.xz
+        sha256: b3223fe005f6a4c7f21f34e4ee6ce0094737cff9503ba15bbb171ac18794f76d
+
+  - name: qt6-qtdeclarative
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DQT_TOOL_COMMAND_WRAPPER_PATH=env
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtdeclarative-everywhere-src-6.10.3.tar.xz
+        sha256: dadf80d43b8e08ca63aa65d46859a42b920a7777cf7e0ecfcb4c4537f9e65c76
+
+  # Qt Linguist's tools, which the frameworks' translations are built
+  # with (ECM's ecm_install_po_files_as_qm); the rest of qttools off
+  - name: qt6-qttools
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DFEATURE_linguist=ON
+      - -DFEATURE_assistant=OFF
+      - -DFEATURE_designer=OFF
+      - -DFEATURE_distancefieldgenerator=OFF
+      - -DFEATURE_pixeltool=OFF
+      - -DFEATURE_qdbus=OFF
+      - -DFEATURE_qtdiag=OFF
+      - -DFEATURE_qtplugininfo=OFF
+      - -DFEATURE_qtattributionsscanner=OFF
+      - -DFEATURE_qev=OFF
+      - -DFEATURE_kmap2qmap=OFF
+      - -DFEATURE_clang=OFF
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qttools-everywhere-src-6.10.3.tar.xz
+        sha256: 8f00b9e3d1f80973d81cff67684972b89993183ef19924404d5b8ff0f89675b6
+
+  # KDE's build modules and Plasma's Wayland protocols, for the frameworks
+  # below; build-time only
+  - name: extra-cmake-modules
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/extra-cmake-modules.git
+        commit: 2334cb6eab01afc7adaeb92179b0080ba54743e7
+
+  - name: plasma-wayland-protocols
+    buildsystem: cmake-ninja
+    builddir: true
+    sources:
+      - type: git
+        url: https://invent.kde.org/libraries/plasma-wayland-protocols.git
+        commit: 95a1bdcf98935ae8b5f6103bb90655e986439d97
+
+  # The frameworks, in dependency order, at the KDE runtime's commits
+  - name: kcoreaddons
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF, -DBUILD_PYTHON_BINDINGS=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kcoreaddons.git
+        commit: 0e1a2050043f04e41291d2eb41d31c031330624d
+
+  - name: kconfig
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kconfig.git
+        commit: 060d7bfdb25273f88ac0283fa4944d7db690f782
+
+  - name: ki18n
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/ki18n.git
+        commit: 5480b9cbf0b2019151533a9830ae1c9c4bed1099
+
+  - name: kguiaddons
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF, -DBUILD_PYTHON_BINDINGS=OFF, -DBUILD_GEO_SCHEME_HANDLER=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kguiaddons.git
+        commit: e66c2ae915625f52e862ab2d9b64601fd8ccafbe
+
+  - name: kwidgetsaddons
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF, -DBUILD_PYTHON_BINDINGS=OFF, -DBUILD_DESIGNERPLUGIN=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kwidgetsaddons.git
+        commit: 08d154a6be5619ee614fc0db78231a6600cb2cb4
+
+  - name: kcolorscheme
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kcolorscheme.git
+        commit: aaee0c7ba88e99f06c34b4b50893916e244ba32f
+
+  - name: karchive
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/karchive.git
+        commit: 384d26a9d6cc7d391524d9b60a000c42cc9f53af
+
+  - name: breeze-icons
+    buildsystem: cmake-ninja
+    builddir: true
+    # The icons as a library only (libKF6BreezeIcons, which KIconThemes
+    # links and recolours for a dark scheme), not 115 MB of the same
+    # icons as files
+    config-opts: [-DBUILD_TESTING=OFF, -DWITH_ICON_GENERATION=OFF, -DSKIP_INSTALL_ICONS=ON]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/breeze-icons.git
+        commit: 517057fafb8c3ddf9682832c4173a45e7f424476
+
+  - name: kiconthemes
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF, -DBUILD_DESIGNERPLUGIN=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kiconthemes.git
+        commit: 4ba57c2a859eb5b8917e945187a4c8ba79af9c94
+
+  - name: kwindowsystem
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kwindowsystem.git
+        commit: d0a4d52b027af3101c686c2ed2787b3360b38d33
+
+  - name: kirigami
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/kirigami.git
+        commit: 03279d553378fd5132f59e5a61baf1fab47682e6
+
+  # Sonnet, for its QML module: qqc2-desktop-style's menus and check
+  # boxes import `org.kde.sonnet` (GlobalSonnetSettings), which its build
+  # does not require but its controls fail without
+  - name: sonnet
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF, -DBUILD_DESIGNERPLUGIN=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/sonnet.git
+        commit: 829fad5b691e435b82fda3f1fc74660428d1f74c
+
+  - name: qqc2-desktop-style
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts: [-DBUILD_TESTING=OFF]
+    sources:
+      - type: git
+        url: https://invent.kde.org/frameworks/qqc2-desktop-style.git
+        commit: d9e9af69d29a1e7f979ceab4df239c2418db4acb
+
+  # The Breeze widget style, which qqc2-desktop-style draws its controls
+  # with. Only the style: no window decorations, wallpapers or cursors,
+  # and no settings page, which is the one part that needs KCMUtils (and
+  # through it KIO), so the line that makes KCMUtils required goes.
+  - name: breeze
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_QT5=OFF
+      - -DBUILD_QT6=ON
+      - -DWITH_DECORATIONS=OFF
+      - -DWITH_WALLPAPERS=OFF
+      - -DBUILD_CURSOR=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/plasma/breeze.git
+        commit: 2661fb3583aa9eb1f2ab4c1ae6bdcd3f89fb6508
+      - type: shell
+        commands:
+          - sed -i '/KF6KCMUtils PROPERTIES/,/^ *)/ s/TYPE REQUIRED/TYPE OPTIONAL/' CMakeLists.txt
+
+  # The launcher itself, from this tree: launcher-mitsuami with mitsuami's
+  # Kirigami backend instead of GTK, against the Qt above (pkg-config),
+  # offline from the same vendored crates as the app (cargo-sources.json).
+  - name: 2ksbox-kde
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/2ksbox-kde/cargo
+    build-commands:
+      - cd launcher-mitsuami && cargo build --release --locked --offline --no-default-features --features kde
+      - install -Dm755 launcher-mitsuami/target/release/launcher-mitsuami ${FLATPAK_DEST}/2ksbox
+      - install -Dm644 packaging/flatpak/com._2ksbox.Launcher.KDE.metainfo.xml -t ${FLATPAK_DEST}/share/metainfo
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          # What the launcher's three crates do not read (their sources,
+          # and the icons it embeds from packaging/)
+          - target
+          - launcher-mitsuami/target
+          - build
+          - .git
+          - .claude
+          - qemu
+          - third_party
+          - guest-tools
+          - spikes
+      - cargo-sources.json

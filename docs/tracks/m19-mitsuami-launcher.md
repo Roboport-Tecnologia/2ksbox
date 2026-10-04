@@ -402,7 +402,17 @@ The machine window is 770 wide since 2026-10-01 (user: "a bit narrower", then 50
   window checks are new and have not run; only the Windows packager
   has, on the PC, and it passed except for a pre-existing bug in the
   executor on the system's d3d9.
-- Regenerate `packaging/flatpak/cargo-sources.json`
-  (`scripts/gen-flatpak-cargo-sources.sh`; mitsuami is a git
-  dependency).
+- ~~Regenerate `packaging/flatpak/cargo-sources.json`~~ (done
+  2026-10-04: the generator's merge had refused mitsuami's git crates).
+- **The Flatpak (2026-10-04).** The packager ran with this launcher on
+  `org.gnome.Platform` 49 and every check passed, the Broadway window
+  grab included. The KDE build is an add-on, `com._2ksbox.Launcher.KDE`
+  (user): Qt 6.10.3 and the frameworks Kirigami needs, built from
+  source, mounted at `/app/kde`; `2ksbox` starts it in a Plasma session
+  (`docs/development.md` "Flatpak"). Its check: `/app/kde/2ksbox` drew
+  a window offscreen with `XDG_CURRENT_DESKTOP=KDE`. Found on the way:
+  Kirigami's desktop style imports `org.kde.sonnet` in its menus, and a
+  `gtk4-broadwayd :37` left running by an earlier check holds that
+  display's port, which fails the GTK check on any build. Not yet run in
+  a real Plasma session.
 - Measure the macOS floor with the AppKit launcher.

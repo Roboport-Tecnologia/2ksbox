@@ -815,6 +815,13 @@ and the tarball the host's GTK 4; the Flatpak moved to
 window check is the launcher's own `LAUNCHER_SHOT` (GTK on a private
 Broadway display, AppKit and WinUI on the desktop for a moment).
 
+**Amendment (2026-10-04, user).** The Flatpak's KDE build is an add-on,
+`com._2ksbox.Launcher.KDE`, not a second app: one app, one library of
+machines. Since an add-on runs on the app's GNOME runtime, it carries
+the Qt and KDE Frameworks the Kirigami launcher needs, built from source,
+and the app's `2ksbox` starts it only in a Plasma session (user: the GTK
+launcher everywhere else). `docs/development.md` "Flatpak".
+
 **Unchanged.** ADR-014: every rule and every sentence stays in
 `launcher-core`. wgpu stays in `launcher-core` for the preview (mitsuami
 takes its pixels in an `Image`); the player keeps winit (a mitsuami player

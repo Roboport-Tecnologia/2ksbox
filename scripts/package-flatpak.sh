@@ -16,13 +16,19 @@
 #   scripts/package-flatpak.sh              build, install --user, smoke check
 #   scripts/package-flatpak.sh --no-install just build into the repo
 #   scripts/package-flatpak.sh --no-wine    skip the Wine add-on (below)
-#   scripts/package-flatpak.sh --wine-only  only the add-on, onto the installed app
+#   scripts/package-flatpak.sh --wine-only  only the Wine add-on, onto the installed app
+#   scripts/package-flatpak.sh --no-kde     skip the KDE add-on (below)
+#   scripts/package-flatpak.sh --kde-only   only the KDE add-on, onto the installed app
 #   scripts/package-flatpak.sh --check      only re-run the smoke check
 #
-# The Wine add-on (M15 step 7) is a second manifest,
-# `com._2ksbox.Launcher.Wine.yml`, built after the app because the app is
-# its runtime. Building Wine from source takes about half an hour more.
-# The smoke check expects it unless --no-wine was given.
+# Two add-ons, each a manifest of its own built after the app, because
+# the app is their runtime:
+# - Wine (M15 step 7), `com._2ksbox.Launcher.Wine.yml`. Building Wine
+#   from source takes about half an hour more.
+# - KDE, `com._2ksbox.Launcher.KDE.yml`: the launcher on Kirigami for a
+#   Plasma session, with the Qt and KDE Frameworks it needs built from
+#   source (about an hour more).
+# The smoke check expects each unless --no-wine / --no-kde was given.
 #
 # Environment:
 #   FLATPAK_USER_DIR    which `--user` installation to use (flatpak's own
@@ -38,6 +44,7 @@ cd "$ROOT"
 
 APPID=com._2ksbox.Launcher
 WINEID=$APPID.Wine
+KDEID=$APPID.KDE
 # Both manifests leave the branch to the builder, so the local build is
 # `stable` like Flathub's and the add-on's `runtime-version: stable`
 # resolves to this app. Every ref below names the branch, because an
@@ -45,15 +52,18 @@ WINEID=$APPID.Wine
 BRANCH=stable
 MANIFEST="packaging/flatpak/$APPID.yml"
 WINE_MANIFEST="packaging/flatpak/$WINEID.yml"
+KDE_MANIFEST="packaging/flatpak/$KDEID.yml"
 BUILD_DIR="${FLATPAK_BUILD_DIR:-$ROOT/build/flatpak}"
-INSTALL=1 ONLY_CHECK=0 WINE=1 APP=1
+INSTALL=1 ONLY_CHECK=0 WINE=1 KDE=1 APP=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-install) INSTALL=0; shift ;;
     --no-wine) WINE=0; shift ;;
-    --wine-only) APP=0; shift ;;
+    --wine-only) APP=0; KDE=0; shift ;;
+    --no-kde) KDE=0; shift ;;
+    --kde-only) APP=0; WINE=0; shift ;;
     --check) ONLY_CHECK=1; shift ;;
-    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     *) echo "package-flatpak.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -161,7 +171,9 @@ smoke() {
   local shot="$HOME/.2ksbox-flatpak-window.png"
   rm -f "$shot"
   echo "==> flatpak run $APPID (window grab on Broadway)"
-  flatpak run --user --command=sh --env=LAUNCHER_SHOT="$shot" "$APPID//$BRANCH" -c '
+  # Not in a Plasma session as far as `2ksbox` can tell, or the KDE
+  # add-on would answer (below).
+  flatpak run --user --command=sh --env=XDG_CURRENT_DESKTOP= --env=LAUNCHER_SHOT="$shot" "$APPID//$BRANCH" -c '
       gtk4-broadwayd :37 >/dev/null 2>&1 & b=$!
       sleep 1
       GDK_BACKEND=broadway BROADWAY_DISPLAY=:37 GTK_USE_PORTAL=0 timeout 60 2ksbox
@@ -172,6 +184,33 @@ smoke() {
   else
     echo "package-flatpak.sh: the app drew no window (LAUNCHER_SHOT on Broadway) — is GTK 4 in the runtime?" >&2
     fail=1
+  fi
+  # The KDE add-on: in a Plasma session `2ksbox` must start the Kirigami
+  # launcher from /app/kde, which must draw a window with the add-on's own
+  # Qt and frameworks. Qt's offscreen platform and Qt Quick's software
+  # renderer, so nothing opens on the desktop. `2ksbox` is a script that
+  # execs the launcher, so the background job's executable says which.
+  if flatpak info --user "$KDEID//$BRANCH" >/dev/null 2>&1; then
+    rm -f "$shot"
+    echo "==> the KDE add-on is installed: flatpak run $APPID in a Plasma session (window grab offscreen)"
+    local kde
+    kde=$(flatpak run --user --env=XDG_CURRENT_DESKTOP=KDE --env=QT_QPA_PLATFORM=offscreen \
+      --env=QT_QUICK_BACKEND=software --env=LAUNCHER_SHOT="$shot" --env=LAUNCHER_SHOT_DELAY_MS=5000 --command=sh "$APPID//$BRANCH" -c \
+      '2ksbox & p=$!; sleep 2; readlink /proc/$p/exe; (sleep 60; kill $p) & wait $p' 2>/dev/null || true)
+    echo "process        $(printf '%s\n' "$kde" | tail -1)"
+    case "$kde" in */app/kde/2ksbox*) ;; *)
+      echo "package-flatpak.sh: in a Plasma session 2ksbox did not start /app/kde/2ksbox" >&2; fail=1 ;;
+    esac
+    if [ -s "$shot" ]; then
+      echo "window         $(du -h "$shot" | cut -f1) grabbed offscreen: Kirigami from the add-on"
+      rm -f "$shot"
+    else
+      echo "package-flatpak.sh: the KDE launcher drew no window (LAUNCHER_SHOT offscreen)" >&2; fail=1
+    fi
+  elif [ "$KDE" = 1 ]; then
+    echo "package-flatpak.sh: the KDE add-on $KDEID//$BRANCH is not installed" >&2; fail=1
+  else
+    echo "==> no KDE add-on installed (--no-kde): the GTK launcher everywhere"
   fi
   return $fail
 }
@@ -197,7 +236,7 @@ echo "==> build dir:    $BUILD_DIR (${avail} GB free)"
 args=(--user --force-clean --default-branch="$BRANCH" --state-dir "$BUILD_DIR/state")
 [ "$INSTALL" = 1 ] && args+=(--install)
 if [ "$APP" = 1 ]; then
-  flatpak-builder "${args[@]}" "$BUILD_DIR/build" "$MANIFEST"
+  flatpak-builder "${args[@]}" --install-deps-from=flathub "$BUILD_DIR/build" "$MANIFEST"
 fi
 if [ "$WINE" = 1 ]; then
   # The add-on builds against the *installed* app (its runtime), so it
@@ -205,6 +244,14 @@ if [ "$WINE" = 1 ]; then
   [ "$INSTALL" = 1 ] || { echo "package-flatpak.sh: the Wine add-on builds against the installed app; drop --no-install or pass --no-wine" >&2; exit 2; }
   flatpak info --user "$APPID//$BRANCH" >/dev/null 2>&1 || { echo "package-flatpak.sh: $APPID//$BRANCH is not installed; build the app first" >&2; exit 1; }
   flatpak-builder "${args[@]}" --install-deps-from=flathub "$BUILD_DIR/build-wine" "$WINE_MANIFEST"
+fi
+
+if [ "$KDE" = 1 ]; then
+  # Like the Wine add-on: against the installed app, with the rust SDK
+  # extension (the launcher) the manifest names
+  [ "$INSTALL" = 1 ] || { echo "package-flatpak.sh: the KDE add-on builds against the installed app; drop --no-install or pass --no-kde" >&2; exit 2; }
+  flatpak info --user "$APPID//$BRANCH" >/dev/null 2>&1 || { echo "package-flatpak.sh: $APPID//$BRANCH is not installed; build the app first" >&2; exit 1; }
+  flatpak-builder "${args[@]}" --install-deps-from=flathub "$BUILD_DIR/build-kde" "$KDE_MANIFEST"
 fi
 
 [ "$INSTALL" = 1 ] || { echo "built (not installed): $BUILD_DIR/build"; exit 0; }
