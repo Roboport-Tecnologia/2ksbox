@@ -202,6 +202,31 @@ if [ -n "$NATIVE" ]; then
           # qemu-ga links two resource objects, which lld-link refuses;
           # no package ships the guest agent
           --disable-guest-agent)
+    # Visual Studio's header and library directories go into the build
+    # directory, so a plain `ninja -C build/win/qemu-msvc` works in any
+    # shell, with no msvc-env.sh (clang finds no UCRT on its own here).
+    # configure splits these flags on spaces, so each directory is
+    # written as its 8.3 short name, and as a word of its own: MSYS2
+    # rewrites the /PROGRA~1 inside a joined -idirafterC:/PROGRA~1 as a
+    # POSIX path. -idirafter, not clang-cl's -imsvc (the GNU driver has
+    # none): searched after patch 83's -isystem include/msvc, whose
+    # #include_next then finds the UCRT's. Libraries as lld-link's own
+    # -libpath:, through -Wl: meson takes a lone -L apart from its
+    # directory, and in its own link checks passes -L on as -Wl,-L, which
+    # lld-link ignores (a regeneration then finds no pathcch.lib).
+    msvc_short() {
+      local s; s="$(cygpath -m -s "$1")"
+      case "$s" in *" "*)
+        echo "configure-qemu.sh: '$1' has no 8.3 short name (fsutil 8dot3name query)" >&2; return 1 ;; esac
+      printf '%s' "$s"
+    }
+    MSVC_CFLAGS="" MSVC_LDFLAGS="" d=""
+    IFS=';' read -ra dirs <<< "$INCLUDE"
+    for d in "${dirs[@]}"; do [ -z "$d" ] || MSVC_CFLAGS="$MSVC_CFLAGS -idirafter $(msvc_short "$d")" || exit 1; done
+    IFS=';' read -ra dirs <<< "$LIB"
+    for d in "${dirs[@]}"; do [ -z "$d" ] || MSVC_LDFLAGS="$MSVC_LDFLAGS -Wl,-libpath:$(msvc_short "$d")" || exit 1; done
+    EXTRA_CFLAGS="$EXTRA_CFLAGS$MSVC_CFLAGS"
+    CFG+=(--extra-cxxflags="${MSVC_CFLAGS# }" --extra-ldflags="${MSVC_LDFLAGS# }")
     echo "==> MSVC runtime, libraries: $DEPS (static)"
     # WHPX (Windows 11 guests under the host's hypervisor, track M20)
     # needs the Windows SDK's VMX capability codes, which arrived after
@@ -387,5 +412,11 @@ case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
 # auto-regeneration, overriding the -Dwerror=false from --disable-werror and
 # breaking a pinned release on new toolchains. Strip it.
 sed -i.bak '/^werror = true$/d' "$BUILD/config-meson.cross" && rm -f "$BUILD/config-meson.cross.bak"
+# MSVC: the libraries' .pc files, in the file meson reads again when a
+# plain `ninja` regenerates, where this script's PKG_CONFIG_LIBDIR is
+# gone and MSYS2's pkg-config would answer with its mingw glib.
+if [ -n "$MSVC" ] && ! grep -q '^pkg_config_libdir' "$BUILD/config-meson.cross"; then
+  sed -i "s|^\[properties\]\$|[properties]\npkg_config_libdir = ['$DEPS/lib/pkgconfig']|" "$BUILD/config-meson.cross"
+fi
 # keep the edited native file from looking newer than build.ninja (spurious regen)
 touch -r "$BUILD/build.ninja" "$BUILD/config-meson.cross"

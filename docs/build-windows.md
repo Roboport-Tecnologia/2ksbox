@@ -240,12 +240,25 @@ can also make qemu compile on msvc"). It is opt-in, beside the mingw
 build that still ships, in its own `build/win/qemu-msvc`:
 
 ```sh
-. scripts/msvc-env.sh               # not needed by hand: both scripts source it
 scripts/build-deps.sh               # zlib, pcre2, glib, pixman, libslirp, libepoxy
 WIN_QEMU_CC=msvc scripts/configure-qemu.sh
-ninja -C build/win/qemu-msvc        # in msvc-env.sh's environment
+ninja -C build/win/qemu-msvc        # in any MINGW64 shell
 WIN_QEMU_CC=msvc scripts/test.sh all
 ```
+
+The two scripts find Visual Studio themselves (`scripts/msvc-env.sh`),
+and configure writes what the build needs of it into the build
+directory: its header and library directories as `-idirafter` and
+`-Wl,-libpath:` flags (8.3 short names, since configure splits its
+flags on spaces; `-idirafter` and its directory as two words, since
+MSYS2 rewrites the `/PROGRA~1` in a joined `-idirafterC:/PROGRA~1`; not
+`-L`, which meson's own link checks hand lld-link as an unknown `-L`;
+clang finds no UCRT here on its own), and the libraries' `.pc`
+directory as meson's `pkg_config_libdir`, so a regeneration under a
+plain `ninja` does not take MSYS2's mingw glib. A build directory
+configured before 2026-10-04's fix wants `msvc-env.sh` sourced first
+(`fatal error: 'sys/types.h' file not found` otherwise), or configuring
+again.
 
 - **The compiler** is MSYS2's clang targeting `x86_64-pc-windows-msvc`
   (its GNU driver, since QEMU's flags are GCC's; Visual Studio ships no
