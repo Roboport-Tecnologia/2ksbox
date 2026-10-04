@@ -28,8 +28,9 @@ keeps scope, test loop, traps and open items. The design:
   `guest-tools/msys2-i686.sh`.
 - Package: `scripts/package-windows.sh`; the Store's MSIX: `scripts/package-msix.sh`,
   `packaging/windows/AppxManifest.xml.in`, `packaging/windows/Assets/`,
-  `scripts/win-sideload.ps1`; the submission: `packaging/windows/store-listing.md`,
-  `docs/privacy.md`; the executables'
+  `scripts/win-sideload.ps1`; the privacy policy the Store links to,
+  `docs/privacy.md` (the listing and the submission steps are in the
+  private `davidrios/2ksbox-stores`); the executables'
   manifest `packaging/windows/app.manifest` (with the icon, `win-icon.rs`).
 - Windows branches of shared code: `embed/mglcntx_embed.c` (WGL) and
   `tools/wgl-probe.c`; `launcher-core/src/console.rs`, `fatal.rs`,

@@ -413,42 +413,10 @@ APIs: the launcher starts the player). The first run was a WARNING for
 `packaging/windows/win-icon.rs` beside the icon, in place of mingw's
 default manifest) answers it, and the second run passed.
 
-**The submission**, step by step. Everything Partner Center asks for is
-written down in `packaging/windows/store-listing.md`, so a resubmission
-pastes the same words.
-
-1. A developer account at <https://partner.microsoft.com/dashboard>
-   (individual, a one-time fee), then *Apps and games → New product →
-   MSIX or PWA app* and reserve the name `2ksbox`.
-2. *Product management → Product identity* shows the three values;
-   pack with them (`--identity`, `--publisher`, `--publisher-display`).
-   **The version's first number cannot be 0** (the Store's rule, and
-   `package-msix.sh` refuses it for a Store identity), so the first
-   upload needs `Cargo.toml` at 1.0.0 or later, or `--version`; the
-   fourth number is 0.
-3. Sideload that exact package once (`win-sideload.ps1 -Check`) and run
-   the certification kit on its signed copy (above).
-4. In the submission: *Packages* takes the unsigned `.msix` (the Store
-   signs it); *Properties* takes the category, the privacy-policy URL
-   (mandatory because of `internetClient`; it is
-   `docs/privacy.md` on GitHub) and the system requirements;
-   *Age ratings* is the IARC questionnaire (all "no"); *Pricing* is
-   free; *Store listing* takes the text and at least one screenshot of
-   1366×768 or more, a shot of the player's window with the shader
-   chain on it (the player full screen, Ctrl+Alt+Shift+S or Win+PrtScn), never
-   the player's Ctrl+Alt+S guest frame scaled up (the listing file says
-   why); *Submission options* takes
-   one sentence per restricted capability (`runFullTrust`, in the
-   listing file).
-5. Submit; certification takes up to a few days, and its report names
-   any failing test by the kit's name.
-
-An update is the same pack with a higher version, uploaded to a new
-submission; the Microsoft Store Developer CLI (`winget install
-"Microsoft Store Developer CLI"`, `msstore publish --inputFile
-<msix> --appId <productId>`) does that from a shell, but it signs in
-with an Entra ID tenant, not the Microsoft account, so it is for after
-the first submission has gone through the web form.
+**The submission** (the steps, and the text and answers Partner Center
+asks for) is kept in a private repository, `davidrios/2ksbox-stores`,
+since 2026-10-04 (user), so the listing copy is no ready-made kit for an
+impostor listing. Everything that makes the package stays here.
 
 Microsoft lets the listing carry the app's own licence terms, and its
 policy permits open-source apps; whether GPL-2 QEMU and 86Box go up
