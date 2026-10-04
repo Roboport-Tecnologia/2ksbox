@@ -115,6 +115,37 @@ first refused write dumps the FIFO state and the last 64 accesses.
 - One TCG guest at a time, and end scripted Win98 runs with the ACPI power
   button (`docs/00-status.md` "Gotchas").
 
+## The Air (2026-10-04)
+
+The ARM64 recompiler runs under `MAP_JIT` with no change: the shim maps
+code with `MAP_JIT` and 86Box's generator toggles
+`pthread_jit_write_protect_np` itself. lldb on `voodoo_generate` counts
+four blocks compiled during a passing `voodoo-guest`, so the JIT draws
+the dither scene, and patch 64's ARM64 half is checked on hardware:
+`DITHER_SUB=off` fails with the documented walk (7bef … 6b4d, 10,240
+pixels off the tile) and `RECOMP=off` passes. The four `voodoo-guest`
+checks pass in `test.sh all`.
+
+Games, headless on a raw copy of `base98-us` with 3dfx's 3.02.02 driver
+installed into the copy (the user's package, `~/isos/others/voodoo2-30202.exe`):
+
+| | Air | Linux (2026-09-15) |
+|---|---|---|
+| Quake II `timedemo demo1`, `3dfxgl`, 640×480, `gl_swapinterval 0` | **147.9 fps** | 147.5 |
+| the same, `recompiler=off` | 71.6 fps | |
+| UT CityIntro flyby, Glide, one loop of `(N new)` | **39.9 fps** | 40.7 |
+
+The JIT is 2.07× the interpreter here. Neither launcher machine on the
+Air had 3dfx's driver: `GLIDE2X.DLL` in `SYSTEM` alone is the old
+pass-through's leftover, and a run on such an image meets "Add New
+Hardware" and never opens Glide. Installing into a scratch copy: unzip
+the package into the raw copy's `WINDOWS\INF` (8.3 names, upper case),
+boot with the card, and answer the source prompt with
+`KEYS="40:ret,45:c,45:shift+semicolon,45:backslash,…,50:ret,90:ret"`
+(`C:\WINDOWS\INF`, then the INF's `Reboot`). UT needs
+`GameRenderDevice=GlideDrv.GlideRenderDevice` and `FirstRun=436` in its
+INI, or it opens its first-run wizard.
+
 ## Open, in order
 
 1. **Left-over state between Glide windows.** A second game after one has
@@ -130,9 +161,8 @@ first refused write dumps the FIFO state and the last 64 accesses.
    (`DDERR_CANTCREATEDC`). Unknown whether a real Voodoo 2 with this
    driver fails it too (the card has no GDI) or the device lacks
    something.
-4. **The M1 Air.** The ARM64 recompiler under `MAP_JIT` (86Box's own
-   code), patch 64's ARM64 half, the `voodoo-guest` check there, then the
-   game numbers.
+4. ~~**The M1 Air.**~~ Done 2026-10-04 ("The Air" below). Left there:
+   Diablo II and the hand test through the player.
 5. **Diablo II**, the title the route was chosen for, measured, and
    Tirtanium (one of the titles that stranded the screen) run.
 6. **Upstream.** Offer patches 64 and 71 and the two command-counter

@@ -340,7 +340,8 @@ generators the interpreter's three table lookups at the destination
 read-back (`dithersub_rb` / `dithersub_g` or the 2x2 pair, keyed on the
 dither write's x and `real_y`); the block cache already keys on the whole
 `fbzMode`. Both emissions were checked against the tables for every byte
-value at every dither position (ARM64 under Unicorn). The `voodoo-guest`
+value at every dither position (ARM64 under Unicorn), and the ARM64 one
+runs on the Air (track doc, "The Air"). The `voodoo-guest`
 dither phase requires a screendump of one 4x4 tile with the recompiler
 on and off (`RECOMP=off`); `DITHER_SUB=off` is the control that fails.
 
