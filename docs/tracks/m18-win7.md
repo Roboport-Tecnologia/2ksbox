@@ -478,12 +478,22 @@ device's half is plain QEMU C and builds anywhere.
    and DWM keeps composing after it exits (`build/w7/w7d3d.sh` with
    `EXTRA_KEYS=alt-f4`, which closes the Personalization window
    `aero.theme` leaves with the keyboard).
+10. **Every program under composition** (2026-10-04, one boot with Aero
+   on): D3DGAME8 0 pixels off native, D3DFEAT9 byte-identical with native
+   query and getter lines, D3D7TEST's full-screen frame equal to the host
+   frame. D3DGAME8 (Direct3D 8) and D3DFEAT9 each present into their
+   window's redirection surface through the host's colour BLT, as
+   D3DGAME9 does; D3D7TEST's full-screen mode change takes the display
+   from DWM and gives it back, and DWM goes on composing after it. No
+   driver change was needed. The test loop runs them as one command line
+   (`w7d3d.sh CHAIN=1`): typed one per program, a slow first start let
+   the next line's keys go to the program still running.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Under way: DWM composes
    the desktop since 2026-10-03 (finding 8 above), behind the
-   `CompositionPolicy` override, and a windowed Direct3D 9 program draws
-   in it with native frames (finding 9), paced by the device's own
-   vertical-blank interrupt (plan step 4); next the other programs under
-   composition, the Experience Index.
+   `CompositionPolicy` override, and every test program draws in it with
+   native frames (findings 9 and 10), paced by the device's own
+   vertical-blank interrupt (plan step 4); next the Experience Index, in
+   place of the override.
 
 After Aero, not planned yet: 64-bit (test mode, or signing, which on
 64-bit Windows 10/11 means an EV certificate and Microsoft's attestation
