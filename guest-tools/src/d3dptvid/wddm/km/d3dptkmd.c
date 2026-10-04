@@ -72,8 +72,16 @@ typedef struct D3DPT_ADAPTER {
     /* the vertical blank while dxgkrnl has it enabled (ControlInterrupt):
      * the device's interrupt (register set v6, CAP_IRQ), else a periodic
      * timer at the mode's refresh */
-    BOOLEAN vsync_irq;                /* the device raises it (IRQ_VBLANK) */
+    BOOLEAN vsync_irq;                /* the device raises it (IRQ_VBLANK); CAP_IRQ */
     ULONG vsync_isr;                  /* interrupts taken, the first few logged */
+    volatile ULONG irq_mask;          /* what IRQ_ENABLE holds: IRQ_DMA always (fence_irq), IRQ_VBLANK while dxgkrnl wants it */
+    /* register set v7 (CAP_DMA): the device appends the user-mode driver's
+     * records to the window from the DMA buffer (dma), and a submission's
+     * fence is the device's DMA interrupt (fence_irq, with CAP_IRQ) */
+    BOOLEAN dma, fence_irq;
+    PUCHAR sub_va;                    /* the DMA buffer of the submission being run: system VA */
+    PHYSICAL_ADDRESS sub_pa;          /* and its physical address (contiguous) */
+    ULONG dma_errors;                 /* appends the device refused, the first few logged */
     KTIMER vsync_timer;
     KDPC vsync_dpc;
     volatile LONG vsync_on;
@@ -392,11 +400,17 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->scan_addr = 0;
     a->vsync_irq = version >= 6u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_IRQ);
     a->vsync_isr = 0;
+    a->dma = a->d3d && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->fence_irq = a->vsync_irq && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->dma_errors = 0;
+    a->irq_mask = a->fence_irq ? D3DPT_FB_IRQ_DMA : 0;
     if (a->vsync_irq) {
-        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;   /* nothing raised until dxgkrnl enables it */
         a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = ~0u;
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;   /* the vertical blank when dxgkrnl enables it */
     }
     dbg_line(a->vsync_irq ? "vertical blank: the device's interrupt" : "vertical blank: a timer (no CAP_IRQ)");
+    dbg_line(a->fence_irq ? "fences: the device's interrupt" : "fences: reported at submit (no CAP_DMA / CAP_IRQ)");
+    dbg_line(a->dma ? "records: appended by the device from the DMA buffer" : "records: copied into the window by the CPU");
     KeInitializeTimer(&a->vsync_timer);
     KeInitializeDpc(&a->vsync_dpc, vsync_tick, a);
     a->vsync_ready = TRUE;
@@ -413,6 +427,10 @@ static void unmap(D3DPT_ADAPTER *a)
 
     if (a->vsync_ready) {           /* no tick may run past this */
         vsync_stop(a);
+        if (a->vsync_irq && a->regs) {      /* and no interrupt of the device's */
+            a->irq_mask = 0;
+            a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;
+        }
         KeFlushQueuedDpcs();
         a->vsync_ready = FALSE;
     }
@@ -603,9 +621,22 @@ static BOOLEAN d3dpt_interrupt(IN_CONST_PVOID ctx, IN_ULONG msg)
         return FALSE;
     }
     a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = st;
+    if (st & D3DPT_FB_IRQ_DMA) {
+        DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
+
+        /* the last fence written is done, and with it every earlier one */
+        a->fence_notify = (LONG)a->regs[D3DPT_FB_REG_FENCE_DONE / 4];
+        RtlZeroMemory(&n, sizeof(n));
+        n.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
+        n.DmaCompleted.SubmissionFenceId = (UINT)a->fence_notify;
+        a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
+        if (!(st & D3DPT_FB_IRQ_VBLANK) || !a->vsync_on) {
+            a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+        }
+    }
     if ((st & D3DPT_FB_IRQ_VBLANK) && a->vsync_on) {
         a->vsync_isr++;
-        notify_vsync(a);
+        notify_vsync(a);            /* queues the DPC */
     }
     return TRUE;
 }
@@ -1575,40 +1606,91 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
  * return slot here (every result record has its ret_off second in its
  * body), runs the batch so far, and copies the result into the user-mode
  * driver's result allocation in VRAM. */
+/* Records of the DMA buffer onto the window's batch, as they are (each
+ * whole and a multiple of 8 bytes, checked at Render): appended by the
+ * device from the buffer's physical address (register set v7), which is
+ * the host's copy instead of the vCPU's, else copied here. */
+static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG count)
+{
+    ULONG i;
+
+    if (!count) {
+        return;
+    }
+    if (a->dma && a->sub_va && bytes <= D3DPT_CMD_SIZE) {
+        PHYSICAL_ADDRESS pa = a->sub_pa;
+        ULONG st;
+
+        if (d3dpt_enc_hdr(&a->enc)->cmd_bytes + bytes > D3DPT_CMD_SIZE) {
+            d3dpt_enc_flush(&a->enc);
+        }
+        pa.QuadPart += from - a->sub_va;
+        a->regs[D3DPT_FB_REG_DMA_ADDR_LO / 4] = pa.LowPart;
+        a->regs[D3DPT_FB_REG_DMA_ADDR_HI / 4] = (ULONG)pa.HighPart;
+        a->regs[D3DPT_FB_REG_DMA_BYTES / 4] = bytes;
+        a->regs[D3DPT_FB_REG_DMA_APPEND / 4] = count;
+        st = a->regs[D3DPT_FB_REG_DMA_APPEND / 4];
+        if (st == D3DPT_FB_DMA_OK) {
+            return;
+        }
+        if (a->dma_errors++ < 8) {
+            dbg_hex("d3dptkmd: DMA append refused: ", st);
+            dbg_hex(" bytes ", bytes);
+            dbg_hex(" records ", count);
+            dbg_puts("; copied instead\n");
+        }
+    }
+    for (i = 0; i < count; i++) {
+        const d3dpt_cmd *c = (const d3dpt_cmd *)from;
+        UCHAR *body = (UCHAR *)d3dpt_enc_cmd(&a->enc, c->op, c->size - sizeof(*c), 0);
+
+        if (body) {
+            RtlCopyMemory(body, c + 1, c->size - sizeof(*c));
+        }
+        from += c->size;
+    }
+}
+
 static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 {
-    const UCHAR *r = (const UCHAR *)(p + 1), *end = (const UCHAR *)p + p->h.size;
-    ULONG i, ret_dst = 0, ret_bytes = 0;
+    const UCHAR *r = (const UCHAR *)(p + 1), *end = (const UCHAR *)p + p->h.size, *run_at = r;
+    ULONG i, ret_dst = 0, ret_bytes = 0, run_n = 0;
     BOOLEAN ret = FALSE;
 
     for (i = 0; i < p->count && r + sizeof(d3dpt_cmd) <= end; i++) {
-        const d3dpt_cmd *c = (const d3dpt_cmd *)r;
-        ULONG body_size = c->size - sizeof(*c), slot = 0;
-        UCHAR *body;
+        d3dpt_cmd *c = (d3dpt_cmd *)r;
+        ULONG body_size = c->size - sizeof(*c), slot;
 
-        r += c->size;
         if (c->op == D3DPT_UMD_OP_RETURN) {
             const d3dpt_u32x2 *u = (const d3dpt_u32x2 *)(c + 1);
 
+            d3d_put(a, run_at, (ULONG)(r - run_at), run_n);
+            r += c->size;
+            run_at = r;
+            run_n = 0;
             ret = body_size >= sizeof(*u) && u->b <= 4096 && u->a + sizeof(d3dpt_ret) + u->b <= a->seg_size;
             ret_dst = ret ? u->a : 0;
             ret_bytes = ret ? u->b : 0;
             continue;
         }
-        if (ret && body_size >= 8) {
-            slot = d3dpt_enc_ret(&a->enc, ret_bytes);
+        r += c->size;
+        run_n++;
+        if (!ret || body_size < 8) {
+            ret = FALSE;
+            continue;
         }
-        body = (UCHAR *)d3dpt_enc_cmd(&a->enc, c->op, body_size, 0);
-        if (body) {
-            RtlCopyMemory(body, c + 1, body_size);
-        }
-        if (ret && body && body_size >= 8) {
-            ((ULONG *)body)[1] = slot;
-            d3dpt_enc_flush(&a->enc);
-            RtlCopyMemory(a->vram + ret_dst, d3dpt_enc_result(&a->enc, slot), sizeof(d3dpt_ret) + ret_bytes);
-        }
+        /* the record whose result is wanted: its return slot written in
+         * the buffer itself, then it alone, then the batch run */
+        slot = d3dpt_enc_ret(&a->enc, ret_bytes);
+        ((ULONG *)(c + 1))[1] = slot;
+        d3d_put(a, run_at, (ULONG)(r - run_at), run_n);
+        run_at = r;
+        run_n = 0;
+        d3dpt_enc_flush(&a->enc);
+        RtlCopyMemory(a->vram + ret_dst, d3dpt_enc_result(&a->enc, slot), sizeof(d3dpt_ret) + ret_bytes);
         ret = FALSE;
     }
+    d3d_put(a, run_at, (ULONG)(r - run_at), run_n);
 }
 
 /* Execute one submission: every packet from start to end, in order. */
@@ -2158,7 +2240,8 @@ static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH 
 
 /* The DMA buffer is in contiguous system memory (segment set 0), so its
  * physical address gives it back in system space. Run it, then report the
- * fence done. */
+ * fence done: through the device's DMA interrupt (register set v7, the
+ * FENCE register), else as an interrupt would, from here. */
 static DXGKDDI_SUBMITCOMMAND d3dpt_submit_command;
 static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SUBMITCOMMAND s)
 {
@@ -2179,14 +2262,22 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
         pa.QuadPart += s->DmaBufferSubmissionStartOffset;
         va = s->DmaBufferSegmentId == 0 ? (PUCHAR)MmGetVirtualForPhysical(pa) : NULL;
         if (va) {
+            a->sub_va = va;
+            a->sub_pa = pa;
             run(a, va, s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
+            a->sub_va = NULL;
         } else {
             dbg_hex("d3dptkmd: SubmitCommand: no system address for the DMA buffer, segment ",
                     s->DmaBufferSegmentId);
             dbg_puts("\n");
         }
     }
-    complete_fence(a, s->SubmissionFenceId);
+    if (a->fence_irq) {
+        a->fence_done = (LONG)s->SubmissionFenceId;
+        a->regs[D3DPT_FB_REG_FENCE / 4] = s->SubmissionFenceId;   /* IRQ_DMA: the ISR reports it */
+    } else {
+        complete_fence(a, s->SubmissionFenceId);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -2702,8 +2793,8 @@ static void vsync_stop(D3DPT_ADAPTER *a)
 {
     InterlockedExchange(&a->vsync_on, 0);
     if (a->vsync_irq && a->regs) {
-        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;
-        a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = ~0u;
+        a->irq_mask &= ~D3DPT_FB_IRQ_VBLANK;
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;   /* a pending vertical blank goes with it */
     }
     KeCancelTimer(&a->vsync_timer);
 }
@@ -2737,7 +2828,8 @@ static NTSTATUS APIENTRY d3dpt_control_interrupt(IN_CONST_HANDLE h,
     }
     if (a->vsync_irq) {
         InterlockedExchange(&a->vsync_on, 1);
-        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = D3DPT_FB_IRQ_VBLANK;
+        a->irq_mask |= D3DPT_FB_IRQ_VBLANK;
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;
         return STATUS_SUCCESS;
     }
     if (!InterlockedExchange(&a->vsync_on, 1)) {

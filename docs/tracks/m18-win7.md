@@ -235,9 +235,34 @@ device's half is plain QEMU C and builds anywhere.
    blank (about 200 interrupts in the run), DWM composes at up to 57
    flips a second while D3DGAME9 runs (about 45 with the timer, whose
    period the system clock rounds to 15.6 ms), and D3DGAME9's frame
-   stays 0 pixels off native. Left of this step: a fence register and
-   DMA command buffers (fences complete at submit, on the CPU, and are
-   reported through the same DPC path).
+   stays 0 pixels off native.
+   **The fence and the records from the DMA buffer done 2026-10-04**
+   (register set v7, `CAP_DMA`):
+   - `FENCE` (0xd0) takes a submission's fence once its work is done:
+     `FENCE_DONE` (0xd4) reads it back and `IRQ_DMA` raises the interrupt,
+     whose ISR reports DMA_COMPLETED with it. SubmitCommand writes it after
+     running the buffer, instead of reporting the completion itself
+     through SynchronizeExecution (kept for a device without CAP_DMA /
+     CAP_IRQ). The work is still all done inside SubmitCommand, so a
+     fence is done when written; the register is where an asynchronous
+     host would report later ones.
+   - `DMA_ADDR_LO` / `HI`, `DMA_BYTES`, then `DMA_APPEND` (the record
+     count, 0xc0..0xcc): the device copies whole records from guest memory
+     to the end of the window's batch and updates its header, as the
+     encoder would have. The kernel driver hands it each run of the
+     user-mode driver's records from the DMA buffer (contiguous, its
+     physical address from SubmitCommand) instead of copying them record
+     by record on the vCPU; a record whose result is wanted gets its
+     return slot written into the buffer, goes alone, and the batch runs
+     before the result is copied out. A refused append (`DMA_APPEND` reads
+     `NO_ROOM` / `BAD`) falls back to the CPU copy, logged. The executor's
+     API and the protocol are unchanged.
+   Proved 2026-10-04: D3DGAME9 and D3DGAME8 0 pixels off native,
+   D3DFEAT9 byte-identical with native query lines, D3D7TEST equal to
+   the host frame, every record through ~85 appends a 5 s line (~800 KiB),
+   fences through the interrupt. Left of the step: nothing the driver
+   needs; true asynchrony (the host running a batch while the vCPU goes
+   on) would be the executor's own change, not planned.
 5. **The desktop, basic theme.** Segments (VRAM as one linear segment),
    allocations, paging buffers, DMA submission and fences, VidPN (modes,
    the scanout address in `OFFSET`), the cursor, vertical blank, timeout

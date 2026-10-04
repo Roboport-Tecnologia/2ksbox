@@ -66,6 +66,14 @@
  * there). Level triggered and possibly shared: a set STATUS bit that is
  * enabled holds the line until the driver writes it back.
  *
+ * Version 7 (CAP_DMA, M18): the WDDM driver's submissions. DMA_APPEND
+ * copies records from guest memory (the DMA buffer, physically
+ * contiguous) to the end of the window's batch, as d3dpt_enc_cmd would
+ * have written them, updating the header's cmd_bytes and cmd_count: the
+ * copy is the host's, not the vCPU's. FENCE takes the fence of a
+ * submission whose work is done and raises IRQ_DMA (when enabled), the
+ * completion interrupt dxgkrnl's scheduler waits on.
+ *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
  * built with and refuses only an older one, because a newer register set is
@@ -86,7 +94,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_FB_VERSION      6u
+#define D3DPT_FB_VERSION      7u
 #define D3DPT_FB_MAGIC        0x42463344u          /* "D3FB" at REG_MAGIC */
 
 /* PCI identity: QEMU/Bochs pseudo vendor, our device id ("3D00"). The INF
@@ -147,6 +155,17 @@
 #define D3DPT_FB_REG_IRQ_STATUS  0xbcu   /* R: D3DPT_FB_IRQ_* that happened while enabled; W: 1 bits acknowledge
                                           * (clear) them, and the line drops when none enabled is left */
 #define D3DPT_FB_IRQ_VBLANK      0x1u    /* each period of HZ (60 when unset) while enabled, off the guest's clock */
+#define D3DPT_FB_IRQ_DMA         0x2u    /* version 7: a FENCE write (the submission it names is done) */
+#define D3DPT_FB_REG_DMA_ADDR_LO 0xc0u   /* RW (version 7, CAP_DMA): guest-physical address of records to append */
+#define D3DPT_FB_REG_DMA_ADDR_HI 0xc4u
+#define D3DPT_FB_REG_DMA_BYTES   0xc8u   /* RW: their bytes, a multiple of 8, whole records */
+#define D3DPT_FB_REG_DMA_APPEND  0xccu   /* W: the number of records: append them to the window's batch;
+                                          * R: D3DPT_FB_DMA_* of the last append (nothing is appended on error) */
+#define D3DPT_FB_REG_FENCE       0xd0u   /* W: a submission fence, all its work done: FENCE_DONE takes it, IRQ_DMA */
+#define D3DPT_FB_REG_FENCE_DONE  0xd4u   /* R: the last FENCE written (0 after reset) */
+#define D3DPT_FB_DMA_OK          0u
+#define D3DPT_FB_DMA_NO_ROOM     1u      /* the batch has no room for them: ring the doorbell first */
+#define D3DPT_FB_DMA_BAD         2u      /* no window, a size not a multiple of 8, or memory the device cannot read */
 #define D3DPT_FB_CURSOR_MAX      64u     /* pixels per side; larger pointers stay with GDI's software one */
 #define D3DPT_FB_CURSOR_BYTES    (D3DPT_FB_CURSOR_MAX * D3DPT_FB_CURSOR_MAX * 4u)
 
@@ -164,5 +183,6 @@
 #define D3DPT_FB_CAP_CURSOR      0x10u   /* version 4: the CURSOR registers */
 #define D3DPT_FB_CAP_GAMMA       0x20u   /* version 5: GAMMA_ENABLE and the GAMMA block */
 #define D3DPT_FB_CAP_IRQ         0x40u   /* version 6: an interrupt pin and the IRQ registers (irq=on) */
+#define D3DPT_FB_CAP_DMA         0x80u   /* version 7: DMA_* and FENCE (with a command window) */
 
 #endif

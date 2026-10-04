@@ -74,6 +74,9 @@ struct D3dptVgaState {
     uint32_t irq_status;        /* IRQ_STATUS: raised while enabled, not yet acknowledged */
     QEMUTimer *vbl_timer;       /* the vertical blank interrupt's, while IRQ_VBLANK is enabled */
     int64_t vbl_next_ns;        /* its next deadline (QEMU_CLOCK_VIRTUAL) */
+    uint32_t dma_lo, dma_hi, dma_bytes, dma_status; /* DMA_* (register set v7) */
+    uint32_t fence_done;        /* FENCE_DONE */
+    uint64_t dma_appends, dma_appended; /* appends and their bytes, for the rate line */
     bool no_exec;              /* property: act as a host with no Vulkan 1.3 device
                                    (ADR-013's floor unmet); D3D_STATUS then reads
                                    NO_EXEC and the guest driver offers DirectDraw only */
@@ -376,7 +379,7 @@ static void fb_irq_enable(D3dptVgaState *s, uint32_t val)
 {
     uint32_t was = s->irq_enable;
 
-    s->irq_enable = s->irq ? val & D3DPT_FB_IRQ_VBLANK : 0;
+    s->irq_enable = s->irq ? val & (D3DPT_FB_IRQ_VBLANK | D3DPT_FB_IRQ_DMA) : 0;
     s->irq_status &= s->irq_enable;         /* nothing stays pending that is off */
     if ((s->irq_enable & D3DPT_FB_IRQ_VBLANK) && !(was & D3DPT_FB_IRQ_VBLANK)) {
         s->vbl_next_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -422,6 +425,12 @@ static void fb_flip_rate(D3dptVgaState *s)
                         (s->batches - s->batches_last),
                     100.0 * (s->exec_ns - s->exec_ns_last) /
                         (now - s->flips_ns));
+    }
+    if (s->dma_appends) {
+        /* register set v7: the records the WDDM driver had the device copy */
+        info_report("d3dpt-vga: %" PRIu64 " DMA appends, %" PRIu64 " KiB of records, fence %u",
+                    s->dma_appends, s->dma_appended >> 10, s->fence_done);
+        s->dma_appends = s->dma_appended = 0;
     }
     s->batches_last = s->batches;
     s->exec_ns_last = s->exec_ns;
@@ -631,6 +640,34 @@ static void d3d_doorbell(D3dptVgaState *s)
     fb_flip_rate(s);    /* the 5 s line, for a game that blits and never flips */
 }
 
+/* DMA_APPEND (register set v7): `count` records from guest memory at
+ * DMA_ADDR, DMA_BYTES of them, to the end of the window's batch, as the
+ * guest's encoder would have written them. The executor checks the
+ * records themselves at the doorbell (a count that does not match the
+ * bytes is its MALFORMED); here only that they fit and can be read. */
+static uint32_t d3d_dma_append(D3dptVgaState *s, uint32_t count)
+{
+    uint8_t *win = memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset;
+    d3dpt_shm_hdr *h = (d3dpt_shm_hdr *)win;
+    dma_addr_t addr = ((uint64_t)s->dma_hi << 32) | s->dma_lo;
+    uint32_t bytes = s->dma_bytes;
+
+    if (!s->cmd_offset || !count || !bytes || (bytes & 7) || h->cmd_bytes > D3DPT_CMD_SIZE) {
+        return D3DPT_FB_DMA_BAD;
+    }
+    if (bytes > D3DPT_CMD_SIZE - h->cmd_bytes) {
+        return D3DPT_FB_DMA_NO_ROOM;
+    }
+    if (pci_dma_read(&s->dev, addr, win + D3DPT_CMD_OFFSET + h->cmd_bytes, bytes) != MEMTX_OK) {
+        return D3DPT_FB_DMA_BAD;
+    }
+    h->cmd_bytes += bytes;
+    h->cmd_count += count;
+    s->dma_appends++;
+    s->dma_appended += bytes;
+    return D3DPT_FB_DMA_OK;
+}
+
 /* guest reset: every context and surface the driver registered is gone */
 static void d3d_reset(D3dptVgaState *s)
 {
@@ -781,11 +818,21 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
     case D3DPT_FB_REG_CAPS:
         return D3DPT_FB_CAP_BPP8 | D3DPT_FB_CAP_BPP16 | D3DPT_FB_CAP_BPP32 |
                D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0) |
-               (s->irq ? D3DPT_FB_CAP_IRQ : 0);
+               (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0);
     case D3DPT_FB_REG_IRQ_ENABLE:
         return s->irq_enable;
     case D3DPT_FB_REG_IRQ_STATUS:
         return s->irq_status;
+    case D3DPT_FB_REG_DMA_ADDR_LO:
+        return s->dma_lo;
+    case D3DPT_FB_REG_DMA_ADDR_HI:
+        return s->dma_hi;
+    case D3DPT_FB_REG_DMA_BYTES:
+        return s->dma_bytes;
+    case D3DPT_FB_REG_DMA_APPEND:
+        return s->dma_status;
+    case D3DPT_FB_REG_FENCE_DONE:
+        return s->fence_done;
     case D3DPT_FB_REG_CURSOR_ADDR:
         return s->cur_addr;
     case D3DPT_FB_REG_CURSOR_W:
@@ -978,6 +1025,25 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         s->irq_status &= ~(uint32_t)val;
         fb_irq_update(s);
         break;
+    case D3DPT_FB_REG_DMA_ADDR_LO:
+        s->dma_lo = val;
+        break;
+    case D3DPT_FB_REG_DMA_ADDR_HI:
+        s->dma_hi = val;
+        break;
+    case D3DPT_FB_REG_DMA_BYTES:
+        s->dma_bytes = val;
+        break;
+    case D3DPT_FB_REG_DMA_APPEND:
+        s->dma_status = d3d_dma_append(s, val);
+        break;
+    case D3DPT_FB_REG_FENCE:
+        s->fence_done = val;
+        if (s->irq_enable & D3DPT_FB_IRQ_DMA) {
+            s->irq_status |= D3DPT_FB_IRQ_DMA;
+            fb_irq_update(s);
+        }
+        break;
     default:
         if (addr >= D3DPT_FB_REG_PALETTE &&
             addr < D3DPT_FB_REG_PALETTE + 4 * D3DPT_FB_PALETTE_SIZE) {
@@ -1091,6 +1157,8 @@ static void d3dpt_vga_reset(DeviceState *dev)
     fb_gamma_apply(s);     /* no ramp after a reset: a RAMDAC comes up linear */
     s->irq_status = 0;
     fb_irq_enable(s, 0);   /* no interrupt until the driver asks again */
+    s->dma_lo = s->dma_hi = s->dma_bytes = s->dma_status = 0;
+    s->fence_done = 0;
     d3d_reset(s);
 }
 
