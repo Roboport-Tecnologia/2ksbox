@@ -36,4 +36,4 @@ qemu-embed = { path = "../qemu-embed" }
 # Pinned to a commit (user decision, ADR-023), the launcher's rev: bump
 # both together. For work on both repositories at once, a `[patch]` in a
 # local, uncommitted `.cargo/config.toml` (docs/tracks/m19-mitsuami-launcher.md).
-mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "48e4801a6dcd3ba58f0ef34a9498adcd1be21900", default-features = false }
+mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "0e21f20ee73a186d37fa6251b8f44d3771e07761", default-features = false }

@@ -339,9 +339,9 @@ tracks, plus the items no track owns.
     installer (6d; the MSIX covers the Store, above), screenshots for a
     Flathub submission, `CDSHELF.EXE`'s Win98 (ASPI) run.
 10a. **M19, the launcher on mitsuami.** The flip is done (2026-10-02);
-    left: run the Linux, macOS and Flatpak packagers with it (their
-    window checks are new and unrun), the regenerated Flatpak
-    `cargo-sources.json`, and the macOS floor with an AppKit launcher
+    mitsuami pinned at 1.0.0 (`0e21f20`) since 2026-10-04; left: run
+    the Linux packager with it (the Windows, macOS and Flatpak ones
+    have), and the macOS floor with an AppKit launcher
     (`tracks/m19-mitsuami-launcher.md`).
 10b. **M22, the player on mitsuami.** Step 2: the pointer, the menus and
     the close alert on a real desktop, latency against the winit player,

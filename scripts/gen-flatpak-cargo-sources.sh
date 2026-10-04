@@ -34,10 +34,12 @@ OUT="$ROOT/packaging/flatpak/cargo-sources.json"
 
 command -v uv >/dev/null || { echo "uv not found — https://docs.astral.sh/uv/" >&2; exit 1; }
 mkdir -p "$(dirname "$TOOL")"
-if ! [ -f "$TOOL" ] || ! echo "$SHA256  $TOOL" | sha256sum -c --status; then
+# the first field of sha256sum's line, not `-c --status`: macOS's has no --status
+hash_ok() { [ "$(sha256sum "$TOOL" | cut -d' ' -f1)" = "$SHA256" ]; }
+if ! [ -f "$TOOL" ] || ! hash_ok; then
   echo "==> fetching flatpak-cargo-generator ($COMMIT)"
   curl -fsSL -o "$TOOL" "$URL"
-  echo "$SHA256  $TOOL" | sha256sum -c --status || {
+  hash_ok || {
     echo "gen-flatpak-cargo-sources.sh: the generator's hash does not match; refusing to run it" >&2
     rm -f "$TOOL"; exit 1; }
 fi

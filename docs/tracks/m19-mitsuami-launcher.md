@@ -38,7 +38,10 @@ mitsuami = { path = "/path/to/mitsuami/crates/mitsuami" }
 and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
-with `scripts/gen-flatpak-cargo-sources.sh`.
+with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
+The pin is mitsuami 1.0.0, `0e21f20`, since 2026-10-04 (53 commits past
+`48e4801`: 1.0.0 and three security and performance passes); both
+crates built with no change, and the macOS launcher drew its window.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
 Runtime 2.4+, so the launcher is built only on a PC, never in the cross
@@ -398,10 +401,11 @@ The machine window is 770 wide since 2026-10-01 (user: "a bit narrower", then 50
 
 ## Left
 
-- Run the Linux, macOS and Flatpak packagers with this launcher. Their
-  window checks are new and have not run; only the Windows packager
-  has, on the PC, and it passed except for a pre-existing bug in the
-  executor on the system's d3d9.
+- Run the Linux packager with this launcher; its window check has not
+  run. The Windows packager has (on the PC; it passed except for a
+  pre-existing bug in the executor on the system's d3d9), the macOS ones
+  (App Store, community and Intel, 2026-10-04, M21's Mac step) and the
+  Flatpak (below).
 - ~~Regenerate `packaging/flatpak/cargo-sources.json`~~ (done
   2026-10-04: the generator's merge had refused mitsuami's git crates).
 - **The Flatpak (2026-10-04).** The packager ran with this launcher on
