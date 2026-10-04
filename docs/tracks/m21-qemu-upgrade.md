@@ -598,9 +598,11 @@ Still open after the merge:
 - Step 4: the Linux package and the Flatpak (Linux only). The Air is
   done (2026-10-04, above: patch 82, all three apps), and the Windows
   package is built and checked natively since 2026-10-03.
-- A Windows 11 machine's board is the unversioned `q35` (Arm: `virt`),
-  so a live snapshot taken on 9.2 may not load on 11.1; the i440fx pin
-  (`Machine::board`) does not cover it. User's call.
+- ~~A Windows 11 machine's board~~ is the unversioned `q35` (Arm:
+  `virt`), so a live snapshot taken on 9.2 may not load on 11.1; the
+  i440fx pin (`Machine::board`) does not cover it. **Accepted (user,
+  2026-10-04): "nobody is using 9.2".** Windows 11 machines stay
+  unversioned.
 - Doc 22's numbers are 9.2's; x87 softfloat ~1.7x slower on 11.1 with
   the fast path off. The README's "Drop" lines were re-checked row by row
   against pristine 11.1.2 (2026-10-04): none is met, and the stale wording
