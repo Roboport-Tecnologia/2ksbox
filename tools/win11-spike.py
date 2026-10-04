@@ -27,14 +27,15 @@ Environment:
   SMP=4 MEM=4096       Windows 11's minimum is 2 cores and 4 GB
   EDITION="Windows 11 Pro"   the install.wim image name setup installs
   QEMU=build/qemu/qemu-system-x86_64
-  FW=build/qemu/qemu-bundle/usr/local/share/qemu   the EDK2 files
+  FW=qemu/pc-bios       the EDK2 files, where scripts/prepare-qemu.sh unpacks
+                       them (the launcher's -L)
   VNC=20               watch on 127.0.0.1:5920 (needs ninja -C build/qemu
                        pc-bios/keymaps/en-us); default none
   SHOT=60              seconds between screen dumps
   SETTLE=60            boot: seconds on the desktop before the power button
   TPM=swtpm|libtpms    the TPM backend (libtpms: OUT/tpm.permall)
   ARCH=x86_64|aarch64  the guest (aarch64: QEMU=build/qemu/qemu-system-aarch64,
-                       FW=qemu/pc-bios, TPM=libtpms, ACCEL=hvf on a Mac)
+                       TPM=libtpms, ACCEL=hvf on a Mac)
   FW_ARM=2ksbox        aarch64 firmware: ours (2ksbox-aarch64-*.fd), or edk2
                        for QEMU's prebuilt one (no Secure Boot, no AHCI: the
                        disk goes on NVMe, the CDs on USB)
@@ -45,15 +46,16 @@ Environment:
                        one; the shots here are of the first)
   NET=1                a network card (aarch64: virtio-net, whose driver is on
                        the drivers disc; x86_64: e1000e) on QEMU's user network
-  DRIVERS=<iso>        aarch64: the drivers disc in a CD drive of its own
-                       (default build/virtio-win/2ksbox-drivers-arm64.iso when
+  DRIVERS=<iso>        the drivers disc in a CD drive of its own (default
+                       build/virtio-win/2ksbox-drivers-<arm64|x64>.iso when
                        it exists; DRIVERS= for none)
   SB_BYPASS=1          install: setup's LabConfig BypassSecureBootCheck
                        (needed on FW_ARM=edk2 only)
   LANG_ISO=en-US       the ISO's language, when 7z is not there to read it
-  PROBE=1              boot, ARCH=aarch64: on the desktop, tools/win11-spike/
-                       probe.ps1 from the REPORT disk, elevated the same way
-                       (UAC's Yes at UAC_YES_ARM), appends W11-PROBE lines
+  PROBE=1              boot: on the desktop, tools/win11-spike/probe.ps1 from
+                       the REPORT disk (a FAT disk on USB, as on aarch64),
+                       elevated the same way (UAC's Yes), appends W11-PROBE
+                       lines
   PROBE_PS1=<file>     the script PROBE=1 runs instead of probe.ps1, as
                        main.ps1 under stub.ps1, which logs a refusal
                        (tools/win11-spike/smb.ps1: the shared folder, M23)
@@ -88,13 +90,14 @@ OURS = os.environ.get("FW_ARM", "2ksbox") == "2ksbox"
 SB_BYPASS = os.environ.get("SB_BYPASS", "") == "1"
 NET = os.environ.get("NET", "") == "1"
 GPU = os.environ.get("GPU", "ramfb")
-DRIVERS = os.environ.get("DRIVERS", os.path.join(ROOT, "build/virtio-win/2ksbox-drivers-arm64.iso"))
+DRIVERS = os.environ.get("DRIVERS", os.path.join(ROOT, "build/virtio-win/2ksbox-drivers-%s.iso"
+                                                 % ("arm64" if ARM else "x64")))
 ACCEL = os.environ.get("ACCEL", "hvf" if ARM and sys.platform == "darwin" else "kvm")
 SMP = os.environ.get("SMP", "4")
 MEM = os.environ.get("MEM", "4096")
 EDITION = os.environ.get("EDITION", "Windows 11 Pro")
 QEMU = os.environ.get("QEMU", os.path.join(ROOT, "build/qemu/qemu-system-" + ARCH))
-FW = os.environ.get("FW", os.path.join(ROOT, "qemu/pc-bios" if ARM else "build/qemu/qemu-bundle/usr/local/share/qemu"))
+FW = os.environ.get("FW", os.path.join(ROOT, "qemu/pc-bios"))
 VNC = os.environ.get("VNC", "")
 SHOT = int(os.environ.get("SHOT", "60"))
 SETTLE = int(os.environ.get("SETTLE", "60"))
@@ -236,8 +239,9 @@ REPORT_IMG = os.path.join(OUT, "report.img")
 
 
 def report_disk():
-    """Windows on Arm's stand-in for COM1: a FAT disk labelled REPORT,
-    which spike.ps1 appends its lines to (w11.log)."""
+    """Windows on Arm's stand-in for COM1, and a probe's disk on either:
+    a FAT disk labelled REPORT, which spike.ps1 and the probes append
+    their lines to (w11.log)."""
     if not os.path.exists(REPORT_IMG):
         with open(REPORT_IMG, "wb") as f:
             f.truncate(32 << 20)
@@ -332,7 +336,7 @@ def run_qemu(cds):
                      "-device", "scsi-cd,bus=ub%d.0,drive=cd%d%s" % (i, i, boot)]
         else:
             args += ["-device", "ide-cd,drive=cd%d,bus=ide.%d%s" % (i, i + (ARM and OURS), boot)]
-    if ARM and DRIVERS and os.path.exists(DRIVERS):
+    if DRIVERS and os.path.exists(DRIVERS):
         n = len(cds) + (ARM and OURS)
         args += ["-drive", "if=none,id=drv,media=cdrom,readonly=on,file=" + DRIVERS,
                  "-device", "ide-cd,drive=drv,bus=ide.%d" % n]
@@ -346,7 +350,7 @@ def run_qemu(cds):
         args += ["-chardev", "qemu-vdagent,id=vda,clipboard=on,mouse=off",
                  "-device", "virtio-serial-pci",
                  "-device", "virtserialport,chardev=vda,name=com.redhat.spice.0"]
-    if ARM:
+    if ARM or PROBE:
         # after the CDs: plugged first, the firmware made its one USB
         # boot entry for this disk and never tried the ISO
         args += report_disk()
@@ -405,7 +409,7 @@ def start(args, swtpm):
     q = subprocess.Popen(args, stdout=qlog, stderr=subprocess.STDOUT)
     serial = Serial(os.path.join(OUT, "com1.sock"), t0)
     serial.start()
-    if ARM:
+    if ARM or PROBE:
         ReportLog(serial).start()
     qmp = None
     for _ in range(100):
@@ -614,7 +618,7 @@ def report(q, qmp, serial, shots):
 def boot():
     if not os.path.exists(DISK):
         die("no %s; run install first" % DISK)
-    if ARM:
+    if ARM or PROBE:
         report_disk()       # makes it in a fresh OUT
         if PROBE_PS1 == os.path.join(SPIKE, "probe.ps1"):
             subprocess.run(["mcopy", "-o", "-i", REPORT_IMG, PROBE_PS1, "::probe.ps1"], check=True)

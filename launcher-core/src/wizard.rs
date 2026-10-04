@@ -827,16 +827,13 @@ impl Form {
 
     /// Under the "Clipboard" checkbox: what the guest needs for it.
     pub fn clipboard_notes(&self) -> &'static [&'static str] {
-        match (self.clipboard, self.arch()) {
-            (false, _) => &["Copy and paste stay inside the machine."],
-            (true, bundle::Arch::Aarch64) => &[
+        if self.clipboard {
+            &[
                 "Text copied on either side can be pasted on the other.",
                 "Needs the 2ksbox agent in Windows: run 2ksbox\\install.cmd from the drivers disc once.",
-            ],
-            (true, _) => &[
-                "Text copied on either side can be pasted on the other.",
-                "Needs virtio-win's serial driver and the 2ksbox agent in Windows, which there is no disc for on x64 Windows yet.",
-            ],
+            ]
+        } else {
+            &["Copy and paste stay inside the machine."]
         }
     }
 

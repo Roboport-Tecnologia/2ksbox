@@ -28,9 +28,12 @@
 #   edk2    Arm hosts: build-edk2.sh, the firmware of Windows 11 on Arm
 #           (EDK2's ArmVirtQemu with Secure Boot and AHCI) into
 #           qemu/pc-bios. Needs clang and lld (Homebrew's on a Mac)
-#   virtio  Arm hosts: build-virtio-win.sh, Windows 11 on Arm's drivers
-#           disc (virtio-win's ARM64 network and display drivers, from a
-#           pinned download) into build/virtio-win. Needs xorriso
+#   virtio  build-virtio-win.sh, Windows 11's drivers disc for the host's
+#           processor (on Arm virtio-win's ARM64 network, display and
+#           serial drivers; on x86 its x64 serial driver, the clipboard's;
+#           both with the 2ksbox agent) from a pinned download into
+#           build/virtio-win. Not on an Intel Mac. Needs xorriso and
+#           mingw-w64
 #   rust    cargo build --release: player, libdisc/discx, launcher-core
 #           (with its `launcherx` verb binary), qemu-embed, shader-chain.
 #           Runs after `qemu`, because the player links libqemu-embed from
@@ -404,11 +407,15 @@ if want edk2; then
 fi
 
 # --- virtio -----------------------------------------------------------
-# Windows 11 on Arm's drivers disc, beside its firmware. Its own stamp
-# (build/virtio-win/.stamp); the first run downloads virtio-win's ISO.
+# Windows 11's drivers disc for the host's processor: on an Arm host
+# Windows 11 on Arm's, beside its firmware; elsewhere x64 Windows 11's
+# (the clipboard's driver). Its own stamps (build/virtio-win/.stamp-*);
+# the first run downloads virtio-win's ISO.
 if want virtio; then
-  if [ -n "$ROSETTA" ] || ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
-    skip virtio "an x86 host runs no Windows 11 on Arm" || true
+  if [ "$(uname -s)" = Darwin ] && ! case "$(uname -m)" in arm64|aarch64) true ;; *) false ;; esac; then
+    skip virtio "a Mac runs no x64 Windows 11" || true
+  elif ! have x86_64-w64-mingw32-gcc; then
+    skip virtio "no mingw-w64 (x86_64-w64-mingw32-gcc) for the guest agent" || true
   elif ! have xorriso; then
     skip virtio "no xorriso" || true
   else

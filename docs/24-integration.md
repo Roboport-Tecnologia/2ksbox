@@ -138,7 +138,11 @@ virtio-serial port named `com.redhat.spice.0`:
 - **The guest driver:** virtio-win's `vioserial`, which has a signed
   ARM64 Windows 11 build (`vioserial/w11/ARM64`), joins our drivers disc
   (`scripts/build-virtio-win.sh`) beside NetKVM and viogpudo. x64
-  Windows 11 needs the same driver, from the same ISO.
+  Windows 11 needs the same driver, from the same ISO: its own disc,
+  `2ksbox-drivers-x64.iso`, holds `vioserial/w11/amd64` and the agent.
+- **The host's side on Linux** reads and writes the clipboard through
+  the Wayland compositor's data-control protocol where there is one
+  (`arboard`'s `wayland-data-control`), X11 otherwise.
 - **The guest agent is ours** (§4). Red Hat's `vdagent-win` exists, but
   its builds are x86 / x64 only. It runs as a service plus a session
   process, and it ships inside an installer (`virtio-win-guest-tools.exe`).

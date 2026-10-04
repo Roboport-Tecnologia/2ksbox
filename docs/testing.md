@@ -446,18 +446,20 @@ index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
 
-`tools/clipboard-win11-test.sh [build/w11d]` (M23 steps 4-6): the
-clipboard and the shared folder between this Mac and Windows 11 on Arm,
-end to end, the way a user gets them. The machine runs in the aarch64
-player itself (`tools/player-as-qemu.sh` as `win11-spike.py`'s `QEMU=`,
+`tools/clipboard-win11-test.sh [base]` (M23 steps 4-6): the clipboard
+and the shared folder between the host and Windows 11, end to end, the
+way a user gets them: on a Mac Windows 11 on Arm (base `build/w11d`), on
+Linux x64 Windows 11 under KVM (base `/mnt/data2/david/w11`). The
+machine runs in that processor's player itself (`tools/player-as-qemu.sh` as `win11-spike.py`'s `QEMU=`,
 `PLAYER_OPTS=--share <dir>` as the launcher passes it, `CLIPBOARD=1`
 adding `qemu-vdagent` and the virtio-serial port); its window opens.
 `tools/win11-spike/clip.ps1` runs the drivers disc's
-`2ksbox\install.ps1`. Checks: the agent's tasks, text on the Mac's
-clipboard at boot in the guest, text the guest sets in `pbpaste`, a
-second Mac text in the guest, the share mapped by `--map` and a host file
-read through it. The Mac's clipboard is the user's: its text is saved and
-put back. About 5 minutes. Needs the aarch64 player and the drivers disc
+`2ksbox\install.ps1`. Checks: the agent's tasks, text on the host's
+clipboard at boot in the guest, text the guest sets on the host
+(`pbpaste`, `wl-paste` or `xclip`), a second host text in the guest, the
+share mapped by `--map` and a host file read through it. The host's
+clipboard is the user's: its text is saved and put back. About 5
+minutes. Needs the player and the drivers disc for the processor
 (`scripts/build-virtio-win.sh`, which builds the agent).
 
 `tools/smb-try.sh <folder> [build/w11d]` (M23): the shared folder by
@@ -512,8 +514,12 @@ disk on USB (`OUT/report.img`), which the script reads with mtools;
 USB device, the network adapters and addresses, the driver store, the
 volumes). `LANG_ISO=en-US` stands in for `7z`. `NET=1` adds a network
 card (`virtio-net` on aarch64, whose driver comes from the drivers disc,
-`build/virtio-win/2ksbox-drivers-arm64.iso`, attached when it exists,
-`DRIVERS=` for none); `GPU=virtio-gpu-pci` swaps ramfb for virtio-gpu.
+`e1000e` on x86_64). The drivers disc,
+`build/virtio-win/2ksbox-drivers-<arm64|x64>.iso`, is attached when it
+exists (`DRIVERS=` for none), and `PROBE=1` works on x86_64 too, with
+the same REPORT disk; `GPU=virtio-gpu-pci` swaps ramfb for
+virtio-gpu. The firmware comes from `qemu/pc-bios` on both, as the
+launcher's does.
 
 `tools/bmpdiff.py` (frame diffs with masks and budgets),
 `tools/ipc-latency-spike.c` (ADR-010's process-boundary numbers),

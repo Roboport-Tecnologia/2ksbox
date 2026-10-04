@@ -56,6 +56,7 @@ filesystem driver or a virtual disk).
    `player-core/src/share.rs` serves with `libsmb` and forwards to. The
    `sharing` host check, and `tools/clipboard-win11-test.sh` end to end.
 7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC.
+   (x64 Windows 11 on Linux, done 2026-10-04: its own drivers disc, below.)
 8. **Vintage** (to be scoped): SMB1 for Win98 / XP, and a C agent over a
    COM port (doc 24 §5).
 
@@ -220,6 +221,42 @@ Not run: the launcher's own machine under the player on the Mac, since its
 TPM device trips QEMU 11.1's HVF (M21); the test runs the spike's board
 with `ppi=off`, and the `sharing` check runs the launcher's channel on a
 bare board.
+
+## x64 Windows 11 on Linux (2026-10-04)
+
+Until now only Windows 11 on Arm got the guest side: the drivers disc,
+with `vioser` and the agent, was built on Arm hosts only and attached to
+Arm machines only. x64 Windows has no virtio-serial driver in the box, so
+an x64 machine's clipboard had nothing to talk to.
+
+- `scripts/build-virtio-win.sh [arm64|x64]` cuts one disc per processor,
+  the host's by default. `2ksbox-drivers-x64.iso` (776 KB) holds
+  virtio-win's `vioserial/w11/amd64`, the agent and the installer; the
+  q35's e1000e and display need nothing. `build.sh`'s `virtio` stage
+  runs on every host but an Intel Mac.
+- `disc_library::drivers_iso(arch)` (`LAUNCHER_X64_DRIVERS_ISO` beside
+  the Arm one); `modern_args` puts the disc on `ide.2` as `arm_args`
+  does. The Clipboard note is one sentence for both processors.
+- **The host's clipboard on Wayland.** The player's `arboard` was X11
+  only. Under sway, through Xwayland, it saw no text set by a Wayland
+  program and its own text reached none: the guest's text arrived in the
+  player (`[clipboard] guest -> host`) and stopped there. `arboard`'s
+  `wayland-data-control` feature reads and writes through the
+  compositor's data-control protocol with no window focused; X11 stays
+  the fallback (GNOME has no such protocol).
+- `tools/clipboard-win11-test.sh` runs here too: x64 Windows 11 under
+  KVM in the x86_64 player, on an overlay of step 1's install
+  (`/mnt/data2/david/w11`), the host's clipboard through `wl-copy` /
+  `wl-paste` (or `xclip`). `win11-spike.py`'s `PROBE=1` and drivers disc
+  work on x86_64, and its firmware comes from `qemu/pc-bios`.
+
+| Check | Result |
+|---|---|
+| `vioser` installed by the disc's `install.ps1` | on `PCI\VEN_1AF4&DEV_1003` |
+| Host text at boot, in the guest | 0.1 s after the agent |
+| Guest text, in `wl-paste` | pass |
+| A second host text, in the guest | 1.9 s |
+| The share mapped by `--map`, a host file read | Z:, pass |
 
 ## Leases (2026-10-03)
 

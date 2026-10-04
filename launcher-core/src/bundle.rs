@@ -2075,6 +2075,9 @@ impl Machine {
     ///   list needs.
     /// * The RTC in local time, which is what Windows reads it as.
     /// * The PS/2 keyboard the q35 has; the tablet and a pad on xHCI.
+    /// * The drivers disc (`disc_library::drivers_iso`: virtio-win's x64
+    ///   serial driver, the clipboard's, and the 2ksbox agent) in a CD
+    ///   drive of its own on `ide.2`, as on Arm.
     fn modern_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
         if self.effective_arch() == Arch::Aarch64 {
             return self.arm_args(pc_bios_dir, shelf);
@@ -2129,6 +2132,7 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(drivers_disc_args(Arch::X86_64));
         args.extend(self.extra_qemu_args.iter().cloned());
         args
     }
@@ -2156,8 +2160,8 @@ impl Machine {
     ///   tablet, or a relative mouse with the seamless pointer off.
     /// * With networking, `virtio-net`. Windows on Arm has no driver for
     ///   it (nor for an e1000e); the drivers disc does.
-    /// * The drivers disc (`disc_library::arm_drivers_iso`, virtio-win's
-    ///   ARM64 NetKVM and viogpudo) in a CD drive of its own on `ide.2`,
+    /// * The drivers disc (`disc_library::drivers_iso`, virtio-win's
+    ///   ARM64 NetKVM, viogpudo and vioser, and the 2ksbox agent) in a CD drive of its own on `ide.2`,
     ///   always: Windows Setup installs what it finds under the disc's
     ///   `$WinPEDriver$`, and an installed Windows can be pointed at it.
     ///   The user's own discs keep `ide.1` and the shelf.
@@ -2222,16 +2226,24 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
-        if let Some(iso) = crate::disc_library::arm_drivers_iso() {
-            args.extend([
-                "-drive".into(),
-                format!("if=none,id=drivers0,media=cdrom,readonly=on,file={}", opt_value(&iso.display().to_string())),
-                "-device".into(),
-                "ide-cd,bus=ide.2,drive=drivers0".into(),
-            ]);
-        }
+        args.extend(drivers_disc_args(arch));
         args.extend(self.extra_qemu_args.iter().cloned());
         args
+    }
+}
+
+/// A Windows 11 machine's drivers disc in a CD drive of its own on
+/// `ide.2`, after the user's own on `ide.1`; nothing when it was not
+/// built or shipped.
+fn drivers_disc_args(arch: Arch) -> Vec<String> {
+    match crate::disc_library::drivers_iso(arch) {
+        Some(iso) => vec![
+            "-drive".into(),
+            format!("if=none,id=drivers0,media=cdrom,readonly=on,file={}", opt_value(&iso.display().to_string())),
+            "-device".into(),
+            "ide-cd,bus=ide.2,drive=drivers0".into(),
+        ],
+        None => Vec::new(),
     }
 }
 

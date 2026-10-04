@@ -289,12 +289,17 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     if !machine.family.is_modern() {
         return Ok(());
     }
-    // Not fatal: the machine starts, and only its network and display
-    // drivers are missing
-    if machine.effective_arch() == crate::bundle::Arch::Aarch64 && crate::disc_library::arm_drivers_iso().is_none() {
+    // Not fatal: the machine starts, and only the disc's drivers and
+    // agent are missing
+    let arch = machine.effective_arch();
+    if crate::disc_library::drivers_iso(arch).is_none() {
+        let missing = match arch {
+            crate::bundle::Arch::Aarch64 => "Windows on Arm gets no network or display driver",
+            crate::bundle::Arch::X86_64 => "Windows gets no clipboard driver or 2ksbox agent",
+        };
         eprintln!(
-            "launcher: no {} (scripts/build-virtio-win.sh): Windows on Arm gets no network or display driver",
-            crate::disc_library::ARM_DRIVERS_ISO
+            "launcher: no {} (scripts/build-virtio-win.sh): {missing}",
+            crate::disc_library::drivers_iso_name(arch)
         );
     }
     let vars = machine.effective_efi_vars();

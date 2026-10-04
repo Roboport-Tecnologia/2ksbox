@@ -30,8 +30,11 @@ bytemuck = "1"
 png = "0.18"
 cpal = "0.18.2"
 shader-chain = { path = "../shader-chain" }
-# the host's clipboard, for the guest agent's (M23)
-arboard = { version = "3", default-features = false }
+# the host's clipboard, for the guest agent's (M23). On a Wayland desktop
+# its data-control protocol, which reads and writes the clipboard with no
+# window focused (X11 alone through Xwayland saw neither side's text on
+# sway); X11 where the compositor has no such protocol
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 # the machine's shared folder, served in this process (M23)
 libsmb = { path = "../libsmb" }
 

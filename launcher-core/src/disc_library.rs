@@ -316,22 +316,34 @@ pub fn write_shelf_file(library: &DiscLibrary, path: &Path) -> std::io::Result<(
 /// guest walks the reply with a fixed stride and a bounded buffer.
 pub const MAX_SHELF_ENTRIES: usize = 256;
 
-/// Windows 11 on Arm's drivers disc (`scripts/build-virtio-win.sh`):
-/// virtio-win's ARM64 network and display drivers, which Windows on Arm
-/// has none of in the box. Shipped as `share/2ksbox/drivers/`, built
-/// into `build/virtio-win` in a checkout; `LAUNCHER_ARM_DRIVERS_ISO`
-/// overrides both. `None` when it is not there, and the machine then
-/// starts without it (`player::prepare` says so).
-pub fn arm_drivers_iso() -> Option<PathBuf> {
-    let path = match std::env::var("LAUNCHER_ARM_DRIVERS_ISO") {
+/// A Windows 11 machine's drivers disc (`scripts/build-virtio-win.sh`),
+/// one per processor, each with the 2ksbox agent: for Windows 11 on Arm
+/// virtio-win's ARM64 network, display and serial drivers, which Windows
+/// on Arm has none of in the box; for x64 Windows 11 the serial driver
+/// alone, the clipboard's. Shipped as `share/2ksbox/drivers/`, built
+/// into `build/virtio-win` in a checkout; `LAUNCHER_ARM_DRIVERS_ISO` and
+/// `LAUNCHER_X64_DRIVERS_ISO` override both. `None` when it is not
+/// there, and the machine then starts without it (`player::prepare` says
+/// so).
+pub fn drivers_iso(arch: crate::bundle::Arch) -> Option<PathBuf> {
+    let var = match arch {
+        crate::bundle::Arch::Aarch64 => "LAUNCHER_ARM_DRIVERS_ISO",
+        crate::bundle::Arch::X86_64 => "LAUNCHER_X64_DRIVERS_ISO",
+    };
+    let path = match std::env::var(var) {
         Ok(path) => PathBuf::from(path),
-        Err(_) => crate::paths::resource("share/2ksbox/drivers", "build/virtio-win").join(ARM_DRIVERS_ISO),
+        Err(_) => crate::paths::resource("share/2ksbox/drivers", "build/virtio-win").join(drivers_iso_name(arch)),
     };
     path.is_file().then(|| crate::paths::canonical(&path).unwrap_or(path))
 }
 
 /// The drivers disc's file name, in either place.
-pub const ARM_DRIVERS_ISO: &str = "2ksbox-drivers-arm64.iso";
+pub fn drivers_iso_name(arch: crate::bundle::Arch) -> &'static str {
+    match arch {
+        crate::bundle::Arch::Aarch64 => "2ksbox-drivers-arm64.iso",
+        crate::bundle::Arch::X86_64 => "2ksbox-drivers-x64.iso",
+    }
+}
 
 /// The newest guest-tools ISO (`guest-tools/build-wrappers.sh` writes
 /// `guest-tools/out/guest-tools-3dfx-<rev>.iso`), for doc 07's
