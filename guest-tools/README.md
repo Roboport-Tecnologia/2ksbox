@@ -270,5 +270,5 @@ Every program of ours writes its log (and any BMP it dumps) to
 moves it. The rest of `TESTS\` and `DRIVER\` is catalogued in
 `docs/testing.md`.
 
-Later: SoftGPU (a pinned release), AC'97 and network drivers, an
+Later: SoftGPU (a pinned release), network drivers, an
 in-guest `verify` tool (docs 04, 06).

@@ -14,6 +14,7 @@ use launcher_core::bundle::{Accel, Boot, CpuSpeed, Family, Optimization};
 use launcher_core::shader_library::{self, ProfileEntry};
 use launcher_core::wizard::{
     AccelNote, DISK_FILTER, FLOPPY_FILTER, Form, MEDIA_FILTER, SOUNDFONT_FILTER, Section,
+    VOODOO2_LABEL, VOODOO2_UNDITHER_LABEL,
 };
 use launcher_core::library;
 use mitsuami::prelude::*;
@@ -504,13 +505,13 @@ fn DisplayPage() -> impl View {
                 <Column gap=Spacing::Md>
                     <Row gap=Spacing::Lg>
                         <Checkbox checked=get(wiz, Form::voodoo2) @change=move |on| wiz.edit(|f| f.choose_voodoo2(on))>
-                            "3dfx Voodoo 2"
+                            {VOODOO2_LABEL}
                         </Checkbox>
                         <Checkbox
                             enabled=get(wiz, Form::voodoo2_undither_enabled)
                             checked=get(wiz, Form::voodoo2_undither)
                             @change=move |on| wiz.edit(|f| f.choose_voodoo2_undither(on))
-                        >"Voodoo3 undither filter"</Checkbox>
+                        >{VOODOO2_UNDITHER_LABEL}</Checkbox>
                     </Row>
                     <Note text=get(wiz, |f| joined(f.voodoo2_notes()))/>
                     <Note text=get(wiz, |f| joined(f.voodoo2_undither_notes()))/>

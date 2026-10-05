@@ -14,7 +14,7 @@
 //! launcher reaches a running machine").
 
 use crate::bundle::{self, D3d9, Machine, Music, Video};
-use crate::wizard::Section;
+use crate::wizard::{self, Section};
 use crate::{control, disc_library, library, player, shader_library};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -261,7 +261,7 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         (true, true) => "On, with the Voodoo3 undither filter".to_owned(),
         (on, _) => on_off(on),
     };
-    display.push(("3dfx Voodoo 2", voodoo));
+    display.push((wizard::VOODOO2_LABEL, voodoo));
     display.push(("Shader profile", shader));
     let music = machine.effective_music();
     let mut audio = rows(vec![

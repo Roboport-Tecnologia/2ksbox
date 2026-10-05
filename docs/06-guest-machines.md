@@ -37,7 +37,7 @@ Modeled as a ~1998–2000 consumer PC.
 | CPU | `pentium3` | avoids CPUID features and fast-CPU bugs 9x mishandles; the floor, as our guest wrappers are built `-march=pentium3` |
 | RAM | 256 MB (32–512) | 9x VCACHE sizing overflows much above 512 MB |
 | Video | `d3dpt-vga` + our driver (`cirrus`) | the whole display path (doc 19): mode table, desktop from VRAM, paced page flips, Direct3D. Default by user decision; the Cirrus (Windows' in-box driver) is the A/B |
-| Sound | SB16 + OPL3 (AC'97, Gravis Ultrasound, none) | in the box, and what a DOS box inside 98 expects. The AC'97 needs a driver 98 lacks and the ISO doesn't carry yet; the Gravis needs Gravis's own |
+| Sound | SB16 + OPL3 (AC'97, Gravis Ultrasound, none) | in the box, and what a DOS box inside 98 expects. The AC'97's driver is installed from the Windows CD; the Gravis needs Gravis's own |
 | Music | MPU-401 at 0x330, General MIDI (CM-32L, none) | 98 has no wavetable synth; its MIDI output is the FM chip. Add "MPU-401 Compatible" in Add New Hardware to get the port |
 | Net | PCnet when on | in-box driver |
 | Pointer | USB tablet (`seamless_mouse`) | absolute, nothing grabbed; off leaves PS/2 relative mode for mouselook (doc 03) |

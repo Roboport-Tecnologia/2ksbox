@@ -35,6 +35,12 @@ use std::path::{Path, PathBuf};
 /// machine that names no profile (`machines::Machines::shader_label`).
 pub const SHADER_DEFAULT_LABEL: &str = "(default)";
 
+/// The Voodoo 2 checkbox (`Form::voodoo2`), and the machine details' row
+/// for the same field (`machines::details`).
+pub const VOODOO2_LABEL: &str = "3dfx Voodoo 2";
+/// The checkbox beside it (`Form::voodoo2_undither`).
+pub const VOODOO2_UNDITHER_LABEL: &str = "Voodoo3 undither filter";
+
 pub const DISK_FILTER: Filter<'static> = ("Disk images", &["qcow2", "img", "raw"]);
 pub const FLOPPY_FILTER: Filter<'static> = ("Floppy images", &["img", "ima", "vfd", "flp"]);
 /// A General MIDI bank for the machine's MIDI port (doc 20 §4). SF2
@@ -1321,7 +1327,7 @@ impl Form {
                 "Includes the OPL3, so games with AdLib-only music still play it.",
             ],
             (Sound::Ac97, Family::Win98) => &[
-                "Better sound than the SB16, but Windows 98 has no driver for it. Install ours from the guest tools first.",
+                "Better sound than the SB16, but Windows 98 has no driver for it built in. Install it from the Windows CD.",
                 "No FM chip: DOS games inside this machine get no AdLib music. The MIDI port still works.",
             ],
             (Sound::Ac97, _) => &[
