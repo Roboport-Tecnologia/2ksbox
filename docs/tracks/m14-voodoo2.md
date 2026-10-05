@@ -161,13 +161,16 @@ INI, or it opens its first-run wizard.
    (`DDERR_CANTCREATEDC`). Unknown whether a real Voodoo 2 with this
    driver fails it too (the card has no GDI) or the device lacks
    something.
-4. ~~**The M1 Air.**~~ Done 2026-10-04 ("The Air" below). Left there:
+4. ~~**The M1 Air.**~~ Done 2026-10-04 ("The Air" above). Left there:
    Diablo II and the hand test through the player.
-5. **Diablo II**, the title the route was chosen for, measured, and
+5. **The Windows build.** The card ran on the PC's earlier builds
+   (3DMark 99, `scripts/win-voodoo-ab.sh`); no run on the package's MSVC
+   QEMU (since 2026-10-04, `build-windows.sh qemu-msvc`) is recorded.
+6. **Diablo II**, the title the route was chosen for, measured, and
    Tirtanium (one of the titles that stranded the screen) run.
-6. **Upstream.** Offer patches 64 and 71 and the two command-counter
+7. **Upstream.** Offer patches 64 and 71 and the two command-counter
    asymmetries to 86Box; a sync that brings them in drops the patch.
-7. A Voodoo Graphics (`VOODOO_1`) type only if a title wants one; SLI
+8. A Voodoo Graphics (`VOODOO_1`) type only if a title wants one; SLI
    never.
 
 ## Rules

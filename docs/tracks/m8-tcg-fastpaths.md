@@ -5,6 +5,8 @@ path and shadow-double translator (patches 05/06, doc 13), SSE float inline
 (patch 11, doc 16), MMX/SSE integer and permutes inline (patch 12, doc 16),
 and the TCG float and vector opcodes they add to both backends. It was
 merged to `main` on 2026-09-04, bit-exact on aarch64 (the Air) and x86-64.
+M21 ported the four patches to QEMU 11.1 (2026-10-01), the backend half
+rewritten for its `TCGOutOp` backends, all batteries still bit-exact.
 This doc keeps scope, test loop and open items; designs and measurements
 are in docs 13 and 16, each patch's row in `patches/qemu/README.md`. Doc 13
 also covers the later x87 patches from other work: 37 (PE sticky), 45
@@ -16,10 +18,11 @@ also covers the later x87 patches from other work: 37 (PE sticky), 45
   `12-simd-inline-tcg`. They touch:
   - `target/i386/tcg/`: `x87-fast.h`, `x87-shadow.c.inc`,
     `sse-fast.c.inc`, `sse-fast-lane.c.inc`, `simd-fast.c.inc`;
-  - the new opcodes: `include/tcg/tcg-opc.h`, `tcg/tcg-op*.c`,
-    `tcg/aarch64/`, `tcg/i386/`;
+  - the new opcodes: `include/tcg/tcg-opc.h`, `tcg/tcg.c`,
+    `tcg/tcg-op*.c`, `tcg/aarch64/`, `tcg/x86_64/` (`tcg/i386/` before
+    QEMU 10);
   - hooks in `translate.c`, `emit.c.inc`, `decode-new.c.inc`,
-    `fpu_helper.c`, `cpu.h`, `cpu.c`.
+    `tcg-cpu.c`, `fpu_helper.c`, `cpu.h`, `cpu.c`.
 
   SSE and SIMD were 07/08 on the track branch; old commit messages use
   those numbers.

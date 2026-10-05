@@ -5,13 +5,15 @@ points it uses, the patches it needs, the audio driver and the hazards.
 The API is **v11** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
-player's display pipeline doc 03. QEMU file:line references are to
-`qemu/` as prepared from v9.2.4.
+player's display pipeline doc 03. QEMU file:line references were taken
+at v9.2.4, before M21 moved to v11.1.2, and have drifted; look things up
+by function name.
 
 ## Shape
 
 One shared library per target, `libqemu-embed-<target>.{so,dylib,dll}`
-(`i386` for the era's machines, `x86_64` for Windows 11), built by
+(`i386` for the era's machines, `x86_64` for Windows 11, `aarch64` for
+Windows 11 on Arm), built by
 QEMU's own meson from the per-target static library (which already
 excludes `system/main.c`, so there is no `main()`) plus our shim
 `embed/libqemu_embed.c`. `prepare-qemu.sh` rsyncs `embed/` into
@@ -23,8 +25,9 @@ drift, and no libclang is needed.
 
 **One player binary per target, each linking its QEMU.** The era's
 `2ksbox-player` links i386; Windows 11's `2ksbox-player-x86_64` is the
-same player built with `--features qemu-x86_64` (track M20), and the
-launcher starts the one a machine needs (`player::player_binary_for`).
+same player built with `--features qemu-x86_64` (track M20), and
+`2ksbox-player-aarch64` with `--features qemu-aarch64`; the launcher
+starts the one a machine needs (`player::player_binary_for`).
 Not one player opening its QEMU at run time: patch 63 reserves TCG's
 code buffer next to the helpers from a constructor that has to run when
 the image loads, before `main()` and anything else fragments the address
@@ -58,7 +61,7 @@ Windows has no zero-copy slot; its 3D frames arrive through
 ## What needs no QEMU changes
 
 - **Lifecycle.** `qemu_init(argc, argv)` → `qemu_main_loop()` →
-  `qemu_cleanup()` (`include/sysemu/sysemu.h:98-100`) on one
+  `qemu_cleanup()` (`include/system/system.h`) on one
   caller-created thread. `qemu_init` takes the BQL on the calling thread
   (`system/runstate.c:864`, thread-local ownership `system/cpus.c:515`),
   so init and the main loop **must share a thread**. The library always
@@ -139,12 +142,15 @@ the library**. A raw `SOCKET` is refused at startup as `File descriptor
 
 ## The C runtime boundary
 
-On Windows the player and the library are two C runtimes apart, or
-will be. QEMU stays mingw (msvcrt) under ADR-026, and the player moves
-to MSVC with its static UCRT when the mitsuami player builds there (M22
-step 4). Today's winit player is `windows-gnu` and shares QEMU's
-`msvcrt.dll`, which hides any state the two sides happen to share.
-Audited 2026-10-02, every channel the API or the process offers:
+On Windows the player and the library are two C runtimes apart. The
+package's player (`player-mitsuami`) and its QEMU (`build-windows.sh
+qemu-msvc`, ADR-026's third amendment) are both MSVC, but each links the
+static C runtime, so each module has its own copy; the mitsuami player
+over the mingw test QEMU is UCRT over msvcrt. Only the winit player
+(`windows-gnu`, test only) shares the mingw QEMU's `msvcrt.dll`, which
+hides any state the two sides happen to share. Audited 2026-10-02 (when
+QEMU was still mingw only), every channel the API or the process
+offers:
 
 - **Memory.** Nothing allocated on one side is freed on the other.
   `new` copies `argv` (`g_strdup`) and `destroy` frees the copies; the
@@ -198,7 +204,7 @@ Audited 2026-10-02, every channel the API or the process offers:
   only an executor built by the same compiler catches it. An MSVC
   executor over the mingw DXVK ended the player there (ADR-026's
   amendment), so the two moved to MSVC together (its second amendment,
-  2026-10-04). The executor's C API is the boundary QEMU (mingw) opens it
+  2026-10-04). The executor's C API is the boundary QEMU opens it
   across: nothing it allocates is freed by QEMU, no `FILE *` crosses, and
   it reads the environment from the process block
   (`GetEnvironmentVariableA`, `d3dpt::env`), not from a C runtime's copy.
@@ -283,6 +289,7 @@ a shared staging frame under the callback and publishes it on
 `on_refresh_done`. While 3D is active, the VGA surface is shown only
 once 3D frames stop and the guest has drawn on it. 3D frames arrive as a
 copy or a ring slot index (`dmabuf.rs`, `iosurface.rs`). Keyboard and
-mouse go from winit through `qemu_embed_key` / `mouse_*` and one
+mouse go from the window (`player-core/src/input.rs`) through
+`qemu_embed_key` / `mouse_*` and one
 `input_flush` per batch; the pad goes through `pad_state` once per
 published frame. The rest of the player is doc 03 and doc 07.

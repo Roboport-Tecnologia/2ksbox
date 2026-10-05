@@ -7,7 +7,7 @@ tests, what the protections we own actually read, and a host folder as
 a disc (§8). Doc 05 has the problem and the acceptance table; the track
 records are `docs/tracks/m5-cdrom-backend.md` and `m5-dirdisc.md`; the
 disc shelf is doc 07 and patch 52. QEMU function names are exact for the
-pinned tree (v9.2.4).
+pinned tree (v11.1.2; the patches were ported from 9.2.4 in track M21).
 
 ## 1. Shape
 
@@ -580,8 +580,9 @@ IDEState.
   platform, `CONFIG_CDIMAGE`, and `cdimage.c` in `block_ss`.
   `atapi.c`'s disc paths are under `#ifdef CONFIG_CDIMAGE`.
 - `scripts/configure-qemu.sh` runs `cargo build --release -p libdisc`
-  first (no cycle: the crate has no QEMU dependency) and passes
-  `-Dlibdisc_dir=target/release`. `prepare-qemu.sh` overlays
+  first (no cycle: the crate has no QEMU dependency) and passes its
+  output directory as `-Dlibdisc_dir` (`target/release`, or the target
+  triple's under a cross or MSVC build). `prepare-qemu.sh` overlays
   `cdimage.c` into `qemu/block/`, and `cdimage.h` and `libdisc.h` into
   `qemu/include/block/`, before the patch loop.
 - **meson does not track the staticlib.** `cc.find_library` makes it
@@ -591,8 +592,8 @@ IDEState.
   reads"). `scripts/build-libdisc.sh` runs cargo and deletes those
   targets so ninja relinks them; `scripts/build.sh` builds libdisc
   before QEMU links it.
-- The staticlib is linked into `qemu-system-i386` and
-  `libqemu-embed-i386`. The player is Rust too, so two copies of `std`
+- The staticlib is linked into every `qemu-system-<target>` and
+  `libqemu-embed-<target>`. The player is Rust too, so two copies of `std`
   share the process. On macOS the export list hides libdisc's symbols;
   on Linux the copies interpose identical code. QEMU's own Rust support
   is not enabled, and cargo builds the crate outside meson.
@@ -616,7 +617,7 @@ uint32_t atapi_last_lba;           /* the head, for READ SUB-CHANNEL when not pl
 uint8_t  atapi_audio_status;       /* 0x11 playing … 0x15 none */
 uint32_t atapi_play_lba, atapi_play_end;
 uint8_t  atapi_audio_port[4], atapi_audio_vol[4];   /* mode page 0x0E */
-QEMUSoundCard *atapi_card; SWVoiceOut *atapi_voice; QEMUTimer *atapi_play_timer;
+AudioBackend *atapi_be; SWVoiceOut *atapi_voice; QEMUTimer *atapi_play_timer;
 ```
 
 Every handler asks `atapi_disc(s)` itself. New table entries, all
@@ -628,7 +629,7 @@ audio too. With no disc the audio commands are no-ops leaving status
 behaves like READ CD.
 
 **The transfer path.** The disc path generalises `cd_sector_size` to
-whatever `read_cd_length` returns (≤ 2744 bytes, so at least 47 sectors
+whatever `libdisc_mmc_read_cd_length` returns (≤ 2744 bytes, so at least 47 sectors
 fit the 131,076-byte `io_buffer`).
 
 - **PIO.** `cd_read_sector` returns 1 when it filled the sector
@@ -685,15 +686,16 @@ Implementation rules:
 
 ### 5.4 CD-DA
 
-`DEFINE_AUDIO_PROPERTIES` on `ide-cd` (the card lives in `IDEDrive`).
+`DEFINE_AUDIO_PROPERTIES` on `ide-cd` (the backend lives in `IDEDrive`).
 Without an `audiodev` no voice is opened and a `QEMUTimer` advances the
 play position at 75 sectors per second, so polling games still see
-tracks complete. With one, the drive opens `AUD_open_out` at 44100 Hz
-stereo S16, active while playing.
+tracks complete. With one, the drive opens a voice at 44100 Hz
+stereo S16 (`audio_be_open_out`), active while playing.
 
-`cd_audio_callback` reads audio sectors with `libdisc_read_raw`, routes
+`atapi_audio_cb` reads audio sectors with `libdisc_read_raw`, routes
 them through page 0x0E (port 0 = left: channel mask 1 L, 2 R, 3 mix,
-scaled by `vol/255`; port 1 = right), `AUD_write`s them and advances.
+scaled by `vol/255`; port 1 = right), writes them (`audio_be_write`)
+and advances.
 At the end the status is 0x13. A data sector inside a play range ends it
 with 0x14. **A host read error plays as silence** (patch 55), as a real
 drive plays through a bad audio sector as a dropout; before, a transient

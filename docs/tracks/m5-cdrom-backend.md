@@ -4,7 +4,7 @@ Raw optical-drive emulation: the `libdisc` Rust crate (disc model, image
 formats, EDC/ECC, subchannel, MMC responders), the `cdimage` QEMU block
 driver over its C API, and the ATAPI patch that serves TOC, raw sectors,
 subchannel and CD-DA from the model. The work ran 2026-09-04 to 2026-09-09
-and is all on `main`. This doc keeps scope, test loop, traps and open
+and is all on `main`; later fixes land there under `M5:`. This doc keeps scope, test loop, traps and open
 items. The design is elsewhere:
 
 - Doc 05: the problem statement and the acceptance table, one row per
@@ -29,15 +29,18 @@ items. The design is elsewhere:
 - QEMU patches (rows in `patches/qemu/README.md`): `50-cdimage-block-driver`
   (meson, `CONFIG_CDIMAGE`), `51-atapi-disc-model` (`hw/ide/`),
   `53-atapi-dvd-profile` (M5g), `54-atapi-audio-seek-stop` (Win9x's
-  seek-as-stop, doc 17 §5.4), `55-atapi-audio-read-error`. Numbers 56–59
-  are reserved for this track; patch 52, the shelf, is shared with M6.
-- Guest program: `guest-tools/src/cdtest.c` (`CDTEST.EXE`, MCI CD audio).
+  seek-as-stop, doc 17 §5.4), `55-atapi-audio-read-error`,
+  `56-atapi-medium-type` (MODE SENSE's medium type, for DOS CD drivers).
+  Numbers 57–59 are reserved for this track; patch 52, the shelf, is
+  shared with M6.
+- Guest programs: `guest-tools/src/cdtest.c` (`CDTEST.EXE`, MCI CD audio)
+  and `cdshelf.c` (`CDSHELF`, the shelf inside the guest).
 - Tools: `tools/atapi-guest-test.py`, `tools/cd-rate-guest-test.py`,
   `tools/xp-cdimage-test.sh`, `tools/cdaudio-guest-test.sh`,
   `tools/cdshelf-guest-test.sh`, `tools/read-error-inject.c`.
 - Shared: `scripts/prepare-qemu.sh` and `configure-qemu.sh` (the overlay
-  and `-Dlibdisc_dir`), `scripts/test.sh`, and `player/`'s `-drive` /
-  `ide-cd,audiodev=` lines.
+  and `-Dlibdisc_dir`), `scripts/test.sh`, and the `-drive` /
+  `ide-cd,audiodev=` lines in `launcher-core/src/bundle.rs`.
 
 ## Test loop
 

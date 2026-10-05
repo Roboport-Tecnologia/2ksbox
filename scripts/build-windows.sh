@@ -87,8 +87,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # MSYS2's MINGW64 shell only. The other MSYS2 shells are other C runtimes
-# and C++ libraries than the package's msvcrt + libstdc++, so a build there
-# would not be the one that ships.
+# and C++ libraries than the mingw QEMU's msvcrt + libstdc++ (test.sh and
+# the winit player), and the MSVC stages expect this shell's tools.
 case "${MSYSTEM:-}" in
   MINGW64) ;;
   "") echo "build-windows.sh: Windows builds are made on Windows, in MSYS2's MINGW64 shell (ADR-026; docs/build-windows.md)" >&2; exit 1 ;;

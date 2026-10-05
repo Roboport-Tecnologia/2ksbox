@@ -18,7 +18,7 @@ work (doc 20 §8).
   `irq=` asks for one; its hardware IRQ 9 is PIIX4's ACPI SCI, where a
   queued ACK rebooted Win98 (doc 20 §5.1).
 - **Pickers** (doc 20 §6): `bundle::Sound` / `bundle::Music` in
-  `launcher-core`, the Qt form, the C API (`lc_wizard_sound_*`,
+  `launcher-core`, the launcher's machine form, the C API (`lc_wizard_sound_*`,
   `lc_wizard_music_*`) and `launcherx --music`.
 - **Packaging.** Every package carries `soundfonts/TimGM6mb.sf2`, passed as
   `LIBSYNTH_SF2` by `player-core/src/companions.rs`.

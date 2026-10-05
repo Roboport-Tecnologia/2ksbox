@@ -62,8 +62,8 @@ The user's decisions (ADR-022, amended 2026-10-02):
    The driver builds natively on Windows with MSVC and the WDK
    (`d3dkmddi.h`, `d3dumddi.h`, `dispmprt.h`, `displib.lib` for
    `DxgkInitialize`), which the build reads from the installed WDK and
-   never commits. The Windows host build moves to MSVC too (ADR-026),
-   later and outside this track.
+   never commits. The Windows host build moved to MSVC too (ADR-026,
+   M11, done 2026-10-04).
 2. **32-bit first.** The user's Windows 7 is 32-bit, which loads an
    unsigned driver after a prompt. 64-bit Windows 7 refuses unsigned kernel
    drivers outside test mode.
@@ -123,8 +123,8 @@ device's half is plain QEMU C and builds anywhere.
      and removes the device without calling StartDevice. `-device
      d3dpt-vga,irq=on` (new, off by default: XP, 9x and snapshots see no
      change; nothing raises it yet) gives the pin, and StartDevice runs.
-     Part of step 4 brought forward; the launcher has to pass it for a
-     Windows 7 machine on the WDDM driver. Committed after `scripts/test.sh
+     Part of step 4 brought forward; the launcher's Windows 7 family
+     passes it (finding 13). Committed after `scripts/test.sh
      all` passed on Windows (2026-10-02).
    - **The BARs by address.** A VGA-class device's resources carry the
      legacy 0xA0000 window ahead of the BARs; StartDevice reads BAR 0 and
@@ -235,8 +235,8 @@ device's half is plain QEMU C and builds anywhere.
    driver"). The drivers' three files are part of the ISO's
    stamp in both build scripts. SETUP installs it (finding 12) when the
    adapter has its interrupt: the driver starts only with `-device
-   d3dpt-vga,irq=on`, which the launcher does not pass yet; README.TXT on
-   the disc gives the manual steps too.
+   d3dpt-vga,irq=on`, which the launcher's Windows 7 family passes
+   (finding 13); README.TXT on the disc gives the manual steps too.
 4. **The device's additions** (`d3dpt/hw/d3dpt_vga.c`, `d3dpt/d3dpt_fb.h`,
    with M7): an interrupt line, a fence register, DMA command buffers read
    from guest memory. Registers are only added (`D3DPT_FB_VERSION`), so
@@ -377,7 +377,8 @@ device's half is plain QEMU C and builds anywhere.
    untested), render targets on a level or a face, 32-bit indices, the
    depth-to-depth StretchRect, the test loop as a repo tool (its base
    image is still made by hand), and the device's own interrupt (step 4).
-   Next is step 7: Direct3D 9Ex, shared surfaces, DWM.
+   Next is step 7: Direct3D 9Ex, shared surfaces, DWM. (The test loop and
+   the interrupt landed since: finding 15 and plan step 4.)
 7. **First probes of DWM** (2026-10-03, `w7d3d.sh EXTRA=`): with the
    UxSms service running, applying `aero.theme` answers "This theme can't
    be applied to the desktop", and the driver sees only OpenAdapter,

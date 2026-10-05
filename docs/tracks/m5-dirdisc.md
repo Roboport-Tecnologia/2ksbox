@@ -9,7 +9,7 @@ test loop, traps and open items. The design:
 - Doc 17 §8: volume layout, decisions, limits, model additions.
 - Doc 17 §5.1: the `isodir` driver beside `cdimage`, and the `raw` node
   the block layer puts on top of it.
-- Doc 07: the launcher side ("Add folder…", forced Insert/Eject).
+- Doc 07: the launcher side ("Folder as disc…", forced Insert/Eject).
 - `docs/tracks/m5-cdrom-backend.md`: the M5 code this track extends.
 
 ## Scope and files
@@ -27,10 +27,9 @@ test loop, traps and open items. The design:
   checking the host path.
 - Launcher, shared with M6: `launcher-core/src/disc_library.rs`
   (`qemu_medium`), `bundle.rs` (comma doubling), `control.rs` (forced
-  insert), `cli.rs` (`--discs publish`), and the disc shelf's "Add
-  folder…" (then `launcher-qt/qml/DiscShelfWindow.qml`; since
-  2026-10-02 the Add menu's "Folder as disc…" in
-  `launcher-mitsuami/src/discs.rs`).
+  insert), `cli.rs` (`--discs publish`), and the disc shelf's Add menu
+  item "Folder as disc…" in `launcher-mitsuami/src/discs.rs` (the Qt
+  launcher's "Add folder…" until 2026-10-02, ADR-023).
 - `libdisc.h` did not change: `libdisc_open` on a directory is the whole
   interface, so `LIBDISC_API_VERSION` stays 1.
 

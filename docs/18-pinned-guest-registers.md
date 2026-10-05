@@ -4,8 +4,11 @@ The design of patch `21-pinned-regs`, which keeps the eight 32-bit GPRs
 and `eip` in aarch64 callee-saved registers for the life of a chain of
 TBs. **It is parked.** It is off by default and the machine form does
 not offer it (user decision: too unstable for too little gain), so a
-bundle that still says it is on never reaches the command line. The
-property stays in the queue. Profiles, results and the open crash are in
+bundle that still says it is on never reaches the command line. **The
+patch was not ported to QEMU 11.1 and is gone from the queue** (track
+M21, user decision 2026-10-01: 10.1's TCG backend rewrite made the port
+a rewrite), so this doc is the design on 9.2.4 and the tools below ran
+on that tree. Profiles, results and the open crash are in
 the M9 track (`docs/tracks/m9-tcg-aarch64.md`, "Open"); doc 22 §3.6 and
 §8.1 place it among the other patches.
 
@@ -180,8 +183,8 @@ work after them and the chain's share stayed at 42 %.
 - **The crash.** XP reboots or bugchecks with registers pinned: seen
   with eight pinned, with all nine in doc 22's `pinned` configuration
   (during Super PI) and with seven in doc 23's spike E, so it is the
-  pinned path, not a particular register. Reproduce with
-  `tools/specbench/run.sh <image> pinned`.
+  pinned path, not a particular register. It reproduced with
+  `tools/specbench/run.sh <image> pinned` on the 9.2.4 tree.
 - **A stall at the flags-helper call boundary.** `helper_cc_compute_c`
   at 4 % of the vCPU instead of 1 %, most samples on its first
   instruction.
@@ -192,8 +195,8 @@ work after them and the chain's share stayed at 42 %.
 
 - `scripts/test.sh all` runs the DOS batteries (x87, rep, SMC, SSE, each
   comparing its own on/off pair) and the XP guest stage unpinned, the
-  default. `QEMU_TCG_OPTS=pinned-regs=on` on the DOS tools runs the same
-  batteries pinned, an A/B of the pinning alone.
+  default. On the 9.2.4 tree, `QEMU_TCG_OPTS=pinned-regs=on` on the DOS
+  tools ran the same batteries pinned, an A/B of the pinning alone.
 - 7-Zip's benchmark verifies every decompressed block against a CRC, so
   a run to completion checks a few billion instructions. It passes; XP
   under Super PI does not (above).

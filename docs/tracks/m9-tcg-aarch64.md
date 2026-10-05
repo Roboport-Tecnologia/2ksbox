@@ -16,17 +16,20 @@ and what is open. Elsewhere:
 ## State
 
 - All on `main`. `track/m9-tcg-aarch64` is deleted; `track/m9-hwmmu`
-  stays on the remote, parked. The patches are 13–21, 24, 35–39 and
-  41–45. Each has an `-accel tcg` or `-cpu` switch (patch 29 gave the
+  stays on the remote, parked. The patches are 13–20, 24, 35–39 and
+  41–45 (21 until M21). Each has an `-accel tcg` or `-cpu` switch (patch 29 gave the
   last three theirs) except 13, 14 and 41, which change no guest-visible
   behaviour.
 - **Optimization is closed by user decision (2026-09-12).** Both 3DMark
   99 game tests sit at the 60 Hz flip cap. The Mac verification is done.
 - **The hardware-MMU design is abandoned for the time being** (user
   decision, 2026-09-16): 1.1–1.2x on every workload ("Gauging the gain").
-- **Patch 21 (pinned registers) is parked**: off by default and not
-  offered by the launcher (user decision, 2026-09-16: too unstable for
-  too little gain).
+- **Patch 21 (pinned registers) is gone**: parked on 2026-09-16 (off by
+  default and not offered, user: too unstable for too little gain), then
+  not ported to QEMU 11.1 (M21, user decision, 2026-10-01: 10.1's TCG
+  backend rewrite made the port a rewrite). Doc 18 keeps the design.
+- The rest were ported to QEMU 11.1 in M21 (doc 22's
+  numbers are 9.2's until re-measured).
 - Later TCG work has other owners: x87 at PC=64 (patches 47–49, 67) is
   doc 13's, the code-buffer placement (patch 63) doc 22 §5.0's.
 
@@ -328,7 +331,7 @@ day a workload changes the number.
 
 ## Open
 
-1. **Patch 21's crash.** XP reboots or bugchecks with registers pinned:
+1. **Patch 21's crash** (moot while 21 is not ported, M21). XP reboots or bugchecks with registers pinned:
    seen at 8, at all nine (doc 22's `pinned` run, Super PI) and at 7
    (doc 23's spike E), so it is the pinned path, not a register.
    `tools/specbench/run.sh <image> pinned` reproduces it. Also, with

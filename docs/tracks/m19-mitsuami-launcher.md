@@ -44,8 +44,8 @@ The pin is mitsuami 1.0.0, `0e21f20`, since 2026-10-04 (53 commits past
 crates built with no change, and the macOS launcher drew its window.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
-Runtime 2.4+, so the launcher is built only on a PC, never in the cross
-build: `scripts/build-windows.sh mitsuami` in MSYS2's MINGW64 shell. The
+Runtime 2.4+, so the launcher is built only on a PC:
+`scripts/build-windows.sh mitsuami` in MSYS2's MINGW64 shell. The
 root `rust-toolchain.toml` says `stable`, which on a PC whose rustup
 host is `x86_64-pc-windows-gnu` (the MSYS2 setup, `docs/build-windows.md`)
 is the GNU toolchain, so the script names the MSVC one (Visual Studio's
@@ -55,13 +55,12 @@ MSYS2's `/usr/bin` from `PATH` for that cargo run, because coreutils'
 operand"), and links with `+crt-static`, so the binary needs no C
 runtime beside it.
 
-To play from it, start it with `scripts/win-run.sh mitsuami` in MSYS2's
-MINGW64 shell (a release build). The mitsuami player has no Windows build
-yet (M22 step 4), so the launcher's fallback is the winit player, which on
-Windows is only ever the MinGW build in `target/x86_64-pc-windows-gnu/`.
-Run on its own, the launcher looks for `target/release/player.exe` and
-finds nothing. The script points it at that player and puts the embed DLL
-and the executor on its path.
+To play from it, start it with `scripts/win-run.sh launcher` in MSYS2's
+MINGW64 shell (a release build). The launcher finds the mitsuami player
+itself once `build-windows.sh mitsuami` has built it (M22); the script
+points it at the winit player only when that one is missing, and puts the
+embed DLL, `qemu-img` and the executor on its path (its header has the
+list).
 
 On Windows the toolbar sits in the title bar beside the caption buttons,
 as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
@@ -121,7 +120,7 @@ and photograph the screen it is on:
 |---|---|
 | (unset) | the machine window |
 | `select:<machine.toml>` | the machine window with that machine chosen, as a click on its row |
-| `wizard[:<family>[:<page>[:open]]]` | a fresh form, on `win98` / `xp` / `dos` / `other` / `win11` and a page by its sidebar index; `:open` opens the optimizations list |
+| `wizard[:<family>[:<page>[:open]]]` | a fresh form, on `win98` / `xp` / `win7` / `dos` / `other` / `win11` and a page by its sidebar index; `:open` opens the optimizations list |
 | `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
 | `clone:<machine.toml>[:same]` | the clone dialog on a machine, or sharing its disk |
 | `clonego:<machine.toml>` | presses Clone, and shows the machine window once the copy has landed (writes into the library) |
@@ -136,7 +135,8 @@ and photograph the screen it is on:
 | `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |
 | `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one |
 
-The machine window is 770 wide since 2026-10-01 (user: "a bit narrower", then 50 less, three times in all; 1060, 920, 820 before). The debug verbs are
+The machine window starts 820 × 610 on Windows and GTK, 770 × 560 on
+macOS and KDE (user, 2026-10-01; 1060, 920 and 820 wide before). The debug verbs are
 `launcher_core::cli`'s, as in every front end.
 
 ## Steps

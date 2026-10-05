@@ -1346,15 +1346,16 @@ Track M16 (`docs/tracks/m16-dx9-ddi.md`, ADR-021). To XP's `d3d9.dll`
 the driver is a DirectX 9 driver with vs / ps 3.0; `d3d8.dll` still sees
 the DX8 driver above (it asks for `GETD3DCAPS8`, never the DX9 queries).
 Both OS layers route `GetDriverInfo2` to `core_gdi2_answer`
-(`core/core_caps.c`); the NT layer turns the DX9 face on (`core.dx9`),
-the 9x layer not yet.
+(`core/core_caps.c`), and both turn the DX9 face on (`core.dx9`; the 9x
+layer since M16 step 5, doc 19).
 
 - **The queries.** `d3d9.dll` asks, in this order: `DXVERSION` (0x902),
   `GETD3DCAPS9` (304 bytes), `GETDDIVERSION` (its `dwDXVersion` is **9**,
   not 0x900; the answer is `DX9_DDI_VERSION`, 4), `GETFORMATCOUNT` /
   `GETFORMAT`, `GETEXTENDEDMODECOUNT` (0), `GETADAPTERGROUP`,
-  `GETD3DQUERYCOUNT` (0 for now). Each answer needs `DD_OK`, the exact
-  `dwActualSize` and its field set, or the runtime falls back.
+  `GETD3DQUERYCOUNT` / `GETD3DQUERY` (event and occlusion, "Queries"
+  below). Each answer needs `DD_OK`, the exact `dwActualSize` and its
+  field set, or the runtime falls back.
 - **The runtime's caps check.** An answered `D3DCAPS9` still goes through
   `d3d9.dll`'s validation (XP SP3's at 0x4fcf6d20, read in the
   disassembly and followed under the QEMU gdbstub, `-gdb tcp::N` and a

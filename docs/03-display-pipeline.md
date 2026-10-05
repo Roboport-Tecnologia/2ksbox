@@ -3,8 +3,9 @@
 The player shades and shows exactly what the guest's video card outputs,
 at native guest resolution and correct geometry, with a CRT look close
 enough that a 1998 screenshot is hard to tell from a photo of the tube.
-We own this pipeline end to end (ADR-005): a winit window, wgpu and
-librashader. This doc covers the stages, the pixel rules, mode analysis
+We own this pipeline end to end (ADR-005): wgpu and librashader in
+`player-core/`, drawn into a winit window (`player/`) or a mitsuami
+`GpuSurface` (`player-mitsuami/`, ADR-025). This doc covers the stages, the pixel rules, mode analysis
 and geometry, latency and input. How 3D frames reach the player is doc
 12, the reference CRT and its photo protocol doc 09, shader profiles doc
 07, and the player's flags and env knobs `docs/development.md`.
@@ -246,7 +247,10 @@ photons at 60 Hz, measured.
 
 ## Input path
 
-winit events go to QEMU's input injection directly on the event thread.
+Window events go to QEMU's input injection directly on the event thread
+(`player-core/src/input.rs`, shared by both players). The per-platform
+grab below is the winit player's; the mitsuami player gets the keyboard
+grab and pointer lock from mitsuami's surface.
 
 **Pointer.** Absolute (USB tablet) for the desktop, relative (PS/2 plus a
 host cursor grab) for mouselook, chosen by the bundle's `seamless_mouse`
@@ -367,10 +371,11 @@ window stays in front. Ctrl+Alt+K, and the same keys go to the host.
 released with D). **Ctrl+Alt+Shift+F** toggles windowed full screen
 (borderless, on the window's monitor). **A close with Alt held asks
 first**, since Alt+F4 reaches the player whenever the host has its
-shortcuts and a window close stops the machine. The player draws the
-question itself (`player/src/prompt.rs`, the VGA 8×16 font blended over
-the finished picture), because Linux has no message box that works in the
-Flatpak and over a full-screen window. Enter, Close or a second Alt+F4
+shortcuts and a window close stops the machine. The winit player
+draws the question itself (`player/src/prompt.rs`, the VGA 8×16 font
+blended over the finished picture), because Linux has no message box that
+works in the Flatpak and over a full-screen window; the mitsuami player
+uses the platform's alert. Enter, Close or a second Alt+F4
 closes; Esc or Back returns; nothing reaches the guest while it is up.
 The title bar's close button does not ask.
 

@@ -73,8 +73,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# MSYS2's MINGW64 shell only: the C runtime and libstdc++ the package
-# ships, and the Windows that runs its checks. As in build-windows.sh.
+# MSYS2's MINGW64 shell only: the shell build-windows.sh builds in (the
+# package itself is MSVC), and the Windows that runs its checks. As in build-windows.sh.
 case "${MSYSTEM:-}" in
   MINGW64) ;;
   "") echo "package-windows.sh: Windows packages are made on Windows, in MSYS2's MINGW64 shell (ADR-026)" >&2; exit 1 ;;

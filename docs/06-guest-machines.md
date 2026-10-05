@@ -5,13 +5,18 @@ supply their own OS media and licences. The project is built around
 Win98, XP and DOS; **Windows 7** (32-bit, track M18) is XP's PC with
 Aero on our WDDM driver. **Other** is the catch-all for any other era OS
 (BeOS, a period Linux, OS/2), with standard hardware and nothing of
-ours. The defaults live in `launcher-core/src/bundle.rs`
+ours. **Windows 11** (ADR-024, track M20) is the one modern family: a
+different PC (q35 or Arm's `virt`, UEFI, a TPM), below. The defaults
+live in `launcher-core/src/bundle.rs`
 (`video_choices`, `sound_choices`, `music_choices`, `pad_choices`,
 `default_*`); each choice list's first entry is the family's default.
 The machine form is doc 07, the sound and music devices doc 20, the
 display drivers docs 15 and 19, the Voodoo 2 doc 21.
 
-**Common to all of them.** i440FX + PIIX (`-machine pc`), `-cpu pentium3`
+**Common to the era families** (all but Windows 11). i440FX + PIIX on
+a versioned board (`pc-i440fx-<ver>`, `Machine::board`: a new machine
+gets `pc-i440fx-11.1`, a bundle from before the field `pc-i440fx-9.2`),
+`-cpu pentium3`
 (`max` on Windows 7; with the form's optimization switches as its
 properties), IDE disk
 (qcow2) and our ATAPI CD (doc 17). **No network card** on a new machine
@@ -29,7 +34,7 @@ Modeled as a ~1998–2000 consumer PC.
 
 | Component | Default (alternatives) | Why |
 |---|---|---|
-| Machine | `pc-i440fx-<ver>,hpet=off` | The board is versioned and kept per bundle (`Machine::board`): a machine stays on the QEMU version it was created on, so a QEMU upgrade cannot break its live snapshots; a bundle with no `board` predates the field and gets `pc-i440fx-9.2`. 98 has no HPET (`PNP0103`) driver and never uses one; it showed as an Unknown Device (the `hpet` check). fw_cfg (`QEMU0002`) has no driver either, but its `_STA` hides it |
+| Machine | `pc-i440fx-<ver>,hpet=off` | The board is versioned and kept per bundle (`Machine::board`): a machine stays on the QEMU version it was created on, so a QEMU upgrade cannot break its live snapshots; a new one gets `pc-i440fx-11.1`, and a bundle with no `board` predates the field and gets `pc-i440fx-9.2`. 98 has no HPET (`PNP0103`) driver and never uses one; it showed as an Unknown Device (the `hpet` check). fw_cfg (`QEMU0002`) has no driver either, but its `_STA` hides it |
 | Accel | TCG | under KVM Explorer dies at startup (*SHELL32.DLL is linked to missing export SHLWAPI.DLL:GetFileAttributesA*): no Start menu |
 | CPU | `pentium3` | avoids CPUID features and fast-CPU bugs 9x mishandles; the floor, as our guest wrappers are built `-march=pentium3` |
 | RAM | 256 MB (32–512) | 9x VCACHE sizing overflows much above 512 MB |
@@ -51,14 +56,16 @@ New Hardware, then calibrate), and the form says so.
 
 **QEMU-side traps** (`patches/qemu/README.md`):
 
-- 9.2.4's TCG needs the upstream LSS fix (patch 01, issue 2987), or 98
-  faults with exception 0D on first boot.
+- 98 faulted with exception 0D on first boot under 9.2.4's TCG until
+  the upstream LSS fix (issue 2987); QEMU 11.1 has it, so patch 01 was
+  dropped in M21.
 - TCG has faulted RUNDLL32 in Display Properties since 7.2 (issue 1964).
   The user has not seen it on our build for a long time (2026-09-23);
   the cause of the change is unknown. Cosmetic; KVM/WHPX were never
   affected.
-- qemu-3dfx's 3D needs a context provider, which the player registers
-  and a bare `qemu-system-i386` does not (doc 12).
+- The OpenGL pass-through (qemu-3dfx's `hw/mesa`) needs a context
+  provider, which the player registers and a bare `qemu-system-i386`
+  does not (doc 12).
 
 **Guest setup.** Install from the user's CD image, then the guest-tools
 ISO (`SETUP.EXE`, `guest-tools/README.md`). Still to document:
@@ -105,10 +112,10 @@ Modeled as a ~2002–2005 PC.
 
 | Component | Default (alternatives) | Why |
 |---|---|---|
-| Machine | `pc` | best compatibility with XP-era drivers; q35 unnecessary |
+| Machine | `pc-i440fx-<ver>` | best compatibility with XP-era drivers; q35 unnecessary. Versioned as on 98 |
 | Accel | Automatic (KVM or WHPX with TCG behind it; TCG on macOS) | prefer an era CPU model for games: KVM `-cpu host` breaks Max Payne's level loading |
 | RAM | 512 MB (64–3072) | the top is the practical 32-bit limit, below where PCI space eats RAM |
-| Video | `d3dpt-vga` + our driver (`cirrus`) | doc 15: the host's mode table (640×480…1600×1200, 16/32 bpp, 60/75/85 Hz), desktop from VRAM, Direct3D 7/8. Plain VGA (vga.sys, 800×600×4) until the driver is installed. The Cirrus is XP's in-box 2D driver (up to 1024×768×16). The standard VGA has **no** XP driver and is not offered |
+| Video | `d3dpt-vga` + our driver (`cirrus`) | doc 15: the host's mode table (640×480…1600×1200, 16/32 bpp, 60/75/85 Hz), desktop from VRAM, Direct3D up to 9 through Microsoft's own runtime (track M16). Plain VGA (vga.sys, 800×600×4) until the driver is installed. The Cirrus is XP's in-box 2D driver (up to 1024×768×16). The standard VGA has **no** XP driver and is not offered |
 | Sound | AC'97 (SB16 + OPL3, none) | XP's in-box AC'97 driver; the SB16 for a DOS-era title |
 | Music | none (General MIDI, CM-32L) | XP ships a wavetable synth and wouldn't use the port |
 | Net | RTL8139 when on | in-box driver |
@@ -148,6 +155,33 @@ driver, so it gets no Aero; SETUP says so and installs the XP-model
 driver instead. An XP-family bundle holding a Windows 7 install (the
 user's `win7`, from before this family) has no interrupt on its adapter,
 so SETUP gives it the XP-model driver too.
+
+## Windows 11
+
+The modern family (ADR-024, track M20): 64-bit, on its own QEMU target
+(`Machine::modern_args`, `arm_args`), with none of the era work: no
+`d3dpt-vga`, no Voodoo 2, no guest-tools ISO, no MIDI port, no gameport.
+
+| Component | x64 | Arm (`arch = "aarch64"`) |
+|---|---|---|
+| QEMU | `qemu-system-x86_64` | `qemu-system-aarch64` |
+| Machine | `q35,smm=on` | `virt,gic-version=3` |
+| Accel | Automatic: KVM (WHPX on Windows) with TCG behind it | Automatic: HVF on a Mac (KVM on an Arm Linux host) with TCG behind it |
+| CPU | `max`, 2 to 4 vCPUs (`default_cpus`) | `max`, the same count |
+| Firmware | EDK2's secure build from `pc-bios`, its variables the machine's own qcow2 (`efi_vars`) | our own EDK2 (`scripts/build-edk2.sh`), the same |
+| TPM 2.0 | libtpms in QEMU (patch 75) on `tpm-crb`, state in `tpm_state` | the same on `tpm-tis-device` |
+| RAM / disk | 4096 MB (4096 to 32768) / 64 GB | the same |
+| Disk, CD | AHCI: disk on `ide.0`, the user's CD on `ide.1`, the drivers disc on `ide.2` | `ich9-ahci,id=ide`, the same layout |
+| Video | `std` (Basic Display Adapter) | `ramfb` plus `virtio-gpu-pci` (viogpudo from the drivers disc) |
+| Sound | HD Audio (none) | HD Audio (none) |
+| Net | e1000e when on | `virtio-net-pci` when on (NetKVM from the drivers disc) |
+| Input | PS/2 keyboard; tablet and pad on `qemu-xhci` | `usb-kbd`, `usb-tablet` (or `usb-mouse`) on `qemu-xhci` |
+
+A new machine gets the host's own architecture (`Arch::native`). A Mac
+runs only the Arm one. With `clipboard`, a `qemu-vdagent` serial port
+carries the clipboard; `shared_folder` (with networking) is the
+player's SMB share (track M23, doc 24). Host support and measurements:
+`docs/tracks/m20-win11.md`.
 
 ## DOS
 
@@ -252,12 +286,16 @@ machine line.
 
 ## The display adapter
 
-All four families offer a choice (`bundle::Video`, the bundle's `video`):
+Every era family offers a choice (`bundle::Video`, the bundle's
+`video`). x64 Windows 11 has the standard VGA only, and Windows 11 on
+Arm a fixed `ramfb` plus `virtio-gpu-pci` whatever `video` says:
 
 | Family | Offers | Default |
 |---|---|---|
 | XP | `d3dpt` (our adapter + driver) / `cirrus` (in-box driver) | `d3dpt` |
 | Win98 | `d3dpt` / `cirrus` | `d3dpt` |
+| Windows 7 | `d3dpt` (with `irq=on`) / `std` (no Cirrus driver) | `d3dpt` |
+| Windows 11 | `std` | `std` |
 | Other | `std` (Bochs VGA, VBE 2.0) / `cirrus` | `std` |
 | DOS | `std` / `cirrus` (period VESA BIOS) | `std` |
 

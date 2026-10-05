@@ -142,8 +142,9 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   (patch 74). Don't propose nGlide, dgVoodoo2 or a new wrapper. **The
   OpenGL pass-through (`hw/mesa`) stays**; never propose retiring it.
 - **The display adapter is our `d3dpt-vga` + real drivers** (ADR-008,
-  ADR-012; doc 15 for XP, doc 19 for 9x), the default on both Windows
-  families (`bundle::video_choices`; Cirrus one pick away). Register set
+  ADR-012; doc 15 for XP, doc 19 for 9x), the default on Windows 98, XP
+  and 7 (`bundle::video_choices`; Cirrus or the standard VGA one pick
+  away; Windows 11 gets only the standard VGA). Register set
   `d3dpt/d3dpt_fb.h`. **A `D3DPT_FB_VERSION` bump only ever adds
   registers** (drivers accept any version at or above their own); a
   change that must reinterpret a register is a new `D3DPT_FB_MAGIC`.

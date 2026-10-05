@@ -1,7 +1,8 @@
 # guest-tools
 
-The guest-tools ISO holds everything a guest needs from us: the display
-drivers, the OpenGL and Direct3D wrappers, the installer, the
+The guest-tools ISO holds everything an era guest needs from us: the
+display drivers, the OpenGL wrapper and the DirectInput fix, the
+installer, the
 disc-shelf program and the test programs. This file covers how the disc
 is built, what is on it and what `SETUP.EXE` does. The end-user text on
 the disc is `README-ISO.txt` (the root `README.TXT`) and
@@ -65,14 +66,17 @@ DRIVER9X\   the 98/Me display driver for d3dpt-vga: D3DPT9X.INF,
             D3DPT9X.DRV, D3DPT9V.VXD, the DirectDraw HAL D3DPT9HL.DLL;
             and the blue-screen test VxDs
 WDDM\       the Windows 7 WDDM driver for d3dpt-vga,irq=on (track M18):
-            D3DPTKMD.SYS, D3DPTUMD.DLL, D3DPTKMD.INF; MSVC, so only on an
-            ISO built on Windows (build-windows.sh's wddm stage);
+            D3DPTKMD.SYS, D3DPTUMD.DLL, D3DPTKMD.INF; MSVC, built on
+            Windows (build-windows.sh's wddm stage) and fetched for
+            the same sources elsewhere (scripts/wddm-prebuilt.sh);
             SETUP installs it on 32-bit Windows 7 with the interrupt
 DINPUT\     per game: DINPUT.DLL, the DirectInput keyboard fix
 OPENGL\     per game: OPENGL32.DLL (the GL pass-through) and
             WRAPGL32.EXT, its extension-list cap
 VOODOO2\    V2START.EXE, the start-up guard for 3dfx's Voodoo 2 driver
 CDSHELF\    CDSHELF.EXE (98/2000/XP), CDSHELF.COM (DOS)
+DOSMODE\    UIDE.SYS, FreeDOS's CD/DVD driver, for Win98/Me's MS-DOS
+            mode (component 7)
 TESTS\      every test, benchmark and calibration program
 ```
 
@@ -121,6 +125,7 @@ number moves.
 | 4 | 4 | Test programs | `TESTS\` into `C:\2KSBOX`; off in the menu, on with `/ALL` |
 | 5 | | Sound Blaster 16 device names | only where a translation made an SB16 wave name too long for DirectX 9: a shorter one in the override `SB16.VXD` reads (doc 20 §5.3) |
 | 6 | | Voodoo 2 start-up guard | only with a 3dfx card. 3dfx's `Voodoo2` Run entry moves to `HKLM\SOFTWARE\2ksbox\Voodoo2` and `V2START.EXE` takes its place (doc 21 §11) |
+| 7 | | MS-DOS mode: CD-ROM drive + Sound Blaster | off in the menu and not part of `/ALL`. Copies `DOSMODE\UIDE.SYS` to `C:\2KSBOX` and writes "2ksbox MS-DOS mode.pif" on the desktop, whose own CONFIG.SYS and AUTOEXEC.BAT load the CD driver, MSCDEX and the Sound Blaster settings (`README-ISO.txt`) |
 
 **File sets** (`/GAME <n> <dir>`) are copied next to one game, never into
 the system folder. Each set is self-contained, so two stacks never share

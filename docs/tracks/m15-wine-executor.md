@@ -162,8 +162,8 @@ search order).
   A future Windows out-of-process executor needs another mapping call.
 - An overlay's absolute backing path does not exist on the other macOS
   volume. Flatten the image (`qemu-img convert`) for a run there.
-- Homebrew's mingw links `libwinpthread-1.dll` dynamically (the Fedora
-  cross image's does not), so the pair needs it beside the `.exe`.
+- Homebrew's mingw links `libwinpthread-1.dll` dynamically, so the pair
+  needs it beside the `.exe`.
 
 ## Steps
 
@@ -179,8 +179,8 @@ Numbered as ADR-018, doc 07 and CLAUDE.md cite them.
 4. **The launcher and the packages.** Done (doc 07 has the verdicts).
 5. **A real game on a below-floor host.** The acceptance, and what is
    left. The community app is built on the 26 side (`scripts/package-macos.sh
-   --community --no-sign --no-dmg --out build/macos-community`; needs
-   Homebrew, `macdeployqt` and the Vulkan SDK) with
+   --community --no-sign --no-dmg --out build/macos-community`;
+   `docs/build-macos.md` has what it needs) with
    `build/xp-mac15.qcow2` (the XP overlay, flattened). Booted into
    macOS 15, in a Terminal:
 
@@ -228,7 +228,8 @@ Numbered as ADR-018, doc 07 and CLAUDE.md cite them.
      tarball's stager only stages it together with the pair.
    - `packaging/flatpak/com._2ksbox.Launcher.Wine.yml`: `build-extension`
      with the app as its runtime (the Flathub add-on shape), on
-     `org.kde.Sdk` 6.10 plus `org.freedesktop.Sdk.Extension.mingw-w64`
+     `org.kde.Sdk` 6.10 then (`org.gnome.Sdk` 49 since M19 moved the app
+     to GNOME's runtime) plus `org.freedesktop.Sdk.Extension.mingw-w64`
      25.08. It builds Wine 11.0 from source, 64-bit only, modelled on
      Flathub's `org.winehq.Wine` `stable-25.08` and trimmed (no Gecko or
      Mono, no sound, printing, scanners, cameras, USB, GStreamer or

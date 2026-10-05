@@ -39,7 +39,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 - **gnu-sed**: qemu-3dfx's `sign_commit` uses GNU `sed -i`, so
   `prepare-qemu.sh` puts gnu-sed's `gnubin` first on `PATH`.
 - **No XQuartz and no SDL2.** QEMU has no display of its own
-  (`--disable-sdl --disable-cocoa …`, patch 02), and patch 70 replaces
+  (`--disable-sdl --disable-cocoa …`; our qemu-3dfx port needs no SDL2),
+  and patch 70 replaces
   qemu-3dfx's GLX backend on Darwin with one that only refuses; 3D is
   the player's CGL backend.
 - `GL/glcorearb.h` is vendored in `third_party/khronos`, so the build
@@ -133,7 +134,7 @@ Mac specifics of the stages:
   `-Werror=unguarded-availability-new`, so an API newer than the floor
   without an `@available` check fails the build instead of dying on the
   floor's macOS (`strchrnul`, declared from 15.4 and found by meson
-  anyway, is patch 46).
+  anyway, was patch 46 until QEMU 10.1 fixed it upstream).
 - `configure-qemu.sh` uses uv's Python only; a Python complaint means uv
   is not on `PATH`. Under Rosetta (`--x86_64`) it takes uv's x86_64
   build of the same version, because meson takes the machine its
@@ -152,10 +153,10 @@ embed library brings the 3D provider (patch 30) and the audiodev (patch
 is refused and keeps running.
 
 ```sh
-build/qemu/qemu-system-i386 --version        # 9.2.4
+build/qemu/qemu-system-i386 --version        # 11.1.2
 printf 'info mtree\nquit\n' | build/qemu/qemu-system-i386 -machine pc -display none \
     -monitor stdio -net none 2>/dev/null | grep -E 'mesapt|glidept'
-# expect the Mesa pass-through region and no glidept one (patch 74)
+# expect the Mesa pass-through region and no glidept one (the qemu-3dfx port builds no hw/3dfx)
 ```
 
 The player, as a machine runs it (`launcherx --print-args` prints the
@@ -490,8 +491,8 @@ a recipe change for the same version wants `--clean`.
   for the macOS style's button margins); the AppKit launcher needs
   none of it, and that part and its patches are gone.
 - **Our patches on a package** live in `patches/deps/<name>/` and are
-  applied to the unpacked tarball (`patches/deps/README.md`; today one,
-  on libtpms). Each package's build stamp carries a hash of its patch
+  applied to the unpacked tarball (`patches/deps/README.md` lists
+  them). Each package's build stamp carries a hash of its patch
   set: editing one rebuilds that package on the next `build.sh`,
   nothing else.
 

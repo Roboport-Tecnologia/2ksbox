@@ -15,7 +15,7 @@ Names and the install layout are in doc 07.
 
 ```sh
 # on the PC, in MSYS2's MINGW64 shell ("Building on Windows"):
-scripts/build-windows.sh          # qemu, rust, mitsuami, exec, guest-tools
+scripts/build-windows.sh          # qemu, qemu-msvc, rust, mitsuami, exec, wddm, guest-tools
 scripts/package-windows.sh        # the zip, checked on this PC
 scripts/package-windows.sh --msix # ... and the Store's MSIX layout ("The Store package")
 ```
@@ -33,7 +33,7 @@ re-applies the patch queue) while another build reads `qemu/`
 | Part | Built with | Why |
 |---|---|---|
 | the package's QEMU, `libqemu-embed-i386.dll`, `qemu-img` (`build/win/qemu-msvc`) | MSYS2's clang targeting `x86_64-pc-windows-msvc`, Visual Studio's headers and the static C runtime, lld-link; its libraries static from `build-deps.sh` | everything the package ships is MSVC (ADR-026's third amendment), so it carries no runtime DLL ("QEMU under MSVC") |
-| the test QEMU (`build/win/qemu`) | MSYS2's clang against its mingw runtime (msvcrt), lld | what `test.sh` and the winit player run; clang because mingw GCC has only emulated TLS, which QEMU touches on every device access (a VGA register read cost 2.3x Linux's; patch 68). `WIN_QEMU_CC=gcc` builds the old way |
+| the test QEMU (`build/win/qemu`) | MSYS2's clang against its mingw runtime (msvcrt), lld | what `test.sh` and the winit player run; clang because mingw GCC has only emulated TLS, which QEMU touches on every device access (a VGA register read cost 2.3x Linux's). Patch 68 made clang build it until QEMU 10.0 did so upstream. `WIN_QEMU_CC=gcc` builds the old way |
 | `libdisc`, `libsynth` (inside QEMU), the winit `player.exe` | Rust `x86_64-pc-windows-gnu` for the mingw QEMU, `x86_64-pc-windows-msvc` for the MSVC one | the QEMU's own ABI; the winit player is not shipped, but `test.sh` runs it |
 | `launcherx`, `discx`, `synthx`, `tools\wgl-probe.exe` | Rust `x86_64-pc-windows-msvc` (`scripts/cargo-msvc.sh`) and `cl`, static C runtime | everything that does not link into QEMU is MSVC (ADR-026's second amendment) |
 | `2ksbox.exe` (`launcher-mitsuami`), `2ksbox-player.exe` (`player-mitsuami`) | Rust `x86_64-pc-windows-msvc`, static C runtime | WinUI 3 needs MSVC (ADR-023, ADR-025); the player imports the embed DLL by name and runs either QEMU (over the mingw one, two C runtimes; doc 11, "The C runtime boundary") |
@@ -57,7 +57,7 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 
 | Stage | Output | Notes |
 |---|---|---|
-| `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | the mingw QEMU `test.sh` runs; `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; no WHPX in i386 since 11.1 (Acceleration) |
+| `qemu` | `build/win/qemu/{qemu-system-i386,qemu-img,qemu-io}.exe`, `libqemu-embed-i386.dll` | the mingw QEMU `test.sh` runs; `configure-qemu.sh --windows`; clang; a directory from another QEMU release configures afresh; WHPX in i386 through patch 84 (Acceleration) |
 | `qemu-msvc` | the same in `build/win/qemu-msvc`, and `libqemu-embed-x86_64.dll` (Windows 11's) | the package's QEMU: `build-deps.sh`, then `WIN_QEMU_CC=msvc configure-qemu.sh` when it never has or its inputs moved, then `ninja` ("QEMU under MSVC"); after `qemu`, which prepares the tree |
 | `rust` | `target/x86_64-pc-windows-gnu/release/player.exe`, `target/x86_64-pc-windows-msvc/release/{launcherx,discx,synthx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh`; the tools are MSVC (`scripts/cargo-msvc.sh`, rustup's `stable-x86_64-pc-windows-msvc`), skipped without it |
 | `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe`, `player-mitsuami/target/qemu-x86_64/release/player-mitsuami.exe` | the package's `2ksbox.exe`, `2ksbox-player.exe` and `2ksbox-player-x86_64.exe` (ADR-023, track M22; the last `--features qemu-x86_64`, Windows 11's, track M20); their own workspaces; MSVC ("The launcher") |
@@ -73,8 +73,8 @@ directories under it.
 ```
 2ksbox.exe  2ksbox-player.exe  2ksbox-player-x86_64.exe  qemu-img.exe
 libqemu-embed-i386.dll  libqemu-embed-x86_64.dll  d3dpt_exec.dll  dxvk_d3d9.dll
-pc-bios\  guest-tools\  shaders\  tools\  doc\
-2ksbox-debug.bat
+pc-bios\  soundfonts\  guest-tools\  shaders\  tools\  doc\
+2ksbox.ico  2ksbox-debug.bat
 ```
 
 `launcher-core/src/paths.rs` takes the executable's directory as the
@@ -242,10 +242,10 @@ diff the two builds' API dumps before reading code.
 ### QEMU under MSVC
 
 QEMU also builds against MSVC's runtime (2026-10-04, user: "see if you
-can also make qemu compile on msvc"). It is opt-in, beside the mingw
+can also make qemu compile on msvc"). It builds beside the mingw
 build, in its own `build/win/qemu-msvc`; since the same day it is the
-QEMU the package ships (`build-windows.sh qemu-msvc`, ADR-026's third
-amendment):
+QEMU the package ships (`build-windows.sh qemu-msvc`, a stage of every
+default run; ADR-026's third amendment). By hand:
 
 ```sh
 scripts/build-deps.sh               # zlib, pcre2, glib, pixman, libslirp, libepoxy
@@ -355,10 +355,10 @@ guest on the user's PC reads `NVIDIA GeForce RTX 3090/PCIe/SSE2`.
 `2ksbox.exe` is `launcher-mitsuami` (ADR-023): WinUI 3 through
 mitsuami. The same stage then builds `player-mitsuami` (track M22),
 which the package ships as `2ksbox-player.exe` (2026-10-03), MSVC as
-well, linking QEMU's mingw DLL across the two C runtimes (doc 11, "The
-C runtime boundary"); a launcher in the checkout starts it once built.
-They are the package's two MSVC binaries, each with a static C runtime.
-`package-windows.sh` checks both import no Visual C++ runtime DLL, and
+well. In the package it runs the MSVC QEMU; in a checkout it runs
+either, the mingw DLL across two C runtimes (doc 11, "The C runtime
+boundary"), and a launcher in the checkout starts it once built. Each
+links a static C runtime. `package-windows.sh` checks both import no Visual C++ runtime DLL, and
 runs the staged player from outside the package folder on a machine
 with a General MIDI port to its BIOS and a clean exit, which is WinUI
 3, Direct3D 12 on its surface, QEMU's DLL and the packaged SoundFont at
@@ -545,7 +545,7 @@ emulated regardless.
   `launcher.log` means the trial bind failed and the machine ran
   without it.
 - **No installer** beside the zip for users outside the Store (doc 07
-  wants one; QEMU's `mingw32-nsis` recipe is within the image's reach).
+  wants one).
   The MSIX is one, but only through the Store or a trusted certificate.
 - **The Store package has not been uploaded.** It installs and runs on
   the PC through `scripts/win-sideload.ps1` (2026-09-23) and passes the
@@ -555,8 +555,6 @@ emulated regardless.
   -Check`). What is left needs the user: the Partner Center account and
   the name reservation (the identity triple), a version of 1.0.0 or
   later, and screenshots of the player's window with games in it.
-- **No Windows check that boots a guest**, in the shape of
-  `tools/xp-driver-test.sh`.
 
 ## Building on Windows
 
@@ -568,8 +566,9 @@ a guest and runs `test.sh`'s Direct3D checks (2026-10-03), its
 `SETUP.EXE` and the Win98 half untried. The launcher builds only here, so `scripts/package-windows.sh`
 rolls and checks the zip here too ("Packaging on Windows").
 
-**MINGW64, not UCRT64 or CLANG64**: it is the package's ABI (msvcrt,
-GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`). The
+**MINGW64, not UCRT64 or CLANG64**: it is the mingw QEMU's ABI (msvcrt,
+GCC's runtime and libstdc++, Rust's `x86_64-pc-windows-gnu`), which
+`test.sh` and the winit player run; the package itself is MSVC. The
 scripts refuse the other two shells.
 
 Once, on the PC:
@@ -582,15 +581,20 @@ git config --global core.autocrlf false       # belt and braces: CRLF breaks eve
 cd /c && git clone --recurse-submodules --shallow-submodules https://github.com/davidrios/2ksbox
 cd 2ksbox && scripts/build-windows.sh --msys2-deps
 
-# 2. Rust from https://rustup.rs with the GNU host (MSVC needs Microsoft's linker):
+# 2. Rust from https://rustup.rs with the GNU host (MSVC's build scripts need Microsoft's
+#    linker), plus the MSVC toolchain for the launcher, the players and the tools:
 ./rustup-init.exe -y --default-host x86_64-pc-windows-gnu
 echo 'export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"' >> ~/.bashrc && . ~/.bashrc
+rustup toolchain install stable-x86_64-pc-windows-msvc
 
 # 3. Open Watcom: the same ow-snapshot.tar.xz as on Linux (binaries in binnt64),
 #    open-watcom-v2's Last-CI-build release, unpacked where build-driver9x.sh
 #    looks by default (or anywhere, with WATCOM= naming it):
 curl -LO https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz
 mkdir -p ~/.local/opt/open-watcom && tar -C ~/.local/opt/open-watcom -xf ow-snapshot.tar.xz
+
+# 4. Visual Studio (or its Build Tools) with the C++ desktop workload and the
+#    Windows 11 SDK 10.0.26100 (WHPX needs it), found by scripts/msvc-env.sh.
 ```
 
 `--msys2-deps` also installs what `scripts/test.sh` needs here
@@ -607,7 +611,7 @@ finds converted.
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu rust mitsuami exec wddm, and the ISO when its sources moved
+scripts/build-windows.sh                  # qemu qemu-msvc rust mitsuami exec wddm, and the ISO when its sources moved
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, whatever the stamp says
 scripts/win-run.sh launcher               # the launcher, out of the checkout

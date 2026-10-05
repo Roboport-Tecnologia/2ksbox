@@ -62,7 +62,8 @@ No clicking and no unit tests. Three layers, all in `scripts/test.sh host`:
   Checks: `optimizations`, `pointer`, `extra-args`, `display-adapter`,
   `d3d9`, `voodoo2`, `music`, `pad`, `hpet`, `family-other`,
   `host-check`, `shelforder`, `dirshelf`, `clone`, `shader-defaults`,
-  `preview-anim`, and `capi` (the C smoke). Most end with our own
+  `preview-anim`, `machine-details`, `accel-choices`, `snapshot-tree`,
+  and `capi` (the C smoke). Most end with our own
   `qemu-system-i386` accepting the exact line `--print-args` wrote.
 - **The real window, headless.** `LAUNCHER_SCREEN=<screen>` picks the
   window and what it does (the table is in track M19's "Test loop"), and
@@ -120,8 +121,9 @@ in-guest shelf on a real XP.
   2ksbox.com, and the manifest's sources should be a repository, not a
   local directory), the AppImage the user asked for (not started), and a
   Windows installer beside the zip. Windows live control (AF_UNIX) is
-  M11's item. The Linux, macOS and Flatpak packagers have not yet run
-  with the mitsuami launcher (track M19, "Left").
+  M11's item. The Linux packager has not yet run with the mitsuami
+  launcher; the Windows, macOS and Flatpak ones have (track M19,
+  "Left").
 - **Clone cannot be cancelled once copying.** `std::fs::copy` keeps the
   kernel's fast paths (reflinks, `copy_file_range`) and cannot stop
   mid-file, so Cancel is off during a copy.

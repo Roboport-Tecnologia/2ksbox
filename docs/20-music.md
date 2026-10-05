@@ -31,8 +31,8 @@ guest MIDI bytes ─► hw/audio/mpu401.c ─┘                                
 ```
 
 **The engines live inside QEMU, not in the player.** `libsynth/` is a
-Rust staticlib with a C API, linked into `qemu-system-i386` and
-`libqemu-embed-i386` and driven by two device models, as `libdisc` is
+Rust staticlib with a C API, linked into each `qemu-system-<target>`
+and `libqemu-embed-<target>` with an ISA bus and driven by two device models, as `libdisc` is
 (doc 17 §5.2, patch 50). A synthesizer in the player, fed MIDI bytes
 through the embed API, was rejected for three reasons:
 
@@ -259,6 +259,7 @@ real question about, and **the first entry is its default**
 | DOS | SB16, Gravis Ultrasound, AdLib only, none | SB16 |
 | XP | AC'97, SB16, none | AC'97 |
 | Other | ES1370, AC'97, none | ES1370: BeOS and a period Linux both drive it out of the box (doc 06) |
+| Windows 7, Windows 11 | HD Audio, none | HD Audio: their in-box driver (doc 06) |
 
 **Music** is what sits behind the MPU-401, `bundle::Music`:
 
@@ -271,10 +272,12 @@ real question about, and **the first entry is its default**
 **Win98 and DOS start on General MIDI, XP and Other on None.** The first
 two have no synthesizer of their own (98's MIDI output is the FM chip).
 XP ships a wavetable synthesizer, and Other is the family we add no
-drivers to; both have the port one pick away.
+drivers to; both have the port one pick away. Windows 7 and Windows 11
+are offered None only: each has its own synthesizer, and the ISA port
+is not tried there.
 
 **The FM chip is in neither picker.** SB16 or AdLib puts an OPL3 on the
-machine, AC'97 or the ES1370 does not.
+machine; AC'97, the ES1370 or HD Audio does not.
 
 **Changing either is a hardware change** to an installed guest, and the
 form says so in the display adapter's orange: Windows re-detects the

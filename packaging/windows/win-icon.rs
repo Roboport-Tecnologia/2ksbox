@@ -18,7 +18,7 @@
 // Store package. The resource script holds nothing else (no VERSIONINFO
 // block; nobody maintains a version string yet).
 //
-// Cross-built from Linux, so mingw's `windres` turns the .rc into a COFF
+// For a GNU-target binary mingw's `windres` turns the .rc into a COFF
 // object and `rustc-link-arg-bins` hands it to the linker for every binary
 // of the crate. A host with no windres gets a warning and a binary with no
 // icon and the default manifest, not a failed build.

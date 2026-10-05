@@ -46,7 +46,7 @@ shape we replaced.
   `mesa_gui_fullscreen`, `mesa_cursor_define`, `mesa_mouse_warp`,
   `glide_{prepare,release}_window`, `glide_window_stat`,
   `glide_gui_fullscreen`, `glide_renderer_stat` (the five `glide_*` are
-  unreferenced since patch 74, §5). In the handshake the
+  unreferenced since `hw/3dfx` left the build, §5). In the handshake the
   vCPU calls `mesa_prepare_window(msaa, alpha, 0, cwnd_fn)`, the
   provider must call `cwnd_fn(swnd, nwnd, opaque)`, which sets
   `wnd_ready`, and the guest spins on MMIO `0xFB8` until then.
@@ -176,9 +176,10 @@ title on it by hand.
 **ADR-020 removed all of it** (user decision: the emulated Voodoo 2 is
 "a much better experience"): the submodule, the patch queue, `glidept/`,
 patch 33, the guest `GLIDE*.DLL` and `GLIDE2X.OVL`, the embed provider's
-Glide half and the two Glide checks. Patch 74 keeps `hw/3dfx` out of the
-QEMU build (its directory is still overlaid because `sign_commit` stamps
-a file in it), so a machine has no `glidept` MMIO region and the UI
+Glide half and the two Glide checks. Patch 74 kept `hw/3dfx` out of the
+QEMU build; since M21 the qemu-3dfx port carries only the OpenGL half
+(the directory is still overlaid because `sign_commit` stamps a file in
+it), so a machine has no `glidept` MMIO region and the UI
 table's five `glide_*` entries are unreferenced defaults. A Glide game,
 Windows or DOS, runs on the Voodoo 2 with 3dfx's own driver and the
 game's own Glide (doc 21). The design and its tests are in the history

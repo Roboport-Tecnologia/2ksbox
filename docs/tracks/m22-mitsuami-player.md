@@ -32,7 +32,7 @@ over a window that is otherwise only the picture.
 ```sh
 cargo build --release -p player                    # the winit player, as before
 cd player-mitsuami && cargo build --release        # GTK 4 (4.10+)
-cargo build --release --no-default-features --features kde,gilrs   # Kirigami (not run yet)
+cargo build --release --no-default-features --features kde,gilrs --target-dir target/kde   # Kirigami (step 3)
 ```
 
 mitsuami comes from the same pinned `rev` as `launcher-mitsuami`; bump
@@ -141,7 +141,9 @@ embed library, as for the winit player, into a target dir of its own:
    off). Either mitsuami takes the player's ways, or `kbcapture`'s halves
    move into `player-core` on the surface's raw handle. Windows also needs
    the native MSVC build mitsuami requires (ADR-023's cost), which puts
-   the player and QEMU (mingw, ADR-026) on two C runtimes. **The boundary
+   the player and QEMU (mingw, ADR-026) on two C runtimes. (Since
+   2026-10-04 the package's QEMU is MSVC too, ADR-026's third amendment;
+   a checkout's mingw QEMU keeps the boundary.) **The boundary
    was audited first (2026-10-02, doc 11 "The C runtime boundary")**: the
    API shares no memory or descriptor across it, but the environment did.
    The companions the player names never reached QEMU's `getenv()` on
@@ -211,8 +213,10 @@ embed library, as for the winit player, into a target dir of its own:
    player had (`player-mitsuami/build.rs`, `win-icon.rs`), and
    `package-windows.sh` checks its static C runtime and that it boots a
    machine with a General MIDI port from outside the package folder and
-   quits. The winit player still builds on Windows for `test.sh` (the
-   `rust` stage). Left: Linux, macOS, the Flatpak, and deleting
+   quits. Since 2026-10-04 they also ship Windows 11's
+   `2ksbox-player-x86_64.exe`, the same player with `--features
+   qemu-x86_64` (M20 step 5). The winit player still builds on Windows
+   for `test.sh` (the `rust` stage). Left: Linux, macOS, the Flatpak, and deleting
    `player/`.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)

@@ -4,7 +4,9 @@ A real period machine is the ground truth the emulated stack is judged
 against: **Pentium 4 1.7, GeForce 6200, dual-boot Windows 98 / Windows
 XP, a CRT monitor, a real optical drive.** Its results live in
 `reference/`: the Direct3D goldens in `reference/d3d/rig-2026-09-03/`,
-the benchmarks in `reference/benchmarks/rig-2026-09-04/`. The CRT photo
+the benchmarks in `reference/benchmarks/rig-2026-09-04/`, and Wine's
+d3d8 / d3d9 test suites' baselines in `reference/winetest/` (`rig-98.txt`,
+`rig-xp.txt`; track M16). The CRT photo
 set and the ATAPI traces are still to be taken. The rig stays stock; it
 is an oracle, not a dev machine.
 

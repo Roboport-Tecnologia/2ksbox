@@ -26,9 +26,9 @@ rectangle in a window.
    Silicon a first-class target. Open source ruled out VMware.
    VirtualBox has had no 3D for pre-Win7 guests since 6.1.
 2. **Real guest 3D**, host-accelerated, on Win98 and XP. Direct3D goes
-   through our paravirtual device and its host executor (doc 14). Glide
-   runs on an emulated Voodoo 2 (doc 21). OpenGL goes through the
-   qemu-3dfx pass-through.
+   through our display adapter's driver and its host executor (docs 14,
+   15, 19). Glide runs on an emulated Voodoo 2 (doc 21). OpenGL goes
+   through the qemu-3dfx pass-through.
 3. **Pixel-accurate video.** The player captures the raw guest
    framebuffer before scaling and presents it with the correct aspect
    (non-square modes like 320×200 included), integer scaling and a CRT
@@ -39,8 +39,8 @@ rectangle in a window.
    passes because the drive is faithful; nothing is patched.
 5. **Low latency.** QEMU runs in-process with the front end, and the
    display, input and audio paths are built for latency (doc 03).
-6. **UTM-style UX.** A machine library, guided creation for four
-   families (Win98, XP, DOS, Other), sane defaults, a one-click
+6. **UTM-style UX.** A machine library, guided creation for six
+   families (Windows 98, XP, 7 and 11, DOS, Other), sane defaults, a one-click
    guest-tools disc, no 40-flag QEMU command lines. It ships as a player
    (one machine per window) and a launcher (doc 07).
 
@@ -61,10 +61,10 @@ rectangle in a window.
 | # | Pillar | Scope | Novelty |
 |---|---|---|---|
 | P1 | QEMU fork + CPU fast paths | a slimmed QEMU with TCG fast paths (x87, SSE, SIMD, REP strings, SMC, lookup and TLB work; docs 13, 16, 22) | integration and optimisation |
-| P2 | Guest display drivers | `d3dpt-vga` drivers: XP miniport + display driver with DirectDraw and a DX8 Direct3D DDI (doc 15); Win9x mini-VDD + display driver (doc 19) | original work |
-| P3 | Paravirtual Direct3D | the device, protocol, guest DLLs and host executor (doc 14) | original work |
+| P2 | Guest display drivers | `d3dpt-vga` drivers: XP miniport + display driver with DirectDraw and a DirectX 9 Direct3D DDI (doc 15); Win9x mini-VDD + display driver (doc 19); a WDDM driver for Windows 7 and Aero (track M18) | original work |
+| P3 | Paravirtual Direct3D | the protocol and the host executor (doc 14) | original work |
 | P4 | Player display pipeline | in-process embed, mode analysis, event-driven geometry, CRT shading on wgpu + librashader (docs 03, 11) | original work |
-| P5 | Launcher | `launcher-core` with the Qt front end and a C ABI: library, form, disc shelf, snapshots, shader profiles (doc 07) | original work |
+| P5 | Launcher | `launcher-core` with the mitsuami front end (ADR-023) and a C ABI: library, form, disc shelf, snapshots, shader profiles (doc 07) | original work |
 | P6 | Raw CD-ROM backend | `libdisc`: raw disc model and formats, ATAPI device, CD-DA, disc shelf, folder discs (docs 05, 17) | original work |
 
 No existing project provides P2 to P6. They are written to be reusable

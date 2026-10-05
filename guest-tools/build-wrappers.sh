@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build qemu-3dfx guest wrappers (Windows DLLs) from the SAME
 # third_party/qemu-3dfx commit our QEMU fork is signed with, plus our own
-# Direct3D DLLs, drivers and test programs, and stage them as a
+# per-game DLLs, drivers and test programs, and stage them as a
 # guest-tools ISO. Needs: i686-w64-mingw32-gcc, gendef, xxd, shasum,
 # git, make, nasm; xorriso or genisoimage/mkisofs for the ISO.
 #   Linux (Arch):  pacman -S mingw-w64-gcc mingw-w64-tools xorriso

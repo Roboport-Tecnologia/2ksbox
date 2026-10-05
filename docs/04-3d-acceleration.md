@@ -32,7 +32,7 @@ Apple Silicon included.
 | Glide 2 / 3 | the Voodoo 2 device with 3dfx's driver and the game's own Glide (a DOS game brings its own `GLIDE2X.OVL`) | the same (few titles care) |
 | OpenGL | qemu-3dfx GL pass-through (`OPENGL32.DLL`) | the same |
 | DirectDraw, Direct3D 3–7 | `d3dpt-vga`'s driver (doc 19); below the Vulkan floor, see "Fallbacks" | `d3dpt-vga`'s driver (doc 15); the same |
-| Direct3D 8 / 9 | the driver's DirectX 8 DDI under Windows' own runtime, or the per-game `D3DPT\` DLLs (doc 14); the same fallbacks | the same |
+| Direct3D 8 / 9 | the driver's DirectX 9 DDI under Windows' own `d3d9.dll` / `d3d8.dll` (ADR-021; the per-game DLLs were retired in M16 step 7); the same fallbacks | the same |
 | 2D desktop | `d3dpt-vga`'s driver (the default adapter); `-vga cirrus` with Windows' in-box driver one pick away | the same |
 
 Which host Direct3D 9 the executor calls (design in doc 14, decisions in
@@ -56,8 +56,9 @@ host can run.
 - **Version coupling.** qemu-3dfx's guest wrappers and the patched QEMU
   must come from the same commit (the host checks a signature stamp), so
   the guest-tools ISO is built with each build of our QEMU, never
-  downloaded. The 3dfx patches also track specific QEMU releases; the
-  fork pins the one they support (v9.2.4).
+  downloaded. qemu-3dfx publishes its patch only up to QEMU 9.2, so we
+  carry our own port for the pinned v11.1.2 (ADR-001's amendment,
+  track M21).
 - **Host GL on macOS** is Apple's OpenGL framework (4.1 core / 2.1
   compat), a long-term risk. If Apple removes it, the way out is ANGLE
   (GL ES on Metal) or a Zink-style layer.
@@ -95,9 +96,9 @@ inside the guest).
 |---|---|---|
 | Win98 GL | Quake 2 | GLQuake on the pass-through (Linux, in the player); Quake II's MiniGL on the Voodoo 2 (by hand) |
 | Win98 Glide | Unreal | UT on the Voodoo 2 (by hand) |
-| Win98 D3D | Forsaken or Incoming (D3D6) | neither run; 3DMark 99 / 2001 SE, Crimson Skies, Moto Racer on the 9x driver (doc 19) |
+| Win98 D3D | Forsaken or Incoming (D3D6) | neither run; 3DMark 99 / 2001 SE, Crimson Skies, Moto Racer, Max Payne 2 and Vice City on the 9x driver (doc 19, track M16) |
 | XP GL | Quake 3 | not run |
-| XP D3D8 | Max Payne | plays on the DX8 DDI with no DLL in the game folder (doc 15) |
+| XP D3D8 | Max Payne | plays on the driver's DDI with no DLL in the game folder (doc 15) |
 | XP D3D9 (stretch) | Half-Life 2 or GTA:VC | Vice City (a DirectX 8 title) plays; no D3D9 title yet |
 | Benchmarks | 3DMark 99 / 2001 SE (98), 2001 SE / 03 (XP) | 99 and 2001 SE run on Win98 headless (`tools/w98-3dmark*.sh`); XP not run |
 

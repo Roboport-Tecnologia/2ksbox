@@ -327,8 +327,8 @@ travels with the Linux packages; the macOS app carries the LunarG loader
 and KosmicKrisp. The packaged player names the files to QEMU through
 `player-core/src/companions.rs`, and packagers check `player --companions`,
 which prints what that rule resolved. `D3DPT_EXEC_LIB` /
-`D3DPT_DXVK_LIB` point `tools/d3dpt-dp2-test` at a staged pair, the
-cheap proof that the files themselves work.
+`D3DPT_DXVK_LIB` point `d3dpt-dp2-test` (`tools/d3dpt-dp2-test.cpp`)
+at a staged pair, the cheap proof that the files themselves work.
 
 ## Milestones (P = paravirt)
 
@@ -375,7 +375,8 @@ track doc.
 - **P4. D3D8** (`d3d8.c`). D3DGAME8 is byte-identical to D3DGAME9.
 - **P5. Later.** The "proper driver" became ADR-008 / M7: a real XP
   display driver on the same transport and executor (doc 15), and the
-  Win98 driver (doc 19). The DLLs stay the 9x per-game path.
+  Win98 driver (doc 19). The DLLs stayed the 9x per-game path until
+  ADR-021 retired them (M16 step 7).
 
 The first commercial titles on the DLL path were Max Payne (to its
 tutorial level) and GTA Vice City (to its menu), both headless. Vice City
@@ -391,8 +392,11 @@ its full-screen window (`tools/xp-game-test.sh`, M4 track).
   native-DXVK frames.
 - **Wine's d3d8/d3d9 test suites** (`dlls/d3d9/tests/*.c`, LGPL):
   thousands of API and pixel tests that pass on real Windows; they build
-  with mingw and run on XP. The rig gives the pass list, then the device
-  runs them. Not wired in yet.
+  with mingw (`guest-tools/build-winetests.sh`) and run through the
+  driver on XP (`tools/xp-driver-test.sh <image> winetest`) and Win98
+  (`tools/win98-winetest.sh`), against baselines in `reference/winetest/`
+  (the rig's, DXVK's own under Wine from `tools/winetest-dxvk.sh`, and
+  the drivers'). Track M16; `docs/testing.md` has the loop.
 - **Irrlicht** (zlib): D3D8 and D3D9 renderers with engine-shaped sample
   apps; builds with mingw.
 - **Commercial titles** (doc 04's matrix) are the acceptance bar.

@@ -629,7 +629,7 @@ rig's GeForce 6200 (doc 09) is an SM3 card, so it answers for 3.0.
 - The Wine conformance suites: a build script in `guest-tools/`, a
   runner on the ISO's `TESTS\`, a host-side summary in `tools/`, the
   baselines under `reference/winetest/`, a stage in `scripts/test.sh`.
-- Removals (steps 7 and 8): step 7's are done (below); left for step
+- Removals (steps 7 and 8): step 7's are done (State); left for step
   8, SETUP's file set 3, `OPENGL\` and the
   device mapper (`MAPPER\`, SETUP component 2) once the ICD no longer
   needs it. `FXMEMMAP.VXD` that 3dfx's own Voodoo 2 driver installs is
@@ -754,8 +754,8 @@ track builds.
 
 ## Steps
 
-0. **The suite in a guest.** Done on 2026-09-25 except the rig's two
-   runs (State, above). Wine 11.0 loads on XP and 98; no test imports
+0. **The suite in a guest.** Done on 2026-09-25; the rig's two
+   baselines were saved on 2026-09-26 and 27 (The test loop, above). Wine 11.0 loads on XP and 98; no test imports
    D3DX or `d3dcompiler`. The first fixes, before step 1: the three
    driver bugs the first run found, since the crashes hide everything
    after them in a file.
@@ -772,7 +772,7 @@ track builds.
    and read its disassembly before guessing. Done when D3DGAME9 fixed
    function runs through Microsoft's `d3d9.dll` on the driver and
    matches the native frame.
-2. **The DX9 tokens.** What the DP2 stream carries for a DX9 driver:
+2. *Done 2026-09-26.* **The DX9 tokens.** What the DP2 stream carries for a DX9 driver:
    vertex declarations (`D3DVERTEXELEMENT9`) and their create / set /
    delete, shader functions for vs/ps 2.0 and 3.0, integer and boolean
    constants, the scissor rect, `SETSTREAMSOURCE2` with its stride,
@@ -806,8 +806,8 @@ track builds.
    the DLLs run them on `d3dpt-vga` through Microsoft's runtime. Vice
    City's 256 MB video-memory question, which `DDRAW.DLL` answered,
    gets the driver's own answer. The SysBus `-device d3dpt` (patch 40)
-   has no user left and goes. `D3DPT\` keeps `DINPUT.DLL` alone; the
-   folder's name is settled then.
+   has no user left and goes. `DINPUT.DLL` moved to its own `DINPUT\`
+   (State).
 8. *Left open when the track closed (user, 2026-09-27).* **The OpenGL ICD.** qemu-3dfx's GL wrapper, today `OPENGL32.DLL`
    copied beside a game, becomes an installable client driver
    registered under `OpenGLDrivers` by both INFs, so a game loads

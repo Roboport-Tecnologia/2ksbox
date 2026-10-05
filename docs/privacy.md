@@ -5,7 +5,7 @@ open source (the code is at <https://github.com/davidrios/2ksbox>), and
 this page says what it does with your data, which is almost nothing.
 
 *This page is the privacy policy for every build of 2ksbox, including
-the Microsoft Store package. Last changed 2026-09-23.*
+the Microsoft Store package. Last changed 2026-10-05.*
 
 ## What 2ksbox collects
 
@@ -59,6 +59,16 @@ There is no update check, no licence check and no "phone home".
 2ksbox opens the disk images, disc images and folders you point it at.
 It reads and writes them only to run your machines, and never copies or
 uploads them.
+
+## The clipboard and a shared folder
+
+A Windows 11 machine can share your clipboard: text you copy on your
+computer can be pasted inside the machine, and the other way round. It
+is on for a new Windows 11 machine and can be turned off in its
+settings. A machine can also be given one folder of yours, which
+programs inside it can then read and write. No folder is shared unless
+you pick one. Both stay between your computer and the machine; 2ksbox
+sends neither anywhere else.
 
 ## Children
 

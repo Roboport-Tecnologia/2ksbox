@@ -28,8 +28,15 @@ M3/M4.
 | M12 | Music | done | doc 20 · `m12-music.md` |
 | M13 | Gamepads | done | `m13-gamepads.md` |
 | M14 | Voodoo 2 device | active | doc 21 · `m14-voodoo2.md` |
-| M15 | Direct3D executor on Wine | active (steps 5–6) | doc 14 · `m15-wine-executor.md` |
-| M20 | Windows 11 (ADR-024) | active (step 1) | `m20-win11.md` |
+| M15 | Direct3D executor on Wine | done, leftovers | doc 14 · `m15-wine-executor.md` |
+| M16 | DirectX 9 driver, no custom DLLs | closed (step 8 left open) | doc 15 · `m16-dx9-ddi.md` |
+| M17 | The driver's speed | closed | `m17-driver-perf.md` |
+| M18 | Windows 7 and Aero | active (step 2) | `m18-win7.md` |
+| M19 | The launcher on mitsuami | shipped, step 6 continues | ADR-023 · `m19-mitsuami-launcher.md` |
+| M20 | Windows 11 (ADR-024) | active (step 5) | `m20-win11.md` |
+| M21 | QEMU 9.2 to 11.1 | merged, step 4 open | `m21-qemu-upgrade.md` |
+| M22 | The player on mitsuami | active (step 2) | ADR-025 · `m22-mitsuami-player.md` |
+| M23 | Shared folders and the clipboard | active (step 7) | doc 24, ADR-027 · `m23-integration.md` |
 
 ## M0: Foundation
 
@@ -78,12 +85,10 @@ ADR-006/007, doc 14. Guest `d3d9.dll` / `d3d8.dll` serialize the API to
 the `d3dpt` device (patch 40); the host decoder runs it on DXVK. Phases
 P0 to P4 (DXVK on KosmicKrisp and RADV, transport, fixed function,
 shaders and queries, D3D8 over d3d9) are done, and D3DGAME9, D3DGAME8
-and D3DFEAT9 are byte-identical to native DXVK. On XP the M7 driver
-replaced the per-game DLLs; they remain the Win98 path and the
-executor's harness.
-
-**Left:** a D3D8/9 game by hand on the DLL path, its stubs, a decoder
-thread (the track doc).
+and D3DFEAT9 are byte-identical to native DXVK. The M7 and M10
+drivers replaced the per-game DLLs, and M16 step 7 retired the DLLs and
+the SysBus `-device d3dpt` (2026-09-27). The executor and its host
+harness stay.
 
 ## M5: CD-ROM backend and folder discs
 
@@ -104,11 +109,11 @@ Doc 07. `launcher-core` owns every rule (ADR-014); `launcher-mitsuami`
 is the shipped front end since 2026-10-02 (ADR-023, track M19: AppKit,
 WinUI 3, GTK 4), after the Qt one (ADR-015, deleted that day) and egui
 (deleted by ADR-017); `launcher-capi` and `launcherx` are its other
-callers. Done: the library and form (four families and their pickers),
+callers. Done: the library and form (six families and their pickers),
 the disc shelf, snapshots, shader profiles with a live preview, clone.
 Packages: a Linux tarball (the host's GTK 4), a Flatpak
 (`org.gnome.Platform` 49, offline), a macOS app in two builds (ADR-019)
-and a Windows zip.
+and a Windows zip and Store MSIX.
 
 **Left:** an AppImage, a Windows installer, grid thumbnails, bundle
 import/export, Flathub screenshots (the track doc's "Open"); the Linux,
@@ -169,8 +174,10 @@ Carmageddon in Mode X, Blood in a DOS box.
 
 ## M11: Windows host
 
-`docs/build-windows.md`. A native build on the user's PC, in MSYS2
-(QEMU with clang, patch 68), into a portable zip and a Store MSIX:
+`docs/build-windows.md`. A native build on the user's PC, in MSYS2,
+into a portable zip and a Store MSIX that are all MSVC (QEMU too,
+`build-windows.sh qemu-msvc`, ADR-026's third amendment; the mingw
+clang QEMU stays for `test.sh` and the winit player):
 WHPX, the WGL backend, DXVK as `dxvk_d3d9.dll`, Windows' own Direct3D 9
 below the floor (ADR-007). The cross build from Linux it began as was
 retired on 2026-10-03 (ADR-026).
@@ -214,10 +221,11 @@ Porsche, FIFA 2000 and Carmageddon. The command FIFO lives in guest RAM
 (`ramfifo=on`, Quake II 41 → 147.5 fps). The 8 MB board is the default.
 
 **Left:** a second Glide game after one quits sometimes starts
-glitched; a client resuming on a dead ring; the Air and Windows builds;
+glitched; a client resuming on a dead ring; the Windows build (the Air
+done 2026-10-04);
 patches 64 and 71 upstream (the track doc).
 
-## M15: The Direct3D executor on Wine, on the host (active)
+## M15: The Direct3D executor on Wine, on the host
 
 ADR-018, doc 14 §"The executor on Wine, in another process". A Linux or
 macOS host below DXVK's Vulkan 1.3 floor runs the same executor on
@@ -227,15 +235,79 @@ the packages (the macOS community build carries the Wine pair, and no
 package ships a Wine).
 
 **Done 2026-09-23:** step 5, the community app on a real macOS 15
-(user-confirmed), and step 6, WineD3D-in-guest removed in one commit.
-**Left:** the Flatpak's Wine (the user's, on Linux).
+(user-confirmed), step 6, WineD3D-in-guest removed in one commit, and
+step 7, the Flatpak's Wine add-on `com._2ksbox.Launcher.Wine`.
+**Left:** a game through the add-on on a below-floor host (the track
+doc).
+
+## M16: DirectX 9 driver, no custom DLLs
+
+ADR-021, doc 15's DX9 section. Microsoft's own `d3d9.dll` / `d3d8.dll`
+run on the display driver's DDI with SM3, on XP and Win98 (protocol
+v21). Step 7 retired the Direct3D DLLs and the SysBus `-device d3dpt`.
+Closed 2026-09-27 (user).
+
+**Left:** the OpenGL ICD (step 8; `OPENGL32.DLL` stays per game),
+vertex texture fetch in a title.
+
+## M17: The driver's speed, on Max Payne 2
+
+The vCPU is the limit, and the driver's share of it is about 12 %.
+Closed 2026-09-27 (user); what is left is in the track doc.
+
+## M18: Windows 7 and Aero (active)
+
+ADR-022. Step 1, the XP-model driver on 32-bit Windows 7, is done.
+Step 2, a WDDM driver (`guest-tools/src/d3dptvid/wddm/`) built with
+MSVC and the WDK's headers, composes Aero with every test program exact
+under DWM, and a fresh install from the launcher's Windows 7 family
+reaches Aero by itself (`tools/win7-aero-test.sh`).
+
+## M19: The launcher on mitsuami
+
+ADR-023. `launcher-mitsuami` replaced the Qt launcher on 2026-10-02 and
+is the only launcher; every packager ships it as `2ksbox`.
+
+**Left:** step 6's polish, the Linux and macOS packagers' runs with
+it, the KDE add-on in a real Plasma session (the track doc).
 
 ## M20: Windows 11 (active)
 
 ADR-024 made 2ksbox a general-purpose VM manager. The first modern box
 is Windows 11: EDK2 firmware, a TPM 2.0 from libtpms inside QEMU, x86_64
 under KVM or WHPX, and Windows 11 on Arm under Hypervisor.framework on
-Apple Silicon. Steps in the track doc.
+Apple Silicon. Steps 1 to 4 are done; step 5 (packaging) has the Linux,
+Windows and macOS packages carrying it.
+
+**Left:** the App Store review of the hypervisor entitlement, Windows
+hosts (the track doc).
+
+## M21: QEMU 9.2 to 11.1
+
+QEMU v11.1.2 with qemu-3dfx's patch ported into `patches/qemu-3dfx/`
+and every TCG patch ported. Merged to `main` 2026-10-02. Old bundles
+stay on the `pc-i440fx-9.2` board.
+
+**Left:** step 4's Linux package and Flatpak, doc 22's numbers, the
+user's hand test.
+
+## M22: The player on mitsuami (active)
+
+ADR-025. `player-core` holds everything but the window, under the winit
+`player/` and `player-mitsuami/`. The Windows packages ship
+`player-mitsuami` as `2ksbox-player.exe`; the others still ship winit.
+
+**Left:** step 2 (the pointer and the window on a real desktop), then
+X11 / KDE, macOS and Windows, the flip (the track doc).
+
+## M23: Shared folders and the clipboard (active)
+
+ADR-027, doc 24. A host folder through `libsmb`, an SMB server in the
+player (QEMU patch 79 forwards the guest's connections to it), and the
+clipboard through QEMU's `qemu-vdagent` and `guest-agent/`. Both work on
+Windows 11 on Arm and on x64 Windows 11 under KVM.
+
+**Left:** Windows hosts (step 7).
 
 ## Post-v1 candidates
 
@@ -252,6 +324,6 @@ a host MIDI port for a real module (doc 20 §8), QEMU in its own process
 | Apple's GL deprecation | Watched. ANGLE or Zink is the escape hatch. |
 | XP on TCG on Apple Silicon | Addressed: integer beyond the P4 1.7, x87 at its speed (M1, M8, M9). |
 | Hosts below DXVK's Vulkan floor | Addressed: Windows' own d3d9 (ADR-007), Wine on the host (ADR-018). |
-| Drift from upstream QEMU | Pinned at v9.2.4, with a patch queue re-applied by `prepare-qemu.sh`. |
+| Drift from upstream QEMU | Pinned at v11.1.2 (M21), with a patch queue re-applied by `prepare-qemu.sh`. |
 | QEMU dependency bloat | Addressed: unused backends disabled, 175 → 93 shared libraries (the `no-optionals` check). |
 | Protection checks needing dump features | `discx` inspects, verifies and makes negative controls. |

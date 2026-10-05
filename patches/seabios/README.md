@@ -1,7 +1,9 @@
 # SeaBIOS patch queue (the VGA BIOS)
 
-Patches to the SeaBIOS tree QEMU 9.2.4 pins (`qemu/roms/seabios`,
-rel-1.16.3). `scripts/build-vgabios.sh` applies them with `patch -p1` to a
+Patches to the SeaBIOS tree QEMU pins (`qemu/roms/seabios`). The blobs
+checked in were built from QEMU 9.2.4's pin, rel-1.16.3, and have not
+been rebuilt since QEMU 11.1.2 (track M21) moved the pin to `b52ca86e`;
+the next rebuild takes the new tree. `scripts/build-vgabios.sh` applies them with `patch -p1` to a
 fresh copy (never the submodule) and builds the VGA BIOS for the two
 variants a 2ksbox machine loads: `stdvga` (`-vga std`, and `d3dpt-vga`,
 whose `romfile` it is) and `cirrus`. `scripts/prepare-qemu.sh` copies the
@@ -14,7 +16,7 @@ the Linux box has and the Mac, the Flatpak SDK and the Windows build do
 not. A rebuild on another compiler is not byte-identical (QEMU's prebuilt
 ROM and a pristine build here differ from byte 5), so a blob's evidence
 is the `vbe-palette` guest check in `scripts/test.sh`, not a hash. The
-version string is `rel-1.16.3-0-g<commit>-2ksbox`, with no build time or
+version string is `<tag>-0-g<commit>-2ksbox` (today `rel-1.16.3-0-ga6ed6b70-2ksbox`), with no build time or
 host name.
 
 Patches are git-format diffs relative to the SeaBIOS tree (`git diff

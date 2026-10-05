@@ -120,8 +120,8 @@ Hardware plus calibration. On 98 the USB pad already reaches both APIs
 such a game calls, sample for sample: DirectInput, and winmm
 (`joyGetPosEx` over VJOYD, whose generic "Microsoft PC-joystick driver"
 exposes the HID pad). The port stays offered on Win98 for DOS boxes,
-which read 0x201 directly. XP and Other are not offered it (nothing
-enumerates a non-PnP port there).
+which read 0x201 directly. XP, Windows 7 and 11 and Other are not
+offered it (nothing enumerates a non-PnP port there).
 
 ### Path C, keys
 
@@ -143,7 +143,7 @@ grows no device in its Device Manager.
 
 | Family | Offered |
 |---|---|
-| XP, Other | `none`, `usb`, `keys` |
+| XP, Windows 7, Windows 11, Other | `none`, `usb`, `keys` |
 | Win98 | `none`, `usb`, `gameport`, `keys` |
 | DOS | `none`, `gameport`, `keys` |
 
@@ -173,8 +173,7 @@ All run the player, so they skip without a display. Commands and knobs:
   `.COM` first.
 - The Flatpak needs `--device=input` (`--device=dri` does not cover
   `/dev/input`). Check with `player --pads` inside the sandbox.
-- `gilrs` links libudev on Linux (the KDE SDK and Platform 6.10 carry
-  it). A host without it builds `--no-default-features` and gets the
+- `gilrs` links libudev on Linux (the Flatpak's runtime carries it). A host without it builds `--no-default-features` and gets the
   scripted pad only.
 - `gilrs` on Windows is XInput-first (four pads); a DualShock needs its
   DirectInput fallback.

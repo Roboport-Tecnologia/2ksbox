@@ -101,7 +101,7 @@ cache to 65,536).
 
 Generic, exact, and on top of patch 20: the cheapest candidate.
 
-### 3. Pinned guest registers (patch 21, parked)
+### 3. Pinned guest registers (patch 21, parked; dropped in M21)
 
 - **Zurstraßen, Bosbach, Reimann, Leupers**, *Static Global Register
   Allocation for Dynamic Binary Translators*,
@@ -279,8 +279,9 @@ came out 1–2 % under doc 22's row, so a difference under 3 % is nothing.
   gain (+16 % on 7-Zip decompress); the crash had been blamed on the
   eighth pinned register. It is not: capped at seven, XP rebooted in
   Super PI's first repetition as in doc 22's nine-register run. The bug
-  is in the pinned path; the next step is to catch the reboot (`-d int`)
-  and bisect over the allocator changes.
+  is in the pinned path; the next step was to catch the reboot (`-d int`)
+  and bisect over the allocator changes, until M21 dropped patch 21
+  rather than port it to QEMU 11.1.
 - **Not spiked.** §1, the hardware MMU: weeks by the probe's own
   estimate, and its user-space variants are closed on macOS (16 KiB
   pages). §5, SC '25 double-word arithmetic for x87 at 64 bits: its

@@ -377,7 +377,7 @@ talks to the chip. 3dfx's driver finds the card by scanning PCI for
 
 **Our guest tools stay out of its way.** 3dfx's driver installs
 `GLIDE2X.DLL` / `GLIDE3X.DLL` / `FXMEMMAP.VXD` in the system folder; the
-last is the device mapper our Direct3D and OpenGL DLLs also need
+last is the device mapper our OpenGL pass-through DLL also needs
 (qemu-3dfx's copy is 3dfx's own binary, 4.10.01.0013, so either serves
 both). SETUP looks for a *present* 3dfx PCI device (9x: the devnode
 tree in `HKEY_DYN_DATA`; NT: `CM_Locate_DevNode`) and, with one, leaves
@@ -386,18 +386,19 @@ carries no Glide of its own (ADR-020). `VOODOO=1
 tools/setup-guest-test.sh` checks it on 98 and XP.
 
 **The PCI map.** On both 2D adapters SeaBIOS puts the BAR at
-`0xfd000000`, clear of the fixed pass-through windows (Mesa
-`0xea000000`–`0xefffefff`, d3dpt `0xd8000000`–`0xdfffefff`; the Glide
-device's, `0xfb000000`–`0xfb7fffff` and `0xfbdff000`, is no longer on
-the machine). Nothing
-reserves those windows, so a guest that moved the BAR could overlap
-them; an ACPI Win98 keeps the firmware's placement.
+`0xfd000000`, clear of the fixed pass-through window (Mesa
+`0xea000000`–`0xefffefff`; the Glide device's, `0xfb000000`–`0xfb7fffff`
+and `0xfbdff000`, and the retired SysBus d3dpt's, `0xd8000000`–
+`0xdfffefff`, are no longer on the machine). Nothing
+reserves that window, so a guest that moved the BAR could overlap
+it; an ACPI Win98 keeps the firmware's placement.
 
 **In the launcher** the card is one checkbox on the machine form
-("Emulated 3dfx Voodoo 2", `voodoo2` in the bundle, doc 07), off unless
-picked, on every family. It adds `-device voodoo2,addr=0x05`, the slot
-after the sound card's. A headless run must use the same slot; any other
-is new hardware and a restart prompt before the shell. For Win98 the
+("3dfx Voodoo 2", `voodoo2` in the bundle, doc 07), off unless picked,
+on every family but Windows 11 (`Form::voodoo2_applies`). It adds
+`-device voodoo2,addr=0x05`, the slot after the sound card's. A
+headless run must use the same slot; any other is new hardware and a
+restart prompt before the shell. For Win98 the
 pairing is our adapter plus the chip: Direct3D on the doc 19 driver,
 Glide on the chip. The `voodoo2` check walks the checkbox to
 `query-pci`, and `tools/voodoo-guest-test.py` exercises the device with

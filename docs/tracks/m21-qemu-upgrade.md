@@ -14,6 +14,9 @@ on. Write what you find into it as you go.
 
 ## Where this runs
 
+Merged to `main` on 2026-10-02 (step 5); what is left is done on `main`.
+The two items below were the rules while the branch ran.
+
 - A worktree of its own on the branch `track/m21-qemu-upgrade` off
   `main`: `git worktree add ../2ksbox-m21 -b track/m21-qemu-upgrade main`,
   then `git submodule update --init` and `scripts/build.sh` there (~15
@@ -494,8 +497,8 @@ harness (`m21-base` worktree at main, QEMU 9.2.4).
 ### 4. The other platforms
 
 The macOS build on the Air (both the App Store and community builds, and
-the Intel build under Rosetta), the Windows cross build
-(`scripts/build-windows.sh`, `package-windows.sh`) with
+the Intel build under Rosetta), the Windows build (native in MSYS2
+since ADR-026: `scripts/build-windows.sh`, `package-windows.sh`) with
 `build/win/d3dpt-dp2-test.exe` on both `D3DPT_D3D9` values, the Linux
 package and the Flatpak. Each packager's own checks must pass.
 
@@ -575,7 +578,9 @@ desktop), so Windows' own `Get-Tpm` line was not read this time.
 Mac's failures from before this step: `exec-wine` and `d3dfeat9-nat`
 failed on 9.2 too (2026-10-01), `exec-no-device` is the 9.2 baseline's
 on Linux as well, and `companions-env` (M22's) calls GNU `timeout`, which
-macOS lacks. Every guest check passes: x87, rep, smc, sse, atapi, midi,
+macOS lacks. (Later the same day all four were fixed in `test.sh`
+itself, and the Air's host stage is green: commits 827a0a75, 2375b3d3.)
+Every guest check passes: x87, rep, smc, sse, atapi, midi,
 pit, the four Voodoo 2 runs, vbe-palette, pad.
 
 The packagers, `--no-sign --no-dmg`, their first runs with the AppKit
@@ -637,4 +642,4 @@ Still open after the merge:
 this doc. Every other track's QEMU patch lands through this track's
 order while it runs, so tell the user before touching a patch another
 track owns (M14's Voodoo patches, M5's ATAPI patches, M20's TPM patch
-when it exists).
+75).

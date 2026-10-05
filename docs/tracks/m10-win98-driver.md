@@ -32,6 +32,11 @@ Steps 0–4 are done; step 5, real titles, is where the work is.
 - **Titles**: Total Annihilation, LEGO Island, Carmageddon, Blood (DOS
   box), Crimson Skies (§28, §34), Diablo II (§33), 3DMark 99, 3DMark2001
   SE's whole benchmark (§36–§39).
+- **DirectX 9 on the same HAL** (track M16, closed 2026-09-27): Win98's
+  own `d3d9.dll` / `d3d8.dll` run on the driver with SM3, and Max Payne
+  2, Vice City, 3DMark2001 SE and Crimson Skies play on it. The design
+  is doc 15's DX9 section; the `win98-dx9` and `win98-winetest` checks
+  are M16's.
 
 ## Scope and files
 

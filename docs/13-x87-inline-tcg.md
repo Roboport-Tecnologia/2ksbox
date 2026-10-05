@@ -57,14 +57,17 @@ vector register. So a scalar float op is an ordinary opcode on i64 temps
 whose operand constraint is the vector class:
 
 - `include/tcg/tcg-opc.h`: `add/sub/mul/div_f64`, `fmsub_f64` (a·b − c,
-  fused), `sqrt_f64`, `cvt_f64_f32`, `cvt_f32_f64`, gated by
-  `TCG_TARGET_HAS_f64`.
+  fused), `sqrt_f64`, `cvt_f64_f32`, `cvt_f32_f64`, offered where the
+  backend defines `TCG_TARGET_F64` (`tcg_f64_supported()`). On QEMU 11.1
+  each backend's half is a `TCGOutOp` descriptor in `tcg/tcg.c`'s
+  scheme (`TCGOutOpBinary`, `TCGOutOpUnary`, and `TCGOutOpTernary` for
+  `fmsub_f64`; `patches/qemu/README.md`, "06").
 - x86-64: `vaddsd/vsubsd/vmulsd/vdivsd/vfmsub213sd/vsqrtsd/vcvtsd2ss/vcvtss2sd`,
   constraints `C_O1_I2(x, x, x)` etc.; requires AVX + FMA3
   (`CPUINFO_FMA`).
 - aarch64: `fadd/fsub/fmul/fdiv/fnmsub/fsqrt/fcvt` (scalar D, `fcvt` both
   ways), `C_O1_I2(w, w, w)` etc., plus `tcg_out_movi` into a V register.
-- Other hosts and TCI: `TCG_TARGET_HAS_f64` is 0 and the translator emits
+- Other hosts and TCI: no `TCG_TARGET_F64`, and the translator emits
   helper calls as before.
 
 Mode 2 (patch 45) uses the binary32 scalar opcodes on i32 temps,

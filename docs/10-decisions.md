@@ -8,7 +8,7 @@ The roadmap is doc 08.
 
 | ADR | Decision | Status |
 |---|---|---|
-| 001 | QEMU is the base | accepted |
+| 001 | QEMU is the base | accepted, amended 2026-10-01 (QEMU 11.1, qemu-3dfx's patch ours; M21) |
 | 002 | QEMU runs in-process with the display | accepted |
 | 003 | A libretro core is the front end | **superseded by 005** |
 | 004 | Rust where possible | accepted |
@@ -24,16 +24,17 @@ The roadmap is doc 08.
 | 014 | One launcher library, front ends draw it | accepted; "two front ends" **ended by 017** |
 | 015 | The Qt front end is the shipped one | **superseded by 023** (2026-10-02); "keep `launcher/`" reversed by 017 |
 | 016 | The Voodoo 2 is emulated beside the Glide pass-through | accepted; "beside" superseded by 020 |
-| 017 | The egui front end is retired | accepted |
+| 017 | The egui front end is retired | accepted; its "`launcher-qt` is the only front end" **superseded by 023** |
 | 018 | Below the Vulkan floor, the executor runs on Wine on the host; WineD3D-in-guest retired | accepted, retirement done 2026-09-23 |
-| 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted |
+| 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted; addenda 2026-09-23 (the Intel build; nothing from Homebrew, community floor macOS 12) |
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18; amended 2026-10-02 (the WDK's headers, built on Windows) |
 | 023 | The launcher moves to mitsuami | accepted; done 2026-10-02 (every package ships it, `launcher-qt` deleted) |
 | 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
-| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22 |
-| 026 | Windows builds natively with MSVC; QEMU and the old guests stay on mingw | accepted; the WDDM driver first (M18), the host build later |
+| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22; the Windows packages ship it since 2026-10-03 |
+| 026 | Windows builds natively with MSVC; QEMU and the old guests stay on mingw | accepted, done 2026-10-03; amended 2026-10-03 and twice 2026-10-04 (DXVK, the executor and the package's QEMU are MSVC too) |
+| 027 | Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent | accepted, work in M23 |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -874,7 +875,8 @@ Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
 
 **Status.** Accepted (user decision: "now lets make the mitsuami
 player"). Work in track M22. Until it runs on every host, `player/` (winit)
-ships.
+ships. *(Since 2026-10-03 the Windows zip and MSIX ship `player-mitsuami`
+as `2ksbox-player.exe`; the other packages still ship winit.)*
 
 **Decision.** The player gets a mitsuami front end, `player-mitsuami/`,
 its picture on mitsuami's `GpuSurface` (a desync Wayland subsurface or an

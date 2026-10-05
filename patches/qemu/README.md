@@ -8,7 +8,7 @@ where 11.1 changed a patch's shape, the row says so. Each row's **Drop**
 was re-checked against pristine 11.1.2 (2026-10-04, track M21): none is
 met yet. Rows 11 and 24 carry 11.1 numbers; the rest, and doc 22, are
 9.2's. The larger patches are designed in the numbered docs
-(x87 doc 13, SSE doc 16, pinned registers doc 18, CD-ROM doc 17, music
+(x87 doc 13, SSE doc 16, CD-ROM doc 17, music
 doc 20, Voodoo 2 doc 21); doc 22 measures the TCG patches as a whole.
 The test tools named here are in `docs/testing.md`.
 
@@ -113,13 +113,13 @@ property, so its command line also runs on a stock QEMU.
 | `jump-cache-keep` | `-accel tcg` | 42 | on |
 | `eob-chain` | `-accel tcg` | 43 | on |
 | `tlb-retire` | `-accel tcg` | 44 | on |
-| `pinned-regs` | `-accel tcg` | 21 | **off**, not offered |
+| `pinned-regs` | | 21, dropped in M21 | gone |
 
 Accelerator properties are spelled `-accel tcg,<prop>=off` (not
 `-machine accel=`); `QEMU_TCG_OPTS=<prop>=off` passes them to the DOS
-batteries. The launcher does not offer `pinned-regs` (user decision: too
-unstable for too little gain), and a bundle that still turns it on never
-reaches the command line. Patches 14, 41, 63 and 67 have no switch
+batteries. `pinned-regs` left the launcher before patch 21 was dropped
+(user decision: too unstable for too little gain), and a bundle that
+still turns it on never reaches the command line. Patches 14, 41, 63 and 67 have no switch
 because they change only cost, not behaviour. Device-level A/Bs:
 `-global isa-pit.overdue-irq=off` (34), `-global isa-pit.reinject=off`
 (65), `-device voodoo2,recompiler=off` (64).
@@ -127,18 +127,13 @@ because they change only cost, not behaviour. Device-level A/Bs:
 ## The patches
 
 Numbers 03 and 57–59 are unused (57–59 are kept for CD-ROM backend
-work, doc 17). Two files share the number 20.
+work, doc 17); the numbers under "Dropped in M21" below are not reused.
+Two files share the number 20.
 
 ### 00-3dfx-darwin-contextalpha
 qemu-3dfx's shared code uses `GL_CONTEXTALPHA`, defined only under
 `CONFIG_LINUX`, which broke the Darwin build. **Drop:** upstream qemu-3dfx
 fixes it.
-
-### 01-upstream-i386-lss-tb-exit-fix
-**Dropped in M21** (QEMU 11.1). Upstream since 10.1 (`0f1d6606c2`).
-
-### 02-3dfx-sdl-optional
-**Dropped in M21** (QEMU 11.1). Folded into the qemu-3dfx port, which has no SDL2 requirement.
 
 ### 04-3dfx-graceful-no-display
 With no 3D provider registered, `MGLCreateContext` / `MGLMakeCurrent`
@@ -164,15 +159,6 @@ for empty registers after a pop. DOS loop 21.6 (softfloat) / 10.6 (patch
 05) / 2.9 ns per op; XP Super PI 1M on the Air 9:49 → 1:57. **Switch:**
 `x87-fast`. **Test:** `tools/x87-guest-test.py`. **Drop:** upstream float
 ops in TCG, or an upstream rewrite of the x87 translator. **On 11.1:** the eight ops are `TCGOutOp` descriptors (`TCGOutOpBinary`, `TCGOutOpUnary`, and `TCGOutOpTernary` for fmsub, in `tcg/tcg.c`) behind `TCG_TARGET_F64`, x86-64 gated at run time on AVX + FMA; the shadow has its own scratch temps (`x87s_t32`/`x87s_t64`, 11.0 removed `tmp2_i32`/`tmp1_i64`), the third `insn_start` word carries its state, and FXCH and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. It carries 07's and 09's hunks on the shadow.
-
-### 07-upstream-x87-helper-fixes
-**Dropped in M21** (QEMU 11.1). Upstream since 11.0 and 11.1.1 (`cf10af6c70`, `1621cc4971`). Its hunk on patch 06's inline compare moves into 06.
-
-### 08-upstream-i386-decoder-fixes
-**Dropped in M21** (QEMU 11.1). All seven fixes upstream by 11.1.1.
-
-### 09-upstream-i386-rep-string
-**Dropped in M21** (QEMU 11.1). Upstream since 10.0. Its `x87-shadow.c.inc` hunk moves into 06.
 
 ### 10-embed-api
 Meson builds `shared_library('qemu-embed-<target>')` per system target
@@ -315,9 +301,6 @@ cache. These stay on the helper: `CF_NO_GOTO_PTR`, exec/nochain logging,
 decompress +7 %. Any new TB flag must be built here too (patch 37).
 **Switch:** `inline-lookup`. **Drop:** upstream grows a generic inline
 probe with a per-target state hook. **On 11.1:** `translator.c` is built once per mode, so the probe addresses `CPUState` as `offsetof(CPUState, f) - sizeof(CPUState)` and tests `singlestep_flags & SSTEP_ENABLE`.
-
-### 21-pinned-regs
-**Dropped in M21** (QEMU 11.1). Not ported (user decision, 2026-10-01): it was off and unoffered, and 10.1's TCG backend rewrite would make the port a rewrite. Doc 18 keeps the design.
 
 ### 22-upstream-apic-reset-cpuid
 **A Win98 guest that restarts freezes on its first frame.** Win98 turns
@@ -512,7 +495,7 @@ Adds the `hw/d3dpt` meson subdir. The overlay carries `d3dpt_vga.c`, the
 is the Direct3D command window, and `d3dpt_exec_load.c`, which opens the
 executor library. Until M16 step 7 (2026-09-27) the patch also put a
 SysBus Direct3D device on the pc machine for the retired guest DLLs
-(doc 14); patch 74's context changed with it. **Drop:** never.
+(doc 14). **Drop:** never.
 
 ### 41-disas-context-uninit
 QEMU builds with `-ftrivial-auto-var-init=zero`, and
@@ -579,9 +562,6 @@ battery sweeps every control word a second time with PE set, because
 `fninit` before every case had kept the sticky variants from ever running.
 **Switch:** `x87-fast`. **Test:** `tools/x87-guest-test.py`. **Drop:**
 upstream has no x87 shadow path.
-
-### 46-darwin-strchrnul
-**Dropped in M21** (QEMU 11.1). Upstream since 10.1 (`a5b30be534`: the check includes `<string.h>`, and our `-Werror=unguarded-availability-new` makes it honour the deployment target). To confirm on the Air in step 4: no `HAVE_STRCHRNUL` in `config-host.h` at the macOS 12 floor.
 
 ### 47-x87-pc64-as-53
 **The one inexact switch, off by default.** Code at PC=64 has no host
@@ -773,12 +753,6 @@ Under the Windows x64 ABI a fifth argument and 128-bit operands go
 through memory, and the helper cost 10.8 % of the vCPU there against
 4.6 % on Linux. **Test:** `tools/x87-guest-test.py`. **Drop:** with 48.
 
-### 68-windows-clang
-**Dropped in M21** (QEMU 11.1). Upstream since 10.0 (`8f5a4cfc7e` removed `gcc_struct`, so clang has nothing to refuse). To confirm in step 4 with the Windows cross build and its checks.
-
-### 69-mkvenv-file-uri
-**Dropped in M21** (QEMU 11.1). Upstream since 11.0 (`587f4a1805` passes a plain path to `--find-links`). To confirm in step 4 in MSYS2.
-
 ### 70-mesa-darwin-no-xquartz
 **The macOS build needs no XQuartz.** qemu-3dfx's Mesa backend on macOS
 was GLX on XQuartz, unused since SDL went.
@@ -819,9 +793,6 @@ and allocates one only when it has no size (a wrong size is refused).
 (`memory_region_init_ram_from_fd`) when the executor runs in another
 process (ADR-018, doc 14), so the guest's VRAM and command window are the
 bytes that process maps. No change for any other VGA. **Drop:** never.
-
-### 74-no-glidept
-**Dropped in M21** (QEMU 11.1). Folded into the qemu-3dfx port, which carries only the OpenGL half.
 
 ### 75-tpm-libtpms
 The libtpms TPM backend, `-tpmdev libtpms,id=…,state=<file>`: a TPM 2.0
@@ -1002,3 +973,21 @@ the union is 32 bits and `write_val_to_reg`'s 4-byte store writes one
 `target_ulong`; x86_64 compiles as before. **Test:** `test.sh`'s
 `whpx-i386` (SeaBIOS under WHPX to "No bootable device"); XP under WHPX at its desktop in 29 s, `TEST_ACCEL=whpx tools/xp-cdimage-test.sh` passing (2026-10-04).
 **Drop:** upstream builds WHPX into `i386-softmmu` again.
+
+## Dropped in M21
+
+Patches the move to QEMU 11.1 (track M21) retired. The files are gone;
+`git log -- patches/qemu/<name>.patch` has them.
+
+| Patch | Why it went |
+|---|---|
+| 01-upstream-i386-lss-tb-exit-fix | upstream since 10.1 (`0f1d6606c2`) |
+| 02-3dfx-sdl-optional | folded into the qemu-3dfx port, which has no SDL2 requirement |
+| 07-upstream-x87-helper-fixes | upstream since 11.0 and 11.1.1 (`cf10af6c70`, `1621cc4971`); its hunk on patch 06's inline compare moved into 06 |
+| 08-upstream-i386-decoder-fixes | all seven fixes upstream by 11.1.1 |
+| 09-upstream-i386-rep-string | upstream since 10.0; its `x87-shadow.c.inc` hunk moved into 06 |
+| 21-pinned-regs | not ported (user decision, 2026-10-01): off and unoffered, and 10.1's TCG backend rewrite made the port a rewrite; doc 18 keeps the design |
+| 46-darwin-strchrnul | upstream since 10.1 (`a5b30be534`); confirmed on the Air at the macOS 12 floor (no `HAVE_STRCHRNUL`) |
+| 68-windows-clang | upstream since 10.0 (`8f5a4cfc7e` removed `gcc_struct`); confirmed by the native MSYS2 build |
+| 69-mkvenv-file-uri | upstream since 11.0 (`587f4a1805`); confirmed by the native MSYS2 build |
+| 74-no-glidept | folded into the qemu-3dfx port, which carries only the OpenGL half (`hw/3dfx` is overlaid for `sign_commit`, never built) |

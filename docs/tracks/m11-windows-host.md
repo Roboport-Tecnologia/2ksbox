@@ -8,14 +8,16 @@ the user's PC (Ryzen 9 5900X, RTX 3090, the `base98-br` image), 3D guests
 included on both Direct3D backends and the OpenGL pass-through. This file
 keeps scope, test loop, traps and open items. The design:
 
-- `docs/build-windows.md`: the container, the stages, the package's
+- `docs/build-windows.md`: the toolchains, the stages, the package's
   all-MSVC rule (no runtime DLL ships, QEMU from `build/win/qemu-msvc`),
   the WinUI launcher (MSVC, built on the PC), `2ksbox-debug.bat`, the
   Direct3D 9 backends, WGL, WHPX, the native MSYS2 build.
-- Patch 68 (clang-built QEMU) in `patches/qemu/README.md`.
+- Patches 83 (QEMU under MSVC) and 84 (WHPX for i386) in
+  `patches/qemu/README.md`.
 - Doc 12 "The WGL rule"; ADR-007 and its second amendment for which
   Direct3D 9 the executor runs on; doc 03 "Input path" and
-  `player/src/kbcapture.rs` for the keyboard capture.
+  `player/src/kbcapture.rs` for the winit player's keyboard capture (the
+  packaged `player-mitsuami` takes mitsuami's keyboard grab, track M22).
 
 ## Scope and files
 
@@ -40,8 +42,10 @@ keeps scope, test loop, traps and open items. The design:
   `player-core/src/qmp.rs`, `player/src/kbcapture.rs`;
   `d3dpt/hw/d3dpt_exec_load.c`,
   `d3dpt/exec/*.cpp`; `libdisc/src/bin/discx.rs`.
-- Patches added: 68 (clang), 69 (mkvenv's `file://C:/…` wheels URL under
-  Python 3.14); Windows hunks in 10, 13, 50.
+- Patches added: 80 (a foreign thread's exit notifiers), 83 (MSVC
+  runtime), 84 (WHPX back in `qemu-system-i386`); Windows hunks in 10,
+  13, 50. 68 (clang) and 69 (mkvenv's `file://C:/…` URL) went upstream
+  and were dropped in M21.
 
 ## Test loop
 
@@ -68,24 +72,21 @@ in `player.log`. Both logs are in `%APPDATA%\2ksbox\data`, not
 
 Detailed in `docs/build-windows.md`:
 
-- An import-table closure misses DLLs loaded with `LoadLibrary`
-  (sdl2-compat's SDL3, libepoxy's `libEGL`), so the package runs a strings
-  pass ("The package").
-- Fedora has no `mingw64-libslirp`; without it every machine dies with
-  "network backend 'user' is not compiled into this binary" ("Why a
-  container").
+- An import-table closure misses DLLs loaded with `LoadLibrary`, so the
+  package runs a strings pass too, and any mingw DLL name fails it ("The
+  package").
 - `windows_subsystem = "windows"` loses the console for debug verbs and
   the player's output, and cmd does not wait for a windowed program ("The
   package").
 - MSYS2's coreutils `link` shadows MSVC's `link.exe`, and an MSVC exe
   imports `vcruntime140.dll` unless linked `+crt-static` ("The
-  launcher"). The Qt launcher's emutls and import-library traps went
-  with it (2026-10-02).
+  launcher").
 - A COFF weak external is not an ELF weak definition, so
   `mglcntx_mingw.c` is split ("OpenGL for a Win98 guest").
-- QEMU is built with clang because mingw GCC's emulated TLS made a VGA
-  register read 2.3x Linux's (patch 68; `WIN_QEMU_CC=gcc` is the old
-  build).
+- The mingw test QEMU is built with clang because mingw GCC's emulated
+  TLS made a VGA register read 2.3x Linux's (patch 68 until QEMU 10.0
+  did it upstream; `WIN_QEMU_CC=gcc` is the old build; "The
+  toolchains").
 - DXVK and the executor change compiler together or not at all (DXVK's
   exceptions), and DXVK under MSVC reused wrong pipelines until patch 15:
   an `eq()` that only MSVC's `unordered_map` calls without a hash match
@@ -93,14 +94,10 @@ Detailed in `docs/build-windows.md`:
 
 Kept here:
 
-- **The emutls fix's limits.** A local `__once_proxy` fixes it;
-  `-static-libstdc++`, `-C link-self-contained=no` and `-shared-libgcc`
-  do not. MSYS2's GCC 16 exports no `std::__once_call`, so the proxy
-  compiles only where `_GLIBCXX_NO_EXTERN_THREAD_LOCAL` is absent.
 - **QMP `fd=` on Windows is a C-runtime descriptor**, not a `SOCKET`;
   `qemu_embed_socket_to_fd()` converts it (embed API v7, doc 11).
-- **A low-level keyboard hook in the player is never called while the
-  player is in front**, cause unknown. The player takes the Windows keys
+- **A low-level keyboard hook in the winit player is never called while
+  the player is in front**, cause unknown. The player takes the Windows keys
   with raw input and `RIDEV_NOHOTKEYS` (doc 03 "Input path"). System
   hotkeys (Alt+Tab, Alt+F4, Ctrl+Alt+Del, Win+L) reach no program.
 
@@ -126,8 +123,12 @@ Kept here:
    FreeDOS floppy that PC's checkout lacked).
 4. **An installer** beside the zip (doc 07). QEMU's own NSIS recipe
    (`mingw-w64-x86_64-nsis` in MSYS2) is one way.
-5. **Zero-copy frames** through a DXGI shared handle, the counterpart of
+5. **The Store upload.** The MSIX passes the certification kit and
+   sideloads; the upload needs the user (`docs/build-windows.md` "What
+   is not there yet").
+6. **Zero-copy frames** through a DXGI shared handle, the counterpart of
    the dma-buf ring and IOSurface. Frames take the readback path today.
-6. **A Windows check that boots a guest**, shaped like
-   `tools/xp-driver-test.sh`: drive it over QMP, pull the artefacts, diff
-   a frame.
+
+A Windows check that boots a guest, once an open item here, is done:
+`scripts/test.sh all` runs natively on the PC since 2026-10-02
+(`docs/testing.md` "On Windows").

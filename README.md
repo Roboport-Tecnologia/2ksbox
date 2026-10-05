@@ -1,24 +1,30 @@
 # 2ksbox
 
-Run Windows 98, Windows XP and DOS the way the machines of the era did.
+Run Windows 98, Windows XP, Windows 7 and DOS the way the machines of
+the era did, and Windows 11 beside them.
 Period 3D games run accelerated on your GPU, the picture goes through a
 CRT shader instead of a blurry stretched rectangle, and the CD-ROM drive
 runs raw dumps of the discs you own, copy protection included.
 
-Built on a patched QEMU. Runs on Linux, Windows and macOS (Apple Silicon).
+Built on a patched QEMU. Runs on Linux, Windows and macOS.
 Free software, GPL-2.0.
 
 ## What it does
 
 - **A machine library, not a command line.** The launcher creates a
-  Windows 98, Windows XP, DOS or "Other" (BeOS, a period Linux, OS/2)
-  machine from a short wizard with defaults for each family. Each machine
-  opens in its own player window.
+  Windows 98, Windows XP, Windows 7, Windows 11, DOS or "Other" (BeOS,
+  a period Linux, OS/2) machine from a short wizard with defaults for
+  each family. Each machine opens in its own player window.
 - **Real 3D in the guest.** DirectX 1 up to 9 through our own
   paravirtual display adapter and driver, OpenGL passed through to the
   host, and an emulated 3dfx Voodoo 2 running 3dfx's own driver for
   Glide games. Quake II, Unreal Tournament, GTA
   Vice City, Max Payne and Need for Speed: Porsche Unleashed all run.
+  On Windows 7 the same driver gives Aero.
+- **Windows 11.** A modern machine with UEFI, Secure Boot and a TPM
+  2.0, so stock install media works with no setup tricks. x64 on a
+  Linux PC, Arm on a Mac (not on a Windows PC yet). On Linux and macOS a host folder
+  can be shared with it, and the clipboard goes both ways.
 - **A CRT on your monitor.** The guest's own framebuffer, at its native
   resolution and aspect (320×200 included), through a libretro slang
   shader chain, with shader profiles and a live preview in the launcher.
@@ -44,9 +50,9 @@ media, licences and disc dumps.
 
 | Host | Requirements |
 |---|---|
-| Linux | An x86-64 machine with GTK 4.10 or newer. KVM for near-native XP (optional; Windows 98 is emulated on purpose). A GPU with Vulkan 1.3 for the fast Direct3D path. Without it, Direct3D runs through Wine on the host if Wine is installed; with neither, the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
-| macOS | Apple Silicon, macOS 15 or newer. Guests are emulated (no x86 virtualization on these Macs) and still run faster than a period PC. The fast Direct3D path needs macOS 26; on older releases Direct3D runs through Wine if it is installed, and with no Wine the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
-| Windows | 64-bit Windows 10 or 11 with the Windows App Runtime 2.4 or later. WHPX (the Windows Hypervisor Platform) accelerates XP when it is enabled. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
+| Linux | An x86-64 machine with GTK 4.10 or newer. KVM for near-native XP, Windows 7 and Windows 11 (optional; Windows 98 is emulated on purpose). A GPU with Vulkan 1.3 for the fast Direct3D path. Without it, Direct3D runs through Wine on the host if Wine is installed; with neither, the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
+| macOS | Apple Silicon, macOS 12 or newer (the App Store build: macOS 26 or newer). The era's guests are emulated (no x86 virtualization on these Macs) and still run faster than a period PC; Windows 11 on Arm runs under the Mac's hypervisor. The fast Direct3D path needs macOS 26; on older releases Direct3D runs through Wine if it is installed, and with no Wine the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
+| Windows | 64-bit Windows 10 or 11 with the Windows App Runtime 2.4 or later. WHPX (the Windows Hypervisor Platform) accelerates XP and Windows 7 when it is enabled (Windows 98 is emulated on purpose). Windows 11 machines don't run on a Windows host yet: QEMU has no TPM there. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
 
 You also need install media for the guest operating system (your own
 Windows 98 / XP CD image, a DOS floppy or CD) and, for games, dumps of
@@ -67,7 +73,7 @@ Debian 12 and 13 and Ubuntu 24.04 and 26.04.
 
 | Purpose | Arch | Debian / Ubuntu |
 |---|---|---|
-| Compilers and build tools | `base-devel git ninja meson pkgconf` | `build-essential git ninja-build meson pkg-config` |
+| Compilers and build tools | `base-devel git ninja meson pkgconf` | `build-essential git ninja-build meson pkg-config autoconf automake libtool` |
 | QEMU's libraries | `pixman zlib libffi mesa libx11` | `libpixman-1-dev zlib1g-dev libffi-dev libgl-dev libx11-dev` |
 | The launcher (GTK 4.10 or newer) | `gtk4` | `libgtk-4-dev` |
 | Direct3D executor (optional) | `vulkan-headers vulkan-icd-loader glslang` | `libvulkan-dev glslang-tools` |
@@ -75,8 +81,9 @@ Debian 12 and 13 and Ubuntu 24.04 and 26.04.
 | Guest tools disc (optional) | `mingw-w64-gcc nasm xorriso` | `gcc-mingw-w64-i686 nasm xorriso` |
 
 QEMU gets a GLib of its own: the build downloads GLib, PCRE2 and libslirp
-and builds them for it, which needs meson 1.4 or newer. Debian 12 and
-Ubuntu 24.04 package older ones; there, `uv tool install meson` (uv is
+(and libtpms with OpenSSL, for Windows 11's TPM) and builds them for
+it, which needs meson 1.4 or newer. Debian 12 and Ubuntu 24.04 package
+older ones; there, `uv tool install meson` (uv is
 below) gives a newer one.
 
 The launcher draws with the system's GTK 4, so a machine that only
@@ -110,7 +117,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Optional on macOS: `brew install mingw-w64 nasm xorriso` and Open Watcom
-(as above) for the guest tools disc, and the Vulkan SDK with KosmicKrisp
+(as above) for the guest tools disc, `brew install autoconf automake
+libtool` for Windows 11's TPM, `brew install llvm lld` for Windows 11 on
+Arm's firmware, and the Vulkan SDK with KosmicKrisp
 for the Direct3D executor on macOS 26 (the recipe is in
 [docs/build-macos.md](docs/build-macos.md)).
 
@@ -186,8 +195,8 @@ are in [docs/build-windows.md](docs/build-windows.md).
    shader collection, it offers to download libretro's. Say yes: the
    starter profiles are made from it. A source checkout already has it.
 2. **Create a machine.** *New machine* walks through family (Windows 98,
-   Windows XP, DOS, Other), name, memory, processor, acceleration,
-   networking, pointer, disk size and install media. The defaults suit
+   Windows XP, Windows 7, Windows 11, DOS, Other), name, memory,
+   processor, acceleration, networking, pointer, disk size and install media. The defaults suit
    the family; change anything later in the machine's settings.
 3. **Install the operating system.** Point the install media at your
    Windows CD image and start the machine.

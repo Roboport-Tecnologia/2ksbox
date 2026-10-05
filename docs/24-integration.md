@@ -8,15 +8,17 @@ on the same host side (§5).
 
 ## 1. What the user gets
 
-- **A host folder as a network drive.** The machine form gets a "Shared
-  folder" path. While the machine runs, the guest sees it as
+- **A host folder as a network drive.** The machine form has a "Shared
+  folder" path (on its Network page; it needs Networking on). While the machine runs, the guest sees it as
   `\\10.0.2.4\host`, read-write and live, mapped to a drive letter by our
   guest agent. It needs no guest driver, because Windows' own SMB client
   does the work.
 - **The clipboard both ways**, text first. You copy on the host and paste
   in the guest, and the reverse.
 
-Both are per machine and off by default, the way the network is.
+Both are per machine. The shared folder is off by default, the way the
+network is; the clipboard is on for a new Windows 11 machine (a bundle
+without the field has it off).
 
 ## 2. Shared folders: an SMB server in the player
 
@@ -51,12 +53,15 @@ guest SMB client ─TCP→ 10.0.2.4:445 (slirp) ─AF_UNIX→ <runtime dir>/smb.
   For each guest connection it opens a new connection to a Unix socket,
   so the server sees ordinary per-connection streams. QEMU's
   `guestfwd=` knows only `cmd:` and a chardev, and a chardev carries one
-  connection for the machine's whole life. **A QEMU patch** adds
-  `guestfwd=tcp:10.0.2.4:445-unix:<path>`. The launcher passes it when
-  the machine has a shared folder, and the player owns the listener.
+  connection for the machine's whole life. **QEMU patch 79** adds
+  `guestfwd=tcp:10.0.2.4:445-unix:<path>`. The launcher gives the player
+  `--share <dir>` when the machine has a shared folder, and the player
+  adds the `guestfwd` to the machine's `-netdev` and owns the listener
+  (`player-core/src/share.rs`).
 - `slirp_add_unix` is `G_OS_UNIX` only. Windows 10 and later have
-  `AF_UNIX` (`afunix.h`), so Windows hosts get a `patches/deps/libslirp`
-  patch that turns it on there. Windows hosts come after macOS and Linux.
+  `AF_UNIX` (`afunix.h`), so Windows hosts need a `patches/deps/libslirp`
+  patch that turns it on there. That patch is not written yet (M23 step
+  7); the shared folder works on macOS and Linux hosts.
 - **The socket is the security boundary.** It sits in a per-run
   directory only the user can open (mode 0700), and slirp exposes it
   only at 10.0.2.4 on the guest's NAT. So the credentials can be a fixed
@@ -104,8 +109,7 @@ matches.
 
 Win98 and XP speak SMB1 (`NT LM 0.12`), and Win98 also uses share-level
 security. That is a second dialect on the same filesystem layer and the
-same socket. It is out of scope until Windows 11 works, and is then
-scoped in the track doc. Until then a vintage machine keeps the folder
+same socket. It is M23's step 8, not scoped yet. Until then a vintage machine keeps the folder
 disc (`isodir:`, track M5g).
 
 ## 3. The clipboard: the SPICE agent protocol, QEMU's host side
@@ -122,12 +126,13 @@ virtio-serial port named `com.redhat.spice.0`:
 
 - **QEMU build:** `vdagent.c` builds only `when: spice_protocol`. That
   means the spice-protocol **headers** (no SPICE server), so
-  `build-deps.sh` gains spice-protocol from a pinned tarball and
-  `configure-qemu.sh` drops `--disable-spice-protocol`. `--disable-spice`
+  `build-deps.sh` builds spice-protocol from a pinned tarball and
+  `configure-qemu.sh` passes `--enable-spice-protocol` (macOS and Linux;
+  Windows hosts still build without it, M23 step 7). `--disable-spice`
   stays.
-- **The embed API** gains a clipboard peer for the player (an API
-  version bump). The guest grabbing, the host's text arriving, and
-  requests both ways.
+- **The embed API** has a clipboard peer for the player (API version
+  11): the guest grabbing, the host's text arriving, and requests both
+  ways.
 - **The player** bridges that peer to the host's clipboard in
   `player-core/src/clipboard.rs`, through the `arboard` crate: a thread
   polls the host's clipboard twice a second, and each side remembers
@@ -182,8 +187,9 @@ Its log goes to `C:\2KSBOX\agent.log`, the guest-output convention.
 
 ## 5. Order and what the vintage families reuse
 
-Windows 11 on Arm on the Air goes first, then x64 Windows 11, then the
-vintage families. The SMB server and the clipboard peer are host code
+Windows 11 on Arm on the Air went first, then x64 Windows 11 (on Linux,
+2026-10-04); Windows hosts and the vintage families are next (M23 steps
+7 and 8). The SMB server and the clipboard peer are host code
 that every family shares. A vintage agent (C, mingw, Win98 / XP) would
 speak the same agent protocol over a **COM port**: `qemu-vdagent` is a
 chardev, so `-serial chardev:vda` works with no driver, and the Win32

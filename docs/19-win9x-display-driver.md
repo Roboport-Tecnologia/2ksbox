@@ -28,8 +28,9 @@ in `docs/testing.md`.
 - The DirectX 3–7 titles that matter on 98 are the ones M7 made work on
   XP through the HAL (execute buffers, colour keys, palettized textures,
   8 bpp modes). On 9x they cost only the per-OS layer.
-- The M4 paravirtual device and its guest DLLs are untouched and stay
-  the fallback wherever the driver is not installed.
+- The M4 paravirtual device and its guest DLLs stayed the fallback
+  wherever the driver was not installed, until ADR-021 retired them (M16
+  step 7); the driver is now the only Direct3D path (doc 14).
 
 ## The split
 
@@ -40,8 +41,8 @@ in `docs/testing.md`.
 - the surface table (handles, mip levels, formats and their pitch
   arithmetic including DXT, VRAM offsets, registration, dirty ranges,
   colour-key and palette bookkeeping);
-- the caps (`DDCAPS`, pixel-format lists, `D3DCAPS7`, `D3DCAPS8`, the
-  `ddflags` knobs);
+- the caps (`DDCAPS`, pixel-format lists, `D3DCAPS7`, `D3DCAPS8`,
+  `D3DCAPS9`, the `ddflags` knobs);
 - contexts, render targets, `Clear2`, readback;
 - the flip chain (offset register, frame counter, wait, timeout);
 - the heap layout, the encoder, the doorbell and the debug log.
@@ -616,7 +617,9 @@ serves DirectX 3 through 8 through the runtime's own translation (DDI 9
 would only add what doc 04 routes to M4's per-game `d3d9.dll`). So stock
 Win98 gets the accelerated desktop and DirectDraw, and **Direct3D wants
 DirectX 7 or later in the guest**. The DirectX 6 accommodations were
-never taken on 9.0c and were deleted.
+never taken on 9.0c and were deleted. Track M16 (ADR-021) later gave the
+9x layer the DX9 DDI as well, replacing that per-game `d3d9.dll` (§45,
+doc 15 "The DirectX 9 DDI").
 
 **Trap when updating an image.** Installing DirectX by hand means
 booting on `-vga cirrus`, which rebinds the display to the in-box driver

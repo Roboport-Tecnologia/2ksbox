@@ -11,7 +11,8 @@ filesystem driver or a virtual disk).
 - `libsmb/` (root workspace, new): the SMB2 server, no QEMU dependency.
 - `guest-agent/` (new): the Windows 11 guest agent, x64 and ARM64.
 - A QEMU patch: `guestfwd=…-unix:<path>` → `slirp_add_unix`.
-- Later: a `patches/deps/libslirp/` patch (`AF_UNIX` on Windows hosts),
+- Then (all landed by 2026-10-04 except the first, step 7): a
+  `patches/deps/libslirp/` patch (`AF_UNIX` on Windows hosts),
   spice-protocol in `scripts/build-deps.sh`, `--disable-spice-protocol`
   dropped in `scripts/configure-qemu.sh` (shared with M21), the embed
   API's clipboard peer (`embed/`, shared), the clipboard bridge in
@@ -35,7 +36,8 @@ filesystem driver or a virtual disk).
    both ways, a large file, editing in place, and Explorer's window.
    CHANGE_NOTIFY is implemented. Left for the user once the launcher has
    the setting (step 6): browsing and dragging by mouse. Left here:
-   leases (below) and Linux's `smbclient` in the host check.
+   Linux's `smbclient` in the host check (leases landed 2026-10-03,
+   below).
 4. **The clipboard's host side** (done 2026-10-03). spice-protocol
    0.14.5's headers in `build-deps.sh` (macOS and Linux; the Flatpak
    carries the tarball), `--enable-spice-protocol` except on Windows,
@@ -218,9 +220,9 @@ Mac, a second host text in 1.3 s, the share mapped on Z: by `--map`, and a
 host file read through it, served by the player's own `libsmb`.
 
 Not run: the launcher's own machine under the player on the Mac, since its
-TPM device trips QEMU 11.1's HVF (M21); the test runs the spike's board
-with `ppi=off`, and the `sharing` check runs the launcher's channel on a
-bare board.
+TPM device tripped QEMU 11.1's HVF (M21; fixed since by patch 82); the
+test runs the spike's board with `ppi=off`, and the `sharing` check runs
+the launcher's channel on a bare board.
 
 ## x64 Windows 11 on Linux (2026-10-04)
 
@@ -264,9 +266,10 @@ it").** The Linux tarball and the Flatpak carry
 it in its SDK (no Windows target for the agent, no ISO writer), so it
 takes the disc `build-virtio-win.sh` made on the host, as it takes the
 patched QEMU tree. `launcherx --paths` names it (`drivers`), and both
-packagers' checks require it inside the package. The macOS app ships no
-Windows 11 on Arm yet (no aarch64 player or firmware) and Windows hosts
-run no Windows 11, so neither carries a disc.
+packagers' checks require it inside the package. The macOS app carries
+the Arm disc, `2ksbox-drivers-arm64.iso`, since M20 step 5 (2026-10-04).
+The Windows package carries none: Windows hosts run no Windows 11 yet
+(no TPM there, M20).
 
 ## Leases (2026-10-03)
 
@@ -291,7 +294,7 @@ macOS's client the same, now in the `smb` host check.
 - Non-administrator users: a SYSTEM service holding the port, as Red
   Hat's agent does.
 
-- ~~Leases~~ (done 2026-10-03, below). Write and handle caching are
+- ~~Leases~~ (done 2026-10-03, above). Write and handle caching are
   still not granted.
 - Four IOCTLs are refused: 0x94264 (offload read), 0x900ef, 0x900a0 and
   0x9009c (object IDs). Nothing visible missed them.

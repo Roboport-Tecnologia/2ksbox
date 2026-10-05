@@ -14,18 +14,19 @@ DirectX 8 feature is a protocol bump made here.
 
 - **M7a**, framebuffer: the host's mode table, the desktop from VRAM,
   unattended install (`DRIVER\DRVINST.EXE`), 8 bpp palettes, hardware
-  cursor, gamma ramps. Register set **v5** (`D3DPT_FB_VERSION`); drivers
-  built since 2026-09-12 accept any adapter at or above their version.
+  cursor, gamma ramps. Register set **v5** (`D3DPT_FB_VERSION`; v8 now,
+  M18 added the interrupt and fence registers); drivers built since
+  2026-09-12 accept any adapter at or above their version.
 - **M7b**, DirectDraw: VRAM surfaces, flips paced by a vertical blank,
   colour keys.
 - **M7c**, Direct3D from DX3 execute buffers through the DX8 DDI:
   hardware T&L, vs/ps 1.x, palettized and compressed textures, VRAM
   vertex/index buffers, sixteen streams, cube and volume textures,
   anisotropic filtering, multisampling. Protocol **v13**
-  (`D3DPT_PROTO_VERSION`).
+  (`D3DPT_PROTO_VERSION`; v22 now, after M16's DX9 DDI and M18).
 - Titles: FIFA 2000, Max Payne, Diablo, Moto Racer 1997, GTA 2, GTA Vice
   City (played by hand by the user). The user's daily XP runs on it with
-  no custom DLL. The FIFA 2000 keyboard shim `D3DPT\DINPUT.DLL` is
+  no custom DLL. The FIFA 2000 keyboard shim `DINPUT\DINPUT.DLL` is
   installed per game by decision (doc 15 "FIFA 2000 on the HAL").
 - Below the Vulkan floor the executor runs under Wine (M15,
   `EXEC=wine`) or on Windows' d3d9 (`d3d9=system`); with `no-exec=on`
@@ -57,7 +58,7 @@ Owned by this track:
 Shared (rebase first, edit minimally, name the other track in the
 commit): `d3dpt/d3dpt_proto.h`, `d3dpt/exec/d3dpt_exec.cpp` /
 `d3dpt_exec.h` (M4), `core/` (M10), the
-remote executor files (M15), `scripts/test.sh`, `player/`.
+remote executor files (M15), `scripts/test.sh`, `player-core/`.
 
 ## Where the design lives
 
@@ -108,7 +109,8 @@ or `xp-fifa2000.bat`) are in `docs/testing.md`.
 **Images.** Use an overlay or copy of an XP image with the driver
 installed, never the user's own `~/vms/winxp-m7.qcow2`. Scratch copies
 exist (`winxp-m7g` has Diablo and the game installs); otherwise make one
-with `install`. `~/vms/winxp.qcow2` is M4's cirrus image.
+with `install`. `~/vms/winxp.qcow2` is the plain XP image; the `guest`
+stage installs the driver on an overlay of it (`tools/xp-dx9-test.sh`).
 
 ## Diagnostics
 
@@ -169,9 +171,10 @@ The rules are in doc 15; these are the ones a session meets first.
    retired TLB table coming back across the VGA window's topology flush
    (fixed 2026-09-24; `xp-driver-test.sh vesa`). The inbox driver's VESA
    desktop renders on the adapter; a failed install is no longer blind.
-2. **A `driver` stage in `scripts/test.sh`**: boot on `d3dpt-vga`, run
-   `d3d7` + `shtest` + `probes` from a snapshot, as the XP D3D stage
-   does. Until then `tools/xp-driver-test.sh` is the check.
+2. **A `driver` stage in `scripts/test.sh`**: the `guest` stage now runs
+   D3DGAME9 / D3DGAME8 / D3DFEAT9 on the driver (`tools/xp-dx9-test.sh`,
+   M16 step 7), but `d3d7`, `shtest` and `probes` are still
+   `tools/xp-driver-test.sh` only.
 3. **Titles for the features only probes have seen** (table below).
 4. Present the host frame through the player's 3D path instead of the
    per-frame readback into VRAM.
@@ -182,8 +185,8 @@ The rules are in doc 15; these are the ones a session meets first.
    only probe still "not offered"), a RAM-backed palette page for fast
    palette animation, more 8 bpp titles (StarCraft, Age of Empires,
    Caesar 3).
-6. A bytecode validator for SM2/3 on M4's d3d9 half. Not a v1 blocker
-   (user decision: hostile guest input is an accepted risk).
+6. A bytecode validator for SM2/3 (only SM1 has `sm1_valid`). Not a v1
+   blocker (user decision: hostile guest input is an accepted risk).
 
 ## Games to test, by feature
 

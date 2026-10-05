@@ -41,11 +41,12 @@ change to anything a guest sees (a drive's behaviour, a device register)
 needs `all`: a patch that broke `atapi-guest` once went unnoticed for
 days behind a green `host`.
 
-Environment: `WINXP_IMG` (`~/vms/winxp.qcow2`), `GUEST_ISO` (newest
-`guest-tools/out/guest-tools-3dfx-*.iso`), `D3D_GOLDEN_BUDGET` (1200),
-`WIN98_PAD_MACHINE`,
+Environment: `WINXP_IMG` (`~/vms/winxp.qcow2`; on Windows `WINXP_MACHINE`,
+below), `GUEST_ISO` (newest `guest-tools/out/guest-tools-3dfx-*.iso`),
+`D3D_GOLDEN_BUDGET` (1200), `WIN98_PAD_MACHINE` (`claude98`),
 `WIN98_DX9_MACHINE` (`base98-br`: the launcher machine the Win98 checks
-copy).
+copy), `WIN7_ISO` (the `win7-aero` check's install disc; unset, it
+skips).
 
 Writing a check for a Mac: never start a program through `env(1)`.
 `/usr/bin/env` is protected by System Integrity Protection, so it strips
@@ -64,7 +65,7 @@ Everything Windows is done natively on Windows (user decision,
 `scripts/build-windows.sh` built, with no Linux box involved.
 
 ```sh
-scripts/build-windows.sh                  # qemu rust mitsuami exec wddm guest, as usual
+scripts/build-windows.sh                  # qemu qemu-msvc rust mitsuami exec wddm guest, as usual
 scripts/test.sh all                       # in the MINGW64 shell
 WIN_QEMU_CC=msvc scripts/test.sh all      # the same, on QEMU built against MSVC's runtime
 ```
@@ -127,8 +128,8 @@ What differs from Linux, so a failure there reads right:
   below the Vulkan floor runs there.
 - SKIPs that stay: `accel-choices` (bwrap), `embed-3d` (Linux's GL path),
   `package` (the zip is rolled and checked by `scripts/package-windows.sh`,
-  not by this check), `atapi-read-error` (an LD_PRELOAD), `mode-sweep` and the pad
-  checks (they want a display test.sh does not set up here yet),
+  not by this check), `atapi-read-error` (an LD_PRELOAD), `mode-sweep` and the
+  `pad-guest` checks (they want a display test.sh does not set up here yet),
   `player-mitsuami` (sway), `tpm-qtest` (no libtpms in the Windows QEMU
   until M20 step 5), `exec-wine`.
 
@@ -177,24 +178,29 @@ What differs from Linux, so a failure there reads right:
 | `preview-anim` | the shader preview: a still preset is one picture at any frame, an animated one is not |
 | `embed-3d` | `tools/embed-3d-test.c` (Linux) |
 | `d3dpt-dp2` | `tools/d3dpt-dp2-test.cpp` |
+| `d3dpt-dp2-system` | Windows only: the same test with `D3DPT_D3D9=system`, the executor on Windows' own `d3d9.dll` (a host below the Vulkan floor) |
 | `exec-wine` | the same test through the Wine executor; its frame must equal the in-process one. An autogen texture's 1x1 level may be either average of its halves: Wine's d3d9 on Apple's OpenGL mixes in linear light (0xbc where DXVK gives 0x7f; D3D9 leaves the filter to the driver) |
 | `exec-no-device` | the dp2 test with both Vulkan loader variables at a missing file, so DXVK's constructor throws out of `Direct3DCreate9`; it must end in the test's own exit 77, never a signal (DXVK patch 09, the executor's once-per-library rule) |
 | `crtcal` | `build/crtcal-render`: every calibration pattern's circle round on its tube |
 | `mode-sweep` | `player --mode-sweep`: the display path without a guest |
+| `mode-sweep-border` | from the same run: the player's log must not say `clamp-to-border sampling: off although` the adapter has it (our device descriptor dropped `ADDRESS_MODE_CLAMP_TO_BORDER`, and curved presets smear the tube's edge) |
 | `player-mitsuami` | `tools/player-mitsuami-test.sh`: the mitsuami player (M22) on a private headless sway, the mode sweep through it, its test pattern read back off the compositor, a key reaching its surface; skipped unless `player-mitsuami` is built and sway, grim and wtype are there |
-| `d3dgame9-nat`, `d3dfeat9-nat` | the reference scene / feature test natively on DXVK, against the rig golden; the guest stage's oracle |
+| `d3dgame9-nat`, `d3dfeat9-nat` | the reference scene / feature test natively on DXVK, against the rig golden; the guest stage's oracle. `d3dfeat9-nat` also needs the occlusion query resolved (`0x00000000` with pixels). A harness that does not build fails as `d3d-native` |
 
 ### Guest-stage checks
 
 First the DOS batteries, each a FreeDOS floppy under our QEMU. They need
 nasm, mtools and the floppy (run `tools/x87-guest-test.py` once to fetch
-it) and skip without them. Then XP (Linux; KVM when `/dev/kvm` exists):
+it) and skip without them. Then XP (Linux and Windows; KVM when `/dev/kvm`
+exists):
 `tools/xp-dx9-test.sh` makes a fresh overlay on `WINXP_IMG`, installs the
 display driver from the newest guest-tools ISO (`xp-driver-test.sh
 install`), and in a second boot runs DDVMTEST, D3DGAME9, D3DGAME8 and
 D3DFEAT9 through XP's own `ddraw.dll` / `d3d9.dll` / `d3d8.dll` (M16 step
 7; until then the Direct3D DLLs on Cirrus). Its log is
-`build/test/xpdx9.log`, a run that did not finish is `guest-run`:
+`build/test/xpdx9.log`, a run that did not finish is `guest-run`, and a
+scene that left no frame on the scratch disk fails as `guest-G9`,
+`guest-G8` or `guest-F9`:
 
 | Check | What it proves |
 |---|---|
@@ -216,7 +222,9 @@ D3DFEAT9 through XP's own `ddraw.dll` / `d3d9.dll` / `d3d8.dll` (M16 step
 The two Win98 checks run after the XP stage, on a raw copy of
 `WIN98_DX9_MACHINE` kept in `build/test/w98.raw` (never the machine's
 disk; delete the copy, or `FRESH=1`, after a run was killed), and skip
-where that machine does not exist. About 5 minutes together.
+where that machine does not exist or Wine's tests are not built
+(`guest-tools/build-winetests.sh`). About 5 minutes together.
+`win7-aero` runs last.
 
 ## Driving a guest
 
@@ -338,7 +346,7 @@ another.
 |---|---|
 | `tools/d3dpt-dp2-test.cpp` | the display driver's records (doc 15 M7c): VRAM surfaces, a context, D3D7TEST's scene as DP2 tokens, readback checked, hostile records refused; its BMP is `D3D7TEST`'s oracle; `d3dpt-dp2`. Run it on both backends whenever the executor changes (107 checks each). `exec-no-device` runs it with no Vulkan device: a second `Direct3DCreate9` on a DXVK whose constructor had thrown dereferenced a null instance (the community app on macOS 15; DXVK patch 09) |
 | `exec-wine` (check) | `d3dpt-dp2-test` with `D3DPT_EXEC_LIB=build/d3dpt/libd3dpt_exec_remote.$SO`: the executor's Windows build under Wine on Wine's d3d9 must draw the in-process frame (M15). Skips without Wine, without mingw's `build/d3dpt/wine/`, or over ssh on macOS; prefix `build/wine-prefix` |
-| `guest-tools/src/d3dgame9.c`, `d3dgame8.c` | the reference scene (doc 14): rig goldens first, diffed against every emulated path; `tools/d3dgame9-native.cpp` is it natively on DXVK |
+| `guest-tools/src/d3dgame9.c`, `d3dgame8.c` | the reference scene (doc 14): rig goldens first, diffed against every emulated path; `tools/d3dgame9-native.cpp` is it natively on DXVK, through the Win32 shim in `tools/d3dgame-native/` |
 | `guest-tools/src/d3dfeat9.c` + `tools/d3dfeat9-native.cpp` | the D3D9 feature test (shaders, declarations, state blocks, queries, cube maps, surfaces, one quad per guest-DLL bug fixed): the guest frame byte-identical to native, getter lines equal |
 | `tools/dxvk-d3d9-test.cpp` | DXVK's d3d9 on patch 04's headless WSI alone |
 | `DRIVER\D3D7TEST.EXE` | Direct3D 7 through the HAL: enumeration, Z, texture, the scene, fps; BMP equals `d3dpt-dp2-test`'s |
@@ -373,6 +381,7 @@ another.
 | Tool | Proves / runs |
 |---|---|
 | `target/release/discx` | the CD model (doc 17): `selftest <dir>` (`libdisc`), `info`/`dump`, `scan` (L-EC per sector, failures split into read-anyway / repaired / unreadable; a protection band must be all unreadable), `repair <image> <out>` (the negative-control copy), `subscan`, `convert`, `export`, `mktree` |
+| `tools/cdprobe.asm` | `CDPROBE.COM`: what a DOS CD driver answers through MSCDEX (drive count, drive check, the IOCTL INPUT subfunctions), for any DOS; build line in its header |
 | `tools/atapi-guest-test.py` | DOS drives the ATAPI drive by PIO on a cdimage disc (patch 51): replies identical to `discx dump`, MODE SENSE 2A's medium type (03h on the mixed disc, patch 56), sense, audio positions, both stops (after a stop the head stays where playback ended, patch 54); the audio status prints in *decimal* (`21` is `0x15`, play completed); the shelf (patch 52) with `CDSHELF.COM`, the boot disc listed as in the drive before any LOAD. `ATAPI_READ_ERROR=1` (Linux, `tools/read-error-inject.c`) makes audio sectors fail with EIO and play must continue as silence (patch 55); `atapi-guest`, `atapi-read-error` |
 | `tools/cd-rate-guest-test.py [image]` | what the guest reads does not depend on how fast it asks: PIO and bus-master DMA, several request sizes, byte-count limits and paces, checksummed against the host; `.iso` vs `.cue` is the driver A/B; `SCAN=1`. The guest must set PCI bus-master enable itself or DMA "succeeds" and writes nothing |
 | `tools/xp-cdimage-test.sh <image> <disc> <ref>` | XP copies a whole disc (`.cue/.ccd/.mds/.iso` or `isodir:<dir>`) through cdrom.sys and every file matches; `CDTEST=` also plays track 2 through MCI into the drive's wav. Runs on macOS (mtools). `guest-cdimage`, `guest-dirdisc` |
@@ -430,7 +439,7 @@ Local only; each works on a raw copy or overlay of an image.
 | Tool | Runs |
 |---|---|
 | `tools/win98-game-test.sh <image> <name>` | a game on the Win98 driver: `GUEST_CMD=` as `C:\RUN.BAT` started by WIN.INI `run=` (a DOS game needs `cd` first; a second Windows program needs `start /w` before the first), `CDS=`, `SHOTS=`, `KEYS=`/`CLICKS=`, `JIGGLE=1`, `DUMP_EVERY=`/`TRACE=1`, `VGA=cirrus`, `STAGE=`, `PULL=`, `TEXT_AT=`, `UNTIL=` (end the run when COM1 prints it; `RUN_SECS` is then the cap), `EXTRA=`, `MUSIC=gm\|mt32\|none`, `NO_DRIVER=1`. **`PLAYER=1`** runs it in the player, the only way to run an OpenGL title (frames every `PLAYER_SHOT_EVERY`). It builds the machine `launcherx --print-args` gives, sound card included (Total Annihilation quits without one, which reads like a driver failure); with a `voodoo2` it waits out 3dfx's login helper (`V2START.LOG`, `VOODOO_WAIT=`). Ends with the power button; a machine that ignores it gets `OUT/hang.txt` (`info registers` twice, `info pic`/`lapic`). With `EXTRA=-perfmap` delete `/tmp/perf-<pid>.map` afterwards (it grows by gigabytes) |
-| `tools/w98-3dmark.sh <name> [perf\|whole]` | 3DMark 99 end to end; `tests.txt` places every rate line by the test on screen (read a test's rate there only); `whole` + `tools/tcg-perf-cut.py`, `JIT_SNAPS=`, `PAGES=` + `tools/tcg-form-weights.py`, `QEMU_TCG_OPTS=`, `TABLET=0` |
+| `tools/w98-3dmark.sh <name> [perf\|whole]` | 3DMark 99 end to end; `tests.txt` (`tools/w98-3dmark-tests.py`) places every rate line by the test on screen (read a test's rate there only); `whole` + `tools/tcg-perf-cut.py`, `JIT_SNAPS=`, `PAGES=` + `tools/tcg-form-weights.py`, `QEMU_TCG_OPTS=`, `TABLET=0` |
 | `tools/w98-mp2.sh <name> [perf\|dwarf]` | Max Payne 2 in `base98-br`'s hospital corridor from the user's save, uncapped (`CAP=1` keeps the vertical blank): the driver's benchmark (track M17). `rates.txt` from `tools/ddi-rate.py` (the level's frames/s, readback and executor time; with `D3DPT_DDI_FLUSH_AB=n` the within-run A/B by adjacent periods), `cpu.txt` per QEMU thread; `perf` adds `tools/guest-code-owner.py` (the vCPU by host library and by guest module), `dwarf` a call-graph profile for the executor's inclusive costs. Refuses to start beside another QEMU |
 | `tools/w98-3dmark2001.sh <name>` | 3DMark2001 SE's Benchmark and its detail pages (`details-NN.png`); `CPU=pentium3,x87-pc64-as-53=on` the inexact switch's A/B |
 | `tools/w98-blood.sh <name>` (+ `w98-blood-fps.py`) | Blood in a DOS box, fps from VBE page flips (`FRESH=1` each run) |
@@ -440,8 +449,9 @@ Local only; each works on a raw copy or overlay of an image.
 | `tools/xp-moto-race.sh <image> <name> [qemu]` | the M9 game oracle's fps; `RACE_SAMPLE=`, `RACE_MEMSAVE=` (for `smc-diff.py`), `RACE_DELAY=`, `FPS_RATE=`, `PERFMAP=0`; `RACE_BRAKE=1` (throttle and brake apart), `RACE_WATCH=<s>` / `RACE_CYCLE=A:B` / `RACE_TRACE=1` (`moto-watch.py`), `RACE_STAGE=demo` (the attract demo, no menus) |
 | `tools/xp-vicecity.sh play\|vm\|attach\|stop <image>` | GTA Vice City on the DX8 DDI into the city, `rates.txt` from `ddi:` lines; `DDFLAGS=` for the A/B, `NO_KVM=1`; the game's frame limiter must be off |
 | `tools/xp-fifa-match.sh kvm\|tcg <image>` | FIFA 2000 into a match and a keyboard test (Esc's pause menu is the pass); `EXEC=wine` |
-| `tools/xp-fifa2000.bat`, `tools/xp-maxpayne.bat` | batch files for `xp-driver-test.sh bat`: FIFA 2000 and Max Payne on the HAL with no wrapper DLL |
+| `tools/xp-fifa2000.bat`, `tools/xp-maxpayne.bat`, `tools/xp-vicecity.bat` | batch files for `xp-driver-test.sh bat`: FIFA 2000, Max Payne and Vice City on the HAL with no wrapper DLL |
 | `tools/xp-diablo.sh install\|play <image>` | Diablo on 8 bpp palettized modes into Tristram |
+| `scripts/win-voodoo-ab.sh <prop=value>` | on Windows, `base98-br` in the player with one Voodoo 2 property changed (`ramfifo=off`, `recompiler=off`, `threads=1`; `vga:` for the adapter's, `no-voodoo` for no card), for an A/B the launcher has no switch for |
 
 ## Other tools
 

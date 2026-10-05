@@ -11,6 +11,10 @@ commands `docs/development.md` and `docs/build-macos.md` /
 
 ## Player
 
+- **Two front ends over one core** (ADR-025, track M22): `player-core/`
+  is everything but the window, under `player/` (winit) and
+  `player-mitsuami/` (the launcher's default when built; the Windows
+  packages ship it as `2ksbox-player.exe`).
 - **What it runs is a QEMU command line**, not a bundle:
   `player [--shader <preset>] [--shader-params k=v,…] [--pad <mode>]
   -- <qemu args>`. The launcher translates a bundle into that line
@@ -22,10 +26,11 @@ commands `docs/development.md` and `docs/build-macos.md` /
   bars. Ctrl+Alt+Shift+F is borderless full screen.
 - **Input** is doc 03's model (tablet or PS/2 grab, Ctrl+Alt+G,
   Ctrl+Alt+K, Ctrl+Alt+Shift+D for Ctrl+Alt+Del, Ctrl+Alt+S for a shot
-  of the guest's frame, Ctrl+Alt+Shift+S for one of the window's). Alt+F4 asks first, in a panel the player draws
-  over the picture (`player/src/prompt.rs`), since the player has no
-  toolkit and Linux has no message box that works inside the Flatpak and
-  over a full-screen window. A gamepad (M13, `docs/tracks/m13-gamepads.md`)
+  of the guest's frame, Ctrl+Alt+Shift+S for one of the window's). Alt+F4 asks first. The winit
+  player draws the question over the picture (`player/src/prompt.rs`),
+  since it has no toolkit and Linux has no message box that works inside
+  the Flatpak and over a full-screen window; the mitsuami player uses the
+  platform's alert. A gamepad (M13, `docs/tracks/m13-gamepads.md`)
   works whether or not the pointer is grabbed and never changes the grab.
 - **Audio.** QEMU's mixer writes f32 into a lock-free ring drained by
   cpal (CoreAudio / WASAPI / PipeWire), and the player limits the sum
@@ -173,8 +178,8 @@ existing machine's values are deliberate. A field with a consequence
 has no setter, only `choose_*`. The `capi` smoke asserts both
 directions and "Default" (except the pad, which the C ABI has no row
 for yet). The disk size follows the same rule
-(`bundle::default_disk_size_gb`: 10 GB Win98 and Other, 20 GB XP, 2 GB
-DOS; user decision).
+(`bundle::default_disk_size_gb`: 10 GB Win98 and Other, 20 GB XP, 40 GB
+Windows 7, 64 GB Windows 11, 2 GB DOS; user decision).
 
 The fields, and why each is what it is:
 
@@ -187,8 +192,8 @@ The fields, and why each is what it is:
   period Linux, OS/2). The note names what it has (a VESA VGA, an
   RTL8139, an ES1370) and says there is no 3D.
 - **Memory** is bounded per family (`bundle::ram_mb_range`: Win98
-  32–512, since more will not boot; XP 64–3072, DOS 4–256, Other
-  16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
+  32–512, since more will not boot; XP 64–3072, Windows 7 1024–3072,
+  Windows 11 4096–32768, DOS 4–256, Other 16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
 - **Acceleration** is Automatic / hardware only / Emulation,
   `accel = "auto" | "kvm" | "tcg"` on every host. `kvm` means "hardware
   acceleration, required", spelled `whpx` on Windows at spawn, and
@@ -213,7 +218,7 @@ The fields, and why each is what it is:
   *writing* (a bare `exists()` misses a user outside the `kvm` group),
   Windows asks `WHvGetCapability` (the feature can be installed and
   still off or held by Hyper-V/WSL2). **Win98 and DOS default to
-  emulation, XP and Other to Automatic.** Under KVM Win9x runs at host
+  emulation, every other family to Automatic.** Under KVM Win9x runs at host
   speed into its own fast-CPU bugs, which `-cpu pentium3` does not
   prevent, and Win98 is tuned on the fast paths of docs 13 and 16. A DOS
   throttle needs TCG.
@@ -335,7 +340,7 @@ The fields, and why each is what it is:
 - **Sound card and music** are per-family lists (`bundle::Sound`,
   `bundle::Music`, doc 20 §6). The FM chip comes with the card that
   carried one.
-- **Seamless mouse** (`seamless_mouse`) is on for Win98 and XP and off
+- **Seamless mouse** (`seamless_mouse`) is on for the Windows families and off
   for DOS (its mouse drivers read the PS/2 controller) and Other (an
   absolute pointer needs a guest USB stack nobody here vouches for). On
   gives `-usb -device usb-tablet` and the window never grabs; off leaves
@@ -479,15 +484,15 @@ and runs without live control.
   therefore writes what it did to `snapshots.toml` beside the bundle
   (`snapshots::Lineage`): every snapshot it took, with the snapshot the
   disk descended from at the time, and which snapshot the disk's present
-  state descends from now — the last one taken or restored, marked
+  state descends from now: the last one taken or restored, marked
   *current* in the list, and where the next one goes. Rows come in tree
   order (each root, then its descendants; siblings in the order they
   were taken) with a depth per row, so a front end draws the tree by
   indenting names. The file follows the disk, never the other way: on
   every read a record whose snapshot is gone is dropped and its children
   move up to its parent, which is also what deleting a snapshot in the
-  middle of a branch does. A snapshot with **no record** — taken by
-  hand with `qemu-img`, or before the launcher kept the file — sits at
+  middle of a branch does. A snapshot with **no record** (taken by
+  hand with `qemu-img`, or before the launcher kept the file) sits at
   the top level, with no parent guessed (and no notice: it is simply a
   row); restoring one gives it a record as a root, so the tree grows
   from there. A record matches a snapshot by id, name *and* date, since
@@ -825,13 +830,14 @@ path into the desktop entry's `Icon=` (a prefix outside `XDG_DATA_DIRS`
 cannot resolve a theme name). macOS builds its `.icns` from the same
 PNGs. On Windows the `.ico` goes *inside* every .exe as a resource, the
 only thing Explorer reads: `packaging/windows/win-icon.rs` is
-`include!`d by the build scripts of `launcher-mitsuami` and `player` (a
+`include!`d by the build scripts of `launcher-mitsuami`, `player` and
+`player-mitsuami` (a
 build-dependency would have to be vendored into the Flatpak's offline
 sources), writes a two-line `.rc` (the icon, and the application
 manifest `packaging/windows/app.manifest`, which declares per-monitor
 DPI awareness for the Store's certification kit) and runs `windres`.
-For the MinGW player it links the object; for the MSVC launcher
-windres writes a `.res`, which Microsoft's linker takes as it is, told
+For the MinGW player it links the object; for an MSVC binary (the
+launcher, the mitsuami player) windres writes a `.res`, which Microsoft's linker takes as it is, told
 to make no manifest of its own. A host without windres gets a warning
 and an icon-less binary with the default manifest. The loose `.ico`
 ships too, for shortcuts.

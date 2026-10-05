@@ -18,15 +18,15 @@ packaging, logs and licensing. Neighbours:
 
 | Piece | Status |
 |---|---|
-| x86 emulation | Exists: a QEMU fork, trimmed to what we use, with our own TCG fast paths (x87, SSE, SIMD, REP strings, same-value SMC, inline TB lookup); KVM / WHPX on x86 hosts |
+| x86 emulation | Exists: a QEMU 11.1 fork, trimmed to what we use, with our own TCG fast paths (x87, SSE, SIMD, REP strings, same-value SMC, inline TB lookup); KVM / WHPX on x86 hosts, HVF for Windows 11 on Arm on a Mac |
 | Guest 3D | We build the paravirtual Direct3D device (`d3dpt`, a host executor on DXVK), qemu-3dfx's GL pass-through, and an emulated Voodoo 2 for Glide (doc 21) |
-| Guest display drivers | We build `d3dpt-vga` drivers for XP (miniport + DX8 DDI, doc 15) and Win98 (mini-VDD + 16-bit driver, doc 19) |
+| Guest display drivers | We build `d3dpt-vga` drivers for XP (miniport + DX9 DDI, doc 15), Win98 (mini-VDD + 16-bit driver, doc 19) and Windows 7 (WDDM, track M18) |
 | Guest music | We build OPL3 and MPU-401 devices over `libsynth` (doc 20) |
 | CRT shaders | Exists: libretro slang presets through librashader (a library, not RetroArch) |
 | Player | We build it: in-process QEMU, wgpu + librashader, mode analysis, low-latency audio (Rust) |
 | Launcher | We build `launcher-core`, shipped as `launcher-mitsuami` (native widgets through mitsuami: AppKit, WinUI 3, GTK 4), and `launcher-capi` for other languages |
 | CD-ROM backend | We build `libdisc` (cue/bin, subchannel, CD-DA, `isodir:` folders), the ATAPI patches, the disc shelf |
-| Machine families | We build Win98, XP, DOS (throttled CPU rates) and Other |
+| Machine families | We build Windows 98, Windows XP, Windows 7, Windows 11, DOS (throttled CPU rates) and Other |
 
 Authentic-hardware emulation (a real S3, cycle-accurate chipsets) is
 86Box's territory and out of scope. The exception is the Voodoo 2,
@@ -39,10 +39,10 @@ title, and it is the machine's only Glide (ADR-016, ADR-020).
 1. [Goals and non-goals](01-goals.md)
 2. [Architecture: in-process QEMU, process model, threading](02-architecture.md)
 3. [Display pipeline: pixel accuracy, CRT shaders, latency](03-display-pipeline.md)
-4. [3D acceleration: qemu-3dfx, paravirtual D3D, and guest drivers](04-3d-acceleration.md)
-5. [CD-ROM backend: raw images, copy protection, and directory discs](05-cdrom-backend.md)
-6. [Guest machines: Win98, XP, DOS, and Other reference configs](06-guest-machines.md)
-7. [Frontend: machine library, UX, input, audio, and packaging](07-frontend.md)
+4. [3D acceleration: strategy and paths](04-3d-acceleration.md)
+5. [CD-ROM backend: raw images and copy protection](05-cdrom-backend.md)
+6. [Guest machines: the families](06-guest-machines.md)
+7. [Front end: player + launcher](07-frontend.md)
 8. [Roadmap and milestones](08-roadmap.md)
 9. [Reference hardware rig](09-reference-hardware.md)
 10. [Decision records (ADRs)](10-decisions.md)
@@ -59,6 +59,7 @@ title, and it is the machine's only Glide (ADR-016, ADR-020).
 21. [The Voodoo 2 device](21-voodoo2.md)
 22. [The CPU-benchmark evaluation of the patch queue](22-tcg-evaluation.md)
 23. [Dynamic binary translation: a literature survey](23-dbt-literature.md)
+24. [Integration: shared folders and the clipboard](24-integration.md)
 
 Also: [testing](testing.md), [macOS](build-macos.md),
 [Windows](build-windows.md), [tracks](tracks/).
@@ -129,8 +130,9 @@ What each stage needs to know:
   real `distlib`). It is for a sandbox that has a Python and cannot fetch
   one, such as the Flatpak.
 - **QEMU links a GLib of its own on Linux** (`scripts/build-deps.sh`
-  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static, and
-  libtpms with OpenSSL's libcrypto for patch 75's TPM;
+  builds pcre2, GLib and libslirp into `build/deps/<arch>`, static,
+  libtpms with OpenSSL's libcrypto for patch 75's TPM, and
+  spice-protocol's headers for the clipboard;
   `build.sh`'s `deps` stage runs it). `configure-qemu.sh` links them
   with their symbols hidden and turns smartcard off, so
   `libqemu-embed` shows no system GLib in `ldd`. The reason is QEMU's
@@ -146,7 +148,7 @@ What each stage needs to know:
   mismatch` and as a guest that never attaches. `build.sh` rebuilds
   both; on a host that cannot (no mingw), its summary names the
   artefacts left behind.
-- **On macOS every stage targets Homebrew's floor**
+- **On macOS every stage targets the macOS floor**, 12.0
   (`scripts/macos-floor.sh`). `build.sh` and `test.sh` export
   `MACOSX_DEPLOYMENT_TARGET`, QEMU and DXVK take it as a flag, and a
   cargo workspace linked for a newer macOS is cleaned first
@@ -262,7 +264,9 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   system hotkeys no program gets), or the window server's hot keys off
   on macOS (Cmd+Tab, Cmd+Space, Mission Control, Ctrl+arrows, the
   screenshot chords; the app menu's Cmd+H and Cmd+Q taken too, and
-  Cmd+Q asks before it closes, like Alt+F4). `Ctrl+Alt+K` toggles
+  Cmd+Q asks before it closes, like Alt+F4;
+  `PLAYER_KEYBOARD_MAC=presentation` uses the public presentation
+  options instead, which cover only Cmd+Tab and Cmd+H). `Ctrl+Alt+K` toggles
   them between host and guest (the title says when they are the
   host's). `PLAYER_KEYBOARD_CAPTURE=0` starts with them the host's;
   `scripts/test.sh` sets it. `PLAYER_KEYBOARD_LOG=1` prints what the
@@ -388,7 +392,7 @@ socket file). A script adds its own `-qmp unix:…,server,nowait`.
 
 ### Direct3D pass-through (doc 14)
 
-The `d3dpt` device loads the executor (`D3DPT_EXEC_LIB`, else
+The `d3dpt-vga` adapter loads the executor (`D3DPT_EXEC_LIB`, else
 `build/d3dpt/libd3dpt_exec.so`) and DXVK (`D3DPT_DXVK_LIB`) on the
 guest's first use. `D3DPT_EXEC=auto|dxvk|wine|none` picks the back end,
 as does the adapter's `exec=` (`-global d3dpt-vga.exec=wine` in the
@@ -565,7 +569,8 @@ scripts/package-linux.sh                  # build/package/2ksbox-<version>-linux
 scripts/package-linux.sh --with-shaders   # + the ~80 MB preset collection
 ```
 
-It stages the launcher, the player, the embed library, our `qemu-img`,
+It stages the launcher, the two players (the era machines' and Windows
+11's `2ksbox-player-x86_64`, each with its embed library), our `qemu-img`,
 the firmware, the guest-tools ISO, Windows 11's drivers disc
 (`build/virtio-win/2ksbox-drivers-x64.iso`, the `virtio` stage) and the
 libraries QEMU `dlopen`s (executor + DXVK, the Wine pair) into one relocatable
@@ -672,9 +677,11 @@ build".
 Built on a Windows PC, in MSYS2's MINGW64 shell
 (`scripts/build-windows.sh`, `scripts/package-windows.sh`; ADR-026):
 `2ksbox.exe` (the launcher) and `2ksbox-player.exe` (`player-mitsuami`),
-WinUI 3 and MSVC, needing the Windows App Runtime 2.4 or later, `libqemu-embed-i386.dll`, the executor
-with DXVK, `qemu-img.exe`, firmware and guest tools in one portable
-folder. The
+WinUI 3 and MSVC, needing the Windows App Runtime 2.4 or later,
+`2ksbox-player-x86_64.exe` (Windows 11's), QEMU built against MSVC
+(`libqemu-embed-i386.dll`, `libqemu-embed-x86_64.dll`, `qemu-img.exe`;
+the `qemu-msvc` stage), the executor with DXVK, firmware and guest tools
+in one portable folder that ships no runtime DLL. The
 same folder packs as an MSIX for the Microsoft Store
 (`scripts/package-msix.sh`, on a PC with the Windows SDK).
 Details: [build-windows.md](build-windows.md).
@@ -694,8 +701,8 @@ Details: [build-windows.md](build-windows.md).
 
 ## Licensing, for packagers
 
-Everything that links QEMU in-process is GPL-2.0: the `player`,
-`qemu-embed`, and `libdisc` and `libsynth`, which are compiled into QEMU.
+Everything that links QEMU in-process is GPL-2.0: the players
+(`player`, `player-core`, `player-mitsuami`), `qemu-embed`, and `libdisc` and `libsynth`, which are compiled into QEMU.
 
 The **launcher** (`launcher-core`, `launcher-mitsuami`, `launcher-capi`) and
 the `shader-chain` crate it shares with the player are

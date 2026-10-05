@@ -7,6 +7,10 @@
 runners take the game measurements. Numbers are from one machine, an M1
 MacBook Air, at the commit that carries this document.*
 
+*Since 2026-10-02 the tree is QEMU 11.1.2 (track M21): every patch here
+was ported except 21 (`pinned-regs`, §3.6) and those 11.1 made
+unneeded, and the numbers below are 9.2.4's until M21 re-measures them.*
+
 ## Abstract
 
 2ksbox runs Windows 98 and XP guests on Apple Silicon through QEMU's Tiny
@@ -269,7 +273,7 @@ after one that may write them, which removes the loads and stores at
 block boundaries. It is off by default and not offered in the machine
 form (user decision: too unstable for too little gain). XP crashes with
 seven or more registers pinned (§5.2, §8.1), and there is a stall at the
-flags-helper call boundary; both are open.
+flags-helper call boundary; both were open when M21 dropped the patch.
 
 ## 4. Methodology
 
