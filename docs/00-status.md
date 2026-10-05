@@ -333,6 +333,10 @@ to one subsystem lives in its design doc; pointers are at the end.
 
 ### Building
 
+- **The repository moved to `github.com/Roboport-Tecnologia/2ksbox`
+  (2026-10-05).** GitHub redirects the old `davidrios/2ksbox` URL, but
+  a checkout made before the move (the Mac, the PC) should run `git
+  remote set-url origin git@github.com:Roboport-Tecnologia/2ksbox.git`.
 - **A new flag in `configure-qemu.sh` reaches a build only through a
   configure.** `build.sh` now reconfigures when that script is newer
   than `build/qemu/build.ninja` (it used to watch only the meson files):

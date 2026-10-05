@@ -107,7 +107,7 @@ objects on both hosts.
 ## Building
 
 ```sh
-git clone --recurse-submodules --shallow-submodules git@github.com:davidrios/2ksbox.git
+git clone --recurse-submodules --shallow-submodules git@github.com:Roboport-Tecnologia/2ksbox.git
 cd 2ksbox
 scripts/build.sh            # QEMU ~10–15 min on the Air, the Rust side ~1 min
 target/release/player       # the test pattern, through wgpu on Metal

@@ -130,7 +130,7 @@ PC in MSYS2 (step 5).
 ### 2. Get the source
 
 ```sh
-git clone --recurse-submodules --shallow-submodules https://github.com/davidrios/2ksbox
+git clone --recurse-submodules --shallow-submodules https://github.com/Roboport-Tecnologia/2ksbox
 cd 2ksbox
 ```
 

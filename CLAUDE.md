@@ -32,7 +32,7 @@ on Apple Silicon as ARM64 under HVF.
 Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
 
 - **The project is `2ksbox`** (ADR-011): the repo
-  `github.com/davidrios/2ksbox`, the commands `2ksbox` / `2ksbox-player`,
+  `github.com/Roboport-Tecnologia/2ksbox`, the commands `2ksbox` / `2ksbox-player`,
   `share/2ksbox`, the data dir `~/.local/share/2ksbox` (migrated once from
   `win98-xp-virt` by `launcher-core/src/paths.rs::data_dir()`). App ID
   `com._2ksbox.Launcher`; the underscore is required.

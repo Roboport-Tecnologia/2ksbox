@@ -580,7 +580,7 @@ Once, on the PC:
 pacman -Syu                                   # again if it asks to restart
 pacman -S git
 git config --global core.autocrlf false       # belt and braces: CRLF breaks every patch of the queue
-cd /c && git clone --recurse-submodules --shallow-submodules https://github.com/davidrios/2ksbox
+cd /c && git clone --recurse-submodules --shallow-submodules https://github.com/Roboport-Tecnologia/2ksbox
 cd 2ksbox && scripts/build-windows.sh --msys2-deps
 
 # 2. Rust from https://rustup.rs with the GNU host (MSVC's build scripts need Microsoft's

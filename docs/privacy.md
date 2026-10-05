@@ -1,7 +1,7 @@
 # Privacy policy
 
 2ksbox runs old operating systems and games on your own computer. It is
-open source (the code is at <https://github.com/davidrios/2ksbox>), and
+open source (the code is at <https://github.com/Roboport-Tecnologia/2ksbox>), and
 this page says what it does with your data, which is almost nothing.
 
 *This page is the privacy policy for every build of 2ksbox, including
@@ -77,5 +77,5 @@ sends neither anywhere else.
 ## Changes and contact
 
 Changes to this policy are made in the repository, where its history is
-public: <https://github.com/davidrios/2ksbox/blob/main/docs/privacy.md>.
+public: <https://github.com/Roboport-Tecnologia/2ksbox/blob/main/docs/privacy.md>.
 Questions go to the repository's issue tracker.

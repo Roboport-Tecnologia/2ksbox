@@ -310,7 +310,8 @@ A distribution refusing the player is the signal to open that track.
 packaged identity moved. **Amended 2026-09-06**: the working name is
 gone everywhere, including the repository
 (`github.com/davidrios/2ksbox`), the checkout, the docs and the user's
-data directory.
+data directory. **Amended 2026-10-05**: the repository moved to
+`github.com/Roboport-Tecnologia/2ksbox`.
 
 **Why the underscore.** No segment of a D-Bus-style name may start with
 a digit, and `flatpak build-init` refuses `com.2ksbox.Launcher` ("Name

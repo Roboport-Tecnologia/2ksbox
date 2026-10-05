@@ -24,7 +24,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-REPO="${WDDM_PREBUILT_REPO:-davidrios/2ksbox}"
+REPO="${WDDM_PREBUILT_REPO:-Roboport-Tecnologia/2ksbox}"
 TAG=wddm-prebuilt
 OUT=build/wddm/x86
 FILES=(d3dptkmd.sys d3dptumd.dll d3dptkmd.inf)

@@ -19,7 +19,7 @@ edition = "2021"
 # `shader-chain` opt out with `GPL-2.0-or-later` (ADR-009 in
 # docs/10-decisions.md).
 license = "GPL-2.0-only"
-repository = "https://github.com/davidrios/2ksbox"
+repository = "https://github.com/Roboport-Tecnologia/2ksbox"
 
 [profile.release]
 lto = "thin"

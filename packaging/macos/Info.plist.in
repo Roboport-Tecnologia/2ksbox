@@ -18,6 +18,6 @@
   <key>LSMinimumSystemVersion</key>    <string>@MINOS@</string>
   <key>LSApplicationCategoryType</key> <string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key>   <true/>
-  <key>NSHumanReadableCopyright</key>  <string>GPL-2.0-only. Source: github.com/davidrios/2ksbox</string>
+  <key>NSHumanReadableCopyright</key>  <string>GPL-2.0-only. Source: github.com/Roboport-Tecnologia/2ksbox</string>
 </dict>
 </plist>
