@@ -692,7 +692,13 @@ if [ "$DMG" = 1 ]; then
   ln -s /Applications "$dmgroot/Applications"
   dmg="$OUT/2ksbox-$VERSION-macos-$(uname -m).dmg"
   rm -f "$dmg"
-  hdiutil create -volname "2ksbox $VERSION" -srcfolder "$dmgroot" -ov -format UDZO -quiet "$dmg"
+  # Sized by hand: hdiutil measures -srcfolder by the blocks its files
+  # take, and our EDK2 pair is two 64 MiB files that are sparse on APFS
+  # (3 MB on disk), which then do not fit ("No space left on device").
+  # Apparent sizes plus a tenth; UDZO compresses the padding away.
+  kb=$(du -sAk "$dmgroot" | cut -f1)
+  hdiutil create -volname "2ksbox $VERSION" -srcfolder "$dmgroot" -size "$((kb + kb / 10 + 20480))k" \
+    -ov -format UDZO -quiet "$dmg"
   rm -rf "$dmgroot"
   if [ "$SIGN" = 1 ]; then
     codesign --force --timestamp --sign "$IDENTITY" "$dmg"
