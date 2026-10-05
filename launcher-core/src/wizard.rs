@@ -1327,7 +1327,7 @@ impl Form {
                 "Includes the OPL3, so games with AdLib-only music still play it.",
             ],
             (Sound::Ac97, Family::Win98) => &[
-                "Better sound than the SB16, but Windows 98 has no driver for it built in. Install it from the Windows CD.",
+                "A more modern sound card, but it doesn't work well for DOS games.",
                 "No FM chip: DOS games inside this machine get no AdLib music. The MIDI port still works.",
             ],
             (Sound::Ac97, _) => &[

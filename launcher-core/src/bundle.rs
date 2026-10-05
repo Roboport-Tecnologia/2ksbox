@@ -582,8 +582,7 @@ pub enum Sound {
     /// DOS title of the CD-ROM era has a driver for.
     Sb16,
     /// The Intel AC'97 codec: 2001's card, and XP's in-box driver.
-    /// 98 installs its driver from the Windows CD (doc 06); it is not
-    /// built in. No FM at all, so a DOS box inside such a machine has no music.
+    /// 98's driver comes from the Windows CD (doc 06). No FM at all, so a DOS box inside such a machine has no music.
     Ac97,
     /// Ensoniq AudioPCI (ES1370): doc 06's card for the `Other`
     /// family, the one BeOS R5 and a period Linux both drive in the box.
