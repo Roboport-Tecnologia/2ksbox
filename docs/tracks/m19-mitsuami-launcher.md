@@ -149,7 +149,7 @@ The machine window is 770 wide since 2026-10-01 (user: "a bit narrower", then 50
    yet are there, disabled.
    **Reworked 2026-10-01 (user: "more like UTM / VirtualBox"):** a
    platform list of machines down the leading side (an icon, the name,
-   and the core's `subtitle`, "XP · Stopped"), selection by bundle
+   and the core's `subtitle`, "Windows XP · Stopped"), selection by bundle
    directory with the first machine chosen until one is, and beside it a
    details pane: the name, with Start (the window's default button) and
    a More menu button (Settings, Discs, Snapshots, Clone) at its right on

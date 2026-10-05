@@ -118,9 +118,9 @@ int main(int argc, char **argv) {
      *
      * A field somebody has picked must survive the switch, so both
      * directions are checked here. */
-    long win98 = label_index(LC_LABEL_FAMILY, "Win98");
-    long xp = label_index(LC_LABEL_FAMILY, "XP");
-    check("the family picker offers Win98 and XP", win98 >= 0 && xp >= 0, NULL);
+    long win98 = label_index(LC_LABEL_FAMILY, "Windows 98");
+    long xp = label_index(LC_LABEL_FAMILY, "Windows XP");
+    check("the family picker offers Windows 98 and Windows XP", win98 >= 0 && xp >= 0, NULL);
     lc_wizard_open_new(w, (size_t)win98);
     char *adapter = video_label(w);
     check("a new Win98 machine starts on our adapter",

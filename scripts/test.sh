@@ -485,7 +485,7 @@ machinedetails_check() { # what the machine window shows of a chosen machine (do
   o="$($LAUNCHERX --machine-details "$xp" 2>&1)" || { echo "--machine-details failed: $o"; return 1; }
   # The line under the name, then a group per page of the form with the
   # form's own labels: System, Storage, then the rest in the form's order.
-  [ "$(head -1 <<<"$o")" = "XP · Stopped" ] || { echo "xp subtitle: $(head -1 <<<"$o")"; rc=1; }
+  [ "$(head -1 <<<"$o")" = "Windows XP · Stopped" ] || { echo "xp subtitle: $(head -1 <<<"$o")"; rc=1; }
   groups="$(tail -n +2 <<<"$o" | cut -f1 | uniq | tr '\n' ' ')"
   [ "$groups" = "System Storage Display Audio Input Network " ] || { echo "xp groups: $groups"; rc=1; }
   grep -qx $'Display\tDirect3D\tAutomatic' <<<"$o" || { echo "xp has no Direct3D row"; rc=1; }

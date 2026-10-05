@@ -178,7 +178,9 @@ DOS; user decision).
 
 The fields, and why each is what it is:
 
-- **Family.** Win98, XP, DOS and Other (doc 06). **Other is the one
+- **Family.** Windows 98, Windows XP, Windows 7, Windows 11, DOS and
+  Other (doc 06), in that order and with those labels (`Family::ALL`,
+  `Family::label`; user, 2026-10-04). **Other is the one
   family with a sentence under the picker** (`family_note()`). It gets
   none of our adapter, the 3D pass-through or the Windows components,
   and its hardware is chosen for guests nothing here tests (BeOS, a

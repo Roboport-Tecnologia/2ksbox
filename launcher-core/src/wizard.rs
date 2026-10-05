@@ -213,8 +213,9 @@ pub struct Form {
     ram_mb: u32,
     /// Whether the memory field holds a value someone chose. Until it
     /// does, switching family moves it to that family's own default (doc
-    /// 06), which is what picking "XP" after "Win98" means; once a
-    /// number has been set, a later family switch must not throw it away.
+    /// 06), which is what picking "Windows XP" after "Windows 98" means;
+    /// once a number has been set, a later family switch must not throw it
+    /// away.
     ram_chosen: bool,
     accel: Accel,
     /// Same as `ram_chosen`, for the accelerator: until someone picks

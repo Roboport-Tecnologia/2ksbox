@@ -53,14 +53,14 @@ pub enum Family {
 
 impl Family {
     /// In the order a picker should offer them: the Windows the project is
-    /// built around first, oldest to newest, then DOS, the era's
-    /// catch-all, and the modern box.
-    pub const ALL: [Family; 6] = [Family::Win98, Family::Xp, Family::Win7, Family::Dos, Family::Other, Family::Win11];
+    /// built around first, oldest to newest, Windows 11 last of them,
+    /// then DOS and the era's catch-all.
+    pub const ALL: [Family; 6] = [Family::Win98, Family::Xp, Family::Win7, Family::Win11, Family::Dos, Family::Other];
 
     pub fn label(self) -> &'static str {
         match self {
-            Family::Win98 => "Win98",
-            Family::Xp => "XP",
+            Family::Win98 => "Windows 98",
+            Family::Xp => "Windows XP",
             Family::Win7 => "Windows 7",
             Family::Dos => "DOS",
             Family::Other => "Other (BeOS, Linux, …)",
