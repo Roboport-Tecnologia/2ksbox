@@ -1328,7 +1328,6 @@ impl Form {
             ],
             (Sound::Ac97, Family::Win98) => &[
                 "A more modern sound card, but it doesn't work well for DOS games.",
-                "No FM chip: DOS games inside this machine get no AdLib music. The MIDI port still works.",
             ],
             (Sound::Ac97, _) => &[
                 "XP has the driver built in. This is the card XP machines always had.",
