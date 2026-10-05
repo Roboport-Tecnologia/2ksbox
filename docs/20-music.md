@@ -255,7 +255,7 @@ real question about, and **the first entry is its default**
 
 | Family | Offers | Default |
 |---|---|---|
-| Win98 | SB16 (with the OPL3), AC'97, Gravis Ultrasound, none | SB16: Windows has the driver in the box, and a DOS box inside 98 finds the card it expects |
+| Win98 | SB16 (with the OPL3), Gravis Ultrasound, none | SB16: Windows has the driver in the box, and a DOS box inside 98 finds the card it expects |
 | DOS | SB16, Gravis Ultrasound, AdLib only, none | SB16 |
 | XP | AC'97, SB16, none | AC'97 |
 | Other | ES1370, AC'97, none | ES1370: BeOS and a period Linux both drive it out of the box (doc 06) |
@@ -290,7 +290,7 @@ packages tried by hand did not make the card work.
 The guest side is the user's (doc 06). A DOS box wants
 `BLASTER=A220 I5 D1 H5 P330 T6` for the MPU-401 to be found, and an
 `ULTRASND` line matching QEMU's `gus` (port 0x240, IRQ 7, DMA 3) plus
-Gravis's drivers. **Windows 98 finds the SB16 and the AC'97 itself, but
+Gravis's drivers. **Windows 98 finds the SB16 itself, but
 plays MIDI to the port only after "MPU-401 Compatible" is added by hand
 from Add New Hardware.**
 

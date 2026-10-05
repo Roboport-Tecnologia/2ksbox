@@ -1616,26 +1616,32 @@ music_check() { # the two pickers, and then the devices actually sounding
     case "$args" in *"-device opl3,"*) echo "$f: an FM chip arrived with a card that never had one"; echo "$args"; rc=1;; esac
     case "$args" in *mpu401*) echo "$f: a MIDI port arrived on a family whose default is none"; echo "$args"; rc=1;; esac
   done
-  # The switch itself, on the 98 machine: to the AC'97 (which takes the
-  # SB16 *and* its FM away, and lands in the pinned PCI slot), to the
-  # Gravis, and back.
-  bundle="$dir/library/music-win98/machine.toml"
-  $LAUNCHERX --music "$bundle" ac97 >/dev/null || { echo "--music ac97 failed"; rc=1; }
+  # The switch itself, on the XP machine: to the SB16 and back to the
+  # AC'97, which takes the SB16 *and* its FM away and lands in the pinned
+  # PCI slot.
+  bundle="$dir/library/music-xp/machine.toml"
+  $LAUNCHERX --music "$bundle" sb16 >/dev/null || { echo "xp: --music sb16 failed"; rc=1; }
+  $LAUNCHERX --music "$bundle" ac97 >/dev/null || { echo "xp: --music ac97 failed"; rc=1; }
   args="$($LAUNCHERX --print-args "$bundle")"
-  case "$args" in *"AC97,audiodev=embed0,addr=0x04"*) ;; *) echo "98: the AC'97 did not arrive at its pinned slot"; echo "$args"; rc=1;; esac
+  case "$args" in *"AC97,audiodev=embed0,addr=0x04"*) ;; *) echo "xp: the AC'97 did not arrive at its pinned slot"; echo "$args"; rc=1;; esac
   # The device arguments, not the bare names: `-L` names the checkout, and
   # a worktree called `sb16-dsound` put `sb16` in every line.
-  case "$args" in *"-device sb16,"*|*"-device opl3,"*) echo "98: the SB16 or its FM is still there beside the AC'97"; echo "$args"; rc=1;; esac
+  case "$args" in *"-device sb16,"*|*"-device opl3,"*) echo "xp: the SB16 or its FM is still there beside the AC'97"; echo "$args"; rc=1;; esac
+  # On the 98 machine: to the Gravis, and back.
+  bundle="$dir/library/music-win98/machine.toml"
   $LAUNCHERX --music "$bundle" gus none >/dev/null || { echo "--music gus failed"; rc=1; }
   args="$($LAUNCHERX --print-args "$bundle")"
   case "$args" in *"gus,audiodev=embed0"*) ;; *) echo "98: no Gravis"; echo "$args"; rc=1;; esac
   case "$args" in *mpu401*) echo "98: the MIDI port survived being turned off"; echo "$args"; rc=1;; esac
   # A card this family does not offer is refused rather than written: an
-  # ES1370 on Windows is a card 98 has no driver for, and a stray field
-  # should not be able to produce one.
-  $LAUNCHERX --music "$bundle" es1370 >/dev/null || { echo "--music es1370 failed"; rc=1; }
-  args="$($LAUNCHERX --print-args "$bundle")"
-  case "$args" in *ES1370*) echo "98: was given the Ensoniq, which is not on offer there"; echo "$args"; rc=1;; esac
+  # ES1370 on Windows is a card 98 has no driver for, the AC'97 is not
+  # offered to 98 (user, 2026-10-05), and a stray field should not be
+  # able to produce either.
+  for c in es1370:ES1370 ac97:AC97; do
+    $LAUNCHERX --music "$bundle" "${c%%:*}" >/dev/null || { echo "--music ${c%%:*} failed"; rc=1; }
+    args="$($LAUNCHERX --print-args "$bundle")"
+    case "$args" in *"${c#*:},"*) echo "98: was given the ${c%%:*}, which is not on offer there"; echo "$args"; rc=1;; esac
+  done
   $LAUNCHERX --music "$bundle" sb16 gm >/dev/null || { echo "--music sb16 gm failed"; rc=1; }
   args="$($LAUNCHERX --print-args "$bundle")"
   case "$args" in *"sb16,audiodev=embed0"*) ;; *) echo "98: the SB16 did not come back"; echo "$args"; rc=1;; esac
@@ -1662,7 +1668,7 @@ music_check() { # the two pickers, and then the devices actually sounding
   # bank is named the way the player names it (companions.rs), because a
   # machine that says synth=gm and nothing else is the normal case.
   export LIBSYNTH_SF2="$PWD/soundfonts/TimGM6mb.sf2"
-  for f in win98:sb16 win98:ac97 win98:gus win98:none dos:sb16 dos:gus dos:adlib xp:ac97 xp:sb16 other:es1370 other:ac97; do
+  for f in win98:sb16 win98:gus win98:none dos:sb16 dos:gus dos:adlib xp:ac97 xp:sb16 other:es1370 other:ac97; do
     want="${f#*:}"; f="${f%%:*}"
     bundle="$dir/library/music-$f/machine.toml"
     $LAUNCHERX --music "$bundle" "$want" >/dev/null || { echo "$f: --music $want failed"; rc=1; continue; }

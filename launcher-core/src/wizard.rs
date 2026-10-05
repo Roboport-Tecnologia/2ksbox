@@ -1326,9 +1326,6 @@ impl Form {
                 "Windows has the driver built in, and DOS programs inside the guest find the card they expect.",
                 "Includes the OPL3, so games with AdLib-only music still play it.",
             ],
-            (Sound::Ac97, Family::Win98) => &[
-                "A more modern sound card, but it doesn't work well for DOS games.",
-            ],
             (Sound::Ac97, _) => &[
                 "XP has the driver built in. This is the card XP machines always had.",
                 "No FM chip. Nothing of this era needs one.",

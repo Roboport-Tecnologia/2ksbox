@@ -581,8 +581,8 @@ pub enum Sound {
     /// What `BLASTER=A220 I5 D1 H5 T6` describes, and the card every
     /// DOS title of the CD-ROM era has a driver for.
     Sb16,
-    /// The Intel AC'97 codec: 2001's card, and XP's in-box driver.
-    /// 98's driver comes from the Windows CD (doc 06). No FM at all, so a DOS box inside such a machine has no music.
+    /// The Intel AC'97 codec: 2001's card, and XP's in-box driver. No
+    /// FM at all, so a DOS box inside such a machine has no music.
     Ac97,
     /// Ensoniq AudioPCI (ES1370): doc 06's card for the `Other`
     /// family, the one BeOS R5 and a period Linux both drive in the box.
@@ -713,15 +713,14 @@ impl Music {
 /// Every family keeps the card it already had as its first entry, so no
 /// existing machine changes hardware by being opened: 98 and DOS on the
 /// Sound Blaster, XP on the AC'97, `Other` on the Ensoniq. The rest are
-/// one pick away: an AC'97 in a 98 machine that wants the better codec,
-/// a Gravis in a DOS machine for the games written for one, an AdLib for
+/// one pick away: a Gravis in a 98 or DOS machine for the games written for one, an AdLib for
 /// a 1990 title, and no card at all.
 pub fn sound_choices(family: Family) -> &'static [Sound] {
     match family {
         // Windows has the SB16 driver in the box and a DOS box inside 98
-        // finds the card it expects; the AC'97 needs the guest-tools
-        // driver (doc 06) and gives the machine no FM.
-        Family::Win98 => &[Sound::Sb16, Sound::Ac97, Sound::Gus, Sound::None],
+        // finds the card it expects. No AC'97 (user, 2026-10-05): DOS
+        // games inside 98 get nothing from it.
+        Family::Win98 => &[Sound::Sb16, Sound::Gus, Sound::None],
         Family::Dos => &[Sound::Sb16, Sound::Gus, Sound::Adlib, Sound::None],
         // XP's own driver, and the card doc 06 has always given it.
         Family::Xp => &[Sound::Ac97, Sound::Sb16, Sound::None],
