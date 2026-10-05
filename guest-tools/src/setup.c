@@ -1088,7 +1088,7 @@ static int step_dos_mode(void)
     memcpy(head, pif_head, sizeof head);
     memset(head + 2, ' ', 30);
     memcpy(head + 2, PIF_TITLE, strlen(PIF_TITLE));
-    snprintf((char *)head + 0x24, 63, "%s\\COMMAND.COM", g_win);
+    snprintf((char *)head + 0x24, 63, "%.50s\\COMMAND.COM", g_win); /* the PIF's 63-byte field */
     snprintf((char *)head + 0x65, 64, "%c:\\", g_win[0]);
     SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
     f = fopen(path, "wb");

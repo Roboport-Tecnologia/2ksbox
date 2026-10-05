@@ -1898,7 +1898,8 @@ struct Dp2 {
             if (s->mips_stale && s->tex) { s->tex->GenerateMipSubLevels(); s->mips_stale = false; }
         }
         x.dev->SetTexture(stage, t);
-        if (sampler_slot(stage) != ~0u) d.stage_tex[sampler_slot(stage)] = t ? handle : 0;
+        uint32_t slot = sampler_slot(stage);
+        if (slot != ~0u) d.stage_tex[slot] = t ? handle : 0;
         if (stage == 0) apply_ckey();
         apply_addr(stage);
     }
@@ -2282,7 +2283,7 @@ struct Dp2 {
                 if (count) {
                     const uint8_t *v = q + 16 * (count - 1);
                     c.vp.X = u32(v); c.vp.Y = u32(v + 4); c.vp.Width = u32(v + 8); c.vp.Height = u32(v + 12);
-                    tr("viewport %u,%u %ux%u", c.vp.X, c.vp.Y, c.vp.Width, c.vp.Height);
+                    tr("viewport %u,%u %ux%u", (unsigned)c.vp.X, (unsigned)c.vp.Y, (unsigned)c.vp.Width, (unsigned)c.vp.Height);
                     x.dev->SetViewport(&c.vp);
                 }
                 break;

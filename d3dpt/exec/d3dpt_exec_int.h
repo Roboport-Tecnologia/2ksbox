@@ -22,8 +22,12 @@
 #include "d3dpt_exec.h"
 #include "../d3dpt_proto.h"
 
-/* printf checking where the compiler has it (not MSVC) */
-#ifdef __GNUC__
+/* printf checking where the compiler has it (not MSVC); mingw's plain
+ * "printf" is msvcrt's dialect (no %zu), but the PE pair is built with
+ * __USE_MINGW_ANSI_STDIO, whose format mingw names __MINGW_PRINTF_FORMAT */
+#if defined(__GNUC__) && defined(__MINGW_PRINTF_FORMAT)
+#define D3DPT_PRINTF(f, a) __attribute__((format(__MINGW_PRINTF_FORMAT, f, a)))
+#elif defined(__GNUC__)
 #define D3DPT_PRINTF(f, a) __attribute__((format(printf, f, a)))
 #else
 #define D3DPT_PRINTF(f, a)
