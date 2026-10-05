@@ -35,7 +35,9 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   `github.com/Roboport-Tecnologia/2ksbox`, the commands `2ksbox` / `2ksbox-player`,
   `share/2ksbox`, the data dir `~/.local/share/2ksbox` (migrated once from
   `win98-xp-virt` by `launcher-core/src/paths.rs::data_dir()`). App ID
-  `com._2ksbox.Launcher`; the underscore is required.
+  `com._2ksbox.Launcher`; the underscore is required. The macOS bundle
+  ID is `com.2ksbox.2ksbox` (Apple forbids the underscore; the App
+  Store's registered App ID, fixed forever once uploaded).
 - **QEMU is the base** (ADR-001): our fork as a **patch queue** on the
   pinned submodule (v11.1.2 + our port of qemu-3dfx, track M21). Not VMware, VirtualBox or 86Box
   as a base (86Box's Voodoo 2 code is vendored as one device, below).

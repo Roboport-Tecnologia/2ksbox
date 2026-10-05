@@ -8,7 +8,7 @@
 <dict>
   <key>CFBundleName</key>              <string>2ksbox</string>
   <key>CFBundleDisplayName</key>       <string>2ksbox</string>
-  <key>CFBundleIdentifier</key>        <string>com._2ksbox.Launcher</string>
+  <key>CFBundleIdentifier</key>        <string>com.2ksbox.2ksbox</string>
   <key>CFBundleExecutable</key>        <string>2ksbox</string>
   <key>CFBundleIconFile</key>          <string>2ksbox</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>

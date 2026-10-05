@@ -311,7 +311,9 @@ packaged identity moved. **Amended 2026-09-06**: the working name is
 gone everywhere, including the repository
 (`github.com/davidrios/2ksbox`), the checkout, the docs and the user's
 data directory. **Amended 2026-10-05**: the repository moved to
-`github.com/Roboport-Tecnologia/2ksbox`.
+`github.com/Roboport-Tecnologia/2ksbox`. **Amended 2026-10-05**: the
+macOS app's bundle ID is **`com.2ksbox.2ksbox`** (user, the App ID
+registered for the App Store); see "Which name goes where".
 
 **Why the underscore.** No segment of a D-Bus-style name may start with
 a digit, and `flatpak build-init` refuses `com.2ksbox.Launcher` ("Name
@@ -323,7 +325,12 @@ names the commands `2ksbox` and `2ksbox-player`, the resource
 directories (`share/2ksbox`, `lib/2ksbox`, `libexec/2ksbox`), the
 tarball and the window title. `com._2ksbox.Launcher` (`paths.rs::APP_ID`)
 names the desktop entry, the icon, the Wayland `app_id`, and the
-Flatpak and AppStream ID.
+Flatpak and AppStream ID. Apple's bundle IDs allow only letters, digits,
+hyphens and periods (no underscore), but a segment may start with a
+digit, so the macOS app (both builds, ADR-019) is `com.2ksbox.2ksbox`
+(`packaging/macos/Info.plist.in`'s `CFBundleIdentifier`): it keys the App
+Store record, the sandbox container and the signing, and can never
+change once uploaded.
 
 **The data directory.** The library is `~/.local/share/2ksbox`, runtime
 files under `$XDG_RUNTIME_DIR/2ksbox`. (On Windows `%APPDATA%\2ksbox\data`,
