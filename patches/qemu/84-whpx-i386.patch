@@ -1,0 +1,85 @@
+WHPX back in qemu-system-i386, the era's target on Windows hosts.
+QEMU 11.1 builds it into x86_64-softmmu only, and 11.1's WHPX emulates
+MMIO and string I/O with the x86 emulator it shares with HVF and MSHV,
+which was only ever built for x86_64. Its x86_register union is 64 bits
+wide and is laid over env->regs[], which on the i386 target are 32 bits
+apart, so every rrx store (a 32-bit register write, `RAX(env) = ...`)
+also overwrote the next register, and a write to EDI overwrote EIP: a
+diskless machine died in SeaBIOS ("WHPX: Unexpected VP exit code 4",
+an unrecoverable exception) within its first MMIO accesses. On i386 the
+union is 32 bits, and write_val_to_reg's 4-byte store writes one
+target_ulong. x86_64 compiles as before. Drop when upstream builds
+WHPX into i386-softmmu again.
+
+diff --git a/meson.build b/meson.build
+index cb1f180..356ee1a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -312,7 +312,7 @@ elif cpu == 'x86_64'
+     'CONFIG_HVF': ['x86_64-softmmu'],
+     'CONFIG_NITRO': ['x86_64-softmmu'],
+     'CONFIG_NVMM': ['i386-softmmu', 'x86_64-softmmu'],
+-    'CONFIG_WHPX': ['x86_64-softmmu'],
++    'CONFIG_WHPX': ['i386-softmmu', 'x86_64-softmmu'],
+     'CONFIG_MSHV': ['x86_64-softmmu'],
+   }
+ endif
+diff --git a/target/i386/emulate/x86.h b/target/i386/emulate/x86.h
+index caf0e3b..1a56bf1 100644
+--- a/target/i386/emulate/x86.h
++++ b/target/i386/emulate/x86.h
+@@ -19,6 +19,32 @@
+ #ifndef X86_EMU_DEFS_H
+ #define X86_EMU_DEFS_H
+ 
++/*
++ * One of env->regs[], which are target_ulong: on the i386 target they
++ * are 32 bits apart, so a 64-bit rrx store there overwrote the next
++ * register (EIP after EDI).
++ */
++#ifndef TARGET_X86_64
++typedef struct x86_register {
++    union {
++        struct {
++            uint32_t rrx;               /* the whole register */
++        };
++        struct {
++            uint32_t erx;
++        };
++        struct {
++            uint16_t rx;                /* low 16 bit part */
++            uint16_t hi16_unused1;
++        };
++        struct {
++            uint8_t lx;                 /* low 8 bit part */
++            uint8_t hx;                 /* high 8 bit */
++            uint16_t hi16_unused2;
++        };
++    };
++} __attribute__ ((__packed__)) x86_register;
++#else
+ typedef struct x86_register {
+     union {
+         struct {
+@@ -41,6 +67,7 @@ typedef struct x86_register {
+         };
+     };
+ } __attribute__ ((__packed__)) x86_register;
++#endif
+ 
+ /* 16 bit Task State Segment */
+ typedef struct x86_tss_segment16 {
+diff --git a/target/i386/emulate/x86_emu.c b/target/i386/emulate/x86_emu.c
+index c6ea854..c595bec 100644
+--- a/target/i386/emulate/x86_emu.c
++++ b/target/i386/emulate/x86_emu.c
+@@ -176,7 +176,8 @@ void write_val_to_reg(void *reg_ptr, target_ulong val, int size)
+         *(uint16_t *)reg_ptr = val;
+         break;
+     case 4:
+-        *(uint64_t *)reg_ptr = (uint32_t)val;
++        /* A 32-bit write zero-extends: the whole target_ulong register */
++        *(target_ulong *)reg_ptr = (uint32_t)val;
+         break;
+     case 8:
+         *(uint64_t *)reg_ptr = val;

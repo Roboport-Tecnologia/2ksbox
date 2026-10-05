@@ -202,11 +202,13 @@ The fields, and why each is what it is:
   under the note that it won't start. `launcherx --kvm [machine.toml]`
   prints the list. *Automatic* is QEMU's own fallback list (`-accel kvm -accel tcg`,
   `whpx` then `tcg` on Windows), not a probe of ours that could be stale
-  by spawn time. On macOS and Windows the hypervisor is Windows 11's
-  alone and an era machine is emulated (`-accel tcg`; user, 2026-10-02:
-  "leave era machines to emulation only", since QEMU 11.1 builds WHPX
-  into x86_64 only), and the note says the hypervisor "runs only
-  Windows 11 here" rather than that the host has none. `player::hw_accel_available()`
+  by spawn time. On macOS the hypervisor is Windows 11 on Arm's alone
+  and an era machine is emulated (`-accel tcg`: HVF runs only the host's
+  own architecture), and the note says the hypervisor "runs only
+  Windows 11 here" rather than that the host has none
+  (`Arch::hypervisor_runs`). Windows' WHPX runs era machines too (patch
+  84 put it back into QEMU 11.1's i386 target; it was Windows 11's alone
+  from 2026-10-02 to 10-04). `player::hw_accel_available()`
   backs only the hint beside the picker: Linux opens `/dev/kvm` for
   *writing* (a bare `exists()` misses a user outside the `kvm` group),
   Windows asks `WHvGetCapability` (the feature can be installed and
@@ -876,9 +878,8 @@ screenshots) needs somewhere to host them.
   `packaging/windows/AppxManifest.xml.in`; `build-windows.md` "The Store
   package"). The launcher is built only on a PC (`build-windows.sh
   mitsuami`, MSVC, WinUI 3, needing the Windows App Runtime 2.4+), so the
-  package is rolled on the PC. Hardware acceleration is WHPX for Windows 11 machines,
-  stated beside the picker, with TCG as the fallback; era machines are
-  emulated.
+  package is rolled on the PC. Hardware acceleration is WHPX,
+  stated beside the picker, with TCG as the fallback.
 
 **Open:** Flathub (hosted screenshots on 2ksbox.com, and the manifest's
 sources as git rather than a local directory), the AppImage (asked for,

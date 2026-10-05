@@ -987,3 +987,18 @@ for every build: four enum fields migrate through `VMSTATE_UINT32_ENUM`
 run (47 passed, the same 1 failed, 28 skipped, 2026-10-04); QEMU's unit
 tests 99 of 99 under MSVC. **Drop:** upstream QEMU builds for MSVC's ABI
 (it supports only mingw on Windows).
+
+### 84-whpx-i386
+WHPX back in `qemu-system-i386`, the era's target on a Windows host
+(track M21, step 4). 11.1 builds WHPX into `x86_64-softmmu` only, and
+its WHPX emulates MMIO and string I/O with the x86 emulator it shares
+with HVF and MSHV (`target/i386/emulate`), never built for i386 before.
+That emulator's `x86_register` union is 64 bits and is laid over
+`env->regs[]`, which on i386 are 32-bit `target_ulong`s: every `rrx`
+store (a 32-bit register write, `RAX(env) = …` on an I/O write) also
+wrote the next register, and a write to EDI wrote EIP, so a diskless
+machine died in SeaBIOS ("WHPX: Unexpected VP exit code 4"). On i386
+the union is 32 bits and `write_val_to_reg`'s 4-byte store writes one
+`target_ulong`; x86_64 compiles as before. **Test:** `test.sh`'s
+`whpx-i386` (SeaBIOS under WHPX to "No bootable device"); XP under WHPX at its desktop in 29 s, `TEST_ACCEL=whpx tools/xp-cdimage-test.sh` passing (2026-10-04).
+**Drop:** upstream builds WHPX into `i386-softmmu` again.

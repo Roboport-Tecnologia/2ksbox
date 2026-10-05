@@ -103,6 +103,20 @@ impl Arch {
         }
     }
 
+    /// Whether this host's hypervisor runs a machine on QEMU target
+    /// `target` (`Machine::qemu_target`). KVM and WHPX run the era's
+    /// i386 on an x86_64 host too (QEMU 11.1's i386 WHPX needs patch 84);
+    /// a Mac's HVF runs only its own architecture, so there it is
+    /// Windows 11 on Arm alone (M20 step 4).
+    pub fn hypervisor_runs(target: &str) -> bool {
+        let native = Arch::native().qemu_target();
+        if cfg!(target_os = "macos") {
+            target == native
+        } else {
+            target == native || (native == "x86_64" && target == "i386")
+        }
+    }
+
     /// QEMU's name for it: `qemu-system-<target>`, `libqemu-embed-<target>`.
     pub fn qemu_target(self) -> &'static str {
         match self {
@@ -802,8 +816,8 @@ impl Boot {
 pub enum Accel {
     /// Hardware acceleration when the host has it, emulation otherwise.
     /// QEMU itself picks from the `kvm:tcg` (Windows: `whpx:tcg`) list,
-    /// so no host probing here can get it wrong. On Windows and macOS an
-    /// era machine is emulation (`Machine::accel_args`).
+    /// so no host probing here can get it wrong. On macOS an era machine
+    /// is emulation (`Machine::accel_args`).
     #[default]
     Auto,
     /// Hardware acceleration only: the machine refuses to start without
@@ -1621,14 +1635,13 @@ impl Machine {
     fn accel_args(&self) -> Vec<String> {
         let mut tcg = "tcg".to_string();
         tcg.push_str(&self.optimization_props(Knob::Tcg));
-        // A Mac's and a Windows host's hypervisor is asked for only on
-        // the host's own target, Windows 11's, since QEMU builds `hvf`
-        // and (since 11.1) `whpx` only into that one (M20 step 4, M21
-        // step 4). The era's i386 is emulated there (user, 2026-10-02:
-        // "leave era machines to emulation only"); asking its QEMU for
-        // either would print "invalid accelerator" on every boot.
+        // A Mac's hypervisor is asked for only on the host's own target,
+        // Windows 11 on Arm's, since QEMU builds `hvf` only into that one
+        // (M20 step 4): asking the era's i386 QEMU for it would print
+        // "invalid accelerator" on every boot. Windows' WHPX runs the
+        // era's i386 too (patch 84).
         let hyp = (cfg!(target_os = "macos") || cfg!(target_os = "windows"))
-            && self.qemu_target() == Arch::native().qemu_target();
+            && Arch::hypervisor_runs(self.qemu_target());
         let hyp_name = if cfg!(target_os = "windows") { "whpx" } else { "hvf" };
         match self.effective_accel() {
             // "Hardware acceleration, required", spelled the way this

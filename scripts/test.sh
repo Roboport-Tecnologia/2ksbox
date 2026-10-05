@@ -2056,6 +2056,35 @@ bios_date_check() { # the legacy BIOS date, as a guest reads it out of a real QE
   return $rc
 }
 
+whpx_i386_check() { # an era machine under WHPX gets through SeaBIOS (patch 84)
+  # QEMU 11.1 builds WHPX into x86_64 only, and its WHPX emulates MMIO
+  # with an x86 emulator whose 64-bit registers overran the i386 target's
+  # 32-bit ones: a diskless machine died in SeaBIOS ("WHPX: Unexpected VP
+  # exit code 4"). SeaBIOS's own log, on the debug port, must reach the
+  # end of its boot order.
+  [ "$OS" = Windows ] || { echo "WHPX is a Windows host's"; return 77; }
+  local log="$OUT/whpx-seabios.log" qlog="$OUT/whpx-qemu.log" p
+  rm -f "$log"
+  $QSYS -L qemu/pc-bios -accel whpx -cpu pentium3 -machine pc -m 64 -display none -net none \
+    -monitor none -chardev "file,id=dbg,path=$log" -device isa-debugcon,iobase=0x402,chardev=dbg \
+    >"$qlog" 2>&1 & p=$!
+  for _ in $(seq 60); do
+    grep -q "No bootable device" "$log" 2>/dev/null && break
+    kill -0 $p 2>/dev/null || break
+    sleep 0.5
+  done
+  kill $p 2>/dev/null; wait $p 2>/dev/null
+  if grep -qi "no accelerator found\|WHPX: No\|could not initialize\|not supported" "$qlog"; then
+    echo "WHPX is not on: $(head -1 "$qlog")"; return 77
+  fi
+  if grep -q "No bootable device" "$log" 2>/dev/null; then
+    echo "SeaBIOS under WHPX reached the end of its boot order"; return 0
+  fi
+  echo "SeaBIOS under WHPX never reached the end of its boot order"
+  tail -5 "$qlog"; tail -3 "$log" 2>/dev/null
+  return 1
+}
+
 optimizations_check() { # the wizard's fast-path switches, all the way to a real QEMU
   local rc=0 dir="$OUT/opt-switches" bundle args o
   rm -rf "$dir"; mkdir -p "$dir/library"
@@ -2422,6 +2451,7 @@ host_stage() {
   if [ -x $QSYS ] && [ -d qemu/pc-bios ]; then
     run_check bios-date bios-date.log bios_date_check || true
     run_check machine-map machine-map.log machine_map_check || true
+    run_check whpx-i386 whpx-i386.log whpx_i386_check || true
   else
     skip bios-date "needs $QSYS"
   fi

@@ -537,6 +537,20 @@ line), the picker offers no hardware entry for it, and the note says
 "WHPX runs only Windows 11 here" (`Machine::accel_args`,
 `Form::hw_accel`).
 
+**Restored 2026-10-04 (user: "restore hardware virtualization on x86
+guests"), patch 84.** The cause: 11.1's WHPX no longer uses Windows'
+own instruction emulator for MMIO and string I/O but the one it shares
+with HVF and MSHV (`target/i386/emulate`), built until now for x86_64
+alone. Its `x86_register` union is 64 bits and is laid over
+`env->regs[]`, which on i386 are 32-bit `target_ulong`s, so every
+`rrx` store (each 32-bit register write, `RAX(env) = …` on an I/O
+write) also wrote the next register, and a write to EDI wrote EIP.
+Patch 84 builds WHPX into `i386-softmmu` again, makes the union 32 bits
+on i386 and `write_val_to_reg`'s 4-byte store one `target_ulong`. The
+launcher asks WHPX for era machines again (`Arch::hypervisor_runs`);
+macOS keeps them emulated (HVF runs only its own architecture). Check:
+`whpx-i386` (SeaBIOS to "No bootable device" under WHPX).
+
 #### The Mac (2026-10-04, the M1 Air, macOS 26)
 
 `scripts/build.sh` builds 11.1.2 at the macOS 12 floor with

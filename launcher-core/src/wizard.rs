@@ -668,15 +668,12 @@ impl Form {
         Accel::ALL.into_iter().filter(|&a| a != Accel::Kvm || self.hw_accel() || self.accel == Accel::Kvm).collect()
     }
 
-    /// Whether this host's hardware acceleration can run this machine. On
-    /// a Mac and on Windows it is Windows 11 alone, on the host's own
-    /// architecture, never the era's i386 (`bundle::Machine::accel_args`):
-    /// a Mac's hypervisor runs only its own architecture, and QEMU 11.1
-    /// builds WHPX into x86_64 only (user, 2026-10-02: "leave era machines
-    /// to emulation only").
+    /// Whether this host's hardware acceleration can run this machine
+    /// (`bundle::Arch::hypervisor_runs`): on a Mac Windows 11 on Arm
+    /// alone, never the era's i386.
     fn hw_accel(&self) -> bool {
-        let modern_only = cfg!(target_os = "macos") || cfg!(target_os = "windows");
-        self.have_kvm && (!modern_only || (self.family.is_modern() && self.arch() == bundle::Arch::native()))
+        let target = if self.family.is_modern() { self.arch().qemu_target() } else { "i386" };
+        self.have_kvm && bundle::Arch::hypervisor_runs(target)
     }
 
     /// A Windows 11 machine's processor: the edited machine's own, the
@@ -696,8 +693,8 @@ impl Form {
             Some(kind) => format!("hardware virtualization ({kind})"),
             None => "hardware virtualization".to_owned(),
         };
-        // The host has it, but not for this machine (an era one on a Mac
-        // or Windows, `hw_accel`): say that rather than "no hypervisor".
+        // The host has it, but not for this machine (an era one on a Mac,
+        // `hw_accel`): say that rather than "no hypervisor".
         let not_for_this = self.have_kvm && !self.hw_accel();
         let mut text = match (self.accel, self.hw_accel()) {
             (Accel::Auto, true) => format!("{} is available and will be used.", capitalized(&hw)),
