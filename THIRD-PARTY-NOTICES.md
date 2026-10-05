@@ -39,6 +39,26 @@ Sarah Walker's PCem), copied verbatim into `voodoo/86box/`. The files
 keep their authors' headers, and `voodoo/86box/UPSTREAM` names the
 commit.
 
+## Windows 11's TPM, firmware and drivers
+
+QEMU links two libraries statically for the TPM 2.0 behind
+`-tpmdev libtpms` (track M20), built from pinned sources by
+`scripts/build-deps.sh`: **libtpms** 0.10.2
+(https://github.com/stefanberger/libtpms, BSD-style; its `LICENSE`) and
+OpenSSL 3.5.9's **libcrypto** (https://www.openssl.org, **Apache-2.0**).
+
+The macOS app's `pc-bios/2ksbox-aarch64-code.fd` and `-vars.fd` are
+**EDK2** (https://github.com/tianocore/edk2, **BSD-2-Clause-Patent**) at
+the commit QEMU pins (`qemu/roms/edk2`), modified by `patches/edk2/` and
+built by `scripts/build-edk2.sh`. That tree plus those patches is the
+corresponding source.
+
+The drivers discs in `share/2ksbox/drivers/` carry drivers from
+**virtio-win** (https://github.com/virtio-win/kvm-guest-drivers-windows,
+**BSD-3-Clause**), Microsoft-signed binaries from its 0.1.302 ISO, cut by
+`scripts/build-virtio-win.sh`. Each disc carries the ISO's own
+`virtio-win_license.txt` beside them.
+
 ## The music engines
 
 The **OPL3, General MIDI and MT-32 engines** are crates linked into QEMU

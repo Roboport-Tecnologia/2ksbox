@@ -912,6 +912,10 @@ fn paths_text() -> String {
     .ok();
     writeln!(s, "player       {}", player::player_binary().display()).ok();
     writeln!(s, "player-x86_64 {}", player::target_player_binary("x86_64").display()).ok();
+    // Windows 11 on Arm's player, which only an Arm host builds (M20)
+    if cfg!(target_arch = "aarch64") {
+        writeln!(s, "player-aarch64 {}", player::target_player_binary("aarch64").display()).ok();
+    }
     writeln!(s, "qemu-img     {}", player::qemu_img_binary().display()).ok();
     writeln!(s, "pc-bios      {}", player::pc_bios_dir().display()).ok();
     match disc_library::guest_tools_iso() {

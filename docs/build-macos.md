@@ -237,7 +237,12 @@ scripts/package-macos.sh --x86_64 --no-notarize # the Intel app, from scripts/bu
 ```
 
 `--no-build`, `--no-notarize`, `--identity`, `--keychain-profile` and
-`--out` are in the script's header. Notarization credentials, once:
+`--out` are in the script's header. On Apple Silicon the app also
+carries Windows 11 on Arm (track M20): `MacOS/2ksbox-player-aarch64` on
+`lib/2ksbox/libqemu-embed-aarch64.dylib`, our EDK2 pair in `pc-bios/`
+and `share/2ksbox/drivers/2ksbox-drivers-arm64.iso`, from `build.sh`'s
+`qemu`, `edk2`, `virtio` and `rust` stages; a missing one fails the
+package. The Intel app has no Windows 11. Notarization credentials, once:
 
 ```sh
 xcrun notarytool store-credentials 2ksbox-notary \
@@ -303,7 +308,15 @@ environment and system directories. The packager requires that
   `launcher-mitsuami/src/shot.rs`, under the same loader watch) and
   must write the PNG and load nothing from outside the app. AppKit has
   no offscreen mode, so the window shows for a moment on the
-  packager's screen.
+  packager's screen;
+- on Apple Silicon, **Windows 11 on Arm end to end** (track M20): the
+  staged launcher makes a Windows 11 machine (`--wizard-new win11`,
+  `--prepare`), its arguments must name the app's EDK2
+  (`pc-bios/2ksbox-aarch64-code.fd`) and drivers disc and ask for HVF,
+  and `MacOS/2ksbox-player-aarch64` runs them until the firmware draws,
+  then quits through QMP, loading nothing from outside the app; "failed
+  to initialize hvf" fails it (the hypervisor entitlement lost in the
+  re-sign). `--paths` must name that player and the disc inside the app.
 
 The script's first runs with the AppKit launcher (2026-10-04, on QEMU
 11.1, track M21 step 4) passed every check above for the App Store, the
@@ -312,7 +325,11 @@ community and the Intel app, unsigned (`--no-sign --no-dmg`).
 Signing is inside-out, every nested Mach-O before the bundle that seals
 it, with `--options runtime` and `packaging/macos/2ksbox.entitlements`
 (`com.apple.security.cs.allow-jit`; without it TCG dies on its first
-translated block). Notarization requires `--timestamp`, and Apple's
+translated block). Windows 11 on Arm's player is signed with
+`packaging/macos/hypervisor.entitlements` instead, in the ad-hoc re-sign
+too: `com.apple.security.hypervisor` (HVF answers `HV_DENIED` without
+it, signed or not) plus the JIT one. The packager checks the signed
+player still has it. Notarization requires `--timestamp`, and Apple's
 timestamp service drops out for seconds at a time, so that call alone
 retries.
 

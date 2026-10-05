@@ -120,6 +120,20 @@ warn() { echo "package-macos.sh: $*" >&2; }
 need "$QB/libqemu-embed-i386.dylib" "scripts/configure-qemu.sh && ninja -C $QB libqemu-embed-i386.dylib"
 need "$QB/qemu-img" "ninja -C $QB qemu-img"
 need qemu/pc-bios "scripts/prepare-qemu.sh"
+# Windows 11 on Arm (track M20), on an Apple Silicon Mac only: the Intel
+# app has no Windows 11 at all (player::mac_x64_refusal). Its own player
+# links its own QEMU (doc 11), boots our EDK2 build (bundle::Arch::
+# efi_code_file; QEMU's own has no Secure Boot and no AHCI) and gets the
+# ARM64 drivers disc (disc_library::drivers_iso), which setup installs the
+# network and display drivers from.
+W11=""
+if [ "$ARCH" = arm64 ]; then
+  W11=1
+  need "$QB/libqemu-embed-aarch64.dylib" "scripts/build.sh qemu"
+  need qemu/pc-bios/2ksbox-aarch64-code.fd "scripts/build.sh edk2"
+  need qemu/pc-bios/2ksbox-aarch64-vars.fd "scripts/build.sh edk2"
+  need build/virtio-win/2ksbox-drivers-arm64.iso "scripts/build.sh virtio"
+fi
 
 # The macOS the app is for (scripts/macos-floor.sh), which scripts/build.sh
 # built everything for. Exported so that a cargo build below links for it
@@ -134,9 +148,11 @@ if [ "$BUILD" = 1 ]; then
   # Its own cargo workspace (ADR-023), so its own build command, as
   # scripts/build.sh's `mitsuami` stage.
   ( cd launcher-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} )
+  [ -z "$W11" ] || cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64
 fi
 need "$LTD/launcher-mitsuami" "scripts/build.sh mitsuami"
 need "$TD/player"
+[ -z "$W11" ] || need target/qemu-aarch64/release/player "scripts/build.sh rust"
 
 # --- stage -----------------------------------------------------------
 rm -rf "$APP"
@@ -146,7 +162,16 @@ install -m755 "$LTD/launcher-mitsuami" "$C/MacOS/2ksbox"
 install -m755 "$TD/player"   "$C/MacOS/2ksbox-player"
 install -m755 "$QB/libqemu-embed-i386.dylib" "$C/lib/2ksbox/"
 install -m755 "$QB/qemu-img" "$C/libexec/2ksbox/"
+# pc-bios/ carries our EDK2 pair too: build-edk2.sh installs it there.
 cp -a qemu/pc-bios "$C/share/2ksbox/pc-bios"
+if [ -n "$W11" ]; then
+  install -m755 target/qemu-aarch64/release/player "$C/MacOS/2ksbox-player-aarch64"
+  install -m755 "$QB/libqemu-embed-aarch64.dylib" "$C/lib/2ksbox/"
+  # 2.7 MB; virtio-win's license is on the disc beside its drivers
+  # (BSD-3-Clause, binaries included) and in THIRD-PARTY-NOTICES.md.
+  mkdir -p "$C/share/2ksbox/drivers"
+  install -m644 build/virtio-win/2ksbox-drivers-arm64.iso "$C/share/2ksbox/drivers/"
+fi
 install -m644 COPYING THIRD-PARTY-NOTICES.md README.md "$C/share/doc/2ksbox/"
 
 # The General MIDI bank (doc 20 §4): the machine form's default music
@@ -272,13 +297,13 @@ bundle_deps() {
   done
 }
 
-for f in "$LIBDIR"/*.dylib "$C/libexec/2ksbox/qemu-img" "$C/MacOS/2ksbox" "$C/MacOS/2ksbox-player"; do
+for f in "$LIBDIR"/*.dylib "$C/libexec/2ksbox/qemu-img" "$C/MacOS/2ksbox" "$C/MacOS/2ksbox-player" "$C/MacOS/2ksbox-player-aarch64"; do
   [ -f "$f" ] || continue
   bundle_deps "$f"
 done
 # Our own libraries kept an absolute or build-tree id; @rpath is what the
 # things loading them ask for.
-for leaf in libqemu-embed-i386.dylib libd3dpt_exec.dylib libd3dpt_exec_remote.dylib libdxvk_d3d9.0.dylib libvulkan.1.dylib libvulkan_kosmickrisp.dylib; do
+for leaf in libqemu-embed-i386.dylib libqemu-embed-aarch64.dylib libd3dpt_exec.dylib libd3dpt_exec_remote.dylib libdxvk_d3d9.0.dylib libvulkan.1.dylib libvulkan_kosmickrisp.dylib; do
   [ -f "$LIBDIR/$leaf" ] || continue
   install_name_tool -id "@rpath/$leaf" "$LIBDIR/$leaf" 2>/dev/null || true
   install_name_tool -add_rpath "@loader_path" "$LIBDIR/$leaf" 2>/dev/null || true
@@ -286,7 +311,9 @@ done
 
 # And the executables. The player already has @loader_path/../lib/2ksbox
 # from player/build.rs.
-install_name_tool -add_rpath "@loader_path/../lib/2ksbox" "$C/MacOS/2ksbox-player" 2>/dev/null || true
+for p in "$C/MacOS/2ksbox-player" "$C/MacOS/2ksbox-player-aarch64"; do
+  [ -f "$p" ] && install_name_tool -add_rpath "@loader_path/../lib/2ksbox" "$p" 2>/dev/null || true
+done
 install_name_tool -add_rpath "@loader_path/../../lib/2ksbox" "$C/libexec/2ksbox/qemu-img" 2>/dev/null || true
 # Every rpath that points out of the app has to go, from libraries as
 # well as executables. meson gives libqemu-embed one LC_RPATH per Homebrew
@@ -306,9 +333,21 @@ done < <(machos)
 # have, and the kernel answers a broken one with SIGKILL and nothing else,
 # which the checks below would run into. So re-sign ad hoc now.
 # The real Developer ID signature replaces this further down; here it only
-# has to make the staged app runnable.
-while read -r f; do codesign --force --sign - "$f" >/dev/null 2>&1 || true; done \
-  < <(machos)
+# has to make the staged app runnable. Windows 11 on Arm's player keeps
+# its entitlements even ad hoc: without the hypervisor one HVF answers
+# HV_DENIED, signed or not (packaging/macos/hypervisor.entitlements).
+entitlements_of() {
+  case "$1" in
+    */MacOS/2ksbox-player-aarch64) echo packaging/macos/hypervisor.entitlements ;;
+    *) echo packaging/macos/2ksbox.entitlements ;;
+  esac
+}
+while read -r f; do
+  case "$f" in
+    */MacOS/2ksbox-player-aarch64) codesign --force --sign - --entitlements "$(entitlements_of "$f")" "$f" >/dev/null 2>&1 || true ;;
+    *) codesign --force --sign - "$f" >/dev/null 2>&1 || true ;;
+  esac
+done < <(machos)
 
 # --- icon -------------------------------------------------------------
 # The same PNGs the Linux package installs (`scripts/gen-icons.sh`), so
@@ -383,7 +422,7 @@ done < <(machos)
 # dlopened by an executable also searches the executable's rpaths. The
 # check has to do the same, or it fails files that work.
 exe_rpaths=""
-for x in "$C/MacOS/2ksbox" "$C/MacOS/2ksbox-player"; do
+for x in "$C/MacOS/2ksbox" "$C/MacOS/2ksbox-player" "$C/MacOS/2ksbox-player-aarch64"; do
   [ -f "$x" ] || continue
   while read -r rp; do
     rp=${rp//@loader_path/$C\/MacOS}; rp=${rp//@executable_path/$C\/MacOS}
@@ -420,10 +459,18 @@ trap 'rm -rf "$scratch"' EXIT
 resolved=$(cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machines" "$C/MacOS/2ksbox" --paths)
 echo "$resolved"
 while read -r what path; do
-  case "$what" in player|qemu-img|pc-bios|guest-tools|prefix) ;; *) continue ;; esac
+  case "$what" in player|player-aarch64|qemu-img|pc-bios|guest-tools|drivers|prefix) ;; *) continue ;; esac
   case "$path" in "("*) continue ;; esac
   case "$path" in "$APP"|"$APP"/*) ;; *) echo "package-macos.sh: $what resolved outside the app: $path" >&2; fail=1 ;; esac
 done <<< "$resolved"
+if [ -n "$W11" ]; then
+  # Present, not only inside: a launcher that names no aarch64 player or
+  # no drivers disc passes the loop above.
+  for want in "player-aarch64 $C/MacOS/2ksbox-player-aarch64" "drivers $C/share/2ksbox/drivers/2ksbox-drivers-arm64.iso"; do
+    grep -qxF "${want%% *} ${want#* }" <<< "$(printf '%s\n' "$resolved" | tr -s ' ')" \
+      || { echo "package-macos.sh: --paths does not name ${want#* }" >&2; fail=1; }
+  done
+fi
 
 # The launcher's own Vulkan, which the closure above never loaded. The
 # probe behind the Direct3D picker opens the app's loader by its full path
@@ -519,6 +566,56 @@ case "$args" in
 esac
 [ -s "$scratch/machines/package-check/disk.qcow2" ] \
   || { echo "package-macos.sh: the packaged qemu-img did not create a disk" >&2; fail=1; }
+
+# Windows 11 on Arm end to end, which nothing above loads: the staged
+# launcher makes the machine and its firmware variables (the packaged
+# qemu-img), its arguments must name the app's EDK2 and drivers disc, and
+# the staged aarch64 player runs them under HVF until the firmware draws
+# a frame, then quits through QMP. That is the hypervisor entitlement
+# surviving the re-sign, the libtpms TPM, our EDK2 and the ARM64 QEMU's
+# closure. The window shows for a moment.
+if [ -n "$W11" ]; then
+  (cd / && env -i HOME="$scratch" LAUNCHER_LIBRARY_DIR="$scratch/machines" \
+    "$C/MacOS/2ksbox" --wizard-new win11 "Arm check" 1 >/dev/null)
+  m="$scratch/machines/arm-check/machine.toml"
+  (cd / && env -i HOME="$scratch" "$C/MacOS/2ksbox" --prepare "$m") \
+    || { echo "package-macos.sh: --prepare failed on a Windows 11 on Arm machine" >&2; fail=1; }
+  w11args=$(cd / && env -i HOME="$scratch" "$C/MacOS/2ksbox" --print-args "$m")
+  for want in "file=$C/share/2ksbox/pc-bios/2ksbox-aarch64-code.fd" \
+              "file=$C/share/2ksbox/drivers/2ksbox-drivers-arm64.iso" "-accel hvf"; do
+    case "$w11args" in *"$want"*) ;; *) echo "package-macos.sh: Windows 11 on Arm's arguments lack $want" >&2; fail=1 ;; esac
+  done
+  # One QEMU at a time on this Mac: the run ends by itself through QMP,
+  # or here after a minute.
+  read -r -a argv <<< "$w11args"
+  (cd / && env -i HOME="$scratch" PLAYER_QMP_EXEC='{"execute":"quit"}' DYLD_PRINT_LIBRARIES=1 \
+    "$C/MacOS/2ksbox-player-aarch64" -- "${argv[@]}" > "$scratch/player-aarch64.txt" 2>&1) &
+  pid=$!
+  ( sleep 60; kill "$pid" 2>/dev/null ) & killer=$!
+  if wait "$pid"; then
+    kill "$killer" 2>/dev/null || true
+    a64loaded=$(sed -n 's|^dyld\[[0-9]*\]: <[^>]*> ||p' "$scratch/player-aarch64.txt")
+    outside=$(printf '%s\n' "$a64loaded" | grep -v -e "^$APP/" -e '^/usr/lib/' -e '^/System/' || true)
+    if [ -n "$outside" ]; then
+      printf '%s\n' "$outside" | sed 's/^/  /' >&2
+      echo "package-macos.sh: the aarch64 player loaded the above from outside the app" >&2
+      fail=1
+    elif grep -q 'failed to initialize hvf' "$scratch/player-aarch64.txt"; then
+      # HV_DENIED is the entitlement lost in the re-sign; a Mac in a VM
+      # has no HVF at all and cannot make this app.
+      grep -e hvf -e 'falling back' "$scratch/player-aarch64.txt" | sed 's/^/  /' >&2
+      echo "package-macos.sh: the staged aarch64 player could not use HVF" >&2
+      fail=1
+    else
+      echo "player-aarch64 ran Windows 11 on Arm's firmware under HVF and quit (libqemu-embed-aarch64, our EDK2, the TPM)"
+    fi
+  else
+    kill "$killer" 2>/dev/null || true
+    grep -v '^dyld\[' "$scratch/player-aarch64.txt" | tail -8 | sed 's/^/  /' >&2
+    echo "package-macos.sh: the staged aarch64 player did not run Windows 11 on Arm's firmware and quit" >&2
+    fail=1
+  fi
+fi
 [ "$fail" = 0 ] || exit 1
 echo "checks passed"
 
@@ -540,7 +637,7 @@ if [ "$SIGN" = 1 ]; then
     local i out
     for i in 1 2 3 4 5; do
       if out=$(codesign --force --timestamp --options runtime \
-                 --entitlements packaging/macos/2ksbox.entitlements \
+                 --entitlements "$(entitlements_of "$1")" \
                  --sign "$IDENTITY" "$1" 2>&1); then
         return 0
       fi
@@ -564,6 +661,10 @@ if [ "$SIGN" = 1 ]; then
   sign_one "$C/MacOS/2ksbox"
   sign_one "$APP"
   codesign --verify --deep --strict --verbose=2 "$APP"
+  if [ -n "$W11" ]; then
+    codesign -d --entitlements - "$C/MacOS/2ksbox-player-aarch64" 2>/dev/null | grep -q com.apple.security.hypervisor \
+      || { echo "package-macos.sh: the signed aarch64 player lost the hypervisor entitlement" >&2; exit 1; }
+  fi
   # The question Gatekeeper will ask on the other Mac. Before notarization
   # it answers "not notarized", which is the one remaining step, not a
   # failure. Any other rejection is.

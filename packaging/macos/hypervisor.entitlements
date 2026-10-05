@@ -6,7 +6,11 @@
        4). Without it hv_vm_create() fails with HV_DENIED and QEMU's
        `-accel hvf` refuses to start, ad-hoc signed or not, so
        scripts/build.sh signs the checkout's aarch64 player with this
-       file. A linker-signed binary that cargo relinks loses it. -->
+       file, and scripts/package-macos.sh the app's 2ksbox-player-aarch64.
+       A linker-signed binary that cargo relinks loses it. -->
   <key>com.apple.security.hypervisor</key> <true/>
+  <!-- And TCG's JIT, as 2ksbox.entitlements, for the hardened runtime of
+       the notarized app: a Mac without HVF (a VM) falls back to TCG. -->
+  <key>com.apple.security.cs.allow-jit</key> <true/>
 </dict>
 </plist>

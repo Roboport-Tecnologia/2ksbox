@@ -775,12 +775,14 @@ checkout it was built from (`target/`, `build/qemu`, `qemu/pc-bios`,
 <prefix>/bin/2ksbox                            the launcher
 <prefix>/bin/2ksbox-player                     the player (era machines)
 <prefix>/bin/2ksbox-player-x86_64              the player for Windows 11
+<prefix>/bin/2ksbox-player-aarch64             ... for Windows 11 on Arm (Arm hosts; the Mac app)
 <prefix>/lib/2ksbox/libqemu-embed-i386.so      the QEMU each links
 <prefix>/lib/2ksbox/libqemu-embed-x86_64.so
 <prefix>/lib/2ksbox/…                          D3D executor + DXVK, wine/
 <prefix>/libexec/2ksbox/qemu-img               ours, patched, kept off PATH
 <prefix>/share/2ksbox/pc-bios/                 QEMU firmware (the player's -L)
 <prefix>/share/2ksbox/guest-tools/             the guest-tools ISO
+<prefix>/share/2ksbox/drivers/                 Windows 11's drivers disc, the host's processor's
 <prefix>/share/2ksbox/shaders/                 presets, when a package ships them
 <prefix>/share/2ksbox/desktop/                 .desktop + metainfo, for install.sh
 <prefix>/share/icons/hicolor/<n>x<n>/apps/     the application icon, every size

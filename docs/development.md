@@ -658,7 +658,9 @@ offscreen platform and wants the add-on's launcher and a window grab.
 dylib closure and the executor with the LunarG loader and KosmicKrisp
 (the launcher is on AppKit and brings no toolkit), then signs with the
 hardened runtime and the JIT entitlement, notarizes and staples.
-`--community` is ADR-019's community build, which adds the Wine pair.
+On Apple Silicon both builds carry Windows 11 on Arm: its player
+(`2ksbox-player-aarch64`, with the hypervisor entitlement), our EDK2 and
+the ARM64 drivers disc. `--community` is ADR-019's community build, which adds the Wine pair.
 `--x86_64` (after `scripts/build.sh --x86_64`) is the Intel app, made on
 the same Mac under Rosetta: always the community build, with no Vulkan,
 into `build/macos-x86_64`. Nothing in either app comes from Homebrew.
