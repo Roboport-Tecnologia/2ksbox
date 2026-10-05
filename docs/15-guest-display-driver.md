@@ -14,9 +14,9 @@ The driver came in three stages, which still name the parts: **M7a** the
 framebuffer driver, **M7b** the DirectDraw DDI, **M7c** the Direct3D DDI
 (a DirectX 7 HAL, grown into a DirectX 8 DDI with hardware T&L, and
 since M16 a DirectX 9 DDI with shader model 3.0). The
-register set is **v7** (`D3DPT_FB_VERSION`; v6 and v7 added only the
-WDDM driver's interrupt, fence and DMA append, which this driver never
-touches) and the protocol **v22**
+register set is **v8** (`D3DPT_FB_VERSION`; v6 to v8 added only the
+WDDM driver's interrupt, fence, DMA append and CURSOR_FLAGS, which this
+driver never touches) and the protocol **v22**
 (`D3DPT_PROTO_VERSION`). FIFA 2000, Max Payne, Diablo, Moto Racer 1997,
 GTA 2 and GTA Vice City run on it with no DLL in their folders.
 
@@ -115,6 +115,9 @@ The sources are in `guest-tools/src/d3dptvid/`. The NT layer `nt/`
 | 3 | 8 bpp: the 256-entry PALETTE block (0x400), `CAP_BPP8` |
 | 4 | the hardware cursor: CURSOR_* |
 | 5 | gamma: the GAMMA block (0x800), GAMMA_ENABLE (0xb4), `CAP_GAMMA` |
+| 6 | interrupts: IRQ_ENABLE / IRQ_STATUS (0xb8 / 0xbc), `CAP_IRQ` (M18) |
+| 7 | the WDDM driver's DMA_* append and FENCE (0xc0..0xd4), `CAP_DMA` (M18) |
+| 8 | CURSOR_FLAGS (0xd8): `CURSOR_OWNED` turns off the flip hiding below (M18) |
 
 The BAR has `valid.min_access_size = 4`, so every access is 32-bit,
 which matters to the 16-bit 9x driver (doc 19).
@@ -483,6 +486,13 @@ adds the sprite every card of the era had.
   the desktop's page shows the pointer until its next flip. While a Voodoo 2 has the monitor the
   cursor is hidden too (patch 66). The adapter does all this, so both
   driver families get it; the `voodoo-guest-d3dpt` check guards it.
+  **Not for the WDDM driver** (register set v8): it writes
+  `CURSOR_OWNED` to CURSOR_FLAGS at StartDevice, and from then on only
+  CURSOR_ENABLE shows or hides the sprite. dxgkrnl's SetPointerPosition
+  says when the pointer hides, and Windows 7's DWM flips the desktop at
+  every composed frame, so with the flip rule the pointer was gone
+  whenever anything on the screen moved, and back 2 s after it stopped.
+  A reset clears the flag.
 
 ### Gamma ramps
 

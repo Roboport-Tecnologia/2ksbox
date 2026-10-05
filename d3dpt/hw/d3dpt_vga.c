@@ -96,6 +96,7 @@ struct D3dptVgaState {
     uint32_t cur_defines, cur_moves;
     bool cur_shown;             /* the visibility last published */
     bool cur_flip_hidden;       /* a flip chain has the screen: see fb_cursor_move */
+    uint32_t cur_flags;         /* CURSOR_FLAGS (v8): CURSOR_OWNED turns the flip hiding off */
     uint32_t cur_flip_desktop;  /* the scanout offset before the chain's first flip */
     QEMUTimer *cur_flip_timer;  /* no flip for D3DPT_FB_FLIP_IDLE_MS: see fb_cursor_flip_idle */
     uint32_t cur_flip_idles;    /* chains ended that way, for the log */
@@ -752,7 +753,12 @@ static void fb_cursor_define(D3dptVgaState *s, bool on)
  * screen then and nothing of its will turn the sprite off. The player
  * composites the sprite into the frame when the pointer is grabbed, and
  * over Blood's 640x480 VGA frame the desktop's arrow came out at the
- * desktop's coordinates, scaled with the frame. */
+ * desktop's coordinates, scaled with the frame.
+ *
+ * A driver that writes CURSOR_OWNED (register set v8; the WDDM driver)
+ * gets none of the flip hiding: dxgkrnl tells it when the pointer hides,
+ * and Windows 7's DWM flips the desktop at every composed frame, so the
+ * pointer was hidden whenever anything on the screen moved. */
 /* How long without a page flip before a flip chain counts as gone. Guest
  * time, so a slow TCG frame or a paused VM does not count; long enough that
  * a game at a few frames a second keeps the sprite hidden. */
@@ -849,6 +855,8 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return (uint32_t)s->cur_y;
     case D3DPT_FB_REG_CURSOR_ENABLE:
         return s->cur_on;
+    case D3DPT_FB_REG_CURSOR_FLAGS:
+        return s->cur_flags;
     case D3DPT_FB_REG_GAMMA_ENABLE:
         return s->gamma_on;
     case D3DPT_FB_REG_MODE_COUNT:
@@ -949,10 +957,14 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         if (val != s->r_offset) {
             s->flips++;
             fb_flip_rate(s);
-            if (s->r_enable) {
+            if (s->r_enable && !(s->cur_flags & D3DPT_FB_CURSOR_OWNED)) {
                 if (!s->cur_flip_hidden) {
                     s->cur_flip_hidden = true;
                     s->cur_flip_desktop = s->r_offset;  /* the page GDI was on */
+                    if (s->cur_flip_idles < 64) {
+                        info_report("d3dpt-vga: page flip from offset %u: a flip chain has the screen, "
+                                    "the cursor hides", s->r_offset);
+                    }
                     s->r_offset = val;
                     if (s->cur_defined && s->cur_on) {
                         fb_cursor_move(s);  /* a flip chain has the screen */
@@ -1013,6 +1025,16 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
     case D3DPT_FB_REG_CURSOR_ENABLE:
         s->cur_on = val != 0;
         fb_cursor_move(s);
+        break;
+    case D3DPT_FB_REG_CURSOR_FLAGS:
+        s->cur_flags = val & D3DPT_FB_CURSOR_OWNED;
+        if (s->cur_flags & D3DPT_FB_CURSOR_OWNED) {
+            s->cur_flip_hidden = false;
+            timer_del(s->cur_flip_timer);
+            if (s->cur_defined) {
+                fb_cursor_move(s);
+            }
+        }
         break;
     case D3DPT_FB_REG_GAMMA_ENABLE:
         s->gamma_on = val != 0;
@@ -1144,6 +1166,7 @@ static void d3dpt_vga_reset(DeviceState *dev)
     s->r_offset = s->r_hz = s->r_sel = 0;
     s->vbl_ns = 0;
     s->cur_flip_hidden = false;
+    s->cur_flags = 0;
     timer_del(s->cur_flip_timer);
     s->flips = s->flips_last = 0;
     s->flips_ns = 0;

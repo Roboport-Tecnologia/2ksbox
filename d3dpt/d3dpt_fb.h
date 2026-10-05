@@ -74,6 +74,13 @@
  * submission whose work is done and raises IRQ_DMA (when enabled), the
  * completion interrupt dxgkrnl's scheduler waits on.
  *
+ * Version 8: CURSOR_FLAGS. With CURSOR_OWNED the driver alone says when
+ * the sprite shows (CURSOR_ENABLE) and a page flip no longer hides it.
+ * The device hides it from a flip chain's first flip on 9x and XP, where
+ * nothing tells a driver of exclusive mode; on Windows 7 DWM flips the
+ * desktop itself at every composed frame, so the pointer was gone while
+ * anything moved (M18), and dxgkrnl's SetPointerPosition says when to hide.
+ *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
  * built with and refuses only an older one, because a newer register set is
@@ -94,7 +101,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_FB_VERSION      7u
+#define D3DPT_FB_VERSION      8u
 #define D3DPT_FB_MAGIC        0x42463344u          /* "D3FB" at REG_MAGIC */
 
 /* PCI identity: QEMU/Bochs pseudo vendor, our device id ("3D00"). The INF
@@ -163,6 +170,8 @@
                                           * R: D3DPT_FB_DMA_* of the last append (nothing is appended on error) */
 #define D3DPT_FB_REG_FENCE       0xd0u   /* W: a submission fence, all its work done: FENCE_DONE takes it, IRQ_DMA */
 #define D3DPT_FB_REG_FENCE_DONE  0xd4u   /* R: the last FENCE written (0 after reset) */
+#define D3DPT_FB_REG_CURSOR_FLAGS 0xd8u  /* RW (version 8): D3DPT_FB_CURSOR_*; 0 at reset */
+#define D3DPT_FB_CURSOR_OWNED    0x1u    /* the driver alone shows and hides the sprite: no hiding on a page flip */
 #define D3DPT_FB_DMA_OK          0u
 #define D3DPT_FB_DMA_NO_ROOM     1u      /* the batch has no room for them: ring the doorbell first */
 #define D3DPT_FB_DMA_BAD         2u      /* no window, a size not a multiple of 8, or memory the device cannot read */

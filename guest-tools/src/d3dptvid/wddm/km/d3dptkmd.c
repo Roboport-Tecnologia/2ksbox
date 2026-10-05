@@ -354,6 +354,12 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     if ((a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_CURSOR) && a->seg_size > 2 * D3DPT_FB_CURSOR_BYTES) {
         a->cursor_off = (a->seg_size - D3DPT_FB_CURSOR_BYTES) & ~(PAGE_SIZE - 1);
         a->seg_size = a->cursor_off;
+        /* SetPointerPosition says when the pointer hides; without this
+         * the device hides it from every flip (its 9x / XP rule), and DWM
+         * flips at every composed frame */
+        if (version >= 8u) {
+            a->regs[D3DPT_FB_REG_CURSOR_FLAGS / 4] = D3DPT_FB_CURSOR_OWNED;
+        }
     }
 
     read_modes(a);

@@ -18,6 +18,9 @@
 #   setup    SETUP chose the WDDM driver (the adapter's interrupt found)
 #   driver   the kernel driver started (its StartDevice in the QEMU log)
 #   dwm      dwm.exe has d3dptumd.dll loaded: DWM composes on our driver
+#   cursor   the pointer was never hidden by a page flip: the driver owns
+#            its visibility (CURSOR_OWNED, register set v8), where DWM's
+#            flips at every composed frame used to hide it (doc 15)
 #   d3dgame9 D3DGAME9's frame 300 under composition against the native d3d9
 #            frame (build/test/g9-native.bmp, scripts/test.sh's host stage)
 #
@@ -193,6 +196,10 @@ else no setup "SETUP did not choose the WDDM driver"; fi
 if grep -aq "d3dptkmd: StartDevice" "$LOG"; then ok driver "StartDevice"; else no driver "no StartDevice in $LOG"; fi
 if tr -d '\r' < "$SER" | grep -q "^dwm.exe .*d3dptumd.dll"; then ok dwm "dwm.exe has d3dptumd.dll loaded"
 else no dwm "no dwm.exe with d3dptumd.dll"; fi
+flips=$(grep -ac "a flip chain has the screen, the cursor hides" "$LOG" || true)
+if ! grep -aq "d3dpt-vga: cursor shown" "$LOG"; then no cursor "the pointer was never shown"
+elif [ "$flips" != 0 ]; then no cursor "hidden by page flips $flips times"
+else ok cursor "shown, never hidden by a flip"; fi
 rm -f "$OUT/G9.BMP" "$OUT/G9.LOG"
 mcopy -n -i "$SCRATCH@@1048576" ::/G9.BMP ::/G9.LOG "$OUT/" 2>/dev/null || true
 if [ ! -f "$OUT/G9.BMP" ]; then no d3dgame9 "no frame on the scratch disk"

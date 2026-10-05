@@ -625,6 +625,18 @@ device's half is plain QEMU C and builds anywhere.
    `sources\ei.cfg`, which lives in UDF: xorriso and bsdtar see only the
    ISO 9660 stub (`README.TXT`), so `tools/udfcat.py` reads it (stdlib
    Python, one file to stdout).
+16. **The pointer under Aero** (2026-10-04, user: "no mouse cursor. it
+   sometimes appears then disappears"). The device hides its cursor
+   sprite from a flip chain's first page flip (doc 15 "The hardware
+   cursor": 9x and XP never tell a driver of exclusive mode) and gives it
+   back after 2 s with no flip on the page the desktop had. DWM flips the
+   desktop between its buffers at every composed frame, so the pointer was
+   hidden whenever anything moved and came back only after a quiet 2 s on
+   one of the two pages. Register set v8 adds `CURSOR_FLAGS`; the kernel
+   driver writes `CURSOR_OWNED` at StartDevice, after which only
+   CURSOR_ENABLE (dxgkrnl's SetPointerPosition) shows or hides the sprite.
+   The device now logs each flip that hides it, and
+   `tools/win7-aero-test.sh`'s `cursor` verdict wants none.
 7. **Direct3D 9Ex, shared surfaces, DWM: Aero.** Done for 32-bit Windows
    7: DWM composes the desktop (finding 8), every test program draws in it
    with native frames (findings 9 and 10), paced by the device's own
