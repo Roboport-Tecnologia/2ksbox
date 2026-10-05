@@ -194,20 +194,20 @@ are in [docs/build-windows.md](docs/build-windows.md).
 1. **Shader presets.** The first time the launcher starts with no
    shader collection, it offers to download libretro's. Say yes: the
    starter profiles are made from it. A source checkout already has it.
-2. **Create a machine.** *New machine* walks through family (Windows 98,
+2. **Create a machine.** *New* walks through family (Windows 98,
    Windows XP, Windows 7, Windows 11, DOS, Other), name, memory,
    processor, acceleration, networking, pointer, disk size and install media. The defaults suit
    the family; change anything later in the machine's settings.
 3. **Install the operating system.** Point the install media at your
    Windows CD image and start the machine.
-4. **Install the guest tools.** Open the disc shelf, press *Add
-   guest-tools ISO*, and put it in the machine's CD drive. Inside the
+4. **Install the guest tools.** Open the disc shelf (*Shelf*), pick
+   *Add* > *Guest tools ISO*, and put it in the machine's CD drive. Inside the
    guest, run `SETUP.EXE` from that drive (`D:\SETUP.EXE /ALL` from the
    Run box installs everything this Windows can use: the display driver,
    the device mapper, the OpenGL pass-through, the disc-shelf program),
    then restart. `SETUP /LIST` shows what is on the disc; its
    `README.TXT` explains every folder.
-5. **Take a snapshot.** *Snapshots…* on the machine. "Fresh install" is
+5. **Take a snapshot.** *More* > *Snapshots* on the machine. "Fresh install" is
    the one you will keep coming back to, especially on Windows 98.
 
 ## Playing games
@@ -258,12 +258,12 @@ Windows machines use a "seamless" mouse by default: the host pointer is
 the guest's cursor and the window never grabs. Turn it off in the
 machine's settings for games that want a real PS/2 mouse.
 
-- **Shader profiles…** names a preset plus your parameter overrides, with
+- **Shaders** names a preset plus your parameter overrides, with
   a live preview against a screenshot. A machine picks a profile by name,
-  or stays on "(default)", which is whichever profile you mark **Use as
-  default** (CRT Aperture after the first download; "No default" means
+  or stays on "(default)", which is whichever profile you mark **Default**
+  (CRT Aperture after the first download; "No default" means
   no shader).
-- **Clone…** copies a machine whole, disk and snapshots, under a new
+- **Clone** (under *More*) copies a machine whole, disk and snapshots, under a new
   name.
 - **Gamepads.** A machine's settings choose whether a pad appears in the
   guest as a USB controller (Windows 98 SE, Me and XP see it with no

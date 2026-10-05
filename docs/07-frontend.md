@@ -17,7 +17,8 @@ commands `docs/development.md` and `docs/build-macos.md` /
   packages ship it as `2ksbox-player.exe`).
 - **What it runs is a QEMU command line**, not a bundle:
   `player [--shader <preset>] [--shader-params k=v,…] [--pad <mode>]
-  -- <qemu args>`. The launcher translates a bundle into that line
+  [--share <dir>] -- <qemu args>` (in that order; `docs/development.md`
+  has every option). The launcher translates a bundle into that line
   (`launcherx --print-player-args <bundle>`), so everything a bundle
   means lives in `launcher-core`. The player boots QEMU in-process (doc
   11) and renders through doc 03's pipeline, one machine per process
@@ -57,28 +58,27 @@ player line runs a machine with nothing else.
   UTM and VirtualBox lay theirs out (user, 2026-10-01).
   The machines run down the leading side, each with its name and
   `Machines::subtitle` (family and state); double-click or Return starts
-  one. Beside them: the chosen machine's name, Start and its windows
-  (Settings, Discs, Snapshots, Clone), then its settings in a group
+  one. Beside them: the chosen machine's name, Start and a More menu of
+  its windows (Settings, Discs, Snapshots, Clone), then its settings in a group
   per page of the form, Storage second (`Machines::details`, `launcherx
   --machine-details`; user: the drives are what is most often looked
   for). The details show only what the form shows for
   that family (no Direct3D row without our adapter), and a path shows
-  its file name. The toolbar keeps what is not about one machine: New
-  machine, Disc shelf, Shader profiles and the status line; no button
-  label there ends in "…" (user).
+  its file name. The toolbar keeps what is not about one machine: New,
+  Shelf, Shaders and About; no button label there ends in "…" (user).
 - **About 2ksbox** (2026-10-02) shows the version, the licence and
   the projects 2ksbox is built on, grouped by what they do for it, each
   a link with its licence. The list is `launcher_core::about` (the
   projects the app runs or ships, plus Wine; a library one of them pulls
   in is theirs to credit), and `launcherx --about` prints it. mitsuami
-  (`launcher-mitsuami/src/about.rs`) opens it from a "?" at the end of
+  (`launcher-mitsuami/src/about.rs`) opens it from an info icon at the end of
   the toolbar, except on macOS (user), where it is the application
   menu's About item: the app's menu bar is set on macOS only, one item
   with `MenuRole::About`, which AppKit moves into the application menu.
   The `mitsuami` check grabs it (`LAUNCHER_SCREEN=about`).
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
-- **Every Play is logged with the line it ran**, quoted to paste back
+- **Every Start is logged with the line it ran**, quoted to paste back
   into a shell, as `[player] …` in `launcher.log`, at the head of
   `player.log`, and on the terminal. The line is derived at spawn
   (family devices, shelf, QMP socket, shader profile), so a bundle alone
@@ -93,7 +93,7 @@ player line runs a machine with nothing else.
   release player `scripts/build.sh` made when no debug one is built.
   Another target's player follows the same order under
   `qemu-<target>/`. `--paths` prints the players it will use.
-- **Clone…** (`launcher-core/src/clone_machine.rs`) makes a new machine
+- **Clone** (`launcher-core/src/clone_machine.rs`) makes a new machine
   with the same settings and **its own copy of the disk**, wherever that
   disk is, since two machines on one image corrupt it the day both run.
   Internal snapshots come along inside the qcow2. Files inside the
@@ -109,7 +109,7 @@ player line runs a machine with nothing else.
   warns that only one machine at a time may run on that disk. Nothing
   enforces it beyond QEMU's own image lock. Nothing of the disk is read,
   so such a clone of a running machine goes ahead. `launcherx --clone
-  <machine.toml> [--same-disk] [name]` and `lc_machines_clone` (its
+  <machine.toml> [--same-disk] [--new-tpm] [name]` and `lc_machines_clone` (its
   `same_disk` argument) are the same model.
   A Windows 11 machine's TPM is copied with the rest (the clone has the
   same TPM identity, and BitLocker keeps working) unless **"Give the
@@ -185,16 +185,19 @@ The fields, and why each is what it is:
 
 - **Family.** Windows 98, Windows XP, Windows 7, Windows 11, DOS and
   Other (doc 06), in that order and with those labels (`Family::ALL`,
-  `Family::label`; user, 2026-10-04). **Other is the one
-  family with a sentence under the picker** (`family_note()`). It gets
-  none of our adapter, the 3D pass-through or the Windows components,
-  and its hardware is chosen for guests nothing here tests (BeOS, a
-  period Linux, OS/2). The note names what it has (a VESA VGA, an
-  RTL8139, an ES1370) and says there is no 3D.
+  `Family::label`; user, 2026-10-04). Windows 7, Windows 11 and Other
+  have a sentence under the picker (`family_note()`): Windows 7's says
+  it is the 32-bit one and that SETUP installs the driver Aero needs;
+  Windows 11's says what the machine is and where its installer comes
+  from, or that it does not run on this host. Other gets none of our
+  adapter, the 3D pass-through or the Windows components, and its
+  hardware is chosen for guests nothing here tests (BeOS, a period
+  Linux, OS/2). Its note names what it has (a VESA VGA, an RTL8139, an
+  ES1370) and says there is no 3D.
 - **Memory** is bounded per family (`bundle::ram_mb_range`: Win98
   32–512, since more will not boot; XP 64–3072, Windows 7 1024–3072,
   Windows 11 4096–32768, DOS 4–256, Other 16–3072). BeOS R5's 1 GB ceiling is stated, not enforced.
-- **Acceleration** is Automatic / hardware only / Emulation,
+- **Acceleration** is Automatic / Hardware virtualization / Emulation,
   `accel = "auto" | "kvm" | "tcg"` on every host. `kvm` means "hardware
   acceleration, required", spelled `whpx` on Windows at spawn, and
   refuses to start without it. The picker says "Hardware virtualization";
@@ -223,11 +226,11 @@ The fields, and why each is what it is:
   prevent, and Win98 is tuned on the fast paths of docs 13 and 16. A DOS
   throttle needs TCG.
 - **The processor** is a combo of named machines (`cpu_speed`,
-  `bundle::CpuSpeed`): *Unthrottled* down through *Pentium 133*,
-  *486DX2-66*, *386DX-33*, *286-12*. DOS-era software times itself
+  `bundle::CpuSpeed`): *Full speed (no throttle)*, then *Pentium 133*,
+  *Pentium 75*, *486DX2-66*, *486SX-25*, *386DX-33* and *286-12*. DOS-era software times itself
   against the CPU it finds, so this field decides whether a game is
-  playable (doc 06 has the measurements). Every family offers it (a
-  Win98 DOS box runs DOS games too); only DOS defaults to a throttled
+  playable (doc 06 has the measurements). Every era family offers it (a
+  Win98 DOS box runs DOS games too; Windows 11 has no such field); only DOS defaults to a throttled
   one (486DX2-66). A throttle is `-icount`, which cannot run under KVM,
   so `effective_accel()` returns TCG whenever one is chosen, and the
   form says so.
@@ -322,10 +325,10 @@ The fields, and why each is what it is:
   `host_gpu::announce_driver`, every front end's first call in `main`
   (`lc_announce_driver` in the C API; `build-macos.md` "The app" has
   why).
-- **The Voodoo 2** ("Emulated 3dfx Voodoo 2", `voodoo2`; doc 21) sits
+- **The Voodoo 2** ("3dfx Voodoo 2", `voodoo2`; doc 21) sits
   under the adapter. When on, the machine gets `-device
   voodoo2,addr=0x05` and nothing else changes. It is off unless picked,
-  on every family, because a card with no guest driver is a New Hardware
+  on every era family (Windows 11 has no such field), because a card with no guest driver is a New Hardware
   wizard on every boot. **"Voodoo3 undither filter"** (`voodoo2_undither`,
   doc 21 §12) is on the same line: disabled without the card
   (`voodoo2_undither_enabled()`), turned off with it, written only where
@@ -365,8 +368,8 @@ The fields, and why each is what it is:
   the player's `--share <dir>` (`player::share_args`), and only with
   Networking on, which the guest reaches it through (`share_folder`,
   `shared_folder_notes`). An absent field means off and none.
-- **A floppy and a boot order** (`floppy`, `boot`). *Boot from* is
-  Automatic / Hard disk / Floppy / CD. Automatic emits no `-boot`, which
+- **A floppy and a boot order** (`floppy`, `boot`), not on Windows 11. *Boot from* is
+  Automatic / Hard disk / Floppy, then hard disk / CD, then hard disk. Automatic emits no `-boot`, which
   is what booting a blank new disk's installer from the CD relies on.
 
 ### The disc shelf
@@ -399,7 +402,7 @@ The fields, and why each is what it is:
   Guest tools ISO) starts at the last folder browsed, and the shelf
   takes dropped images and folders too; there is no typed-path field
   (2026-10-01).
-- **A host folder is a disc too** ("Add folder…"): the drive gets
+- **A host folder is a disc too** ("Folder as disc…"): the drive gets
   `isodir:<path>`, an ISO 9660 + Joliet volume generated over the tree
   (doc 17 §8). That is how a patch, a save game or a folder of
   installers reaches a guest without networking or mastering an image.
@@ -524,8 +527,8 @@ and runs without live control.
   path, the library's default, nothing. The picker's first row and the
   library's "Shader" column say which ("(default) CRT Aperture",
   `shader_library::default_label`; bare "(default)" with none marked).
-  The profile window's rows carry a "default" mark and a "Use as
-  default" button, and "No default" clears it; deleting the default
+  The profile window's rows carry a "Default" switch, and "No
+  default" clears it; deleting the default
   profile clears it too, and a file naming a profile that is gone reads
   as none. **The first download marks CRT Aperture**
   (`create_defaults`, when the library has no default yet; a default
@@ -744,7 +747,7 @@ so what each package carries for it is the platform's to supply:
 | Linux tarball (`scripts/package-linux.sh`) | the host's GTK 4, not carried; `install.sh` names the distribution's package when it is missing |
 | Flatpak (`packaging/flatpak/`) | the runtime: `org.gnome.Platform` 49, which ships GTK 4 (user decision, 2026-10-02) |
 | macOS (`scripts/package-macos.sh`) | nothing: AppKit is the system's |
-| Windows (`scripts/package-windows.sh`, and its MSIX through `package-msix.sh`) | the Windows App Runtime 2.4+ (WinUI 3); the launcher is the one MSVC binary, with the static C runtime, and the MSIX declares the App Runtime as a `PackageDependency` |
+| Windows (`scripts/package-windows.sh`, and its MSIX through `package-msix.sh`) | the Windows App Runtime 2.4+ (WinUI 3); the launcher is MSVC like the whole package, with the static C runtime, and the MSIX declares the App Runtime as a `PackageDependency` |
 
 **Every packager opens the staged launcher's window and requires a
 PNG**, since a package can pass every other check and still open
@@ -869,8 +872,9 @@ screenshots) needs somewhere to host them.
   was `org.kde.Platform` while the launcher was Qt). It builds from
   source (host binaries need a newer
   glibc than the runtime's), offline, through `package-linux.sh --prefix
-  /app`, plus libslirp (absent from the runtime; `-netdev user` needs
-  it) and a build-only `distlib`. Its crates, mitsuami's git checkout
+  /app`, with QEMU's GLib, libslirp and libtpms from `build-deps.sh`'s
+  declared tarballs and a build-only `distlib`. Wine and the KDE
+  launcher are add-ons (`docs/development.md` "Flatpak"). Its crates, mitsuami's git checkout
   among them, are listed in `packaging/flatpak/cargo-sources.json`
   (`scripts/gen-flatpak-cargo-sources.sh`).
 - **macOS.** A signed, notarized .app with the JIT entitlement, native

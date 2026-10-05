@@ -74,7 +74,7 @@ embed library, as for the winit player, into a target dir of its own:
    The winit player's `main.rs` split: the toolkit-free half into
    `player-core` (its `Gpu` no longer holds a window: it takes any surface
    target, reports the minimum window size the mode wants, `take_min_size`,
-   and leaves the present to the front end); `player/main.rs` is the winit
+   and leaves the present to the front end); `player/src/main.rs` is the winit
    half, its behaviour unchanged (the host suite passes as at its
    baseline; an XP overlay boots to the desktop with the same mode, cursor
    and shots as before the split). `player-mitsuami`: an `App::open`

@@ -483,7 +483,7 @@ distribution ships (the Flatpak is for a host without Qt).
 6 builds everything else and rolls no package. Every packager opens a
 **real window offscreen** and requires a PNG, because Qt resolves its
 platform plugin and QML modules by name at run time, invisible to every
-import-table check (doc 07, "Shipping Qt").
+import-table check (doc 07 "Shipping Qt", gone with the Qt launcher).
 
 ## ADR-016: The Voodoo 2 is emulated, beside the Glide pass-through, not instead of it (2026-09-12)
 
@@ -643,6 +643,12 @@ floor and either architecture (`build-macos.md` "The libraries"), and
 line that reaches it allows (`scripts/macos-floor.sh`; 6.5 would reach
 11, but its open-source line ended in 2023). Homebrew remains a source
 of build tools and of recipes to crib from.
+
+*(Since ADR-023 the launcher is AppKit and `build-deps.sh` builds no Qt;
+12 stands until the AppKit launcher's floor is measured, `build-macos.md`
+"The floor". Since 2026-10-04 both Apple Silicon apps also carry Windows
+11 on Arm, whose player has the hypervisor entitlement beside the JIT one,
+track M20.)*
 
 **What stays open.** The store build adds the sandbox and whatever
 review asks. The store's licensing question (GPL-2 QEMU and 86Box under
@@ -915,7 +921,8 @@ wholesale", then "natively on windows"). The WDDM driver goes first
 2026-10-03: everything Windows builds, packages and is tested on the PC,
 the launcher and the player with MSVC, and the cross build from Linux
 (`win-cross.sh` and its container) is retired. The executor and DXVK
-moved to MSVC together on 2026-10-04 (the amendments below).
+moved to MSVC together on 2026-10-04 (the amendments below), and the
+third amendment moved the package's QEMU to MSVC the same day.
 
 **Decision.** Windows binaries build on a Windows machine with Visual
 Studio's MSVC tools, not cross-compiled from Linux:

@@ -31,7 +31,8 @@
 #           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
 #           build/win/qemu-msvc: the QEMU the package ships, importing
 #           only Windows' own DLLs; with libqemu-embed-x86_64.dll, the
-#           Windows 11 player's (track M20, WHPX)
+#           Windows 11 player's (track M20; no Windows 11 runs on it
+#           until QEMU has a TPM on Windows)
 #   rust   the winit player (test.sh's), cargo --target
 #           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
 #           discx and synthx with MSVC (scripts/cargo-msvc.sh, into

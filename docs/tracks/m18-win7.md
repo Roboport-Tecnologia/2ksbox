@@ -100,7 +100,7 @@ device's half is plain QEMU C and builds anywhere.
    rule: the QEMU log, never a debugger). Proved when Windows 7's Device
    Manager shows our adapter started, with the XP-model driver as the
    fallback a reinstall brings back.
-   **Built 2026-10-02, not yet booted:** `wddm/km/d3dptkmd.c` registers
+   **Built 2026-10-02, then booted the same day (StartDevice):** `wddm/km/d3dptkmd.c` registers
    every WDDM 1.1 callback (each stub declared with the WDK's own
    `DXGKDDI_*` type, so the header checks it); add/start/stop/remove are
    real, start maps the register BAR and logs the magic, version and VRAM
@@ -215,7 +215,8 @@ device's half is plain QEMU C and builds anywhere.
      is no DWM, so it is untested.
    Left of step 5: timeout recovery (ResetFromTimeout / RestartFromTimeout
    answer success, never triggered). Next: step 6, the user-mode driver
-   that DWM needs, and step 4's device interrupt to replace the timer.
+   that DWM needs, and step 4's device interrupt to replace the timer
+   (both done since: plan steps 6 and 4).
 3. **How the binaries reach the guest.** The guest-tools ISO is built on
    Linux, the WDDM driver on the PC. Decide in this step: build the ISO on
    the PC too (`build-windows.sh guest` already runs there), or copy the

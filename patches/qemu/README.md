@@ -126,8 +126,9 @@ because they change only cost, not behaviour. Device-level A/Bs:
 
 ## The patches
 
-Numbers 03 and 57–59 are unused (57–59 are kept for CD-ROM backend
-work, doc 17); the numbers under "Dropped in M21" below are not reused.
+Numbers 03, 33 (the Glide host-ops handshake, removed with the Glide
+pass-through, ADR-020) and 57–59 are unused (57–59 are kept for CD-ROM
+backend work, doc 17); the numbers under "Dropped in M21" below are not reused.
 Two files share the number 20.
 
 ### 00-3dfx-darwin-contextalpha

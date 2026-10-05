@@ -14,10 +14,8 @@ The machine form is doc 07, the sound and music devices doc 20, the
 display drivers docs 15 and 19, the Voodoo 2 doc 21.
 
 **Common to the era families** (all but Windows 11). i440FX + PIIX on
-a versioned board (`pc-i440fx-<ver>`, `Machine::board`: a new machine
-gets `pc-i440fx-11.1`, a bundle from before the field `pc-i440fx-9.2`),
-`-cpu pentium3`
-(`max` on Windows 7; with the form's optimization switches as its
+a versioned board (`pc-i440fx-<ver>`, "Windows 98 SE" below),
+`-cpu pentium3` (`max` on Windows 7; with the form's optimization switches as its
 properties), IDE disk
 (qcow2) and our ATAPI CD (doc 17). **No network card** on a new machine
 or a bundle that doesn't ask for one, so an unpatched guest stays off
@@ -166,7 +164,7 @@ The modern family (ADR-024, track M20): 64-bit, on its own QEMU target
 |---|---|---|
 | QEMU | `qemu-system-x86_64` | `qemu-system-aarch64` |
 | Machine | `q35,smm=on` | `virt,gic-version=3` |
-| Accel | Automatic: KVM (WHPX on Windows) with TCG behind it | Automatic: HVF on a Mac (KVM on an Arm Linux host) with TCG behind it |
+| Accel | Automatic: KVM with TCG behind it (a Windows host runs no Windows 11 yet: no TPM there) | Automatic: HVF on a Mac (KVM on an Arm Linux host) with TCG behind it |
 | CPU | `max`, 2 to 4 vCPUs (`default_cpus`) | `max`, the same count |
 | Firmware | EDK2's secure build from `pc-bios`, its variables the machine's own qcow2 (`efi_vars`) | our own EDK2 (`scripts/build-edk2.sh`), the same |
 | TPM 2.0 | libtpms in QEMU (patch 75) on `tpm-crb`, state in `tpm_state` | the same on `tpm-tis-device` |
@@ -196,7 +194,7 @@ Modeled as a ~1994 PC: the same board, a Sound Blaster, and nothing else.
 | Video | `std` (`cirrus`) | a DOS title programs the adapter itself, so the choice is **which VESA BIOS it finds**: the Bochs adapter's VBE 2.0 with a linear frame buffer (the default, user decision) or the Cirrus's period one. The A/B for a game whose modes come out wrong. No `d3dpt-vga`: it has no DOS driver |
 | Sound | SB16 + OPL3 (Gravis Ultrasound, AdLib alone, none) | what DOS software talks to (`BLASTER=A220 I5 D1 H5 P330 T6` names the MIDI port too); the Gravis for games written for one; the bare AdLib is the 1990 machine |
 | Music | MPU-401 at 0x330, General MIDI (CM-32L, none) | what a setup screen means by "General MIDI", "MPU-401" or "Roland" |
-| Net | none | DOS networks only through a packet driver installed by hand |
+| Net | PCnet when on (off by default, as everywhere) | DOS networks only through a packet driver installed by hand |
 | Pointer | PS/2 only (`seamless_mouse = false`) | a DOS mouse driver talks to the PS/2 controller and would find no tablet. A click grabs, Ctrl+Alt+G releases |
 | Gamepad | none (gameport at 0x201, key mapping) | no USB stack. A DOS game reads the port by arming four one-shots and counting, so the count depends on guest speed; unpaced, an untouched axis wanders by half. Another reason this family is paced |
 | Boot | floppy + `boot` on the machine | a DOS machine usually boots from one |

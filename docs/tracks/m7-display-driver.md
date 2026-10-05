@@ -14,8 +14,8 @@ DirectX 8 feature is a protocol bump made here.
 
 - **M7a**, framebuffer: the host's mode table, the desktop from VRAM,
   unattended install (`DRIVER\DRVINST.EXE`), 8 bpp palettes, hardware
-  cursor, gamma ramps. Register set **v5** (`D3DPT_FB_VERSION`; v8 now,
-  M18 added the interrupt and fence registers); drivers built since
+  cursor, gamma ramps. Register set **v5** (`D3DPT_FB_VERSION`; v8 now:
+  M18 added the interrupt, fence and cursor registers); drivers built since
   2026-09-12 accept any adapter at or above their version.
 - **M7b**, DirectDraw: VRAM surfaces, flips paced by a vertical blank,
   colour keys.

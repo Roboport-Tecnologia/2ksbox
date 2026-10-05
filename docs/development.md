@@ -486,8 +486,8 @@ one was before it (ADR-017).
 `launcher-mitsuami` is its own cargo workspace, so a root `cargo build`
 never needs GTK. `build.sh`'s `mitsuami` stage builds it; a Linux host
 with no GTK 4.10+ development files skips that stage and can roll no
-package. On Windows it is the one MSVC binary (WinUI 3, static C
-runtime) and builds only on a PC (`scripts/build-windows.sh mitsuami`,
+package. On Windows it is MSVC like the rest of the package (WinUI 3,
+static C runtime) and builds only on a PC (`scripts/build-windows.sh mitsuami`,
 [build-windows.md](build-windows.md)). Run it from a checkout with
 
 ```sh
@@ -678,7 +678,8 @@ Built on a Windows PC, in MSYS2's MINGW64 shell
 (`scripts/build-windows.sh`, `scripts/package-windows.sh`; ADR-026):
 `2ksbox.exe` (the launcher) and `2ksbox-player.exe` (`player-mitsuami`),
 WinUI 3 and MSVC, needing the Windows App Runtime 2.4 or later,
-`2ksbox-player-x86_64.exe` (Windows 11's), QEMU built against MSVC
+`2ksbox-player-x86_64.exe` (Windows 11's, which a Windows host does not
+run yet: no TPM there), QEMU built against MSVC
 (`libqemu-embed-i386.dll`, `libqemu-embed-x86_64.dll`, `qemu-img.exe`;
 the `qemu-msvc` stage), the executor with DXVK, firmware and guest tools
 in one portable folder that ships no runtime DLL. The
@@ -696,7 +697,7 @@ Details: [build-windows.md](build-windows.md).
   in `launcher.log` (beside the machine library), which is what to send
   when the launcher did not come up. On Windows, where the launcher has
   no stdout, `2ksbox-debug.bat` in the package does that.
-- Every Play writes the full player command line to `launcher.log` as
+- Every Start writes the full player command line to `launcher.log` as
   `[player] …`, quoted for pasting back into a shell.
 
 ## Licensing, for packagers

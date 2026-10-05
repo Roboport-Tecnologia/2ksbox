@@ -116,9 +116,9 @@ Packages: a Linux tarball (the host's GTK 4), a Flatpak
 and a Windows zip and Store MSIX.
 
 **Left:** an AppImage, a Windows installer, grid thumbnails, bundle
-import/export, Flathub screenshots (the track doc's "Open"); the Linux,
-macOS and Flatpak packagers' first runs with the mitsuami launcher
-(M19).
+import/export, Flathub screenshots (the track doc's "Open"); the Linux
+tarball packager's first run with the mitsuami launcher (M19; the macOS
+and Flatpak ones passed on 2026-10-04).
 
 ## M7: XP display driver
 
@@ -155,7 +155,8 @@ per thread, TB and TLB fixes, a REP fast path, SMC filtering, inline
 jump-cache lookup (every patch in `patches/qemu/README.md`). Doc 22
 measures the queue at 2.34x geomean over pristine 9.2.4 on the Air. The
 user closed the optimization work on 2026-09-12. Patch 21
-(`pinned-regs`, doc 18) crashes XP and is not offered in the form.
+(`pinned-regs`, doc 18) crashed XP, was never offered, and was not ported
+to 11.1 (M21).
 
 **Left:** the Air's game tests uncapped, binary32 at PC=24 on aarch64,
 the measurements doc 22 still owes.
@@ -185,8 +186,7 @@ The launcher is WinUI 3, built with MSVC on the PC only (ADR-023, since
 2026-10-02; the Qt launcher before), so the zip is rolled there.
 
 **Left:** Moto Racer's speed on the PC, live control over AF_UNIX, the
-Windows-built ISO's `SETUP.EXE` and Win98 half in a guest, an installer, DXGI zero-copy, a check that
-boots a guest (the track doc).
+Windows-built ISO's `SETUP.EXE` and Win98 half in a guest, an installer, DXGI zero-copy (the track doc).
 
 ## M12: Music
 
@@ -221,8 +221,7 @@ Porsche, FIFA 2000 and Carmageddon. The command FIFO lives in guest RAM
 (`ramfifo=on`, Quake II 41 → 147.5 fps). The 8 MB board is the default.
 
 **Left:** a second Glide game after one quits sometimes starts
-glitched; a client resuming on a dead ring; the Windows build (the Air
-done 2026-10-04);
+glitched; a client resuming on a dead ring; the Windows build;
 patches 64 and 71 upstream (the track doc).
 
 ## M15: The Direct3D executor on Wine, on the host
@@ -231,8 +230,8 @@ ADR-018, doc 14 §"The executor on Wine, in another process". A Linux or
 macOS host below DXVK's Vulkan 1.3 floor runs the same executor on
 Wine's d3d9 in a child process. Steps 1–4 are done: the spike, the
 transport, the guest on XP and Win98, the launcher's third verdict and
-the packages (the macOS community build carries the Wine pair, and no
-package ships a Wine).
+the packages (the Linux tarball and the macOS community build carry
+the Wine pair, and no package ships a Wine).
 
 **Done 2026-09-23:** step 5, the community app on a real macOS 15
 (user-confirmed), step 6, WineD3D-in-guest removed in one commit, and
@@ -268,14 +267,15 @@ reaches Aero by itself (`tools/win7-aero-test.sh`).
 ADR-023. `launcher-mitsuami` replaced the Qt launcher on 2026-10-02 and
 is the only launcher; every packager ships it as `2ksbox`.
 
-**Left:** step 6's polish, the Linux and macOS packagers' runs with
-it, the KDE add-on in a real Plasma session (the track doc).
+**Left:** step 6's polish, the Linux packager's run with it, the KDE
+add-on in a real Plasma session, the macOS floor with the AppKit
+launcher (the track doc).
 
 ## M20: Windows 11 (active)
 
 ADR-024 made 2ksbox a general-purpose VM manager. The first modern box
 is Windows 11: EDK2 firmware, a TPM 2.0 from libtpms inside QEMU, x86_64
-under KVM or WHPX, and Windows 11 on Arm under Hypervisor.framework on
+under KVM (WHPX once a Windows host has a TPM), and Windows 11 on Arm under Hypervisor.framework on
 Apple Silicon. Steps 1 to 4 are done; step 5 (packaging) has the Linux,
 Windows and macOS packages carrying it.
 
@@ -288,8 +288,8 @@ QEMU v11.1.2 with qemu-3dfx's patch ported into `patches/qemu-3dfx/`
 and every TCG patch ported. Merged to `main` 2026-10-02. Old bundles
 stay on the `pc-i440fx-9.2` board.
 
-**Left:** step 4's Linux package and Flatpak, doc 22's numbers, the
-user's hand test.
+**Left:** step 4's Linux package (the Flatpak passed on 2026-10-04,
+M19), doc 22's numbers, the user's hand test.
 
 ## M22: The player on mitsuami (active)
 
@@ -297,8 +297,9 @@ ADR-025. `player-core` holds everything but the window, under the winit
 `player/` and `player-mitsuami/`. The Windows packages ship
 `player-mitsuami` as `2ksbox-player.exe`; the others still ship winit.
 
-**Left:** step 2 (the pointer and the window on a real desktop), then
-X11 / KDE, macOS and Windows, the flip (the track doc).
+**Left:** step 2 (the pointer and the window on a real desktop),
+X11 / KDE, macOS, and the flip in the Linux, macOS and Flatpak
+packages (the track doc).
 
 ## M23: Shared folders and the clipboard (active)
 

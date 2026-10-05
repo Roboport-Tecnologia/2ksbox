@@ -121,7 +121,7 @@ and photograph the screen it is on:
 | (unset) | the machine window |
 | `select:<machine.toml>` | the machine window with that machine chosen, as a click on its row |
 | `wizard[:<family>[:<page>[:open]]]` | a fresh form, on `win98` / `xp` / `win7` / `dos` / `other` / `win11` and a page by its sidebar index; `:open` opens the optimizations list |
-| `edit:<machine.toml>[:<page>]` | the form on a machine, as Edit… opens it |
+| `edit:<machine.toml>[:<page>]` | the form on a machine, as Settings opens it |
 | `clone:<machine.toml>[:same]` | the clone dialog on a machine, or sharing its disk |
 | `clonego:<machine.toml>` | presses Clone, and shows the machine window once the copy has landed (writes into the library) |
 | `snapshots:<machine.toml>` | the snapshot tree |

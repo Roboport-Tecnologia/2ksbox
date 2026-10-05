@@ -83,7 +83,7 @@ environment and replay them with `synthx midilog`, `opllog` and `play`
    Capture one run with both logs set and read it with `synthx`.
 2. **"MPU-401 Compatible" from Add New Hardware**, the step Win98 needs
    before it plays MIDI to the port (`docs/00-status.md` "Next steps").
-3. **A host MIDI port** (doc 20 §8.1): send the stream to real hardware
+3. **A host MIDI port** (doc 20 §8): send the stream to real hardware
    or the host's synth, player-side, with an embed API bump.
 4. **Duke's FM music from a batch file**, if anyone cares. With
    `MusicDevice = 2` it says "Couldn't find selected sound card" unless

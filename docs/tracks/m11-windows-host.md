@@ -128,6 +128,8 @@ Kept here:
    is not there yet").
 6. **Zero-copy frames** through a DXGI shared handle, the counterpart of
    the dma-buf ring and IOSurface. Frames take the readback path today.
+7. **Windows 11 on a Windows host** is track M20's: QEMU builds no TPM
+   there, so the package's `2ksbox-player-x86_64.exe` runs no Windows 11 yet.
 
 A Windows check that boots a guest, once an open item here, is done:
 `scripts/test.sh all` runs natively on the PC since 2026-10-02

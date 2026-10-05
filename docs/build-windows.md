@@ -62,6 +62,7 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 | `rust` | `target/x86_64-pc-windows-gnu/release/player.exe`, `target/x86_64-pc-windows-msvc/release/{launcherx,discx,synthx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh`; the tools are MSVC (`scripts/cargo-msvc.sh`, rustup's `stable-x86_64-pc-windows-msvc`), skipped without it |
 | `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe`, `player-mitsuami/target/qemu-x86_64/release/player-mitsuami.exe` | the package's `2ksbox.exe`, `2ksbox-player.exe` and `2ksbox-player-x86_64.exe` (ADR-023, track M22; the last `--features qemu-x86_64`, Windows 11's, track M20); their own workspaces; MSVC ("The launcher") |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor and the offscreen-GL probe, MSVC; the executor's host test (mingw, so it loads the executor as QEMU does). Skipped without Visual Studio's C++ tools |
+| `wddm` | `build/wddm/x86/{d3dptkmd.sys,d3dptumd.dll,d3dptkmd.inf}` | Windows 7's WDDM driver through a mounted EWDK, or the published build for these sources without one ("The WDDM driver") |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
 ## The package
@@ -514,8 +515,9 @@ under Store terms is the same question ADR-019 leaves to the user.
 ## Acceleration
 
 Windows' hardware acceleration is **WHPX** (Windows Hypervisor
-Platform), for era machines (`qemu-system-i386`) and Windows 11
-(`qemu-system-x86_64`) alike. QEMU 11.1 builds WHPX into x86_64 only;
+Platform), for era machines (`qemu-system-i386`); Windows 11
+(`qemu-system-x86_64`) would use it too, but does not run on a Windows
+host yet (QEMU builds no TPM there; track M20). QEMU 11.1 builds WHPX into x86_64 only;
 **patch 84** puts it back into i386 and fixes what killed it there
 (11.1's WHPX emulates MMIO with an x86 emulator whose 64-bit register
 stores overran the i386 target's 32-bit registers, so a machine died in
@@ -702,7 +704,7 @@ guest-tools ISO, in `WDDM\`.
 
 **Linux and macOS ISOs get the PC's build** (2026-10-04, user):
 `scripts/wddm-prebuilt.sh` names the driver by a hash of the sources it
-is built from (`wddm/`, the shared `core/`, `d3dpt_fb.h`, `d3dpt_enc.h`,
+is built from (`guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`, `d3dpt_enc.h`,
 `d3dpt_proto.h`, `build-wddm.cmd`; `wddm-prebuilt.sh key`). The `wddm`
 stage writes that hash to `build/wddm/x86/.key`, and `build-windows.sh
 wddm --publish` uploads the three files as `wddm-<hash>.tar.gz` to the

@@ -497,8 +497,8 @@ a recipe change for the same version wants `--clean`.
   nothing else.
 
 On Linux, the Flatpak included, the script builds only QEMU's GLib
-(with pcre2 and libslirp) and libtpms with libcrypto
-(`docs/development.md`, "The build, stage by stage"); `QEMU_DEPS=system`
+(with pcre2 and libslirp), libtpms with libcrypto and spice-protocol's
+headers (`docs/development.md`, "The build, stage by stage"); `QEMU_DEPS=system`
 takes the distribution's instead. What the Mac app's closure once was,
 for the record: 43 Qt frameworks and about 30 dylibs (ICU, dbus,
 OpenSSL, tiff, webp, jasper, lcms2, brotli and the rest) from

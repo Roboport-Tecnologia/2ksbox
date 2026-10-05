@@ -22,7 +22,7 @@ runs on `main`.
 - `tools/voodoo-guest-test.py` and its four checks in `scripts/test.sh`.
 - `guest-tools/src/v2start.c` (`SETUP /I 6`, the login-helper guard) and
   SETUP's "leave a 3dfx card's mapper alone" rule (doc 21 §10).
-- The form's "Emulated 3dfx Voodoo 2" checkbox (`voodoo2` in the bundle,
+- The form's "3dfx Voodoo 2" checkbox (`voodoo2` in the bundle,
   `-device voodoo2,addr=0x05`), shared with M6.
 
 ## State

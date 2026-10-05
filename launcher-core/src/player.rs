@@ -327,7 +327,7 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
 
 /// Why `machine` cannot start on this host, in the sentence a front end
 /// shows, or `None` when it can. Windows 11 alone has limits: no Windows
-/// host yet (QEMU 9.2 has no TPM there), and on a Mac only Windows 11 on
+/// host yet (QEMU 11.1 builds no TPM there), and on a Mac only Windows 11 on
 /// Arm, never x64 (user decision 2026-10-01: the Mac build has no x86_64
 /// QEMU or player, so an x64 bundle copied from Linux stops here rather
 /// than on a missing binary).

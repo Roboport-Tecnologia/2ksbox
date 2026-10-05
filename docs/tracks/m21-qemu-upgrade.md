@@ -621,7 +621,8 @@ disk through an overlay, KVM, the libtpms TPM, EDK2 from `qemu/pc-bios`)
 reaches the desktop in 25.3 s and powers off clean.
 
 Still open after the merge:
-- Step 4: the Linux package and the Flatpak (Linux only). The Air is
+- Step 4: the Linux package (Linux only; the Flatpak's packager passed
+  on 11.1 on 2026-10-04, track M19). The Air is
   done (2026-10-04, above: patch 82, all three apps), and the Windows
   package is built and checked natively since 2026-10-03.
 - ~~A Windows 11 machine's board~~ is the unversioned `q35` (Arm:

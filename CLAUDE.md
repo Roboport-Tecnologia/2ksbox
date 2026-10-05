@@ -44,7 +44,8 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
 - **Standalone Rust player + launcher** (ADR-005). RetroArch/libretro was
   tried and rejected; never propose it again. The player is
   `player-core/` (everything but the window) under two front ends:
-  `player/` on winit, which ships, and `player-mitsuami/` (ADR-025,
+  `player/` on winit, which the Linux and macOS packages ship, and
+  `player-mitsuami/` (ADR-025, the Windows packages' player,
   track M22), its own workspace like `launcher-mitsuami`.
 - **One launcher library, thin front ends** (ADR-014, doc 07).
   `launcher-core/` decides everything: bundle format, library, disc
@@ -65,7 +66,7 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   root workspace, so `cargo build` never needs GTK. Every packager opens
   a **real window** through its `LAUNCHER_SHOT` (GTK on a private
   Broadway display) and requires a PNG, because a missing toolkit is
-  invisible to every other check. On Windows it is the one MSVC binary
+  invisible to every other check. On Windows it is MSVC like the whole package
   (WinUI 3, static C runtime, the Windows App Runtime 2.4+), built only
   on a PC (`build-windows.sh mitsuami`).
 - **Rust wherever possible** (ADR-004); C only inside QEMU/qemu-3dfx and
@@ -139,7 +140,7 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   Glide pass-through (qemu-3dfx's `hw/3dfx` + our OpenGLide build) was
   removed on 2026-09-23** (user decision: the card is "a much better
   experience"); `hw/3dfx` is overlaid for `sign_commit` but not built
-  (patch 74). Don't propose nGlide, dgVoodoo2 or a new wrapper. **The
+  (the qemu-3dfx port, `patches/qemu-3dfx/`). Don't propose nGlide, dgVoodoo2 or a new wrapper. **The
   OpenGL pass-through (`hw/mesa`) stays**; never propose retiring it.
 - **The display adapter is our `d3dpt-vga` + real drivers** (ADR-008,
   ADR-012; doc 15 for XP, doc 19 for 9x), the default on Windows 98, XP
@@ -219,7 +220,7 @@ package is all MSVC and ships no runtime DLL. The mingw clang QEMU
 under MSYS2 (`build/win/qemu`, with `libdisc`/`libsynth` inside it)
 stays for `test.sh` and the winit player (test only, GNU target), and
 the 9x/XP guest code is i686 mingw. The mingw QEMU is built with **clang**, not mingw GCC (GCC's
-emulated TLS made every device access 2.3x slower, patch 68). The
+emulated TLS made every device access 2.3x slower). The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and
 must pass on both `D3DPT_D3D9=dxvk` and `system` (the suite's

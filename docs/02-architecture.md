@@ -67,11 +67,10 @@ GPL-2.0 for everything that links it.
   `player-mitsuami` as `2ksbox-player.exe`. A guest of another
   architecture is another player binary (`--features qemu-x86_64` /
   `qemu-aarch64`), never a library opened at run time (doc 22 §5.0).
-- **Modern guests** (ADR-024, track M20) add a TPM 2.0 kept in QEMU's
-  process (`tpm/qemu/`, libtpms), and, through the guest agent
-  (`guest-agent/`) and QEMU's `qemu-vdagent`, the host clipboard; a
-  host folder is an SMB share served by `libsmb` in the player
-  (track M23, doc 24).
+- **Modern guests** (ADR-024, track M20) get a TPM 2.0 kept in QEMU's
+  process (`tpm/qemu/`, libtpms). The host clipboard goes through
+  QEMU's `qemu-vdagent` and our `guest-agent/`, and a host folder is an
+  SMB share served by `libsmb` in the player (track M23, doc 24).
 
 ## The embed boundary: `libqemu_embed.h`
 
