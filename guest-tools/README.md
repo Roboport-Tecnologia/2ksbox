@@ -223,9 +223,14 @@ Both **empty the drive and wait for it to report the tray empty before
 loading**. Windows and MSCDEX cache the last disc, so a swap they never
 saw as a removal leaves the old files on screen; and the device runs a
 medium change from one bottom half, so an eject and a load sent back to
-back collapse into one. The Windows build then dismounts the volume
-(`FSCTL_DISMOUNT_VOLUME`), because its own TEST UNIT READY polling
-consumes the one media-change sense the drive raises.
+back collapse into one. The Windows build waits on the shelf's own
+listing, never TEST UNIT READY: the drive reports a change once, to the
+first ordinary command, and that report is how Windows notices the new
+disc. LIST runs under it without clearing it. It sends its commands to
+the drive's `\\.\CdRom<n>`, not the volume, and never dismounts: a
+dismount after the load broke the volume Explorer and AutoPlay had just
+mounted ("the volume for a file has been externally altered", user
+report on XP 2026-10-04).
 
 Tests: `tools/atapi-guest-test.py` (`atapi-guest`) runs `CDSHELF.COM` on
 a FreeDOS floppy; `tools/cdshelf-guest-test.sh <image> xp` runs

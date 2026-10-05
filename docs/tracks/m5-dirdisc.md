@@ -78,9 +78,11 @@ tool differences, NFD names from bsdtar) are in `docs/testing.md`.
 - **Force tray changes.** The launcher does (doc 07); why is in
   `docs/00-status.md` "Gotchas".
 - **A program that polls a drive consumes its media-change news.** The
-  sense goes once, to whoever asks first, so `CDSHELF` dismounts the
-  volume itself (`FSCTL_DISMOUNT_VOLUME`) after a swap; without that,
-  Windows stayed on the old disc.
+  sense goes once, to whoever asks first, so `CDSHELF` waits on the
+  shelf's LIST (which runs under a pending UNIT ATTENTION without
+  clearing it), never on TEST UNIT READY, and Windows gets the news.
+  It used to dismount the volume after a swap instead, which raced
+  AutoPlay and broke the freshly mounted volume (2026-10-04).
 - **A host file changed under a mounted disc reads as `EMEDIUM`**, never a
   torn file. Eject and insert again to see edits.
 

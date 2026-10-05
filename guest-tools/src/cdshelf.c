@@ -19,7 +19,7 @@
  * have different ones:
  *
  *   XP / 2000   SPTI: DeviceIoControl(IOCTL_SCSI_PASS_THROUGH_DIRECT) on
- *               a handle to \\.\<letter>:. Ring-3 port I/O is not an
+ *               the letter's \\.\CdRom<n>. Ring-3 port I/O is not an
  *               option on NT, and this is what every CD tool of the era
  *               uses.
  *   Win98 / Me  ASPI: WNASPI32.DLL, loaded at run time (it does not
@@ -162,7 +162,7 @@ static pfnSendASPI32Command aspi_send;
 /* ------------------------------------------------------------------ drive */
 typedef struct {
     int aspi;               /* ASPI (Win9x) rather than SPTI (NT) */
-    HANDLE h;               /* SPTI: \\.\<letter>: */
+    HANDLE h;               /* SPTI: \\.\CdRom<n> (spti_path) */
     char letter;
     BYTE ha, target, lun;   /* ASPI */
     char name[64];          /* what to print */
@@ -402,6 +402,29 @@ static int drive_has_shelf(Drive *d)
 }
 
 /*
+ * The device a drive letter's SPTI commands go to: the CD-ROM class
+ * device (\\.\CdRom0) behind the letter, not the volume (\\.\D:). A
+ * volume handle is the file system's, and Windows remounts the volume
+ * whenever the disc changes, which is every Insert; a handle on the class
+ * device is untouched by that, so the window can keep it open. A letter
+ * that does not map to a CdRom device falls back to the volume.
+ */
+static void spti_path(char letter, char *path, int len)
+{
+    char dos[4], target[MAX_PATH];
+    static const char prefix[] = "\\Device\\CdRom";
+
+    sprintf(dos, "%c:", letter);
+    if (QueryDosDeviceA(dos, target, sizeof target)
+        && strncmp(target, prefix, sizeof prefix - 1) == 0
+        && (int)strlen(target + 8) + 5 <= len) {
+        sprintf(path, "\\\\.\\%s", target + 8);   /* "\\.\CdRom0" */
+    } else {
+        sprintf(path, "\\\\.\\%c:", letter);
+    }
+}
+
+/*
  * NT: every CD-ROM drive letter, opened through SPTI. A machine can have
  * more than one drive and only one of them is ours, so the shelf command
  * itself is the test, the same way the DOS build picks a drive.
@@ -412,7 +435,7 @@ static int find_drive_spti(Drive *d, char want_letter)
     int found_any = 0;
 
     for (letter = 'C'; letter <= 'Z'; letter++) {
-        char root[8], path[16];
+        char root[8], path[MAX_PATH];
         HANDLE h;
 
         sprintf(root, "%c:\\", letter);
@@ -423,7 +446,7 @@ static int find_drive_spti(Drive *d, char want_letter)
             continue;
         }
         found_any = 1;
-        sprintf(path, "\\\\.\\%c:", letter);
+        spti_path(letter, path, sizeof path);
         h = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                         OPEN_EXISTING, 0, NULL);
@@ -526,36 +549,42 @@ static int is_win9x(void)
 
 /*
  * The medium change happens behind the command: the device runs it from a
- * bottom half (patch 52), and the drive then reports the ATAPI
- * medium-change dance ("no medium", then UNIT ATTENTION) before the new
- * disc can be read. `wait_medium` polls TEST UNIT READY through that until
- * the drive agrees the tray is (or is not) occupied, so nothing here
- * reports success before the drive does, and Windows sees a settled drive.
+ * bottom half (patch 52), so a LOAD or EJECT returns before the tray has
+ * moved. `wait_shelf_disc` asks the shelf whether one of its discs is in
+ * the drive until the answer is the one wanted, so nothing here reports
+ * success before the drive does. Before a load the drive was just emptied,
+ * so any shelf disc in it is the new one (a file the shelf lists twice is
+ * reported under its first slot). A disc the shelf does not list, such as
+ * a boot disc, reads as an empty drive at once; its eject and the load
+ * after it then run as one medium change, which ends with the right disc.
+ *
+ * It asks with the shelf's own LIST and never with TEST UNIT READY. After
+ * a change the drive reports it once ("no medium", then UNIT ATTENTION) to
+ * the first ordinary command, and that report is how Windows learns the
+ * disc changed: the CD-ROM class driver raises media arrival, Explorer
+ * redraws the drive, and the file system mounts the new volume. A TEST
+ * UNIT READY from here would take the report for itself and leave Windows
+ * on the old volume. LIST is one of the commands the drive answers under a
+ * pending UNIT ATTENTION without clearing it, so the report stays for
+ * Windows. That is also why nothing here dismounts the volume: a dismount
+ * after the load threw away the volume Explorer and AutoPlay had just
+ * mounted ("the volume for a file has been externally altered").
  *
  * `dots` prints progress for the command-line mode; the window passes 0.
  */
-static int wait_medium(Drive *d, int want_present, int dots)
+static int wait_shelf_disc(Drive *d, int want_present, int dots)
 {
-    BYTE cdb[CDB_LEN];
+    BYTE buf[CDSHELF_LIST_HEADER_SIZE], cdb[CDB_LEN];
     Sense sense;
     int i;
 
     for (i = 0; i < 40; i++) {
-        int r;
-
         Sleep(100);
-        memset(cdb, 0, sizeof cdb);     /* TEST UNIT READY */
-        r = send_cdb(d, cdb, NULL, 0, DIR_NONE, &sense);
-        if (want_present && r == CDB_OK) {
+        cdb_list(cdb, CDSHELF_LIST_HEADER_SIZE);
+        memset(buf, 0, sizeof buf);
+        if (send_cdb(d, cdb, buf, CDSHELF_LIST_HEADER_SIZE, DIR_IN, &sense) == CDB_OK
+            && (le16(buf + 8) != CDSHELF_NO_SLOT) == want_present) {
             return 1;
-        }
-        /* an empty tray is exactly "not ready, medium not present" */
-        if (!want_present && r == CDB_SENSE && sense.key == 2 && sense.asc == 0x3A) {
-            return 1;
-        }
-        if (r == CDB_SENSE && sense.key != 2 && sense.key != 6) {
-            vlogf("  drive reports %02x/%02x/%02x while settling\n",
-                  sense.key, sense.asc, sense.ascq);
         }
         if (dots) {
             logf_(".");
@@ -566,20 +595,14 @@ static int wait_medium(Drive *d, int want_present, int dots)
 
 /*
  * Put a disc in the drive: empty it first, wait for the drive to say the
- * tray really is empty, and only then load the new one.
- *
- * Two reasons. Windows caches what it last saw in the drive, and a swap it
- * never saw as a removal leaves Explorer (and MSCDEX) showing the previous
- * disc's files, so inserting appears to do nothing. And on the device side
- * the medium change runs from a *single* bottom half (patch 52): an eject
- * and a load issued back to back without waiting collapse into one, and
- * the one that survives is the last request. The wait between them is
+ * tray really is empty, and only then load the new one. On the device
+ * side the medium change runs from a *single* bottom half (patch 52): an
+ * eject and a load issued back to back without waiting collapse into one,
+ * and the one that survives is the last request. The wait between them is
  * required.
  *
  * `slot < 0` just empties the drive.
  */
-static void tell_windows(Drive *d);
-
 static int cdshelf_insert(Drive *d, int slot, int dots, Sense *sense)
 {
     BYTE cdb[CDB_LEN];
@@ -593,10 +616,9 @@ static int cdshelf_insert(Drive *d, int slot, int dots, Sense *sense)
     /* An eject the drive never confirms means the old medium may still be
      * there when the new one is asked for, which is the swap that appears
      * to do nothing, so it is a failure. */
-    if (!wait_medium(d, 0, dots)) {
+    if (!wait_shelf_disc(d, 0, dots)) {
         return CDB_FAILED;
     }
-    tell_windows(d);
     if (slot < 0) {
         return CDB_OK;
     }
@@ -605,43 +627,7 @@ static int cdshelf_insert(Drive *d, int slot, int dots, Sense *sense)
     if (r != CDB_OK) {
         return r;
     }
-    return wait_medium(d, 1, dots) ? CDB_OK : CDB_FAILED;
-}
-
-/* for tell_windows() below */
-#ifndef FSCTL_DISMOUNT_VOLUME
-#define FSCTL_DISMOUNT_VOLUME CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 8, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#endif
-
-/*
- * Tell Windows the medium is not the one it last saw.
- *
- * CHECK_VERIFY alone is not enough, and the reason is us: a drive raises
- * its media-change sense (NOT READY, then UNIT ATTENTION) once, for
- * whoever asks first, and the first to ask is `wait_medium` polling TEST
- * UNIT READY through SPTI to know the tray had settled. The file system
- * driver therefore never sees a change, keeps the volume it cached, and
- * `dir` lists the disc that came *out*: the drive swapped, Windows did
- * not. Ejecting by hand worked only because Explorer's own polling
- * happened to catch a change we had not eaten.
- *
- * So say it directly: dismount what the file system is holding, then ask
- * it to look again (IOCTL_STORAGE_CHECK_VERIFY, the "look again" every CD
- * utility of the era ends with). It remounts on the next access and reads
- * the disc that is actually in the drive. Both calls are best effort: a
- * failure changes nothing about the disc being loaded. Windows 98 goes through ASPI and has no
- * volume handle to dismount; there the eject-and-settle in
- * `cdshelf_insert` is what MSCDEX notices.
- */
-static void tell_windows(Drive *d)
-{
-    DWORD returned = 0;
-
-    if (d->aspi || d->h == INVALID_HANDLE_VALUE) {
-        return;
-    }
-    DeviceIoControl(d->h, FSCTL_DISMOUNT_VOLUME, NULL, 0, NULL, 0, &returned, NULL);
-    DeviceIoControl(d->h, IOCTL_STORAGE_CHECK_VERIFY, NULL, 0, NULL, 0, &returned, NULL);
+    return wait_shelf_disc(d, 1, dots) ? CDB_OK : CDB_FAILED;
 }
 
 static void print_sense(const Sense *s)
@@ -790,7 +776,6 @@ static DWORD WINAPI gui_worker(LPVOID param)
 {
     (void)param;
     gui.op_result = cdshelf_insert(gui.drive, gui.op_slot, 0, &gui.op_sense);
-    tell_windows(gui.drive);
     PostMessageA(gui.wnd, WM_SHELF_DONE, 0, 0);
     return 0;
 }
@@ -1122,7 +1107,6 @@ int main(int argc, char **argv)
             logf_("the drive did not settle after the load.\n");
             return 1;
         }
-        tell_windows(&drive);
         logf_("the disc is in the drive.\n");
         return 0;
     }
@@ -1137,7 +1121,6 @@ int main(int argc, char **argv)
         logf_("the drive did not accept the eject.\n");
         return 1;
     }
-    tell_windows(&drive);
     logf_("the drive is empty.\n");
     return 0;
 }
