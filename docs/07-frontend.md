@@ -591,10 +591,20 @@ and runs without live control.
   anything else, so the players and `qemu-img` it spawns, which inherit
   its sandbox, open them too. A renamed file's bookmark follows it and
   is rewritten; a missing one is kept for when its drive comes back.
-  The panel grants only what was picked, so a `.cue` picked alone leaves
-  its tracks closed: pick them with it, or add the folder as a disc.
-  `launcherx --grants` resolves and lists them, `--keep-grant <path>`
-  writes one as a pick would. Outside the sandbox none of this runs.
+  The panel grants only what was picked, so a file that reads others (a
+  `.cue`'s tracks, a `.ccd`'s `.img`/`.sub`, an `.mds`'s `.mdf`, a
+  qcow2's backing chain: `grants::companions`, named from the
+  descriptor, never listed) would be half open. So right after a pick,
+  when the sandbox refuses one of them, the launcher shows a folder
+  dialog opened at its folder, prompting "GAME.CUE needs its tracks.
+  Click Open to let 2ksbox read this folder." (`grants::ask_after_pick`;
+  the path field and the disc shelf, `grant_companions`). One click
+  grants the folder, which is kept like a pick; it asks again for a
+  second folder, and stops on cancel or a repeated folder.
+  `launcherx --grants` resolves and lists the kept ones, `--keep-grant
+  <path>` writes one as a pick would, and `--grant-ask <path>` prints a
+  file's companions and what a pick of it would ask. Outside the
+  sandbox none of this runs.
 - **The preview is the player's picture.** The scale is the player's
   `floor(min(area/image)).max(1.0)`, integer, letterboxed and cropped
   like a window smaller than the mode. The `.max(1.0)` is load-bearing:

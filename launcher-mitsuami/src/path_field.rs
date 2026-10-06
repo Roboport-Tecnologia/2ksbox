@@ -91,6 +91,7 @@ pub fn PathField(
         spawn_local(async move {
             if let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) {
                 accept(&path);
+                grant_companions(&browse::picked(&path)).await;
             }
         });
     };
@@ -110,6 +111,27 @@ pub fn PathField(
             />
             <Button @click=browse>"Browse…"</Button>
         </Row>
+    }
+}
+
+/// After a pick in the macOS App Sandbox: the files it reads besides
+/// itself (a `.cue`'s tracks, a qcow2's backing disk) are not granted
+/// with it, so ask for their folder at once, in a folder dialog opened
+/// there with `launcher_core::grants`' sentence as its prompt. Until the
+/// user cancels, or the same folder is asked for twice (they opened
+/// another one).
+pub async fn grant_companions(picked: &Path) {
+    let mut asked: Vec<PathBuf> = Vec::new();
+    while let Some(ask) = launcher_core::grants::ask_after_pick(picked) {
+        if asked.contains(&ask.folder) {
+            break;
+        }
+        let request = OpenFile::new().title(ask.message).directories().start_folder(ask.folder.clone());
+        asked.push(ask.folder);
+        let Some(folder) = open_file(request).await.and_then(|p| p.into_iter().next()) else {
+            break;
+        };
+        launcher_core::grants::keep(&folder);
     }
 }
 

@@ -432,8 +432,9 @@ The signing, the `.pkg` and an upload have not run yet: they wait for
 the account's App Store certificates and profile.
 
 Ad hoc signed with the sandbox (2026-10-06), the launcher's library
-moves into its container and a path no panel granted is refused
-(`--keep-grant`); outside the sandbox `--keep-grant` / `--grants` keep,
+moves into its container, a path no panel granted is refused
+(`--keep-grant`), and a cue sheet in the container whose track is
+outside asks for the track's folder (`--grant-ask`); outside the sandbox `--keep-grant` / `--grants` keep,
 resolve, follow a renamed file and report a deleted one. Not yet known
 (open thread): a pick kept across a restart and opened by a player,
 which needs a click in the open panel, and the length of the QMP

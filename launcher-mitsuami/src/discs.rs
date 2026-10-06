@@ -156,6 +156,7 @@ impl Discs {
             for path in open_file(request).await.unwrap_or_default() {
                 let path = browse::picked(&path);
                 browse::remember(&path);
+                crate::path_field::grant_companions(&path).await;
                 discs.add(&path);
             }
         });

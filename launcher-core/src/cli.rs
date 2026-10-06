@@ -787,6 +787,19 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 }
             }
         }
+        "--grant-ask" => {
+            // What a pick of this file would ask for next, sandbox or
+            // not (`grants::ask_for`): the files it reads besides itself,
+            // and the folder dialog shown when one of them is refused.
+            let path = args.next().expect("usage: --grant-ask <path>");
+            for c in grants::companions(Path::new(&path)) {
+                println!("reads   {}", c.display());
+            }
+            match grants::ask_for(Path::new(&path)) {
+                Some(ask) => println!("ask     {}\nmessage {}", ask.folder.display(), ask.message),
+                None => println!("ask     (nothing)"),
+            }
+        }
         "--default-shader-profile" => {
             // The library's default profile (`shader_library::DEFAULT_FILE`),
             // what a machine on "(default)" plays with: prints the id, or
