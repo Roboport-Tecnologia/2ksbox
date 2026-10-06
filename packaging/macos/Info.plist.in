@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Template: scripts/package-macos.sh substitutes @VERSION@ and @MINOS@.
+<!-- Template: scripts/package-macos.sh substitutes @VERSION@, @MINOS@ and
+     @BUNDLE_ID@ (com.2ksbox.2ksbox, or com.2ksbox.2ksbox-community for
+     the community build; ADR-011).
      @MINOS@ is the highest LC_BUILD_VERSION minos of everything the
      bundle carries, computed at packaging time. A bundled Homebrew or
      Vulkan SDK dylib built on a newer system is what sets the floor. -->
@@ -8,7 +10,7 @@
 <dict>
   <key>CFBundleName</key>              <string>2ksbox</string>
   <key>CFBundleDisplayName</key>       <string>2ksbox</string>
-  <key>CFBundleIdentifier</key>        <string>com.2ksbox.2ksbox</string>
+  <key>CFBundleIdentifier</key>        <string>@BUNDLE_ID@</string>
   <key>CFBundleExecutable</key>        <string>2ksbox</string>
   <key>CFBundleIconFile</key>          <string>2ksbox</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>

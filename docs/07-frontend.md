@@ -767,7 +767,8 @@ Windows the window shows briefly, on macOS under
 The product is **2ksbox** and the application ID
 **`com._2ksbox.Launcher`** (ADR-011, which says which name goes where
 and why the underscore); the macOS app's bundle ID is
-`com.2ksbox.2ksbox`, since Apple forbids the underscore. The data directory `~/.local/share/2ksbox` was
+`com.2ksbox.2ksbox` (`com.2ksbox.2ksbox-community` for the community
+build), since Apple forbids the underscore. The data directory `~/.local/share/2ksbox` was
 moved once from `win98-xp-virt` (`launcher-core/src/paths.rs::data_dir`).
 On Windows it is `%APPDATA%\2ksbox\data`, except from an installed MSIX,
 where Windows would virtualise `AppData` and delete it on uninstall: a

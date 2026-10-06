@@ -369,10 +369,15 @@ iconutil -c icns "$set" -o "$C/Resources/2ksbox.icns"
 minos_of() { otool -l "$1" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}'; }
 minos=$(machos | while read -r f; do minos_of "$f"; done | sort -V | tail -1)
 minos=${minos:-$FLOOR}
+# The bundle ID is the App ID registered with Apple, one per build
+# (ADR-011), so the two apps are distinct to macOS and install side by
+# side. Neither may ever change once shipped.
+BUNDLE_ID=com.2ksbox.2ksbox
+[ "$COMMUNITY" = 1 ] && BUNDLE_ID=com.2ksbox.2ksbox-community
 write_plist() { sed -e "s/@VERSION@/$VERSION/" -e "s/@MINOS@/$1/" \
-  packaging/macos/Info.plist.in > "$C/Info.plist"; }
+  -e "s/@BUNDLE_ID@/$BUNDLE_ID/" packaging/macos/Info.plist.in > "$C/Info.plist"; }
 write_plist "$minos"
-echo "minimum macOS $minos (the floor: $FLOOR)"
+echo "minimum macOS $minos (the floor: $FLOOR), bundle ID $BUNDLE_ID"
 
 # --- the check --------------------------------------------------------
 # The same question package-linux.sh asks, in the form a Mac can answer:

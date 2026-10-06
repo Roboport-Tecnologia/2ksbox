@@ -40,7 +40,7 @@ pub const NAME: &str = "2ksbox";
 /// digit escaped as `_2ksbox` because a name segment may not start with
 /// one (`flatpak build-init` rejects `com.2ksbox.…`; the same convention
 /// gives `7-zip.org` `org._7zip.…`). Not the macOS bundle ID: Apple
-/// forbids the underscore, so the app is `com.2ksbox.2ksbox` (ADR-011).
+/// forbids the underscore, so the app is `com.2ksbox.2ksbox` (`-community` for that build, ADR-011).
 pub const APP_ID: &str = "com._2ksbox.Launcher";
 
 /// The prefix this launcher is installed under, or `None` when it is a

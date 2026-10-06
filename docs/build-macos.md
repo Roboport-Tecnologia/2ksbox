@@ -279,10 +279,11 @@ replaces it further down.
 
 The `Info.plist` is written once, at the end of the staging, with
 `LSMinimumSystemVersion` measured from the bundle ("The floor" below).
-Its `CFBundleIdentifier` is `com.2ksbox.2ksbox` in both builds, the
-App ID registered for the App Store (ADR-011: Apple forbids the
-underscore of `com._2ksbox.Launcher`). It can never change once a build
-is uploaded.
+Its `CFBundleIdentifier` is `com.2ksbox.2ksbox` for the App Store
+build and `com.2ksbox.2ksbox-community` for the community one (the
+registered App IDs; ADR-011: Apple forbids the underscore of
+`com._2ksbox.Launcher`), so the two install side by side. Neither may
+change once shipped.
 
 **The Vulkan driver** is the one companion no load command names. The
 app carries the LunarG loader and KosmicKrisp with its own ICD manifest,
