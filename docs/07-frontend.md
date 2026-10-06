@@ -583,6 +583,18 @@ and runs without live control.
   is what is kept. `launcherx --picked` prints the answer and
   `package-flatpak.sh` checks it in the sandbox with a file it exported
   through the portal.
+- **A pick outlives the run in the macOS App Sandbox** (the App Store
+  build). The open panel grants the sandboxed launcher the picked file
+  or folder until it quits; `browse::remember` keeps each pick as a
+  security-scoped bookmark in `<data dir>/grants/` (`grants.rs`), and
+  every launcher run resolves them all and starts accessing them before
+  anything else, so the players and `qemu-img` it spawns, which inherit
+  its sandbox, open them too. A renamed file's bookmark follows it and
+  is rewritten; a missing one is kept for when its drive comes back.
+  The panel grants only what was picked, so a `.cue` picked alone leaves
+  its tracks closed: pick them with it, or add the folder as a disc.
+  `launcherx --grants` resolves and lists them, `--keep-grant <path>`
+  writes one as a pick would. Outside the sandbox none of this runs.
 - **The preview is the player's picture.** The scale is the player's
   `floor(min(area/image)).max(1.0)`, integer, letterboxed and cropped
   like a window smaller than the mode. The `.max(1.0)` is load-bearing:

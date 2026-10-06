@@ -409,7 +409,9 @@ least 26.0: the App Store build never gets a pre-26 version (ADR-019).
 launcher has its own sandbox (`packaging/macos/app-store.entitlements`:
 the App ID and team from the profile, the network for the guest and the
 preset download, files the user picks in a panel); everything it starts
-inherits it (`com.apple.security.inherit`): `qemu-img`
+inherits it (`com.apple.security.inherit`), with access to whatever
+the user picked in earlier runs (security-scoped bookmarks, doc 07 "A
+pick outlives the run"; hence `files.bookmarks.app-scope`): `qemu-img`
 (`app-store-helper.entitlements`), the player with TCG's JIT
 (`app-store-player.entitlements`), and Windows 11 on Arm's player with
 the JIT and HVF (`app-store-hypervisor.entitlements`; Hypervisor.framework
@@ -429,12 +431,13 @@ pass, the plist says 26.0, and a profile for another App ID is refused.
 The signing, the `.pkg` and an upload have not run yet: they wait for
 the account's App Store certificates and profile.
 
-Not yet known to work inside the sandbox (open thread):
-paths a machine keeps across launches outside the container (a disc or
-disk picked in a panel is granted for that run only; keeping it needs
-security-scoped bookmarks in `launcher-core`), and the length of the
-QMP socket path under the container's `tmp` (`AF_UNIX` allows 104
-bytes).
+Ad hoc signed with the sandbox (2026-10-06), the launcher's library
+moves into its container and a path no panel granted is refused
+(`--keep-grant`); outside the sandbox `--keep-grant` / `--grants` keep,
+resolve, follow a renamed file and report a deleted one. Not yet known
+(open thread): a pick kept across a restart and opened by a player,
+which needs a click in the open panel, and the length of the QMP
+socket path under the container's `tmp` (`AF_UNIX` allows 104 bytes).
 
 ### The Intel build
 

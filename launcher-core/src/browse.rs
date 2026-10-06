@@ -159,7 +159,12 @@ fn host_path_of_portal_document(_path: &Path) -> Option<PathBuf> {
 /// dialog). Remember the directory it was picked in, which is where the
 /// dialog was browsing. A failure to write is only a warning; the next
 /// dialog then opens where it would have anyway.
+///
+/// In the macOS App Sandbox the pick itself is kept too, as a bookmark,
+/// so the next launcher run may still open it (`grants`). Here rather
+/// than in `picked`, which the disc library also runs on paths it loads.
 pub fn remember(picked: &Path) {
+    crate::grants::keep(picked);
     let Some(dir) = picked.parent().filter(|p| !p.as_os_str().is_empty()) else {
         return;
     };

@@ -54,6 +54,9 @@ pub mod editor;
 pub mod fatal;
 // The one question a launcher with no shader presets asks on the way up.
 pub mod firstrun;
+// What a sandboxed macOS launcher may open again after a restart: a
+// security-scoped bookmark per picked file.
+pub mod grants;
 // What this host's GPU can do for the Direct3D executor (ADR-013).
 pub mod host_gpu;
 pub mod library;

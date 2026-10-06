@@ -14,7 +14,7 @@
 //! `LAUNCHER_SHOT` and `LAUNCHER_SCREEN` (its `src/shot.rs`).
 
 use crate::bundle::{self, Family, Machine, Music, Optimization, Sound};
-use crate::{browse, clone_machine, control, disc_library, firstrun, library, machines, player, preview,
+use crate::{browse, clone_machine, control, disc_library, firstrun, grants, library, machines, player, preview,
     shader_library, shader_profile, shader_source, shelf, snaps, wizard};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -755,6 +755,37 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // portal first.
             let path = args.next().expect("usage: --picked <path>");
             println!("{}", browse::picked(Path::new(&path)).display());
+        }
+        "--grants" => {
+            // Every kept bookmark (`grants`), resolved as a launcher run
+            // resolves them: the path and whether access started. In the
+            // sandbox, a path whose access did not start cannot be opened.
+            let grants = grants::restore();
+            for g in &grants {
+                match &g.path {
+                    Ok(p) => println!("{}  {}", if g.open { "open  " } else { "closed" }, p.display()),
+                    Err(e) => println!("broken  {} ({e})", g.bookmark.display()),
+                }
+            }
+            println!(
+                "{} kept in {}{}",
+                grants.len(),
+                grants::dir().map_or("(no data directory)".into(), |d| d.display().to_string()),
+                if grants::sandboxed() { ", sandboxed" } else { "" }
+            );
+        }
+        "--keep-grant" => {
+            // Keep a bookmark for a path as a dialog's pick would, in or
+            // out of the sandbox: outside it, to check the bookmarks
+            // themselves with `--grants`.
+            let path = args.next().expect("usage: --keep-grant <path>");
+            match grants::bookmark_now(Path::new(&path)) {
+                Ok(()) => println!("kept {path}"),
+                Err(e) => {
+                    eprintln!("--keep-grant: {e}");
+                    return Some(1);
+                }
+            }
         }
         "--default-shader-profile" => {
             // The library's default profile (`shader_library::DEFAULT_FILE`),

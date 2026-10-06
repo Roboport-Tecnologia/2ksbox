@@ -39,6 +39,10 @@ fn main() {
     // The package's own Vulkan driver, named to the loader before a thread
     // exists (`host_gpu::announce_driver`'s one rule).
     launcher_core::host_gpu::announce_driver();
+    // In the macOS App Sandbox, the files picked in earlier runs
+    // (`launcher_core::grants`), before anything opens one: a verb, a
+    // window or a player this process starts.
+    launcher_core::grants::restore();
     // Debug verbs first, before a window exists: `launcher_core::cli`'s,
     // so this binary answers every one `launcherx` does.
     let mut args = std::env::args().skip(1);
