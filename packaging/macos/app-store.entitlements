@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The App Store build's launcher (scripts/package-macos.sh
+       --app-store, docs/build-macos.md "The App Store package"). The
+       store takes only sandboxed apps; the players and qemu-img it starts
+       inherit this sandbox (app-store-*.entitlements). @APP_ID@ and
+       @TEAM@ come from the provisioning profile and must match it. -->
+  <key>com.apple.security.app-sandbox</key> <true/>
+  <key>com.apple.application-identifier</key> <string>@APP_ID@</string>
+  <key>com.apple.developer.team-identifier</key> <string>@TEAM@</string>
+  <!-- The guest's network (QEMU's user-mode stack is the host's sockets)
+       and the first-run preset download. -->
+  <key>com.apple.security.network.client</key> <true/>
+  <!-- Discs, disks and folders the user picks in an open or save panel. -->
+  <key>com.apple.security.files.user-selected.read-write</key> <true/>
+</dict>
+</plist>

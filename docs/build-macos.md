@@ -234,6 +234,7 @@ JIT entitlement (doc 07) for a Mac with nothing installed:
 scripts/package-macos.sh                       # build, stage, check, sign, notarize, dmg
 scripts/package-macos.sh --no-sign --no-dmg    # the staging and its checks alone, ~20 s
 scripts/package-macos.sh --community           # ADR-019's community build (below)
+scripts/package-macos.sh --app-store --provision <profile>  # the App Store upload (below)
 scripts/package-macos.sh --x86_64 --no-notarize # the Intel app, from scripts/build.sh --x86_64 (below)
 ```
 
@@ -382,6 +383,58 @@ the launcher's note says which to install:
 The community build permits Intel, untested, because its Wine is
 x86_64 on both architectures (ADR-019 has the reasons). No doc claims
 Intel until an Intel Mac has run the reference scene.
+
+### The App Store package
+
+`--app-store --provision <file>` makes the App Store build for upload
+(`build/macos-app-store`): the same staging and checks as the default
+run, then a sandboxed signature and a `.pkg` instead of a notarized DMG.
+It needs, from the developer account (once):
+
+- an **Apple Distribution** certificate (signs the app; the older
+  "3rd Party Mac Developer Application" is accepted);
+- a **Mac Installer Distribution** certificate (signs the `.pkg`; or
+  "3rd Party Mac Developer Installer");
+- a **Mac App Store** provisioning profile for the explicit App ID
+  `com.2ksbox.2ksbox` (ADR-011), the file `--provision` names.
+
+The script reads the team and App ID out of the profile, refuses one
+made for another App ID or a development profile (one that lists
+devices), embeds it as `Contents/embedded.provisionprofile`, and picks
+that team's identities from the keychain (`--identity` and
+`--installer-identity` override). `LSMinimumSystemVersion` becomes at
+least 26.0: the App Store build never gets a pre-26 version (ADR-019).
+
+**Every executable is sandboxed**, which the store requires. The
+launcher has its own sandbox (`packaging/macos/app-store.entitlements`:
+the App ID and team from the profile, the network for the guest and the
+preset download, files the user picks in a panel); everything it starts
+inherits it (`com.apple.security.inherit`): `qemu-img`
+(`app-store-helper.entitlements`), the player with TCG's JIT
+(`app-store-player.entitlements`), and Windows 11 on Arm's player with
+the JIT and HVF (`app-store-hypervisor.entitlements`; Hypervisor.framework
+works under an inherited sandbox since macOS 11.3). Libraries carry no
+entitlements, and an executable the script has no entitlements for
+fails it. After signing it checks each executable is sandboxed and the
+launcher carries the profile's App ID, then `productbuild`s the app for
+`/Applications` and checks the package's signature.
+
+A build signed for the store does not launch outside it, so the
+sandboxed app first runs through TestFlight. Upload the `.pkg` with
+Transporter (or `xcrun altool --upload-package`); each upload needs a
+`CFBundleVersion` (the workspace version) App Store Connect has not seen.
+
+First run (2026-10-06, `--no-build`): the staging and every check
+pass, the plist says 26.0, and a profile for another App ID is refused.
+The signing, the `.pkg` and an upload have not run yet: they wait for
+the account's App Store certificates and profile.
+
+Not yet known to work inside the sandbox (open thread):
+paths a machine keeps across launches outside the container (a disc or
+disk picked in a panel is granted for that run only; keeping it needs
+security-scoped bookmarks in `launcher-core`), and the length of the
+QMP socket path under the container's `tmp` (`AF_UNIX` allows 104
+bytes).
 
 ### The Intel build
 

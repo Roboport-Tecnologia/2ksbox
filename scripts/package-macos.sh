@@ -15,6 +15,14 @@
 #   scripts/package-macos.sh --community          # ADR-019's community build, which carries
 #                                                 # the Direct3D executor for Wine (M15). The
 #                                                 # App Store build never starts Wine
+#   scripts/package-macos.sh --app-store --provision FILE
+#                                                 # the App Store build for upload: sandboxed,
+#                                                 # signed as Apple Distribution with FILE (a
+#                                                 # Mac App Store provisioning profile for
+#                                                 # com.2ksbox.2ksbox) embedded, macOS 26+, and
+#                                                 # a .pkg signed as Mac Installer Distribution
+#                                                 # (--installer-identity NAME) instead of a
+#                                                 # notarized DMG. Into build/macos-app-store
 #   scripts/package-macos.sh --x86_64             # on an Apple Silicon Mac: the Intel app, from
 #                                                 # scripts/build.sh --x86_64 (build/x86_64,
 #                                                 # build/deps/x86_64, target/x86_64-apple-darwin)
@@ -64,7 +72,7 @@ cd "$ROOT"
 [ "$(uname -s)" = Darwin ] || { echo "package-macos.sh: macOS only" >&2; exit 1; }
 
 BUILD=1 SIGN=1 NOTARIZE=1 DMG=1 OUT=""
-COMMUNITY=0 X86_64=""
+COMMUNITY=0 X86_64="" APP_STORE=0 PROVISION="" INSTALLER_IDENTITY=""
 IDENTITY="" PROFILE="2ksbox-notary"
 ARGS=("$@")
 while [ $# -gt 0 ]; do
@@ -78,7 +86,10 @@ while [ $# -gt 0 ]; do
     --out) OUT=$2; shift 2 ;;
     --community) COMMUNITY=1; shift ;;
     --x86_64) X86_64=1; shift ;;
-    -h|--help) sed -n '2,69p' "$0"; exit 0 ;;
+    --app-store) APP_STORE=1; shift ;;
+    --provision) PROVISION=$2; shift 2 ;;
+    --installer-identity) INSTALLER_IDENTITY=$2; shift 2 ;;
+    -h|--help) sed -n '2,77p' "$0"; exit 0 ;;
     *) echo "package-macos.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -102,10 +113,22 @@ if [ -n "$ROSETTA" ]; then
   CT=(--target x86_64-apple-darwin)
   OUT="${OUT:-$ROOT/build/macos-x86_64}"
 fi
+if [ "$APP_STORE" = 1 ]; then OUT="${OUT:-$ROOT/build/macos-app-store}"; fi
 OUT="${OUT:-$ROOT/build/macos}"
 # The Intel app is the community build and nothing else (ADR-019): the
 # App Store build is Apple Silicon only.
 if [ "$ARCH" = x86_64 ]; then COMMUNITY=1; fi
+# The App Store build goes up as a signed installer package, so there is
+# nothing to notarize and no disk image (docs/build-macos.md, "The App
+# Store package").
+if [ "$APP_STORE" = 1 ]; then
+  [ "$COMMUNITY" = 0 ] || { echo "package-macos.sh: --app-store is the App Store build: Apple Silicon, no --community" >&2; exit 2; }
+  [ "$SIGN" = 1 ] || { echo "package-macos.sh: --app-store signs; stage unsigned without it" >&2; exit 2; }
+  [ -n "$PROVISION" ] || { echo "package-macos.sh: --app-store needs --provision <Mac App Store profile for com.2ksbox.2ksbox>" >&2; exit 2; }
+  [ -f "$PROVISION" ] || { echo "package-macos.sh: no provisioning profile at $PROVISION" >&2; exit 2; }
+  case "$PROVISION" in /*) ;; *) PROVISION="$PWD/$PROVISION" ;; esac
+  NOTARIZE=0 DMG=0
+fi
 # Absolute, whatever was typed: the checks below `cd /` before they run the
 # staged binaries, and a relative --out broke there.
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
@@ -376,8 +399,14 @@ BUNDLE_ID=com.2ksbox.2ksbox
 [ "$COMMUNITY" = 1 ] && BUNDLE_ID=com.2ksbox.2ksbox-community
 write_plist() { sed -e "s/@VERSION@/$VERSION/" -e "s/@MINOS@/$1/" \
   -e "s/@BUNDLE_ID@/$BUNDLE_ID/" packaging/macos/Info.plist.in > "$C/Info.plist"; }
-write_plist "$minos"
-echo "minimum macOS $minos (the floor: $FLOOR), bundle ID $BUNDLE_ID"
+# The App Store build never gets a pre-26 version (ADR-019), whatever
+# its files would run on.
+plist_min=$minos
+if [ "$APP_STORE" = 1 ]; then
+  plist_min=$(printf '%s\n' "$minos" 26.0 | sort -V | tail -1)
+fi
+write_plist "$plist_min"
+echo "minimum macOS $plist_min (the files: $minos; the floor: $FLOOR), bundle ID $BUNDLE_ID"
 
 # --- the check --------------------------------------------------------
 # The same question package-linux.sh asks, in the form a Mac can answer:
@@ -625,6 +654,49 @@ fi
 echo "checks passed"
 
 # --- sign -------------------------------------------------------------
+# The App Store build's identity and entitlements come from its
+# provisioning profile: the team in it, and the App ID it was made for,
+# which must be this bundle's. A development profile (one that lists
+# devices) makes a build the store refuses.
+if [ "$APP_STORE" = 1 ]; then
+  prof=$(mktemp); security cms -D -i "$PROVISION" > "$prof" 2>/dev/null \
+    || { echo "package-macos.sh: $PROVISION is not a provisioning profile" >&2; exit 1; }
+  pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$prof" 2>/dev/null; }
+  TEAM=$(pb TeamIdentifier:0)
+  APP_ID=$(pb Entitlements:com.apple.application-identifier)
+  [ "$APP_ID" = "$TEAM.$BUNDLE_ID" ] \
+    || { echo "package-macos.sh: $PROVISION is for $APP_ID, not $TEAM.$BUNDLE_ID" >&2; exit 1; }
+  ! pb ProvisionedDevices >/dev/null \
+    || { echo "package-macos.sh: $PROVISION lists devices: a development profile, not a Mac App Store one" >&2; exit 1; }
+  echo "profile        $(pb Name) ($APP_ID, expires $(pb ExpirationDate))"
+  cp "$PROVISION" "$C/embedded.provisionprofile"
+  launcher_ents=$(mktemp)
+  sed -e "s/@APP_ID@/$APP_ID/" -e "s/@TEAM@/$TEAM/" packaging/macos/app-store.entitlements > "$launcher_ents"
+  # Pick the team's own, when the keychain holds more than one team's.
+  pick() { security find-identity -v -p "$1" | sed -n "s/.*\"\($2: .*($TEAM)\)\"/\1/p" | head -1; }
+  [ -n "$IDENTITY" ] || IDENTITY=$(pick codesigning 'Apple Distribution')
+  [ -n "$IDENTITY" ] || IDENTITY=$(pick codesigning '3rd Party Mac Developer Application')
+  [ -n "$IDENTITY" ] || { echo "package-macos.sh: no Apple Distribution identity for team $TEAM; --identity" >&2; exit 1; }
+  [ -n "$INSTALLER_IDENTITY" ] || INSTALLER_IDENTITY=$(pick basic 'Mac Installer Distribution')
+  [ -n "$INSTALLER_IDENTITY" ] || INSTALLER_IDENTITY=$(pick basic '3rd Party Mac Developer Installer')
+  [ -n "$INSTALLER_IDENTITY" ] || { echo "package-macos.sh: no Mac Installer Distribution identity for team $TEAM; --installer-identity" >&2; exit 1; }
+fi
+# What each Mach-O is signed with. Every executable in an App Store app
+# must be sandboxed: the launcher with its own sandbox, everything it
+# starts inheriting that one. A library carries no entitlements.
+signing_entitlements() {
+  if [ "$APP_STORE" = 0 ]; then entitlements_of "$1"; return; fi
+  case "$1" in
+    "$C"/MacOS/2ksbox) echo "$launcher_ents" ;;
+    */MacOS/2ksbox-player-aarch64) echo packaging/macos/app-store-hypervisor.entitlements ;;
+    */MacOS/2ksbox-player) echo packaging/macos/app-store-player.entitlements ;;
+    */libexec/2ksbox/qemu-img) echo packaging/macos/app-store-helper.entitlements ;;
+    *) file -b "$1" | grep -q 'Mach-O.*executable' \
+         && { echo "package-macos.sh: no App Store entitlements for the executable ${1#"$C/"}" >&2; return 1; }
+       echo "" ;;
+  esac
+}
+
 if [ "$SIGN" = 1 ]; then
   if [ -z "$IDENTITY" ]; then
     IDENTITY=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
@@ -639,10 +711,11 @@ if [ "$SIGN" = 1 ]; then
   # often enough that a bundle with this many Mach-O files hits it ("The
   # timestamp service is not available"). Only that failure is retried.
   sign_one() {
-    local i out
+    local i out ents
+    ents=$(signing_entitlements "$1") || return 1
     for i in 1 2 3 4 5; do
       if out=$(codesign --force --timestamp --options runtime \
-                 --entitlements "$(entitlements_of "$1")" \
+                 ${ents:+--entitlements "$ents"} \
                  --sign "$IDENTITY" "$1" 2>&1); then
         return 0
       fi
@@ -670,10 +743,36 @@ if [ "$SIGN" = 1 ]; then
     codesign -d --entitlements - "$C/MacOS/2ksbox-player-aarch64" 2>/dev/null | grep -q com.apple.security.hypervisor \
       || { echo "package-macos.sh: the signed aarch64 player lost the hypervisor entitlement" >&2; exit 1; }
   fi
-  # The question Gatekeeper will ask on the other Mac. Before notarization
-  # it answers "not notarized", which is the one remaining step, not a
-  # failure. Any other rejection is.
-  spctl --assess --type execute --verbose=4 "$APP" 2>&1 | sed 's/^/  /' || true
+  if [ "$APP_STORE" = 1 ]; then
+    # What App Store validation rejects first: an executable outside the
+    # sandbox, or a launcher whose App ID is not the profile's.
+    while read -r f; do
+      file -b "$f" | grep -q 'Mach-O.*executable' || continue
+      codesign -d --entitlements - --xml "$f" 2>/dev/null | grep -q com.apple.security.app-sandbox \
+        || { echo "package-macos.sh: ${f#"$C/"} is not sandboxed" >&2; exit 1; }
+    done < <(machos)
+    codesign -d --entitlements - --xml "$C/MacOS/2ksbox" 2>/dev/null | grep -q "$APP_ID" \
+      || { echo "package-macos.sh: the signed launcher lacks the App ID $APP_ID" >&2; exit 1; }
+    echo "sandboxed      every executable; the launcher is $APP_ID"
+  else
+    # The question Gatekeeper will ask on the other Mac. Before notarization
+    # it answers "not notarized", which is the one remaining step, not a
+    # failure. Any other rejection is.
+    spctl --assess --type execute --verbose=4 "$APP" 2>&1 | sed 's/^/  /' || true
+  fi
+fi
+
+# --- the App Store package ----------------------------------------------
+# What App Store Connect takes: the app as an installer package for
+# /Applications, signed by the installer identity. A build signed for the
+# store does not launch outside it; TestFlight is where it runs first.
+if [ "$APP_STORE" = 1 ]; then
+  pkg="$OUT/2ksbox-$VERSION-macos-app-store.pkg"
+  rm -f "$pkg"
+  productbuild --component "$APP" /Applications --sign "$INSTALLER_IDENTITY" "$pkg"
+  pkgutil --check-signature "$pkg" | sed 's/^/  /'
+  du -h "$pkg" | sed 's/^/package /'
+  echo "upload it with Transporter (or xcrun altool --upload-package); CFBundleVersion $VERSION must be new to App Store Connect"
 fi
 
 # --- notarize ---------------------------------------------------------

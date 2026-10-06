@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The App Store build's qemu-img, started by the launcher: it runs in
+       the launcher's sandbox (app-store.entitlements). A child that
+       inherits may carry no other sandbox entitlement. -->
+  <key>com.apple.security.app-sandbox</key> <true/>
+  <key>com.apple.security.inherit</key> <true/>
+</dict>
+</plist>

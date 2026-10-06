@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The App Store build's player for era machines: the launcher's
+       sandbox, inherited, plus TCG's JIT under the hardened runtime
+       (2ksbox.entitlements says why). -->
+  <key>com.apple.security.app-sandbox</key> <true/>
+  <key>com.apple.security.inherit</key> <true/>
+  <key>com.apple.security.cs.allow-jit</key> <true/>
+</dict>
+</plist>

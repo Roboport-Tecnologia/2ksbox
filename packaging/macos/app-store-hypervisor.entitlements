@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The App Store build's Windows 11 on Arm player: the launcher's
+       sandbox, inherited, plus HVF and TCG's JIT
+       (hypervisor.entitlements says why). Hypervisor.framework works
+       under an inherited sandbox since macOS 11.3. -->
+  <key>com.apple.security.app-sandbox</key> <true/>
+  <key>com.apple.security.inherit</key> <true/>
+  <key>com.apple.security.hypervisor</key> <true/>
+  <key>com.apple.security.cs.allow-jit</key> <true/>
+</dict>
+</plist>
