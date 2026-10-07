@@ -394,6 +394,29 @@ done
 rm -f "$set/icon_1024x1024.png"
 rm -f "$set/icon_64x64.png"
 iconutil -c icns "$set" -o "$C/Resources/2ksbox.icns"
+# macOS 26 draws an app's icon from an asset catalogue instead, in Light,
+# Dark, Clear and Tinted: `packaging/icon/2ksbox.icon`, the Icon Composer
+# document (the user's artwork on the export's teal), compiled by Xcode's
+# actool into Assets.car and named by CFBundleIconName (added below). An
+# older macOS keeps reading the .icns above. The App Store build needs it;
+# a community build made without Xcode goes without, the .icns on 26 too.
+icon_car=0
+if xcrun --find actool >/dev/null 2>&1; then
+  car=$(mktemp -d)
+  # Absolute paths: actool resolves a relative one against a directory
+  # of its own.
+  xcrun actool --compile "$car" --app-icon 2ksbox --platform macosx \
+    --minimum-deployment-target "$MACOSX_DEPLOYMENT_TARGET" \
+    --output-partial-info-plist "$car/partial.plist" "$PWD/packaging/icon/2ksbox.icon" >/dev/null
+  [ -f "$car/Assets.car" ] || { echo "package-macos.sh: actool made no Assets.car from packaging/icon/2ksbox.icon" >&2; exit 1; }
+  cp "$car/Assets.car" "$C/Resources/Assets.car"
+  rm -rf "$car"
+  icon_car=1
+elif [ "$APP_STORE" = 1 ]; then
+  echo "package-macos.sh: --app-store needs Xcode's actool for the macOS 26 icon (packaging/icon/2ksbox.icon)" >&2; exit 2
+else
+  echo "package-macos.sh: no actool (Xcode): the app has only the .icns, without macOS 26's Dark and Tinted icons" >&2
+fi
 
 # --- Info.plist -------------------------------------------------------
 # What the bundle's own Mach-O files require, measured rather than
@@ -415,6 +438,7 @@ if [ "$APP_STORE" = 1 ]; then
   plist_min=$(printf '%s\n' "$minos" 26.0 | sort -V | tail -1)
 fi
 write_plist "$plist_min"
+[ "$icon_car" = 0 ] || plutil -insert CFBundleIconName -string 2ksbox "$C/Info.plist"
 echo "minimum macOS $plist_min (the files: $minos; the floor: $FLOOR), bundle ID $BUNDLE_ID"
 
 # --- the check --------------------------------------------------------

@@ -7,7 +7,9 @@
 # The master is `packaging/icon/2ksbox.png`, the official icon (2026-10-07):
 # the Default appearance of the user's Icon Composer export, 1024x1024
 # RGBA, the rounded square filling its canvas (stored 8-bit; the export
-# is 16-bit). It is the only file to replace when the icon changes.
+# is 16-bit). It is the only file to replace when the icon changes, with
+# `2ksbox.icon` beside it, the Icon Composer document macOS 26 draws from
+# (`package-macos.sh` compiles it; it is not derived from here).
 # Everything below is derived from it and checked in, because the places
 # that consume an icon cannot run ImageMagick:
 #

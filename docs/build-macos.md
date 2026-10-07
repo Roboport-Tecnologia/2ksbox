@@ -435,9 +435,17 @@ checked after signing:
   `packaging/icon/macos/`, the same master on **Apple's icon grid**
   (the body 824 of 1024, centred), because a full-bleed icon stands
   oversized in the Dock; Linux and Windows take the full-bleed sizes.
-  The export's Dark, Clear and Tinted appearances need the Icon
-  Composer document compiled into an asset catalog (`actool`), not an
-  `.icns`; not done.
+  macOS 26 draws the icon from an **asset catalogue** instead, in Light,
+  Dark, Clear and Tinted: `packaging/icon/2ksbox.icon`, an Icon Composer
+  document rebuilt by hand on 2026-10-07 (the original was lost) from
+  the user's artwork (`Assets/monitor.png`, the PNG the export was made
+  from) on the export's measured teal (`#45989E`, solid fill) at scale
+  0.72, where its compiled Light image matches the export. Open it in
+  Icon Composer to refine it. `package-macos.sh` compiles it with
+  Xcode's `actool` into `Assets.car` and adds `CFBundleIconName`; the
+  `.icns` stays for older macOS and the 512@2x check. `--app-store`
+  refuses to run without `actool`; a community build without Xcode warns
+  and ships the `.icns` alone.
 - **The export compliance answer.** `Info.plist` says
   `ITSAppUsesNonExemptEncryption` = false (user decision, 2026-10-06),
   so App Store Connect stops asking on every upload. The app's
