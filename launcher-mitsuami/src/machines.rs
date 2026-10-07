@@ -161,7 +161,8 @@ pub fn MachinesWindow() -> impl View {
     let shaders = use_store::<Shaders>();
     let offer = use_store::<Offer>();
     let about = use_store::<About>();
-    crate::about::app_menu(about);
+    let stores = Stores { library, wizard, cloner, snaps, discs, shaders };
+    crate::about::app_menu(about, command_menus(stores));
     // The window's task, which ends with it.
     spawn_local(library.poll());
     crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
@@ -268,8 +269,16 @@ pub fn MachinesWindow() -> impl View {
             library.selected.set(shown);
         }
     });
-    let shelf = move || view! { <Button icon=icons::DISCS @click=move || discs.open_library(library)>"Shelf"</Button> };
-    let shaders_button = move || view! { <Button icon=icons::SHADERS @click=move || shaders.open_list()>"Shaders"</Button> };
+    let shelf = move || {
+        view! {
+            <Button icon=icons::DISCS tooltip=Command::Shelf.tooltip() @click=move || discs.open_library(library)>"Shelf"</Button>
+        }
+    };
+    let shaders_button = move || {
+        view! {
+            <Button icon=icons::SHADERS tooltip=Command::Shaders.tooltip() @click=move || shaders.open_list()>"Shaders"</Button>
+        }
+    };
     // On macOS 26 one item, a row, so one capsule (user); elsewhere two
     // items, which the platform spaces as its toolbars do.
     let shelf_and_shaders = platform! {
@@ -286,8 +295,15 @@ pub fn MachinesWindow() -> impl View {
             </Button>
         },
     };
-    view! {
-        <Column grow=1.0 min_height=0>
+    // Outside macOS the window takes the commands' keys itself: there is
+    // no menu bar to carry them (`command_menus`).
+    let mut root = Column::new().grow(1.0).min_height(0);
+    if !cfg!(target_os = "macos") {
+        for command in Command::ALL {
+            root = root.on_key(command.shortcut(), move || command.run(stores, library.current().as_deref()));
+        }
+    }
+    root.children(view! {
             <Toolbar>
                 <Show when=move || offer.progress.get().is_some()>
                     // Only a bar, on the toolbar with no capsule: the size
@@ -299,7 +315,7 @@ pub fn MachinesWindow() -> impl View {
                         width=160
                     />
                 </Show>
-                <Button icon=icons::NEW @click=move || wizard.open_fresh()>"New"</Button>
+                <Button icon=icons::NEW tooltip=Command::New.tooltip() @click=move || wizard.open_fresh()>"New"</Button>
                 {shelf_and_shaders}
                 {about_button}
             </Toolbar>
@@ -317,8 +333,7 @@ pub fn MachinesWindow() -> impl View {
             <ShaderProfilesWindow/>
             <ShaderEditorWindow/>
             <AboutWindow/>
-        </Column>
-    }
+    })
 }
 
 /// The library: the machines down the leading side, and the chosen one's
@@ -388,39 +403,174 @@ fn darker_list_background() -> mitsuami::appkit::objc2::rc::Retained<mitsuami::a
 /// window on it: the details' More menu, and the list's context menu
 /// under Start. `dir` names the machine when the menu is used.
 fn machine_actions(dir: Rc<dyn Fn() -> PathBuf>) -> impl mitsuami::core::services::MenuEntries {
-    let library = use_store::<Library>();
-    let wizard = use_store::<Wizard>();
-    let cloner = use_store::<Cloner>();
-    let snaps = use_store::<Snaps>();
-    let discs = use_store::<Discs>();
-    let bundle = {
-        let dir = dir.clone();
-        move || library.bundle_path(&dir())
-    };
-    let running = move || library.is_running(&dir());
-    let (b1, b2, b3, b4) = (bundle.clone(), bundle.clone(), bundle.clone(), bundle);
-    let r1 = running.clone();
+    let stores = Stores::get();
+    let dir: Rc<dyn Fn() -> Option<PathBuf>> = Rc::new(move || Some(dir()));
     (
-        MenuItem::new("Settings").on_select(move || {
-            if let Some(bundle) = b1() {
-                wizard.open_edit(bundle);
-            }
-        }),
-        MenuItem::new("Discs").on_select(move || {
-            if let Some(bundle) = b2() {
-                discs.open_for(bundle, library);
-            }
-        }),
-        MenuItem::new("Snapshots").on_select(move || {
-            if let Some(bundle) = b3() {
-                snaps.open_for(&bundle, r1());
-            }
-        }),
-        MenuItem::new("Clone").enabled(move || !cloner.busy()).on_select(move || {
-            if let Some(bundle) = b4() {
-                cloner.open_for(&bundle, running());
-            }
-        }),
+        Command::Settings.item(stores, dir.clone()),
+        Command::Discs.item(stores, dir.clone()),
+        Command::Snapshots.item(stores, dir.clone()),
+        Command::Clone.item(stores, dir),
+    )
+}
+
+/// The stores the commands act through, `Copy` like each of them.
+#[derive(Clone, Copy)]
+struct Stores {
+    library: Library,
+    wizard: Wizard,
+    cloner: Cloner,
+    snaps: Snaps,
+    discs: Discs,
+    shaders: Shaders,
+}
+
+impl Stores {
+    fn get() -> Stores {
+        Stores {
+            library: use_store::<Library>(),
+            wizard: use_store::<Wizard>(),
+            cloner: use_store::<Cloner>(),
+            snaps: use_store::<Snaps>(),
+            discs: use_store::<Discs>(),
+            shaders: use_store::<Shaders>(),
+        }
+    }
+}
+
+/// The main window's commands and their keys, the platform's primary
+/// modifier (`Shortcut::primary`: Command on macOS, Ctrl elsewhere) with a
+/// letter. On macOS they are the menu bar's; elsewhere the window takes
+/// the keys itself, and the More and context menus and the toolbar's
+/// tooltips show them.
+#[derive(Clone, Copy, PartialEq)]
+enum Command {
+    New,
+    Start,
+    Settings,
+    Discs,
+    Snapshots,
+    Clone,
+    Shelf,
+    Shaders,
+}
+
+impl Command {
+    const ALL: [Command; 8] = [
+        Command::New,
+        Command::Start,
+        Command::Settings,
+        Command::Discs,
+        Command::Snapshots,
+        Command::Clone,
+        Command::Shelf,
+        Command::Shaders,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Command::New => "New Machine",
+            Command::Start => "Start",
+            Command::Settings => "Settings",
+            Command::Discs => "Discs",
+            Command::Snapshots => "Snapshots",
+            Command::Clone => "Clone",
+            Command::Shelf => "Disc Shelf",
+            Command::Shaders => "Shader Profiles",
+        }
+    }
+
+    /// ⌘D is Duplicate on macOS, so Clone; ⌘S would read as Save, so
+    /// Snapshots takes Shift too.
+    fn shortcut(self) -> Shortcut {
+        let key = |c: char| Shortcut::primary(Key::Char(c));
+        match self {
+            Command::New => key('n'),
+            Command::Start => key('r'),
+            Command::Settings => key('i'),
+            Command::Discs => key('e'),
+            Command::Snapshots => key('s').shift(),
+            Command::Clone => key('d'),
+            Command::Shelf => key('d').shift(),
+            Command::Shaders => key('p').shift(),
+        }
+    }
+
+    /// The label and its keys as the platform writes them, for a button
+    /// that runs the command: "Start (⌘R)", "Start (Ctrl+R)".
+    fn tooltip(self) -> String {
+        let s = self.shortcut();
+        let Key::Char(c) = s.key else { return self.label().to_owned() };
+        let c = c.to_ascii_uppercase();
+        let keys = if cfg!(target_os = "macos") {
+            format!("{}{}⌘{c}", if s.alt { "⌥" } else { "" }, if s.shift { "⇧" } else { "" })
+        } else {
+            format!("Ctrl+{}{}{c}", if s.alt { "Alt+" } else { "" }, if s.shift { "Shift+" } else { "" })
+        };
+        format!("{} ({keys})", self.label())
+    }
+
+    /// Whether it can run on the machine in `dir` (the chosen one, for the
+    /// menu bar and the keys).
+    fn enabled(self, s: Stores, dir: Option<&Path>) -> bool {
+        match self {
+            Command::New | Command::Shelf | Command::Shaders => true,
+            Command::Start => dir.is_some_and(|d| !s.library.is_running(d)),
+            Command::Clone => dir.is_some() && !s.cloner.busy(),
+            Command::Settings | Command::Discs | Command::Snapshots => dir.is_some(),
+        }
+    }
+
+    fn run(self, s: Stores, dir: Option<&Path>) {
+        if !self.enabled(s, dir) {
+            return;
+        }
+        let running = dir.is_some_and(|d| s.library.is_running(d));
+        let bundle = dir.and_then(|d| s.library.bundle_path(d));
+        match (self, bundle) {
+            (Command::New, _) => s.wizard.open_fresh(),
+            (Command::Shelf, _) => s.discs.open_library(s.library),
+            (Command::Shaders, _) => s.shaders.open_list(),
+            (Command::Start, _) => s.library.play(dir.expect("enabled")),
+            (Command::Settings, Some(b)) => s.wizard.open_edit(b),
+            (Command::Discs, Some(b)) => s.discs.open_for(b, s.library),
+            (Command::Snapshots, Some(b)) => s.snaps.open_for(&b, running),
+            (Command::Clone, Some(b)) => s.cloner.open_for(&b, running),
+            (_, None) => {}
+        }
+    }
+
+    /// The command as a menu item on the machine `dir` names.
+    fn item(self, s: Stores, dir: Rc<dyn Fn() -> Option<PathBuf>>) -> MenuItem {
+        let d = dir.clone();
+        MenuItem::new(self.label())
+            .shortcut(self.shortcut())
+            .enabled(move || self.enabled(s, d().as_deref()))
+            .on_select(move || self.run(s, dir().as_deref()))
+    }
+}
+
+/// The menu bar's commands on macOS, on the chosen machine: File's New
+/// Machine (AppKit's place for New), Machine's, and Window's two
+/// libraries. Elsewhere `None`: the window takes the keys.
+fn command_menus(s: Stores) -> Option<MenuBar> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let current: Rc<dyn Fn() -> Option<PathBuf>> = Rc::new(move || s.library.current());
+    let item = |c: Command| c.item(s, current.clone());
+    Some(
+        MenuBar::new()
+            .menu(Menu::new("File").item(item(Command::New)))
+            .menu(
+                Menu::new("Machine")
+                    .item(item(Command::Start))
+                    .separator()
+                    .item(item(Command::Settings))
+                    .item(item(Command::Discs))
+                    .item(item(Command::Snapshots))
+                    .item(item(Command::Clone)),
+            )
+            .menu(Menu::new("Window").item(item(Command::Shelf)).item(item(Command::Shaders))),
     )
 }
 
@@ -430,9 +580,10 @@ fn machine_actions(dir: Rc<dyn Fn() -> PathBuf>) -> impl mitsuami::core::service
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
     let dir = Rc::new(dir);
-    let (d1, d2, d3, d4) = (dir.clone(), dir.clone(), dir.clone(), dir.clone());
+    let (d1, d2, d3) = (dir.clone(), dir.clone(), dir.clone());
+    let stores = Stores::get();
     let menu = (
-        MenuItem::new("Start").enabled(move || !library.is_running(&d3)).on_select(move || library.play(&d4)),
+        Command::Start.item(stores, Rc::new(move || Some(d3.to_path_buf()))),
         MenuSeparator::new(),
         machine_actions(Rc::new(move || dir.to_path_buf())),
     );
@@ -484,6 +635,7 @@ fn Details() -> impl View {
                         role=ButtonRole::Default
                         icon=icons::START
                         enabled=move || !running()
+                        tooltip=Command::Start.tooltip()
                         @click=move || library.play(&current())
                     >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
                     <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>

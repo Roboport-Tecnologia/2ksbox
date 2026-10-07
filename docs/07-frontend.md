@@ -74,9 +74,18 @@ player line runs a machine with nothing else.
   in is theirs to credit), and `launcherx --about` prints it. mitsuami
   (`launcher-mitsuami/src/about.rs`) opens it from an info icon at the end of
   the toolbar, except on macOS (user), where it is the application
-  menu's About item: the app's menu bar is set on macOS only, one item
-  with `MenuRole::About`, which AppKit moves into the application menu.
+  menu's About item: the app's menu bar is set on macOS only, with
+  `MenuRole::About`, which AppKit moves into the application menu.
   The `mitsuami` check grabs it (`LAUNCHER_SCREEN=about`).
+- **The main window's commands have keys** (2026-10-07,
+  `machines::Command`): the platform's primary modifier (Cmd on macOS,
+  Ctrl elsewhere) with N New Machine, R Start, I Settings, E Discs,
+  Shift+S Snapshots, D Clone (macOS's Duplicate), Shift+D Disc Shelf,
+  Shift+P Shader Profiles; the machine ones act on the chosen machine.
+  On macOS they are the menu bar's File, Machine and Window menus;
+  elsewhere there is no menu bar, so the window takes the keys
+  (`on_key`) and the More and context menus and the toolbar's tooltips
+  show them.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Start is logged with the line it ran**, quoted to paste back
