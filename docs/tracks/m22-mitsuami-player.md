@@ -86,7 +86,10 @@ embed library, as for the winit player, into a target dir of its own:
    Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse, Pause, Reset,
    Power Button, Close as the platform's Quit) and View (Full Screen, left
    out on macOS for AppKit's own Enter Full Screen, which `w.full`
-   follows; Save Screenshot, Save Screenshot as Shown), with the winit player's
+   follows; Scale, a submenu of Largest That Fits and 1x to 4x, and Fit
+   Window to Picture, both 2026-10-07 and both `Gpu`'s geometry
+   (`set_fixed_scale`, `picture_px`); Save Screenshot, Save Screenshot as
+   Shown), with the winit player's
    chords as their shortcuts, answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the

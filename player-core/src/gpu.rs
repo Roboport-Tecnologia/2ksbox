@@ -62,6 +62,10 @@ pub struct Gpu {
     follows_window: bool,
     /// The minimum size changed since the front end last took it.
     min_size_changed: bool,
+    /// A whole scale the picture is held to, in physical pixels per
+    /// scanline (the player's View > Scale), or `None` for the largest
+    /// that fits. A surface too small for it crops the picture (`fit`).
+    fixed_scale: Option<u32>,
 }
 
 impl Gpu {
@@ -247,6 +251,7 @@ impl Gpu {
             forced_surface: None,
             follows_window: false,
             min_size_changed: false,
+            fixed_scale: None,
         }
     }
 
@@ -288,9 +293,42 @@ impl Gpu {
     pub fn set_follows_window(&mut self, on: bool) {
         if self.follows_window != on {
             self.follows_window = on;
+            self.geom = self.fit();
             eprintln!("[display] the guest {} the window's size", if on { "takes" } else { "no longer takes" });
             self.min_size_changed = true;
         }
+    }
+
+    /// Whether the guest takes the window's size (`set_follows_window`):
+    /// then a scale or a window fitted to the picture means nothing, since
+    /// the picture is the window.
+    pub fn follows_window(&self) -> bool {
+        self.follows_window
+    }
+
+    /// Hold the picture at a whole scale (physical pixels per scanline),
+    /// or `None` to give it the largest that fits, as always.
+    pub fn set_fixed_scale(&mut self, scale: Option<u32>) {
+        let scale = scale.map(|s| s.max(1));
+        if self.fixed_scale != scale {
+            self.fixed_scale = scale;
+            self.geom = self.fit();
+        }
+    }
+
+    /// The picture's size with no bars around it, in physical pixels: at
+    /// the scale it is held to, or at the one on show when it is not held.
+    /// What "Fit Window to Picture" sizes the window to. `None` before the
+    /// guest has a surface, and while the guest takes the window's size.
+    pub fn picture_px(&self) -> Option<(u32, u32)> {
+        let m = self.mode;
+        if m.scanlines == 0 || self.follows_window || self.forced_surface.is_some() {
+            return None;
+        }
+        let gh = m.scanlines as f32;
+        let shown = (self.geom.3 / gh).floor().max(1.0) as u32;
+        let scale = self.fixed_scale.unwrap_or(shown) as f32;
+        Some(((gh * scale * m.display_aspect).round() as u32, (gh * scale) as u32))
     }
 
     /// The host surface changed: the picture's own size did not, so the
@@ -639,6 +677,9 @@ impl Gpu {
     /// picture, not a 1.6:1 one, and integer-scaling
     /// both axes would show it stretched. Square-pixel 4:3 modes (640x480,
     /// 800x600, …) come out exactly as they did before.
+    ///
+    /// A scale the user holds (`set_fixed_scale`) replaces the largest
+    /// that fits, and is kept when the surface is smaller than the picture.
     fn fit(&self) -> (f32, f32, f32, f32) {
         let m = self.mode;
         if m.scanlines == 0 {
@@ -657,7 +698,19 @@ impl Gpu {
         // bounded by both axes once the width is corrected; when even 1x does
         // not fit, fall back to a free fit so the picture is letterboxed
         // rather than clipped
-        let scale = (sh / gh).floor().min((sw / (gh * dar)).floor());
+        let most = (sh / gh).floor().min((sw / (gh * dar)).floor());
+        // A scale the user chose stands even when the window is smaller
+        // than the picture: the picture stays centred and what overflows
+        // the window is cropped (the viewport may lie past the target;
+        // only its size is bounded, by the largest texture, which is also
+        // the most the chain's output can be).
+        let limit = self.device.limits().max_texture_dimension_2d as f32;
+        let held = self.fixed_scale.filter(|_| !self.follows_window).map(|n| (n as f32).min((limit / gh).floor()).min((limit / (gh * dar)).floor()));
+        if let Some(n) = held.filter(|n| *n >= 1.0) {
+            let (vw, vh) = ((gh * n * dar).round(), gh * n);
+            return (((sw - vw) / 2.0).floor(), ((sh - vh) / 2.0).floor(), vw, vh);
+        }
+        let scale = most;
         let (vw, vh) = if scale >= 1.0 {
             (gh * scale * dar, gh * scale)
         } else if sw / sh > dar {

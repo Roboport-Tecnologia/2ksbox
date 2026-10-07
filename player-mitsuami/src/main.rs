@@ -55,6 +55,8 @@ struct Player {
     motion_rest: (f32, f32),
     /// The close question is up.
     asking: bool,
+    /// The window, for sizing it to the picture (`fit_window`).
+    window: Option<(Ui, NodeId)>,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -95,6 +97,9 @@ struct Window_ {
     want_grab: Signal<bool>,
     cursor: Signal<Cursor>,
     paused: Signal<bool>,
+    /// View > Scale: the picture held at a whole scale, in points per
+    /// scanline (`physical_scale`), or `None` for the largest that fits
+    scale: Signal<Option<u32>>,
 }
 
 fn main() {
@@ -114,6 +119,7 @@ fn main() {
             raw_motion: false,
             motion_rest: (0.0, 0.0),
             asking: false,
+            window: None,
         })
     });
     // The launcher's identity: a compositor matches the player's window to
@@ -153,6 +159,7 @@ fn player_window(guest: bool) -> Window {
         want_grab: signal(guest && player_core::keyboard_capture_at_start()),
         cursor: signal(Cursor::Default),
         paused: signal(false),
+        scale: signal(None),
     };
     let title = move || {
         let mut notes = Vec::new();
@@ -179,6 +186,9 @@ fn player_window(guest: bool) -> Window {
 
 fn content(w: Window_) -> impl View {
     let ui = inject::<Ui>().expect("a window's content");
+    if let Some(CurrentWindow(id)) = inject::<CurrentWindow>() {
+        with(|p| p.window = Some((ui.clone(), id)));
+    }
     set_menu(menus(w));
     // The wake: everything that follows a publish, on the UI thread.
     let wake = Arc::new(wake::Wake::default());
@@ -243,9 +253,12 @@ fn content(w: Window_) -> impl View {
         if std::env::var_os("PLAYER_SURFACE_LOG").is_some() {
             eprintln!("[surface] {}x{} at {}x", size.width, size.height, size.scale);
         }
+        let held = w.scale.get_untracked();
         with(|p| {
             p.scale = if size.scale > 0.0 { size.scale } else { 1.0 };
             if let (Some(gpu), Some(session)) = (p.gpu.as_mut(), p.session.as_ref()) {
+                // a held scale is in points: another screen, other pixels
+                gpu.set_fixed_scale(held.map(|n| physical_scale(n, p.scale)));
                 gpu.resize(size.width, size.height);
                 session.tell_window_size(gpu, (size.width, size.height), p.scale as f64);
             }
@@ -276,6 +289,44 @@ fn menus(w: Window_) -> MenuBar {
             .item(MenuItem::new("Full Screen").bind(w.full).shortcut(primary_alt('f').shift()))
             .separator();
     }
+    // Nothing to fit while the guest takes the window's size (the
+    // picture is the window), nor in full screen.
+    let sized = move || {
+        !w.full.get() && with(|p| p.gpu.as_ref().is_some_and(|g| !g.follows_window())).unwrap_or(true)
+    };
+    let mut scale = Menu::new("Scale").item(
+        MenuItem::new("Largest That Fits")
+            .radio((w.scale, None))
+            .shortcut(primary_alt('0')),
+    );
+    for n in 1..=4u32 {
+        let key = char::from_digit(n, 10).unwrap_or('1');
+        scale = scale.item(
+            MenuItem::new(format!("{n}x"))
+                .radio((w.scale, Some(n)))
+                .shortcut(primary_alt(key)),
+        );
+    }
+    // A scale chosen is the picture's, whatever the window's size: what
+    // overflows the window is cropped. Fit Window to Picture is the way
+    // to the window around it.
+    effect(move || {
+        let held = w.scale.get();
+        with(|p| {
+            let backing = p.scale;
+            p.gpu.as_mut().map(|g| g.set_fixed_scale(held.map(|n| physical_scale(n, backing))))
+        });
+        draw(w);
+    });
+    view = view
+        .submenu(scale)
+        .item(
+            MenuItem::new("Fit Window to Picture")
+                .enabled(sized)
+                .shortcut(primary_alt('0').shift())
+                .on_select(move || fit_window(w)),
+        )
+        .separator();
     MenuBar::new()
         .menu(
             Menu::new("Machine")
@@ -480,6 +531,32 @@ fn draw(w: Window_) {
             MinSize::Physical(width, height) => Size::new(width as f32 / scale, height as f32 / scale),
         };
         w.min.set(size);
+    }
+}
+
+/// A scale in points as the surface's whole physical one: a Retina
+/// screen's 1x is two pixels per scanline, and a fractional screen scale
+/// rounds to the nearest whole one, never below 1x.
+fn physical_scale(points: u32, backing: f32) -> u32 {
+    ((points as f32 * backing).round() as u32).max(1)
+}
+
+/// Size the window's content to the picture with no bars around it: at
+/// the scale it is held to, or the one on show. Not in full screen, and
+/// not while the guest takes the window's size (the picture is the
+/// window then).
+fn fit_window(w: Window_) {
+    if w.full.get_untracked() {
+        return;
+    }
+    let ask = with(|p| {
+        let (pw, ph) = p.gpu.as_ref()?.picture_px()?;
+        let (ui, window) = p.window.clone()?;
+        Some((ui, window, Size::new(pw as f32 / p.scale, ph as f32 / p.scale)))
+    })
+    .flatten();
+    if let Some((ui, window, size)) = ask {
+        ui.set_window_size(window, size);
     }
 }
 
@@ -699,8 +776,10 @@ fn relative(w: Window_, dx: f32, dy: f32) {
 /// menus' shortcuts reach the surface: Ctrl+Alt+G lets go of the mouse,
 /// Ctrl+Alt+S shoots the guest's frame (with Shift, the window's),
 /// Ctrl+Alt+K gives the host its shortcuts back, Ctrl+Alt+Shift+F is full
-/// screen, Ctrl+Alt+Shift+P pauses, and Ctrl+Alt+Shift+D is Ctrl+Alt+Del
-/// in the guest for as long as D is held. Ctrl is the platform's primary
+/// screen, Ctrl+Alt+Shift+P pauses, Ctrl+Alt+1 to 4 hold the picture at
+/// that scale and Ctrl+Alt+0 lets it go back to the largest that fits,
+/// Ctrl+Alt+Shift+0 fits the window to the picture, and Ctrl+Alt+Shift+D
+/// is Ctrl+Alt+Del in the guest for as long as D is held. Ctrl is the platform's primary
 /// modifier (`primary`): Command on macOS, as in the menus. True when the
 /// key was the host's.
 fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -> bool {
@@ -722,8 +801,20 @@ fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -
         KeyCode::KeyK if !repeat => w.want_grab.set(!w.want_grab.get_untracked()),
         KeyCode::KeyF if m.shift && !repeat => w.full.set(!w.full.get_untracked()),
         KeyCode::KeyP if m.shift && !repeat => toggle_pause(w),
+        KeyCode::Digit0 if m.shift && !repeat => fit_window(w),
+        KeyCode::Digit0 if !repeat => w.scale.set(None),
+        KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 if !m.shift && !repeat => {
+            w.scale.set(Some(match code {
+                KeyCode::Digit1 => 1,
+                KeyCode::Digit2 => 2,
+                KeyCode::Digit3 => 3,
+                _ => 4,
+            }))
+        }
         KeyCode::KeyS | KeyCode::KeyK => {}
         KeyCode::KeyF | KeyCode::KeyP if m.shift => {}
+        KeyCode::Digit0 => {}
+        KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 if !m.shift => {}
         _ => return false,
     }
     true

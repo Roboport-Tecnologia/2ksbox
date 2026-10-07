@@ -304,8 +304,9 @@ is built, a launcher in the checkout starts it instead of the winit one
 with Ctrl+Alt+Shift+P for Pause besides (which lets go of the mouse), and on macOS Cmd in place of
 Ctrl (⌥⌘G, ⌥⇧⌘P, ⌥⇧⌘D for Ctrl+Alt+Del; the title's notes say them
 the platform's way). The menus: Machine (Send Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse,
-Pause, Reset, Power Button, Close; View: Full Screen, the two
-screenshots; on macOS View has AppKit's own Enter Full Screen instead of
+Pause, Reset, Power Button, Close; View: Full Screen, Scale (Largest
+That Fits, ⌥⌘0; 1x to 4x, ⌥⌘1 to ⌥⌘4), Fit Window to Picture (⌥⇧⌘0),
+the two screenshots; on macOS View has AppKit's own Enter Full Screen instead of
 ours, which the chord still toggles); and
 a keyboard close asks in the platform's alert. Two knobs of its own:
 `PLAYER_INPUT_LOG=1` prints every input the surface reports, with the lock

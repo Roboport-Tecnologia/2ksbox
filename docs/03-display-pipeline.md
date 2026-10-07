@@ -96,6 +96,17 @@ fractional viewport samples on a grid that moves with the window, so the
 picture crawls during a drag. Rounding costs at most half a pixel of
 aspect, far inside the sweep's 0.5 %.
 
+The user can hold the scale instead (`Gpu::set_fixed_scale`, the
+mitsuami player's View > Scale, 1x to 4x). It is in points per scanline,
+so a Retina screen's 1x is 2 physical pixels per scanline, rounded to a
+whole physical scale on a fractional screen. A held scale stands when the
+window is smaller than the picture: the picture stays centred and what
+overflows is cropped (a WebGPU viewport may lie past its target; only its
+size is bounded, by the largest texture, which caps the scale too). It is
+ignored while the guest takes the window's size. Fit Window to Picture
+asks the window for the picture's size with no bars (`Gpu::picture_px`:
+the held scale, or the one on show).
+
 Below 1x there is no whole scale, so the window's minimum inner size is
 the 1x picture in physical pixels (320×200 → 534×400), re-applied on
 every mode change and clamped to the monitor.
