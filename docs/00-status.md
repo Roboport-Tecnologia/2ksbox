@@ -286,11 +286,11 @@ tracks, plus the items no track owns.
    over Winsock AF_UNIX on a real PC. The Store upload: the package
    installs through `scripts/win-sideload.ps1` and passes the
    certification kit, and the listing, privacy policy and steps are in
-   the store repo; the user's part is the Partner Center account, the
-   name reservation, a version of 1.0.0 or later (the Store refuses a
-   first number of 0) and screenshots of the player's window with games
-   in it (never the guest-frame shot scaled up). An installer for users
-   outside the Store. Zero-copy frames through a DXGI shared handle.
+   the store repo; the Partner Center account is open (2026-10-06) and
+   the workspace version is 1.0.0 (2026-10-06; the Store refuses a
+   first number of 0); left for the user, the name reservation and
+   screenshots of the player's window with games in it (never the
+   guest-frame shot scaled up). Zero-copy frames through a DXGI shared handle.
 6. **M14, Voodoo 2** (its track doc, "Open, in order"): the glitched
    second Glide game, a client resuming on a dead ring, DxDiag's
    Direct3D 7 `GetDC` failure, the Windows build, Diablo II's

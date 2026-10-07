@@ -1,6 +1,6 @@
 [package]
 name = "player-mitsuami"
-version = "0.0.1"
+version = "1.0.0"
 # mitsuami is edition 2024 and needs Rust 1.95; the root workspace's
 # `stable` toolchain is newer than both.
 edition = "2024"

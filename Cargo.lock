@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "gamepad"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "serde",
 ]
@@ -1340,14 +1340,14 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "launcher-capi"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "launcher-core",
 ]
 
 [[package]]
 name = "launcher-core"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "ash",
  "directories",
@@ -1374,7 +1374,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libdisc"
-version = "0.0.1"
+version = "1.0.0"
 
 [[package]]
 name = "libloading"
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "libsynth"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "moont",
  "nuked-opl3",
@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "player"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "player-core"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "ash",
@@ -2571,7 +2571,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "qemu-embed"
-version = "0.0.1"
+version = "1.0.0"
 
 [[package]]
 name = "quick-xml"
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "shader-chain"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "librashader",
  "png",

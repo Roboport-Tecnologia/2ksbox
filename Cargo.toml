@@ -12,7 +12,7 @@ members = ["player", "player-core", "libdisc", "libsmb", "libsynth", "gamepad", 
 default-members = ["player", "player-core", "libdisc", "libsmb", "libsynth", "gamepad", "launcher-core", "qemu-embed", "shader-chain"]
 
 [workspace.package]
-version = "0.0.1"
+version = "1.0.0"
 edition = "2021"
 # The default for crates that link QEMU (`player`, `qemu-embed`) or its
 # device model (`libdisc`, `libsynth`). `launcher-core` and
