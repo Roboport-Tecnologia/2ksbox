@@ -93,9 +93,11 @@ embed library, as for the winit player, into a target dir of its own:
    grab on every focus loss and the next key or click takes it again), the
    pointer lock with raw motion for a PS/2 guest (`Motion` only where no
    raw counts come), the guest's cursor as the surface's cursor image, keys
-   a keymap moved read by keysym, keys let go on focus loss. A close with
-   Alt held (or the menu's Close) asks in the platform's alert, Cancel
-   first; the title bar's button does not ask. Checked headless: the mode
+   a keymap moved read by keysym, keys let go on focus loss. Every close (the
+   title bar's button, Alt+F4, the menu's Close; the button since
+   2026-10-07, user) asks in the platform's alert, Cancel first, when the
+   guest has drawn something. Pause lets go of the mouse, and a click
+   doesn't take it again until the guest runs. Checked headless: the mode
    sweep (19 modes), the pattern, XP (`basexp-br` on an overlay, KVM) to
    the desktop through CRT Aperture with the d3dpt-vga driver and the
    guest cursor, the Windows key opening XP's Start menu and the arrows

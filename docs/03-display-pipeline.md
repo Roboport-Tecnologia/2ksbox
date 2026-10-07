@@ -383,7 +383,8 @@ blended over the finished picture), because Linux has no message box that
 works in the Flatpak and over a full-screen window; the mitsuami player
 uses the platform's alert. Enter, Close or a second Alt+F4
 closes; Esc or Back returns; nothing reaches the guest while it is up.
-The title bar's close button does not ask.
+The winit player's title bar close button does not ask; the mitsuami
+player's asks like the rest (user, 2026-10-07).
 
 ## 3D and the pipeline
 

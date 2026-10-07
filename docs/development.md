@@ -301,7 +301,7 @@ Linux `build.sh mitsuami` builds it beside the launcher, with Windows
 builds only for `test.sh` and the tools until they move. It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts,
-with Ctrl+Alt+Shift+P for Pause besides, and on macOS Cmd in place of
+with Ctrl+Alt+Shift+P for Pause besides (which lets go of the mouse), and on macOS Cmd in place of
 Ctrl (⌥⌘G, ⌥⇧⌘P, ⌥⇧⌘D for Ctrl+Alt+Del; the title's notes say them
 the platform's way). The menus: Machine (Send Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse,
 Pause, Reset, Power Button, Close; View: Full Screen, the two

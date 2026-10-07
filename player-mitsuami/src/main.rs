@@ -53,9 +53,6 @@ struct Player {
     /// counts, and raw motion can come in fractions (Wayland's relative
     /// pointer), so rounding each move would lose every slow one.
     motion_rest: (f32, f32),
-    /// The modifiers of the last key: a close request with Alt held came
-    /// from the keyboard (Alt+F4).
-    modifiers: Modifiers,
     /// The close question is up.
     asking: bool,
 }
@@ -116,7 +113,6 @@ fn main() {
             cursor_applied: HostCursor::Default,
             raw_motion: false,
             motion_rest: (0.0, 0.0),
-            modifiers: Modifiers::default(),
             asking: false,
         })
     });
@@ -177,7 +173,7 @@ fn player_window(guest: bool) -> Window {
         .min_size(w.min)
         .full_screen(w.full)
         .open(w.open)
-        .on_close_request(move || close_request(w, false))
+        .on_close_request(move || close_request(w))
         .content(move || content(w))
 }
 
@@ -313,7 +309,7 @@ fn menus(w: Window_) -> MenuBar {
                     MenuItem::new("Close")
                         .role(MenuRole::Quit)
                         .shortcut(Shortcut::primary(Key::Char('q')))
-                        .on_select(move || close_request(w, true)),
+                        .on_select(move || close_request(w)),
                 ),
         )
         .menu(
@@ -327,10 +323,13 @@ fn menus(w: Window_) -> MenuBar {
 }
 
 /// Pause the guest, or let a paused one run again.
+/// Pausing lets go of the mouse, and a click doesn't take it again until
+/// the guest runs.
 fn toggle_pause(w: Window_) {
     let Some(vm) = vm() else { return };
     let pause = !w.paused.get_untracked();
     if pause {
+        w.locked.set(false);
         vm.vm_pause();
     } else {
         vm.vm_start();
@@ -368,23 +367,21 @@ fn send_ctrl_alt_del() {
     });
 }
 
-/// A close: the window's close button (`from_menu` false) or the menu's
-/// Close. One from the keyboard (Alt+F4 with Alt held, the menu's own
-/// shortcut) may be a hand that meant the guest, so it asks first when the
-/// guest has drawn something to lose; the title bar's button is never an
-/// accident.
-fn close_request(w: Window_, from_menu: bool) {
-    let Some((by_key, can_lose, asking)) = with(|p| {
-        let by_key = from_menu || p.modifiers.alt || (cfg!(target_os = "macos") && p.modifiers.meta);
+/// A close: the window's close button, Alt+F4, or the menu's Close (and
+/// its shortcut). Each asks first when the guest has drawn something to
+/// lose (user, 2026-10-07: the title bar's button too, which once closed
+/// at once).
+fn close_request(w: Window_) {
+    let Some((can_lose, asking)) = with(|p| {
         let can_lose = p.gpu.as_ref().is_some_and(Gpu::has_frame) && p.session.as_ref().and_then(Session::vm).is_some();
-        (by_key, can_lose, p.asking)
+        (can_lose, p.asking)
     }) else {
         return;
     };
     if asking {
         return;
     }
-    if !(by_key && can_lose) {
+    if !can_lose {
         close(w);
         return;
     }
@@ -575,7 +572,6 @@ fn on_input(w: Window_, input: SurfaceInput) {
     }
     match input {
         SurfaceInput::Key { code, pressed, repeat, modifiers, .. } => {
-            with(|p| p.modifiers = modifiers);
             // the platform ended the grab when the window lost focus: a key
             // here means it has focus again
             if pressed && w.want_grab.get_untracked() && !w.grabbed.get_untracked() {
@@ -619,13 +615,12 @@ fn on_input(w: Window_, input: SurfaceInput) {
             with(|p| p.pointer_inside = false);
             apply_cursor(w);
         }
-        SurfaceInput::Button { button, pressed, modifiers, .. } => {
-            with(|p| p.modifiers = modifiers);
+        SurfaceInput::Button { button, pressed, .. } => {
             if pressed && w.want_grab.get_untracked() && !w.grabbed.get_untracked() {
                 w.grabbed.set(true);
             }
             let Some(vm) = vm() else { return };
-            if pressed && !w.locked.get_untracked() && !vm.mouse_is_absolute() {
+            if pressed && !w.locked.get_untracked() && !w.paused.get_untracked() && !vm.mouse_is_absolute() {
                 with(|p| (p.raw_motion, p.motion_rest) = (false, (0.0, 0.0)));
                 w.locked.set(true);
             }
