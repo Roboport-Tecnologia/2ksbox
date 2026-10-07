@@ -25,9 +25,9 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::os::fd::IntoRawFd;
 #[cfg(unix)]
-use std::os::unix::net::UnixStream as Stream;
+pub(crate) use std::os::unix::net::UnixStream as Stream;
 #[cfg(windows)]
-use std::net::TcpStream as Stream;
+pub(crate) use std::net::TcpStream as Stream;
 #[cfg(windows)]
 use std::os::windows::io::IntoRawSocket;
 
@@ -183,12 +183,12 @@ impl Qmp {
 }
 
 #[cfg(unix)]
-fn socket_pair() -> std::io::Result<(Stream, Stream)> {
+pub(crate) fn socket_pair() -> std::io::Result<(Stream, Stream)> {
     Stream::pair()
 }
 
 #[cfg(unix)]
-fn into_raw(s: Stream) -> std::io::Result<i32> {
+pub(crate) fn into_raw(s: Stream) -> std::io::Result<i32> {
     Ok(s.into_raw_fd())
 }
 
@@ -200,7 +200,7 @@ fn into_raw(s: Stream) -> std::io::Result<i32> {
 /// wins the race is dropped and the whole thing is tried again, so the
 /// monitor is never handed to it.
 #[cfg(windows)]
-fn socket_pair() -> std::io::Result<(Stream, Stream)> {
+pub(crate) fn socket_pair() -> std::io::Result<(Stream, Stream)> {
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
     let addr = listener.local_addr()?;
@@ -227,7 +227,7 @@ fn socket_pair() -> std::io::Result<(Stream, Stream)> {
 /// `_open_osfhandle` would write to if the two ever linked different CRTs.
 /// So the handle crosses the boundary as a handle and the library converts.
 #[cfg(windows)]
-fn into_raw(s: Stream) -> std::io::Result<i32> {
+pub(crate) fn into_raw(s: Stream) -> std::io::Result<i32> {
     let raw = s.into_raw_socket(); // QEMU owns it now; do not close it here
     qemu_embed::socket_to_fd(raw).ok_or_else(|| {
         std::io::Error::other(format!("socket handle {raw} could not be made a file descriptor"))

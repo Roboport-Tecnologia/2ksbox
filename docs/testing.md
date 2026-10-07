@@ -216,6 +216,7 @@ scene that left no frame on the scratch disk fails as `guest-G9`,
 | `guest-F9=native`, `guest-F9-log=native` | D3DFEAT9 byte-identical to native, same query/getter lines |
 | `guest-cdimage`, `guest-dirdisc` | `tools/xp-cdimage-test.sh` on a converted cue and on the same tree as a folder |
 | `pad-guest-xp`, `pad-guest-98` | `tools/pad-guest-test.py xp` / `win98` (own boots) |
+| `win11-boot-prompt` | `tools/win11-boot-prompt-test.sh` (own machine; skips without the Arm64 ISO or off Apple Silicon) |
 | `win98-dx9` | Win98 on the display driver through Microsoft's runtimes (M16 step 5), one boot under TCG of `tools/win98-dx9-test.sh`: D3DGAME9/8 pixel-identical to the native frame outside the HUD, D3DFEAT9 byte-identical with its lines (the A16B16G16R16F readback expected to fail, finding 35), the DX8 probes, SHTEST, CKTEST, EBTEST, DDTEST's sysmem blits; one line each in the log |
 | `win98-winetest` | Wine's suites on Win98 (`tools/win98-winetest.sh`) against `reference/winetest/w98-driver.txt` |
 | `win7-aero` | Windows 7 from its install disc to Aero (M18 finding 14), `tools/win7-aero-test.sh $WIN7_ISO`: a machine of the launcher's Windows 7 family, Windows setup unattended once (the base, kept in `build/win7-aero-test`), then on an overlay SETUP, one restart, and five verdicts: SETUP chose the WDDM driver, the kernel driver started, `dwm.exe` has `d3dptumd.dll` loaded, the pointer was never hidden by a page flip (DWM's flips, finding 16), D3DGAME9's frame under composition within budget of the native one. Skipped without `WIN7_ISO` (a 32-bit Windows 7 disc of the user's) or without `WDDM\` on the guest-tools ISO |
@@ -467,6 +468,20 @@ trip (PCR and index come back, and a third QEMU reads the snapshot's
 index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
 `tpm-crb`.
+
+`tools/win11-boot-prompt-test.sh [iso]` (M20): a new Windows 11 on Arm
+machine starts setup from its disc with nobody at the keyboard. Makes
+the machine with `launcherx` in `build/w11p` and runs the aarch64
+player on its `--print-args` twice (the window opens): with an empty
+drive until the firmware starts the EFI shell, which leaves the disc
+after the shell in the variables' boot order, as a user's first start
+does; then with the ISO inserted (`--drive insert`), where the firmware
+must start the disc and never the shell, the player must answer the
+disc's "Press any key" (`[boot]` in its log), and setup's screen must
+fill a QMP screendump within two minutes (`build/w11p/setup.png`).
+About 1.5 minutes. Needs Microsoft's Arm64 ISO (`$W11_ISO`, or
+`~/Downloads/Windows11_Client_arm64_*.iso`); Apple Silicon only for now.
+The guest stage's `win11-boot-prompt`, which skips without the ISO.
 
 `tools/clipboard-win11-test.sh [base]` (M23 steps 4-6): the clipboard
 and the shared folder between the host and Windows 11, end to end, the

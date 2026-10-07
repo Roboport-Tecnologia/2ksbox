@@ -698,6 +698,7 @@ pub fn start(
             None
         }
     };
+    crate::boot_prompt::attach(&mut args);
     let ring_ptrs = audio.map(|(ring, rate)| {
         args.push("-audiodev".into());
         // the cushion QEMU keeps in the ring under the host device's own

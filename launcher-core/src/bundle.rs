@@ -2082,6 +2082,11 @@ impl Machine {
             drive.push_str(&format!(",file={}", opt_value(&crate::disc_library::qemu_medium(disc))));
         }
         let mut cd = format!("ide-cd,bus=ide.1,id={},drive=cd0,audiodev=embed0", crate::control::CDROM_ID);
+        if self.family.is_modern() {
+            // after the disk (`boot_prompt_args`): the firmware's own
+            // order is whatever drives held media on its first start
+            cd.push_str(",bootindex=1");
+        }
         if let Some(shelf) = shelf {
             // The drive answers the in-guest CDSHELF program from this
             // file (patch 52). Without it the vendor command reports
@@ -2173,7 +2178,7 @@ impl Machine {
             "-drive".into(),
             format!("file={},if=none,id=disk0", opt_value(&self.disk.display().to_string())),
             "-device".into(),
-            "ide-hd,bus=ide.0,drive=disk0".into(),
+            "ide-hd,bus=ide.0,drive=disk0,bootindex=0".into(),
         ]);
         let pad_usb = self.effective_pad() == Pad::Usb;
         if self.seamless_mouse || pad_usb {
@@ -2195,6 +2200,7 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(Arch::X86_64));
         args.extend(self.extra_qemu_args.iter().cloned());
         args
@@ -2260,7 +2266,7 @@ impl Machine {
             "-drive".into(),
             format!("file={},if=none,id=disk0", opt_value(&self.disk.display().to_string())),
             "-device".into(),
-            "ide-hd,bus=ide.0,drive=disk0".into(),
+            "ide-hd,bus=ide.0,drive=disk0,bootindex=0".into(),
             // Two screens, and the player shows the live one (embed's
             // `embed_live_console`): the firmware, Windows setup and its
             // recovery draw on ramfb, an installed Windows on virtio-gpu
@@ -2289,10 +2295,23 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(arch));
         args.extend(self.extra_qemu_args.iter().cloned());
         args
     }
+}
+
+/// A Windows 11 machine's firmware console on a serial port the player
+/// supplies (`player_core::boot_prompt`): when the firmware starts the
+/// install disc, the player answers its "Press any key to boot from CD or
+/// DVD", which nobody sees on the new machine's black screen. With the
+/// disk first in the boot order (`bootindex=0`, the disc 1) the firmware
+/// only starts the disc while the disk has no system, whatever order
+/// its variables recorded: a machine first started with an empty drive
+/// lists the disc after the EFI shell.
+fn boot_prompt_args() -> Vec<String> {
+    vec!["-serial".into(), "chardev:fwcon".into()]
 }
 
 /// A Windows 11 machine's drivers disc in a CD drive of its own on

@@ -2858,6 +2858,10 @@ guest_stage() {
     skip pad-guest-98 "needs $PLAYER and a display (it runs the player)"
   fi
 
+  # A new Windows 11 machine starts setup from its disc with no key
+  # pressed (M20): the boot order and the player's answer to the disc's
+  # prompt. Skips itself without the Arm64 ISO or off Apple Silicon.
+  run_check win11-boot-prompt win11-boot-prompt.log tools/win11-boot-prompt-test.sh || true
 }
 
 win98_checks() { # the Win98 driver's Direct3D (M16 step 5): its own boots, whatever the XP stage had
