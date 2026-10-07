@@ -48,6 +48,8 @@ pub struct Preview {
     preset_path: Option<PathBuf>,
     chain: Option<shader_chain::Chain>,
     viewport: (u32, u32),
+    /// A fixed integer scale instead of the fit (`set_scale`).
+    scale: Option<u32>,
     /// When the loaded preset started animating (its frame 0).
     clock: Instant,
     /// A frame number to render instead of the clock's, for the headless
@@ -68,6 +70,7 @@ impl Preview {
             preset_path: None,
             chain: None,
             viewport: (0, 0),
+            scale: None,
             clock: Instant::now(),
             pinned_frame: None,
             error: None,
@@ -143,6 +146,14 @@ impl Preview {
         self.viewport
     }
 
+    /// Render at this integer scale whatever the area, or (`None`, the
+    /// default) at the largest that fits it. Takes effect on the next
+    /// `update`. A scale that would pass the device's largest texture is
+    /// lowered to the largest that doesn't.
+    pub fn set_scale(&mut self, scale: Option<u32>) {
+        self.scale = scale.map(|s| s.max(1));
+    }
+
     /// The last rendered frame, for `read_frame` and `dump_png`.
     fn output_texture(&self) -> Option<&wgpu::Texture> {
         self.chain.as_ref().and_then(shader_chain::Chain::output_texture)
@@ -151,7 +162,9 @@ impl Preview {
     /// Reflect the editor's current preset path, effective parameter
     /// values (defaults already merged with overrides), image path, and
     /// the area available to render into, reloading only what changed
-    /// and re-rendering a frame.
+    /// and re-rendering a frame. The area is in physical pixels, as the
+    /// player's surface is, so a HiDPI front end multiplies its points by
+    /// the display's scale factor (or the frame is blurred stretching it).
     pub fn update(&mut self, preset: &Path, params: &[(String, f32)], image: &Path, area_w: u32, area_h: u32) {
         if self.image_path.as_deref() != Some(image) {
             self.load_image(image);
@@ -271,7 +284,15 @@ impl Preview {
         // it around the centre, as the player does when its window is
         // smaller than the guest's native resolution.
         let (aw, ah) = (area_w.max(1) as f32, area_h.max(1) as f32);
-        let scale = (aw / iw as f32).min(ah / ih as f32).floor().max(1.0);
+        let scale = match self.scale {
+            // A fixed scale (the editor's slider) ignores the area: the
+            // caller crops what overflows, as above.
+            Some(fixed) => {
+                let max_dim = self.device.limits().max_texture_dimension_2d;
+                fixed.min(max_dim / iw.max(ih).max(1)).max(1) as f32
+            }
+            None => (aw / iw as f32).min(ah / ih as f32).floor().max(1.0),
+        };
         let (rw, rh) = ((iw as f32 * scale) as u32, (ih as f32 * scale) as u32);
         self.viewport = (rw, rh);
 

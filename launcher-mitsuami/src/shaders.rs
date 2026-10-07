@@ -10,7 +10,7 @@
 
 use crate::machines::Library;
 use crate::path_field::PathField;
-use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PresetState, Presets};
+use launcher_core::editor::{Editor, IMAGE_FILTER, PRESET_FILTER, PREVIEW_SCALE_MAX, PresetState, Presets};
 use launcher_core::preview::Preview;
 use launcher_core::shader_library::{self, ProfileEntry};
 use mitsuami::core::{CurrentWindow, Ui};
@@ -141,15 +141,17 @@ impl Shaders {
         });
     }
 
-    /// Render the preview at `(w, h)` points, if the editor has a preset,
-    /// its parameters and a picture.
-    fn render(&self, w: u32, h: u32) {
+    /// Render the preview into `(w, h)` physical pixels, shown at
+    /// `scale` pixels to the point, if the editor has a preset, its
+    /// parameters and a picture.
+    fn render(&self, w: u32, h: u32, scale: f32) {
         let job = self.editor.with_untracked(|e| {
             e.renderable().then(|| {
-                (PathBuf::from(e.preset_path.trim()), e.effective(), PathBuf::from(e.preview_image_path.trim()))
+                let (preset, image) = (PathBuf::from(e.preset_path.trim()), PathBuf::from(e.preview_image_path.trim()));
+                (preset, e.effective(), image, e.preview_scale())
             })
         });
-        let Some((preset, params, image)) = job else { return };
+        let Some((preset, params, image, fixed)) = job else { return };
         let preview = self.preview.get_untracked();
         let mut preview = preview.borrow_mut();
         if preview.is_none() {
@@ -162,6 +164,7 @@ impl Shaders {
             }
         }
         let preview = preview.as_mut().expect("made above");
+        preview.set_scale(fixed);
         preview.update(&preset, &params, &image, w.max(1), h.max(1));
         if let Some(e) = preview.error() {
             self.preview_error.set(Some(e.to_owned()));
@@ -183,7 +186,8 @@ impl Shaders {
             rgba.extend(row.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]));
         }
         self.preview_error.set(None);
-        self.frame.set(Some(Frame { width: cw as f32, height: ch as f32, pixels: Pixels::new(cw, ch, rgba) }));
+        let pixels = Pixels::new(cw, ch, rgba).scale(scale);
+        self.frame.set(Some(Frame { width: cw as f32 / scale, height: ch as f32 / scale, pixels }));
     }
 
     fn frame_interval(&self) -> Option<Duration> {
@@ -471,6 +475,17 @@ pub fn ShaderEditorWindow() -> impl View {
                             value=move || shaders.read(|e| e.preview_image_path.clone())
                             @edit=move |p| shaders.edit(|e| e.preview_image_path = p)
                         />
+                        <Row gap=Spacing::Sm align=Align::Center>
+                            <Text width=90 shrink=0.0>{move || shaders.read(Editor::preview_scale_label)}</Text>
+                            <Slider
+                                label="Preview scale"
+                                grow=1.0
+                                range_with=(0.0, PREVIEW_SCALE_MAX as f64)
+                                step=1.0
+                                value=move || shaders.read(|e| e.preview_scale as f64)
+                                @change=move |v: f64| shaders.edit(|e| e.preview_scale = v.round() as u32)
+                            />
+                        </Row>
                         <PreviewArea/>
                     </Column>
                 </Row>
@@ -491,7 +506,7 @@ fn ParamList() -> impl View {
     let shaders = use_store::<Shaders>();
     view! {
         <ScrollView grow=1.0 min_height=0>
-            <Column gap=Spacing::Sm padding_x=Spacing::Xs>
+            <Column gap=Spacing::Lg padding_x=Spacing::Xs>
                 <For
                     each=move || shaders.read(|e| e.params().iter().map(|p| p.id.clone()).collect::<Vec<_>>())
                     key=|id: &String| id.clone()
@@ -504,8 +519,8 @@ fn ParamList() -> impl View {
     }
 }
 
-/// One parameter: a box that overrides the preset's value, the slider,
-/// and the preset's description of it.
+/// One parameter: a box that overrides the preset's value, and the
+/// slider under its name and value.
 #[component]
 fn ParamRow(id: String) -> impl View {
     let shaders = use_store::<Shaders>();
@@ -525,50 +540,44 @@ fn ParamRow(id: String) -> impl View {
         let row = row.clone();
         move || shaders.read(|e| row().is_some_and(|r| e.is_overridden(r)))
     };
-    let description = {
+    let label = {
         let row = row.clone();
-        move || shaders.read(|e| row().and_then(|r| e.description(r)).unwrap_or_default().to_owned())
+        move || shaders.read(|e| row().and_then(|r| e.label(r)).unwrap_or_default())
     };
     let value = meta(|e, r| e.value(r).unwrap_or_default() as f64);
     let (min, max) = (meta(|e, r| e.params()[r].minimum as f64), meta(|e, r| e.params()[r].maximum as f64));
     let step = meta(|e, r| e.params()[r].step as f64);
-    let (value2, row2, row3) = (value.clone(), row.clone(), row);
-    let (o1, o2, d1, d2) = (overridden.clone(), overridden, description.clone(), description);
-    let id2 = id.clone();
+    let (row2, row3) = (row.clone(), row);
+    let (o1, o2) = (overridden.clone(), overridden);
     view! {
-        <Column gap=Spacing::Xs>
-            <Row gap=Spacing::Sm align=Align::Center>
-                <Checkbox
-                    a11y_label=id.to_string()
-                    checked=o1
-                    @change=move |on| {
-                        if let Some(r) = row2() {
-                            shaders.edit(|e| e.set_override(r, on));
+        <Row gap=Spacing::Sm align=Align::Center>
+            <Checkbox
+                a11y_label=id.to_string()
+                checked=o1
+                @change=move |on| {
+                    if let Some(r) = row2() {
+                        shaders.edit(|e| e.set_override(r, on));
+                    }
+                }
+            />
+            <Column grow=1.0 gap=Spacing::Xs>
+                <Text text_style=TextStyle::Caption max_lines=1>
+                    {label}
+                </Text>
+                <Slider
+                    label=id.to_string()
+                    enabled=o2
+                    range_with=move || (min(), max())
+                    step=step
+                    value=value
+                    @change=move |v| {
+                        if let Some(r) = row3() {
+                            shaders.edit(|e| e.set_value(r, v as f32));
                         }
                     }
                 />
-                <Column grow=1.0 gap=Spacing::Xs>
-                    <Text text_style=TextStyle::Caption max_lines=1>
-                        {move || format!("{}  {:.3}", id2, value2())}
-                    </Text>
-                    <Slider
-                        label=id.to_string()
-                        enabled=o2
-                        range_with=move || (min(), max())
-                        step=step
-                        value=value
-                        @change=move |v| {
-                            if let Some(r) = row3() {
-                                shaders.edit(|e| e.set_value(r, v as f32));
-                            }
-                        }
-                    />
-                </Column>
-            </Row>
-            <Show when=move || !d1().is_empty()>
-                <Text text_style=TextStyle::Caption padding_x=Spacing::Xl>{d2.clone()}</Text>
-            </Show>
-        </Column>
+            </Column>
+        </Row>
     }
 }
 
@@ -588,14 +597,18 @@ fn PreviewArea() -> impl View {
     effect(move || {
         // Both read on every run, so the effect follows both.
         let stale = shaders.stale.get();
+        // In physical pixels, as the player's surface is: the frame then
+        // shows pixel for pixel, never stretched to the points (blurred on
+        // a 2x screen).
+        let scale = ui.metrics().scale_factor.max(1.0);
         let size = size.get();
-        let size = (size.width.round() as u32, size.height.round() as u32);
+        let size = ((size.width * scale).round() as u32, (size.height * scale).round() as u32);
         if size == (0, 0) || (size == last_size.get() && !stale) {
             return;
         }
         last_size.set(size);
         shaders.stale.set(false);
-        shaders.render(size.0, size.1);
+        shaders.render(size.0, size.1, scale);
         if let Some(interval) = shaders.frame_interval()
             && !waking.replace(true)
         {
@@ -660,7 +673,8 @@ pub fn save_probe(shaders: Shaders, preset: &str) {
 
 /// For the headless `editor:<preset>[;<image>[;<param>=<value>]]`
 /// screen: the editor on a preset and a picture, with one parameter overridden as its box and slider
-/// would (the preview must render again for it).
+/// would (the preview must render again for it), or `scale=<n>` the
+/// preview's scale slider moved.
 pub fn edit_preset(shaders: Shaders, arg: &str) {
     let mut parts = arg.split(';');
     let preset = parts.next().unwrap_or_default().to_owned();
@@ -668,6 +682,10 @@ pub fn edit_preset(shaders: Shaders, arg: &str) {
     shaders.open_editor(|e| e.open_with(preset, image));
     if let Some((id, value)) = parts.next().and_then(|p| p.split_once('=')) {
         let value: f32 = value.parse().unwrap_or_default();
+        if id == "scale" {
+            shaders.edit(|e| e.preview_scale = value as u32);
+            return;
+        }
         let row = shaders.editor.with_untracked(|e| e.params().iter().position(|p| p.id == id));
         match row {
             Some(row) => shaders.edit(|e| {

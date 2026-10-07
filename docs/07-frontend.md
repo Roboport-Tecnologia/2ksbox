@@ -612,7 +612,14 @@ and runs without live control.
   slang CRT presets assume they upscale, and some divide by zero when
   asked to shrink (`crt-aperture`'s `floor(OutputSize.y /
   SourceSize.y)`) and draw black. A source over 1600×1200 is resized on
-  the CPU first (`MAX_SOURCE_W/H`).
+  the CPU first (`MAX_SOURCE_W/H`). The area is in **physical pixels**,
+  as the player's surface is: a front end multiplies its points by the
+  display's scale factor and shows the frame at that many pixels to the
+  point (mitsuami: `Pixels::scale`), or a 2x screen stretches it, blurred.
+  The editor's scale slider (`Editor::preview_scale`, Fit or 1x to
+  `PREVIEW_SCALE_MAX`, `Preview::set_scale`) fixes the integer scale
+  instead, so a size bigger than the area can be seen, cropped around
+  the centre; capped at the device's largest texture.
 - **The preview moves when the preset does** (interlacing, phosphor
   decay, NTSC shimmer). `preview::Preview::frame_interval` says how
   often to draw (`None` for a still preset) and the front end obeys

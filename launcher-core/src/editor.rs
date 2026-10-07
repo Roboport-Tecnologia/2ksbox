@@ -28,6 +28,9 @@ use crate::shader_profile::{self, ParamMeta, ShaderProfile};
 use crate::shader_source::{self, Download, Status};
 use std::path::{Path, PathBuf};
 
+/// The largest scale the preview's slider offers.
+pub const PREVIEW_SCALE_MAX: u32 = 8;
+
 pub const PRESET_FILTER: Filter<'static> = ("Shader presets", &["slangp"]);
 pub const IMAGE_FILTER: Filter<'static> = ("Images", &["png", "jpg", "jpeg", "bmp"]);
 
@@ -127,6 +130,10 @@ pub struct Editor {
     pub preset_path: String,
     /// A screenshot to preview the shader against.
     pub preview_image_path: String,
+    /// The preview's integer scale, 0 for the player's own fit (the
+    /// largest that fits the area); up to `PREVIEW_SCALE_MAX`, cropped
+    /// around the centre when it overflows, as the player crops.
+    pub preview_scale: u32,
     /// What the last `save` refused, for the form to show.
     pub error: Option<String>,
 
@@ -239,6 +246,27 @@ impl Editor {
 
     pub fn is_overridden(&self, row: usize) -> bool {
         self.overrides.get(row).map(Option::is_some).unwrap_or(false)
+    }
+
+    /// What the preview's scale slider says: "Scale: Fit" or "Scale: 3x".
+    pub fn preview_scale_label(&self) -> String {
+        match self.preview_scale {
+            0 => "Scale: Fit".to_owned(),
+            n => format!("Scale: {n}x"),
+        }
+    }
+
+    /// The scale for `Preview::set_scale`: `None` to fit.
+    pub fn preview_scale(&self) -> Option<u32> {
+        (self.preview_scale > 0).then_some(self.preview_scale.min(PREVIEW_SCALE_MAX))
+    }
+
+    /// A row's name and value as one line, "Gamma Input  2.400": the
+    /// preset's description when it has one, its id otherwise.
+    pub fn label(&self, row: usize) -> Option<String> {
+        let meta = self.params.get(row)?;
+        let name = self.description(row).unwrap_or(&meta.id);
+        Some(format!("{name}  {:.3}", self.value(row).unwrap_or_default()))
     }
 
     /// The description worth showing under a row: none when it merely
