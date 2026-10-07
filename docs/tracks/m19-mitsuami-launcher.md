@@ -39,9 +39,12 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami 1.0.0, `0e21f20`, since 2026-10-04 (53 commits past
-`48e4801`: 1.0.0 and three security and performance passes); both
-crates built with no change, and the macOS launcher drew its window.
+The pin is mitsuami `c0b6963` since 2026-10-07: 1.0.0 (`0e21f20`, pinned
+2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
+performance passes) plus three, of which one is code: an AppKit surface
+that grabs the keyboard turns the system's shortcuts off for the grab
+(`CGSSetGlobalHotKeyOperatingMode`), so Control-arrows, Command-Space and
+Command-Tab reach the guest. Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
 Runtime 2.4+, so the launcher is built only on a PC:
