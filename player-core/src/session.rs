@@ -251,7 +251,9 @@ impl Session {
                     Some(tex) => {
                         let (ow, oh, rgb) = shader_chain::read_texture(&gpu.device, &gpu.queue, tex);
                         let out = src.with_extension("shaded.png");
-                        shader_chain::write_png(&out.to_string_lossy(), ow, oh, &rgb);
+                        if let Err(e) = shader_chain::write_png(&out.to_string_lossy(), ow, oh, &rgb) {
+                            eprintln!("calib: {}: {e}", out.display());
+                        }
                         println!(
                             "  {} → {} ({ow}x{oh})",
                             src.file_name().unwrap_or_default().to_string_lossy(),

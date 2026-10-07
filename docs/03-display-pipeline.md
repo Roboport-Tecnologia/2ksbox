@@ -174,7 +174,13 @@ parameters, stay open with the pack.
 the mode's own size, before the geometry stage and the chain. That is the
 picture to compare with a golden BMP, a native run or another emulator.
 An imported 3D slot is shot the same way. Files land in `PLAYER_SHOT_DIR`
-(default: the working directory) as `2ksbox-NNNN.png`.
+(default: the user's Pictures folder's `2ksbox`, found the platform's
+way so a localized or moved folder is right: XDG's user dirs, Windows'
+known folder, `~/Pictures` on macOS; user decision 2026-10-07) as
+`2ksbox-NNNN.png`. Never the working directory, which for an app started
+from Finder, the Dock or the Start menu is `/` or a read-only folder: a
+shot there panicked in the key handler and aborted the player (both
+players, 2026-10-07). A shot that cannot be written is a line on stderr.
 **Ctrl+Alt+Shift+S** shoots what the window shows instead: the chain's
 last output drawn again, with the window's own blit, into a texture of
 the swapchain's size and format, black bars included and the close

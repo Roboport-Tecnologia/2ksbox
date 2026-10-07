@@ -5,7 +5,7 @@ open source (the code is at <https://github.com/Roboport-Tecnologia/2ksbox>), an
 this page says what it does with your data, which is almost nothing.
 
 *This page is the privacy policy for every build of 2ksbox, from an
-app store or built from source. Last changed 2026-10-06.*
+app store or built from source. Last changed 2026-10-07.*
 
 ## What 2ksbox collects
 
@@ -33,6 +33,9 @@ shader profiles, downloaded shaders, and two log files, `launcher.log`
 and `player.log`. The logs describe what the program did (which machine
 started, which devices it set up, errors); they are for troubleshooting,
 are never sent anywhere, and you can delete them at any time.
+
+Screenshots you take in the player (Ctrl+Alt+S, Ctrl+Alt+Shift+S) are
+saved in your Pictures folder, in `2ksbox`.
 
 Uninstalling the Microsoft Store package leaves that folder in place,
 so your machines survive a reinstall. Delete the folder yourself if you

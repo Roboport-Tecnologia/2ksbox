@@ -443,7 +443,10 @@ impl Gpu {
         };
         let (w, h, rgb) = shader_chain::read_texture(&self.device, &self.queue, tex);
         let path = shot_path()?;
-        shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb);
+        if let Err(e) = shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb) {
+            eprintln!("[shot] {}: {e}", path.display());
+            return None;
+        }
         eprintln!("[shot] {w}x{h} guest frame → {}", path.display());
         Some(path)
     }
@@ -528,7 +531,10 @@ impl Gpu {
         self.queue.submit(Some(encoder.finish()));
         let (w, h, rgb) = shader_chain::read_texture(&self.device, &self.queue, &tex);
         let path = shot_path()?;
-        shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb);
+        if let Err(e) = shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb) {
+            eprintln!("[shot] {}: {e}", path.display());
+            return None;
+        }
         eprintln!("[shot] {w}x{h} window → {}", path.display());
         Some(path)
     }

@@ -28,6 +28,9 @@ wgpu = "30"
 pollster = "1"
 bytemuck = "1"
 png = "0.18"
+# the user's Pictures folder, where shots go by default (the launcher's
+# version, one entry in the lock)
+directories = "6.0.0"
 cpal = "0.18.2"
 shader-chain = { path = "../shader-chain" }
 # the host's clipboard, for the guest agent's (M23). On a Wayland desktop

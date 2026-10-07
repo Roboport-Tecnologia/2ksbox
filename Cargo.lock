@@ -2470,6 +2470,7 @@ dependencies = [
  "ash",
  "bytemuck",
  "cpal",
+ "directories",
  "gamepad",
  "gilrs",
  "libc",

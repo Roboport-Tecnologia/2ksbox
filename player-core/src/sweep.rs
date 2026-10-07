@@ -222,7 +222,9 @@ pub(crate) fn sweep_step(gpu: &mut Gpu, s: &mut Sweep) -> bool {
             }
         }
         let path = s.out.join(format!("{w}x{h}.png"));
-        shader_chain::write_png(&path.to_string_lossy(), ow, oh, &rgb);
+        if let Err(e) = shader_chain::write_png(&path.to_string_lossy(), ow, oh, &rgb) {
+            bad.push(format!("{}: {e}", path.display()));
+        }
     }
 
     if bad.is_empty() {

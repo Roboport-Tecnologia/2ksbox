@@ -304,8 +304,10 @@ fn reads_member(src: &str, name: &str) -> bool {
 /// `PLAYER_DUMP_OUT`). Blocks on the GPU.
 pub fn dump_texture(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture, path: &str) {
     let (w, h, rgb) = read_texture(device, queue, tex);
-    write_png(path, w, h, &rgb);
-    eprintln!("dumped shader output {w}x{h} to {path}");
+    match write_png(path, w, h, &rgb) {
+        Ok(()) => eprintln!("dumped shader output {w}x{h} to {path}"),
+        Err(e) => eprintln!("dump {path}: {e}"),
+    }
 }
 
 /// Read a texture back as RGB8, row-major. Blocks on the GPU; diagnostics
@@ -374,10 +376,14 @@ pub fn read_texture(
     (w, h, rgb)
 }
 
-pub fn write_png(path: &str, w: u32, h: u32, rgb: &[u8]) {
-    let file = std::fs::File::create(path).expect("dump file");
+/// A PNG of `rgb`. An error, never a panic: a player saves its shots
+/// with this from a key handler, where a panic aborts the process, and
+/// the directory may not be writable.
+pub fn write_png(path: &str, w: u32, h: u32, rgb: &[u8]) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
-    enc.write_header().unwrap().write_image_data(rgb).unwrap();
+    enc.write_header()?.write_image_data(rgb)?;
+    Ok(())
 }

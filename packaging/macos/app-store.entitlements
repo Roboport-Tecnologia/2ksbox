@@ -18,5 +18,8 @@
        (launcher-core/src/grants.rs). -->
   <key>com.apple.security.files.user-selected.read-write</key> <true/>
   <key>com.apple.security.files.bookmarks.app-scope</key> <true/>
+  <!-- The players' screenshots, into ~/Pictures/2ksbox by default
+       (player-core's shot_path); the players inherit this sandbox. -->
+  <key>com.apple.security.assets.pictures.read-write</key> <true/>
 </dict>
 </plist>

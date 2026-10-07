@@ -411,7 +411,9 @@ the App ID and team from the profile, the network for the guest and the
 preset download, files the user picks in a panel); everything it starts
 inherits it (`com.apple.security.inherit`), with access to whatever
 the user picked in earlier runs (security-scoped bookmarks, doc 07 "A
-pick outlives the run"; hence `files.bookmarks.app-scope`): `qemu-img`
+pick outlives the run"; hence `files.bookmarks.app-scope`; and
+`assets.pictures.read-write` for the players' screenshots, which go to
+`~/Pictures/2ksbox`): `qemu-img`
 (`app-store-helper.entitlements`), the player with TCG's JIT
 (`app-store-player.entitlements`), and Windows 11 on Arm's player with
 the JIT and HVF (`app-store-hypervisor.entitlements`; Hypervisor.framework

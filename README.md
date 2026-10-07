@@ -254,8 +254,8 @@ Keys in the player window:
 | Ctrl+Alt+K | hand the host's own shortcuts (the Windows key, Alt+Tab) back to the host, or to the guest again |
 | Ctrl+Alt+Shift+D | Ctrl+Alt+Del in the guest |
 | Ctrl+Alt+Shift+F | windowed full screen on and off |
-| Ctrl+Alt+S | save the guest's own frame as a PNG |
-| Ctrl+Alt+Shift+S | save what the window shows (scaled, through the CRT shader) as a PNG |
+| Ctrl+Alt+S | save the guest's own frame as a PNG, in your Pictures folder's `2ksbox` |
+| Ctrl+Alt+Shift+S | save what the window shows (scaled, through the CRT shader) as a PNG, in the same folder |
 | Alt+F4 | asks before stopping the machine; the window's close button does not |
 
 Windows machines use a "seamless" mouse by default: the host pointer is

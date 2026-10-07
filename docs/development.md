@@ -211,7 +211,8 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   `PLAYER_DUMP_SEQ` and exits, even while the window is occluded.
 - `Ctrl+Alt+S` writes the guest's own frame (native size, no geometry
   stage, no CRT chain) as `PLAYER_SHOT_DIR/2ksbox-NNNN.png`, or in the
-  working directory when that is unset. It is evidence of what the
+  user's Pictures folder's `2ksbox` when that is unset (doc 03,
+  "Screenshots"). It is evidence of what the
   machine rendered, for tests and bug reports. **It is not a picture
   of the product**: a screenshot meant for people (a Store listing,
   Flathub, the README) is the player's window after the shader chain,

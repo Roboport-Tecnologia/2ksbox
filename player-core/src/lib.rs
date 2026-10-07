@@ -166,12 +166,16 @@ pub fn hard_exit(code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// The next free `PLAYER_SHOT_DIR/2ksbox-NNNN.png` (the working directory
-/// when unset), for both shots. `None`, said on stderr, when there is none.
+/// The next free `PLAYER_SHOT_DIR/2ksbox-NNNN.png`, for both shots; when
+/// that is unset, the user's Pictures folder's `2ksbox` (user decision,
+/// 2026-10-07). Not the working directory: an app started from Finder, the
+/// Dock or the Start menu runs in `/` or its own read-only folder. `None`,
+/// said on stderr, when there is none.
 pub fn shot_path() -> Option<std::path::PathBuf> {
-    let dir = std::env::var_os("PLAYER_SHOT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let dir = match std::env::var_os("PLAYER_SHOT_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => std::path::PathBuf::from(d),
+        None => pictures_dir()?.join("2ksbox"),
+    };
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("[shot] {}: {e}", dir.display());
         return None;
@@ -185,6 +189,21 @@ pub fn shot_path() -> Option<std::path::PathBuf> {
         eprintln!("[shot] {}: no free file name", dir.display());
     }
     path
+}
+
+/// The user's Pictures folder: XDG's on Linux, `~/Pictures` on macOS (in
+/// the App Store build's sandbox the container's link to it, opened by
+/// the `assets.pictures.read-write` entitlement), the known folder on
+/// Windows. `~/Pictures` when the platform names none.
+fn pictures_dir() -> Option<std::path::PathBuf> {
+    if let Some(dirs) = directories::UserDirs::new() {
+        if let Some(p) = dirs.picture_dir() {
+            return Some(p.to_path_buf());
+        }
+        return Some(dirs.home_dir().join("Pictures"));
+    }
+    eprintln!("[shot] no home folder; set PLAYER_SHOT_DIR");
+    None
 }
 
 /// `PLAYER_SHOT_EVERY=<n>`: shoot the guest's own frame every n presented
