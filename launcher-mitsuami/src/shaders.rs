@@ -506,7 +506,9 @@ fn ParamList() -> impl View {
     let shaders = use_store::<Shaders>();
     view! {
         <ScrollView grow=1.0 min_height=0>
-            <Column gap=Spacing::Lg padding_x=Spacing::Xs>
+            // Room at the trailing edge for the scroll bar, which is
+            // drawn over the content and covered the sliders' ends (user)
+            <Column gap=Spacing::Lg padding_start=Spacing::Xs padding_end=Spacing::Xl>
                 <For
                     each=move || shaders.read(|e| e.params().iter().map(|p| p.id.clone()).collect::<Vec<_>>())
                     key=|id: &String| id.clone()
