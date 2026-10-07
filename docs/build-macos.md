@@ -427,13 +427,17 @@ launcher carries the profile's App ID, then `productbuild`s the app for
 checked after signing:
 
 - **The icon's 512@2x.** An `.icns` without a 1024 × 1024 image fails
-  the upload (ITMS-90236). `scripts/gen-icons.sh` makes
-  `packaging/icon/2ksbox-1024.png` only from a master of 1024 px or
-  more (it never scales up), and the `.icns` takes it as
-  `icon_512x512@2x`. The master is 500 px today, so **`--app-store`
-  refuses to start until a larger master is in** (2026-10-06: the
-  artwork is to be re-exported at 1024 or more, user). The other builds
-  carry the 512@2x whenever the 1024 exists.
+  the upload (ITMS-90236). `scripts/gen-icons.sh` makes the 1024 only
+  from a master of 1024 px or more (it never scales up); `--app-store`
+  refuses to start without it. The master is the official icon since
+  2026-10-07 (the user's Icon Composer export, its Default appearance,
+  1024 px, filling its canvas). The `.icns` is built from
+  `packaging/icon/macos/`, the same master on **Apple's icon grid**
+  (the body 824 of 1024, centred), because a full-bleed icon stands
+  oversized in the Dock; Linux and Windows take the full-bleed sizes.
+  The export's Dark, Clear and Tinted appearances need the Icon
+  Composer document compiled into an asset catalog (`actool`), not an
+  `.icns`; not done.
 - **The export compliance answer.** `Info.plist` says
   `ITSAppUsesNonExemptEncryption` = false (user decision, 2026-10-06),
   so App Store Connect stops asking on every upload. The app's

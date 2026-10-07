@@ -4,9 +4,10 @@
 #   scripts/gen-icons.sh            # regenerate packaging/icon/ from the master
 #   scripts/gen-icons.sh --check    # fail if anything is out of date (no writes)
 #
-# The master is `packaging/icon/2ksbox.png`, a transparent RGBA render of
-# a beige CRT on a 500x500 canvas it does not fill (the drawing is
-# 431x436). It is the only file to replace when the icon changes.
+# The master is `packaging/icon/2ksbox.png`, the official icon (2026-10-07):
+# the Default appearance of the user's Icon Composer export, 1024x1024
+# RGBA, the rounded square filling its canvas (stored 8-bit; the export
+# is 16-bit). It is the only file to replace when the icon changes.
 # Everything below is derived from it and checked in, because the places
 # that consume an icon cannot run ImageMagick:
 #
@@ -28,6 +29,11 @@
 #                    build until the master is that large
 #   2ksbox.ico       Windows: 16/32/48/256 in one file, which is what a
 #                    shortcut and an .exe resource both want
+#
+# and, under `packaging/icon/macos/`, the same sizes on Apple's grid for
+# the app's .icns (`package-macos.sh`): the icon's body 824 of 1024, centred,
+# as every macOS app icon is drawn (the master fills its canvas, which is
+# right on Linux and Windows but would stand oversized in the Dock);
 #
 # and, under `packaging/windows/Assets/`, the four logos an MSIX manifest
 # names (`scripts/package-msix.sh`), at the exact sizes the Store checks:
@@ -109,6 +115,19 @@ logo StoreLogo         50  50  50
 logo Square150x150Logo 150 150 112
 logo Wide310x150Logo   310 150 112
 
+# macOS: Apple's icon grid, the body 824/1024 of the canvas, centred.
+MAC=$DIR/macos
+mout=$MAC
+[ "$check" = 1 ] && mout=$out/macos
+mkdir -p "$mout"
+for s in 16 32 64 128 256 512 1024; do
+  [ "$s" -le "$canvas" ] || continue
+  body=$(( (s * 824 + 512) / 1024 ))
+  magick "$pad" -background none -colorspace sRGB -resize "${body}x${body}" \
+    -gravity center -extent "${s}x${s}" -strip "PNG32:$mout/2ksbox-$s.png"
+done
+[ "$check" = 1 ] || [ "$canvas" = 1024 ] || rm -f "$MAC/2ksbox-1024.png"
+
 # The same picture: the same bytes, or no pixel more than a fifth of a
 # channel apart. ImageMagick builds resample a few edge pixels differently
 # (the Store logos from Linux's and MSYS2's 7.1.2: at most 0.15 of a
@@ -124,6 +143,10 @@ if [ "$check" = 1 ]; then
     n=$(basename "$f")
     same "$f" "$ASSETS/$n" || { echo "gen-icons.sh: $ASSETS/$n is out of date"; rc=1; }
   done
+  for f in "$mout"/*.png; do
+    n=$(basename "$f")
+    same "$f" "$MAC/$n" || { echo "gen-icons.sh: $MAC/$n is out of date"; rc=1; }
+  done
   # A 1024 left from a larger master would ship a picture the master no
   # longer is.
   [ "$canvas" = 1024 ] || [ ! -e "$DIR/2ksbox-1024.png" ] \
@@ -132,4 +155,4 @@ if [ "$check" = 1 ]; then
   exit $rc
 fi
 
-echo "gen-icons.sh: wrote $DIR/2ksbox-{$(IFS=,; echo "${SIZES[*]}")}.png, 2ksbox.ico and $ASSETS/*.png"
+echo "gen-icons.sh: wrote $DIR/2ksbox-{$(IFS=,; echo "${SIZES[*]}")}.png, 2ksbox.ico, $MAC/*.png and $ASSETS/*.png"

@@ -128,7 +128,7 @@ if [ "$APP_STORE" = 1 ]; then
   [ -f "$PROVISION" ] || { echo "package-macos.sh: no provisioning profile at $PROVISION" >&2; exit 2; }
   # App Store Connect refuses an icon set without 512@2x (ITMS-90236), and
   # gen-icons.sh makes the 1024 only from a master that large.
-  [ -f packaging/icon/2ksbox-1024.png ] || { echo "package-macos.sh: --app-store needs packaging/icon/2ksbox-1024.png: put a master of 1024 px or more at packaging/icon/2ksbox.png and run scripts/gen-icons.sh" >&2; exit 2; }
+  [ -f packaging/icon/macos/2ksbox-1024.png ] || { echo "package-macos.sh: --app-store needs packaging/icon/macos/2ksbox-1024.png: put a master of 1024 px or more at packaging/icon/2ksbox.png and run scripts/gen-icons.sh" >&2; exit 2; }
   case "$PROVISION" in /*) ;; *) PROVISION="$PWD/$PROVISION" ;; esac
   NOTARIZE=0 DMG=0
 fi
@@ -377,15 +377,15 @@ while read -r f; do
 done < <(machos)
 
 # --- icon -------------------------------------------------------------
-# The same PNGs the Linux package installs (`scripts/gen-icons.sh`), so
-# the three platforms draw one icon from one master. Nothing is
-# rasterized here. An .icns is a container, and iconutil accepts a
+# `scripts/gen-icons.sh`'s macOS set (`packaging/icon/macos/`): the one
+# master on Apple's icon grid, so the three platforms draw one icon.
+# Nothing is rasterized here. An .icns is a container, and iconutil accepts a
 # partial set; 512@2x is there when the master made a 1024 (gen-icons.sh),
 # which the App Store build requires (checked at the top).
 set=$(mktemp -d)/2ksbox.iconset; mkdir -p "$set"
 for s in 16 32 64 128 256 512 1024; do
-  [ -f "packaging/icon/2ksbox-$s.png" ] || continue
-  cp "packaging/icon/2ksbox-$s.png" "$set/icon_${s}x${s}.png"
+  [ -f "packaging/icon/macos/2ksbox-$s.png" ] || continue
+  cp "packaging/icon/macos/2ksbox-$s.png" "$set/icon_${s}x${s}.png"
 done
 # The @2x names Apple wants are the next size up under the previous name.
 for s in 16 32 128 256 512; do
