@@ -300,11 +300,13 @@ Linux `build.sh mitsuami` builds it beside the launcher, with Windows
 `2ksbox-player` (since 2026-10-07); the winit player is deprecated and
 builds only for `test.sh` and the tools until they move. It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
-(`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
-(Machine: Send Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse,
+(`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts,
+with Ctrl+Alt+Shift+P for Pause besides, and on macOS Cmd in place of
+Ctrl (⌥⌘G, ⌥⇧⌘P, ⌥⇧⌘D for Ctrl+Alt+Del; the title's notes say them
+the platform's way). The menus: Machine (Send Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse,
 Pause, Reset, Power Button, Close; View: Full Screen, the two
 screenshots; on macOS View has AppKit's own Enter Full Screen instead of
-ours, which the chord still toggles), and
+ours, which the chord still toggles); and
 a keyboard close asks in the platform's alert. Two knobs of its own:
 `PLAYER_INPUT_LOG=1` prints every input the surface reports, with the lock
 and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.

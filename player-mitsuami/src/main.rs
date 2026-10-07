@@ -161,10 +161,10 @@ fn player_window(guest: bool) -> Window {
     let title = move || {
         let mut notes = Vec::new();
         if w.locked.get() {
-            notes.push("Ctrl+Alt+G releases the mouse");
+            notes.push(format!("{} releases the mouse", keys('G', false)));
         }
         if guest && !w.want_grab.get() {
-            notes.push("Ctrl+Alt+K sends shortcuts to the guest");
+            notes.push(format!("{} sends shortcuts to the guest", keys('K', false)));
         }
         let mut title = String::from("2ksbox player");
         if !notes.is_empty() {
@@ -292,16 +292,12 @@ fn menus(w: Window_) -> MenuBar {
                         .on_select(move || w.locked.set(false)),
                 )
                 .separator()
-                .item(MenuItem::new("Pause").checked(move || w.paused.get()).on_select(move || {
-                    let Some(vm) = vm() else { return };
-                    let pause = !w.paused.get_untracked();
-                    if pause {
-                        vm.vm_pause();
-                    } else {
-                        vm.vm_start();
-                    }
-                    w.paused.set(pause);
-                }))
+                .item(
+                    MenuItem::new("Pause")
+                        .checked(move || w.paused.get())
+                        .shortcut(primary_alt('p').shift())
+                        .on_select(move || toggle_pause(w)),
+                )
                 .item(MenuItem::new("Reset").on_select(|| {
                     if let Some(vm) = vm() {
                         vm.vm_reset();
@@ -328,6 +324,35 @@ fn menus(w: Window_) -> MenuBar {
                     with(|p| p.gpu.as_ref().map(Gpu::window_shot));
                 })),
         )
+}
+
+/// Pause the guest, or let a paused one run again.
+fn toggle_pause(w: Window_) {
+    let Some(vm) = vm() else { return };
+    let pause = !w.paused.get_untracked();
+    if pause {
+        vm.vm_pause();
+    } else {
+        vm.vm_start();
+    }
+    w.paused.set(pause);
+}
+
+/// Whether the platform's primary modifier is held: Command on macOS,
+/// Ctrl elsewhere, as `Shortcut::primary` means it in the menus.
+fn primary(m: Modifiers) -> bool {
+    if cfg!(target_os = "macos") { m.meta } else { m.control }
+}
+
+/// A player chord as the platform writes it, for the title's notes:
+/// "⌥⌘G" (with Shift "⌥⇧⌘G") on macOS, "Ctrl+Alt+G" elsewhere; the
+/// menus show the same chords the platform's own way.
+fn keys(key: char, shift: bool) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌥{}⌘{key}", if shift { "⇧" } else { "" })
+    } else {
+        format!("Ctrl+Alt+{}{key}", if shift { "Shift+" } else { "" })
+    }
 }
 
 /// Ctrl+Alt+Del from the menu: nothing is held, so the chord presses the
@@ -679,16 +704,18 @@ fn relative(w: Window_, dx: f32, dy: f32) {
 /// menus' shortcuts reach the surface: Ctrl+Alt+G lets go of the mouse,
 /// Ctrl+Alt+S shoots the guest's frame (with Shift, the window's),
 /// Ctrl+Alt+K gives the host its shortcuts back, Ctrl+Alt+Shift+F is full
-/// screen, and Ctrl+Alt+Shift+D is Ctrl+Alt+Del in the guest for as long
-/// as D is held. True when the key was the host's.
+/// screen, Ctrl+Alt+Shift+P pauses, and Ctrl+Alt+Shift+D is Ctrl+Alt+Del
+/// in the guest for as long as D is held. Ctrl is the platform's primary
+/// modifier (`primary`): Command on macOS, as in the menus. True when the
+/// key was the host's.
 fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -> bool {
     let held = with(|p| p.input.cad_held()).unwrap_or(false);
-    if code == KeyCode::KeyD && (held || (pressed && m.control && m.alt && m.shift)) {
+    if code == KeyCode::KeyD && (held || (pressed && primary(m) && m.alt && m.shift)) {
         let vm = vm();
         with(|p| p.input.ctrl_alt_del(vm, pressed));
         return true;
     }
-    if !(pressed && m.control && m.alt) {
+    if !(pressed && primary(m) && m.alt) {
         return false;
     }
     // once per press: a held chord repeats
@@ -699,8 +726,9 @@ fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -
         }
         KeyCode::KeyK if !repeat => w.want_grab.set(!w.want_grab.get_untracked()),
         KeyCode::KeyF if m.shift && !repeat => w.full.set(!w.full.get_untracked()),
+        KeyCode::KeyP if m.shift && !repeat => toggle_pause(w),
         KeyCode::KeyS | KeyCode::KeyK => {}
-        KeyCode::KeyF if m.shift => {}
+        KeyCode::KeyF | KeyCode::KeyP if m.shift => {}
         _ => return false,
     }
     true

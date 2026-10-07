@@ -70,9 +70,10 @@ impl Input {
 
     /// Ctrl+Alt+Del in the guest, down or up. The real chord is the host's
     /// (on Windows no program can have it, on Linux the desktop takes it),
-    /// so the guest gets it from one nobody else uses (Ctrl+Alt+Shift+D).
-    /// The hand is holding Ctrl and Alt, so the guest has them already:
-    /// this lets Shift go and presses Delete, and D's release lets Delete
+    /// so the guest gets it from one nobody else uses (Ctrl+Alt+Shift+D,
+    /// Cmd+Opt+Shift+D on macOS). The hand is holding Ctrl and Alt, so the
+    /// guest has them already: this lets Shift (and Command's Windows key)
+    /// go, presses Ctrl if the hand holds Command instead, and presses Delete, and D's release lets Delete
     /// go. That is a press as long as the hand's, never a zero-length one.
     /// From a menu, nothing is held: the chord presses Ctrl and Alt too,
     /// and lets go of them with Delete.
@@ -84,10 +85,13 @@ impl Input {
             if self.cad_held {
                 return; // key repeat
             }
-            for shift in [q(0x2A), q(0x36)] {
-                if self.keys_down.contains(&shift) {
-                    vm.key(shift, false);
-                    self.keys_down.retain(|&k| k != shift);
+            // Shift, and the Windows keys a macOS hand holds as Command
+            // (the chord's primary modifier there): the guest sees only
+            // Ctrl+Alt+Del
+            for held in [q(0x2A), q(0x36), q(0xE05B), q(0xE05C)] {
+                if self.keys_down.contains(&held) {
+                    vm.key(held, false);
+                    self.keys_down.retain(|&k| k != held);
                 }
             }
             // a modifier pressed before the window had focus never reached
