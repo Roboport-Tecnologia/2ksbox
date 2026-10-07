@@ -96,6 +96,9 @@ scripts/build-virtio-win.sh  # there its drivers disc instead, build/virtio-win/
 cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64   # its player
 codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements target/qemu-aarch64/release/player   # a Mac: HVF
 cargo check --release --workspace          # launcher-capi, the one non-default member
+(cd launcher-mitsuami && cargo build --release)   # the launcher (build.sh's mitsuami stage)
+(cd player-mitsuami && cargo build --release)     # the player every package ships; Windows 11's with
+                                                  # --features qemu-<arch> --target-dir target/qemu-<arch>
 (cd launcher-mitsuami && cargo build --release)  # the launcher; its own workspace
 # Direct3D pass-through (doc 14):
 scripts/prepare-dxvk.sh && scripts/configure-dxvk.sh && ninja -C build/dxvk && scripts/build-d3dpt-exec.sh
@@ -289,7 +292,12 @@ player-mitsuami && cargo build --release` (GTK 4.10+; `--no-default-features
 --features kde,gilrs` for Kirigami); on Windows `build-windows.sh
 mitsuami` builds it with MSVC after the launcher (`docs/build-windows.md`),
 and there it presents through Direct3D 12 unless `WGPU_BACKEND` says
-otherwise (Vulkan's frames never show on its child window). It is the default player: once it
+otherwise (Vulkan's frames never show on its child window). On macOS and
+Linux `build.sh mitsuami` builds it beside the launcher, with Windows
+11's (`--features qemu-x86_64` / `qemu-aarch64` into
+`player-mitsuami/target/qemu-<arch>`). Every package ships it as
+`2ksbox-player` (since 2026-10-07); the winit player is deprecated and
+builds only for `test.sh` and the tools until they move. It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
 (Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full

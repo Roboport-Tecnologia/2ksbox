@@ -32,7 +32,7 @@ The roadmap is doc 08.
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18; amended 2026-10-02 (the WDK's headers, built on Windows) |
 | 023 | The launcher moves to mitsuami | accepted; done 2026-10-02 (every package ships it, `launcher-qt` deleted) |
 | 024 | A general-purpose VM manager, best at vintage boxes | accepted, work in M20 |
-| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22; the Windows packages ship it since 2026-10-03 |
+| 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22; the Windows packages ship it since 2026-10-03, every package since 2026-10-07; winit deprecated |
 | 026 | Windows builds natively with MSVC; QEMU and the old guests stay on mingw | accepted, done 2026-10-03; amended 2026-10-03 and twice 2026-10-04 (DXVK, the executor and the package's QEMU are MSVC too) |
 | 027 | Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent | accepted, work in M23 |
 | 028 | Binaries only through app stores; GitHub carries the source; the name is a trademark | accepted (2026-10-06) |
@@ -896,7 +896,9 @@ Homebrew. Vintage work keeps its own tracks and its own order in doc 00.
 **Status.** Accepted (user decision: "now lets make the mitsuami
 player"). Work in track M22. Until it runs on every host, `player/` (winit)
 ships. *(Since 2026-10-03 the Windows zip and MSIX ship `player-mitsuami`
-as `2ksbox-player.exe`; the other packages still ship winit.)*
+as `2ksbox-player.exe`; since 2026-10-07 every package ships it, and the
+winit player is deprecated (user): it builds only for `test.sh` and the
+tools until they move to `player-mitsuami`, then `player/` goes.)*
 
 **Decision.** The player gets a mitsuami front end, `player-mitsuami/`,
 its picture on mitsuami's `GpuSurface` (a desync Wayland subsurface or an

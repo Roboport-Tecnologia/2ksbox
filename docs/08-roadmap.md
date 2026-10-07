@@ -295,8 +295,10 @@ M19), doc 22's numbers, the user's hand test.
 ## M22: The player on mitsuami (active)
 
 ADR-025. `player-core` holds everything but the window, under the winit
-`player/` and `player-mitsuami/`. The Windows packages ship
-`player-mitsuami` as `2ksbox-player.exe`; the others still ship winit.
+`player/` and `player-mitsuami/`. Every package ships `player-mitsuami`
+as `2ksbox-player` (Windows since 2026-10-03, macOS, Linux and the
+Flatpak since 2026-10-07); the winit player is deprecated (user,
+2026-10-07) and left only for `test.sh` and the tools until they move.
 
 **Left:** step 2 (the pointer and the window on a real desktop),
 X11 / KDE, macOS, and the flip in the Linux, macOS and Flatpak

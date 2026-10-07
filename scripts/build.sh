@@ -41,9 +41,12 @@
 #           one non-default member, `launcher-capi`, compiling. On Linux
 #           also Windows 11's player, into target/qemu-x86_64; on an Arm
 #           host Windows 11 on Arm's, into target/qemu-aarch64.
-#   mitsuami cargo build --release in launcher-mitsuami/ (its own
-#           workspace): the launcher every package ships (ADR-023), on
-#           AppKit on a Mac and GTK 4 on Linux. Linux needs GTK 4 (4.10+)
+#   mitsuami cargo build --release in launcher-mitsuami/ and
+#           player-mitsuami/ (each its own workspace): the launcher and the
+#           player every package ships (ADR-023, ADR-025), on AppKit on a
+#           Mac and GTK 4 on Linux, with Windows 11's player as the `rust`
+#           stage builds the winit one (player-mitsuami/target/qemu-x86_64
+#           on Linux, qemu-aarch64 on an Arm host). Linux needs GTK 4 (4.10+)
 #           development files; without them the stage is skipped and this
 #           host can build no package.
 #   dxvk    prepare-dxvk.sh -> configure-dxvk.sh -> ninja
@@ -133,10 +136,12 @@ if [ -n "$X86_64" ] && [ -z "$ROSETTA" ]; then
 fi
 # Where this build's outputs go, and the cargo target that puts them
 # there. The native build's are the defaults every doc names.
-QB=build/qemu; TD=target/release; LTD=launcher-mitsuami/target/release; CT=()
+QB=build/qemu; TD=target/release; LTD=launcher-mitsuami/target/release
+PTD=player-mitsuami/target/release; CT=()
 if [ -n "$ROSETTA" ]; then
   QB=build/x86_64/qemu; TD=target/x86_64-apple-darwin/release
-  LTD=launcher-mitsuami/target/x86_64-apple-darwin/release; CT=(--target x86_64-apple-darwin)
+  LTD=launcher-mitsuami/target/x86_64-apple-darwin/release
+  PTD=player-mitsuami/target/x86_64-apple-darwin/release; CT=(--target x86_64-apple-darwin)
   echo "==> the Intel build, under Rosetta: $QB, $TD"
 fi
 
@@ -208,7 +213,7 @@ if [ "$(uname -s)" = Darwin ]; then
   # rustc's default, 11.0). A workspace this run will not rebuild is left
   # alone, since cleaning it would leave no binary at all (`build.sh guest`
   # once took the player with it).
-  for spec in "rust:$TD/player" "mitsuami:$LTD/launcher-mitsuami"; do
+  for spec in "rust:$TD/player" "mitsuami:$LTD/launcher-mitsuami" "mitsuami:$PTD/player-mitsuami"; do
     bin=${spec#*:}
     want "${spec%%:*}" && [ -f "$bin" ] || continue
     built=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
@@ -472,10 +477,12 @@ if want rust; then
 fi
 
 # --- mitsuami ---------------------------------------------------------
-# The launcher every package ships (ADR-023). Its own cargo workspace, so
-# it is a stage of its own rather than a member of the one above, which
-# keeps GTK off the default build path. On a Mac it is AppKit and needs
-# nothing; on Linux GTK 4, found through pkg-config by gtk4-rs.
+# The launcher and the player every package ships (ADR-023, ADR-025).
+# Each its own cargo workspace, so a stage of its own rather than members
+# of the one above, which keeps GTK off the default build path. On a Mac
+# they are AppKit and need nothing; on Linux GTK 4, found through
+# pkg-config by gtk4-rs. Runs after `qemu`: the player links
+# libqemu-embed.
 if want mitsuami; then
   if ! have cargo; then skip mitsuami "no cargo" || true
   elif [ "$(uname -s)" != Darwin ] && ! pkg-config --atleast-version=4.10 gtk4 2>/dev/null; then
@@ -483,6 +490,23 @@ if want mitsuami; then
   else
     say "mitsuami: cargo build --release (launcher-mitsuami)"
     ( cd launcher-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"} )
+    say "mitsuami: cargo build --release (player-mitsuami)"
+    ( cd player-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} ${JOBS[@]+"${JOBS[@]}"} )
+    # Windows 11's players, as the `rust` stage builds the winit ones: a
+    # second libqemu-embed is a second binary, in a target dir of its own.
+    if [ "$(uname -s)" = Linux ]; then
+      say "mitsuami: the x86_64 player (Windows 11)"
+      ( cd player-mitsuami && cargo build --release --features qemu-x86_64 --target-dir target/qemu-x86_64 ${JOBS[@]+"${JOBS[@]}"} )
+    fi
+    if [ -f "build/qemu/libqemu-embed-aarch64.$SO" ] && [ -z "$ROSETTA" ]; then
+      say "mitsuami: the aarch64 player (Windows 11 on Arm)"
+      ( cd player-mitsuami && cargo build --release --features qemu-aarch64 --target-dir target/qemu-aarch64 ${JOBS[@]+"${JOBS[@]}"} )
+      # Hypervisor.framework refuses an unentitled process even ad hoc
+      # signed, and cargo's relink drops the entitlement.
+      if [ "$(uname -s)" = Darwin ]; then
+        codesign --force --sign - --entitlements packaging/macos/hypervisor.entitlements player-mitsuami/target/qemu-aarch64/release/player-mitsuami
+      fi
+    fi
     BUILT+=(mitsuami)
   fi
 fi

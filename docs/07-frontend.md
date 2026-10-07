@@ -13,8 +13,9 @@ commands `docs/development.md` and `docs/build-macos.md` /
 
 - **Two front ends over one core** (ADR-025, track M22): `player-core/`
   is everything but the window, under `player/` (winit) and
-  `player-mitsuami/` (the launcher's default when built; the Windows
-  packages ship it as `2ksbox-player.exe`).
+  `player-mitsuami/` (the launcher's default when built, and what every
+  package ships as `2ksbox-player` since 2026-10-07; `player/` is
+  deprecated, user 2026-10-07).
 - **What it runs is a QEMU command line**, not a bundle:
   `player [--shader <preset>] [--shader-params k=v,…] [--pad <mode>]
   [--share <dir>] -- <qemu args>` (in that order; `docs/development.md`

@@ -65,8 +65,8 @@ embed library, as for the winit player, into a target dir of its own:
   `player-mitsuami/target/<the launcher's profile>/player-mitsuami` is
   built, and the winit player only when it is not (`launcherx --paths`
   says which). `LAUNCHER_PLAYER_BIN` still overrides; the winit player is
-  one `LAUNCHER_PLAYER_BIN=target/release/player` away. Packages still
-  ship the winit player until step 6, except Windows's (below).
+  one `LAUNCHER_PLAYER_BIN=target/release/player` away. Every package
+  ships `player-mitsuami` since 2026-10-07 (step 6, below).
 
 ## Steps
 
@@ -216,7 +216,22 @@ embed library, as for the winit player, into a target dir of its own:
    quits. Since 2026-10-04 they also ship Windows 11's
    `2ksbox-player-x86_64.exe`, the same player with `--features
    qemu-x86_64` (M20 step 5). The winit player still builds on Windows
-   for `test.sh` (the `rust` stage). Left: Linux, macOS, the Flatpak, and deleting
+   for `test.sh` (the `rust` stage).
+   **macOS, Linux and the Flatpak done (2026-10-07, user: "package the
+   mitsuami player for all"; the user, on the keyboard: the
+   `GpuSurface` grabs it on every OS):** `build.sh`'s `mitsuami` stage
+   builds the player beside the launcher, with Windows 11's
+   (`player-mitsuami/target/qemu-x86_64` on Linux, `qemu-aarch64` on an
+   Arm host, entitled for HVF on a Mac); `package-macos.sh`,
+   `package-linux.sh` and the Flatpak manifest stage it as
+   `2ksbox-player` (and `-aarch64` / `-x86_64`), and
+   `gen-flatpak-cargo-sources.sh` reads its lock file too. **The winit
+   player is deprecated** (user, 2026-10-07: "you can even remove it from
+   the builds"). Left: move `test.sh`'s `$PLAYER` checks, the tools that
+   name `target/*/release/player` (`audio-glitch-test.py`,
+   `pad-guest-test.py`, `win98-game-test.sh`, `clipboard-win11-test.sh`,
+   `smb-try.sh`, `player-as-qemu.sh`) and the Windows test build (GNU)
+   to `player-mitsuami`, then drop it from the `rust` stages and delete
    `player/`.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)

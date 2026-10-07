@@ -6,13 +6,14 @@
 # what this file is (every crate + its .cargo-checksum.json + the cargo
 # config that redirects crates-io at the vendor directory).
 #
-# Two lock files, one vendor directory. `launcher-mitsuami/` is its own
-# cargo workspace (ADR-023) and the launcher the Flatpak installs, so its
+# Three lock files, one vendor directory. `launcher-mitsuami/` and
+# `player-mitsuami/` are each their own cargo workspace (ADR-023,
+# ADR-025) and the launcher and player the Flatpak installs, so their
 # crates are declared too, mitsuami itself as a git source at its pinned
 # rev. The generator takes one lock file at a time, so it
-# runs once per lock and the results are merged on their `dest`. The two
+# runs once per lock and the results are merged on their `dest`. They
 # share most crates at identical versions, and one `cargo/config` covers
-# both because `CARGO_HOME` is the same for both builds.
+# all because `CARGO_HOME` is the same for every build.
 #
 # Run it after any dependency change in either workspace, and commit the
 # result:
@@ -44,7 +45,7 @@ if ! [ -f "$TOOL" ] || ! hash_ok; then
     rm -f "$TOOL"; exit 1; }
 fi
 
-LOCKS=(Cargo.lock launcher-mitsuami/Cargo.lock)
+LOCKS=(Cargo.lock launcher-mitsuami/Cargo.lock player-mitsuami/Cargo.lock)
 PARTS=()
 for lock in "${LOCKS[@]}"; do
   part="$ROOT/build/flatpak-tools/$(echo "$lock" | tr / -).json"

@@ -106,9 +106,9 @@ fi
 ARCH=$(uname -m)
 # This build's inputs: the native build's directories, or the Intel
 # build's beside them (scripts/build.sh --x86_64).
-QB=build/qemu TD=target/release LTD=launcher-mitsuami/target/release D3DPT=build/d3dpt DXVK=build/dxvk CT=()
+QB=build/qemu TD=player-mitsuami/target/release LTD=launcher-mitsuami/target/release D3DPT=build/d3dpt DXVK=build/dxvk CT=()
 if [ -n "$ROSETTA" ]; then
-  QB=build/x86_64/qemu TD=target/x86_64-apple-darwin/release
+  QB=build/x86_64/qemu TD=player-mitsuami/target/x86_64-apple-darwin/release
   LTD=launcher-mitsuami/target/x86_64-apple-darwin/release D3DPT=build/x86_64/d3dpt DXVK=build/x86_64/dxvk
   CT=(--target x86_64-apple-darwin)
   OUT="${OUT:-$ROOT/build/macos-x86_64}"
@@ -170,28 +170,29 @@ export MACOSX_DEPLOYMENT_TARGET
 FLOOR=$MACOSX_DEPLOYMENT_TARGET
 
 if [ "$BUILD" = 1 ]; then
-  cargo build --release -p player ${CT[@]+"${CT[@]}"}
-  # Its own cargo workspace (ADR-023), so its own build command, as
-  # scripts/build.sh's `mitsuami` stage.
+  # The launcher and the player are each their own cargo workspace
+  # (ADR-023, ADR-025), so their own build commands, as scripts/build.sh's
+  # `mitsuami` stage. The player is player-mitsuami (track M22).
   ( cd launcher-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} )
-  [ -z "$W11" ] || cargo build --release -p player --features qemu-aarch64 --target-dir target/qemu-aarch64
+  ( cd player-mitsuami && cargo build --release ${CT[@]+"${CT[@]}"} )
+  [ -z "$W11" ] || ( cd player-mitsuami && cargo build --release --features qemu-aarch64 --target-dir target/qemu-aarch64 )
 fi
 need "$LTD/launcher-mitsuami" "scripts/build.sh mitsuami"
-need "$TD/player"
-[ -z "$W11" ] || need target/qemu-aarch64/release/player "scripts/build.sh rust"
+need "$TD/player-mitsuami" "scripts/build.sh mitsuami"
+[ -z "$W11" ] || need player-mitsuami/target/qemu-aarch64/release/player-mitsuami "scripts/build.sh mitsuami"
 
 # --- stage -----------------------------------------------------------
 rm -rf "$APP"
 mkdir -p "$C"/{MacOS,Resources,lib/2ksbox,libexec/2ksbox,share/2ksbox,share/doc/2ksbox}
 
 install -m755 "$LTD/launcher-mitsuami" "$C/MacOS/2ksbox"
-install -m755 "$TD/player"   "$C/MacOS/2ksbox-player"
+install -m755 "$TD/player-mitsuami" "$C/MacOS/2ksbox-player"
 install -m755 "$QB/libqemu-embed-i386.dylib" "$C/lib/2ksbox/"
 install -m755 "$QB/qemu-img" "$C/libexec/2ksbox/"
 # pc-bios/ carries our EDK2 pair too: build-edk2.sh installs it there.
 cp -a qemu/pc-bios "$C/share/2ksbox/pc-bios"
 if [ -n "$W11" ]; then
-  install -m755 target/qemu-aarch64/release/player "$C/MacOS/2ksbox-player-aarch64"
+  install -m755 player-mitsuami/target/qemu-aarch64/release/player-mitsuami "$C/MacOS/2ksbox-player-aarch64"
   install -m755 "$QB/libqemu-embed-aarch64.dylib" "$C/lib/2ksbox/"
   # 2.7 MB; virtio-win's license is on the disc beside its drivers
   # (BSD-3-Clause, binaries included) and in THIRD-PARTY-NOTICES.md.
@@ -336,7 +337,7 @@ for leaf in libqemu-embed-i386.dylib libqemu-embed-aarch64.dylib libd3dpt_exec.d
 done
 
 # And the executables. The player already has @loader_path/../lib/2ksbox
-# from player/build.rs.
+# from player-mitsuami/build.rs.
 for p in "$C/MacOS/2ksbox-player" "$C/MacOS/2ksbox-player-aarch64"; do
   [ -f "$p" ] && install_name_tool -add_rpath "@loader_path/../lib/2ksbox" "$p" 2>/dev/null || true
 done
@@ -550,7 +551,7 @@ fi
 
 # What the *loader* did, which is what another Mac will test. No image
 # outside the app and the system may load. An installed app has no
-# build/qemu, so the @loader_path rpath (player/build.rs) is all there is
+# build/qemu, so the @loader_path rpath (player-mitsuami/build.rs) is all there is
 # to find libqemu-embed with, and every Homebrew library reached from here
 # is one this machine has and another may not. `--mode-sweep` is the
 # display path end to end without a guest, enough to pull the embed

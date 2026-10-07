@@ -60,7 +60,7 @@ finish-args:
   # looks the same as a host with nothing plugged in. `player --pads`
   # inside the sandbox tells the two apart.
   - --device=input
-  # Wayland first, X11 as the fallback the player's winit build expects.
+  # Wayland first, X11 as the fallback GTK takes without it.
   # On a wlroots compositor the sandbox's socket never offers the
   # shortcut-inhibit protocol (doc 03 "Input path"), so host shortcuts
   # stay the host's there; a documented limitation, with a user override
@@ -130,6 +130,7 @@ modules:
           # target/. `target` above is a path from the source root, not a
           # name matched at every level.
           - launcher-mitsuami/target
+          - player-mitsuami/target
           - build
           - .git
           # `third_party/dxvk` is not skipped (63 MB, subprojects
@@ -139,9 +140,9 @@ modules:
           # Patched on the host, like the QEMU tree above.
           - third_party/slang-shaders
           - .claude
-      # Every crate of both lock files (the workspace's and
-      # `launcher-mitsuami/`'s, mitsuami itself a git source at its pinned
-      # rev) as declared sources, unpacked into `cargo/vendor` with a
+      # Every crate of the three lock files (the workspace's,
+      # `launcher-mitsuami/`'s and `player-mitsuami/`'s, mitsuami itself a
+      # git source at its pinned rev) as declared sources, unpacked into `cargo/vendor` with a
       # `cargo/config` that redirects crates-io and the git repository at
       # them; `CARGO_HOME` above points at that directory.
       - cargo-sources.json
@@ -195,15 +196,15 @@ modules:
       # Flatpak-specific variant.
       - scripts/configure-qemu.sh --disable-download
       - ninja -C build/qemu qemu-img libqemu-embed-i386.so libqemu-embed-x86_64.so
-      - cargo build --release --locked --offline -p player
+      # `launcher-mitsuami` and `player-mitsuami` are each their own cargo
+      # workspace (ADR-023, ADR-025), so each is its own build command;
+      # `CARGO_HOME` above points them at the one vendored directory, which
+      # cargo-sources.json fills from every lock file. GTK 4 is the SDK's.
+      - cd launcher-mitsuami && cargo build --release --locked --offline
+      - cd player-mitsuami && cargo build --release --locked --offline
       # Windows 11's player (track M20): the same, linked to the x86_64
       # QEMU, in a target directory of its own.
-      - cargo build --release --locked --offline -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
-      # `launcher-mitsuami` is its own cargo workspace (ADR-023), so it is
-      # its own build command; `CARGO_HOME` above points both at the one
-      # vendored directory, which cargo-sources.json fills from both lock
-      # files. GTK 4 is the SDK's.
-      - cd launcher-mitsuami && cargo build --release --locked --offline
+      - cd player-mitsuami && cargo build --release --locked --offline --features qemu-x86_64 --target-dir target/qemu-x86_64
       # DXVK and the Direct3D executor (doc 14), for the same reason and
       # with the same constraint: the SDK has meson, ninja, glslang and
       # the Vulkan headers, DXVK's subprojects are vendored and it declares

@@ -46,10 +46,11 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   latency (ADR-002).
 - **Standalone Rust player + launcher** (ADR-005). RetroArch/libretro was
   tried and rejected; never propose it again. The player is
-  `player-core/` (everything but the window) under two front ends:
-  `player/` on winit, which the Linux and macOS packages ship, and
-  `player-mitsuami/` (ADR-025, the Windows packages' player,
-  track M22), its own workspace like `launcher-mitsuami`.
+  `player-core/` (everything but the window) in `player-mitsuami/`
+  (ADR-025, track M22), its own workspace like `launcher-mitsuami`,
+  which every package ships since 2026-10-07. `player/` (winit) is
+  **deprecated** (user, 2026-10-07): it still builds for `test.sh` and
+  the tools until they move, then goes; never put it back in a package.
 - **One launcher library, thin front ends** (ADR-014, doc 07).
   `launcher-core/` decides everything: bundle format, library, disc
   shelf, snapshots, shader profiles, preview, **every window's state

@@ -87,15 +87,16 @@ need build/qemu/qemu-img "ninja -C build/qemu qemu-img"
 need qemu/pc-bios "scripts/prepare-qemu.sh"
 
 if [ "$BUILD" = 1 ]; then
-  cargo build --release -p player
-  cargo build --release -p player --features qemu-x86_64 --target-dir target/qemu-x86_64
-  # Its own cargo workspace, so its own build command (as scripts/build.sh's
+  # The launcher and the player (player-mitsuami, track M22) are each their
+  # own cargo workspace, so their own build commands (as scripts/build.sh's
   # `mitsuami` stage). That boundary keeps GTK off the root `cargo build`.
   ( cd launcher-mitsuami && cargo build --release )
+  ( cd player-mitsuami && cargo build --release )
+  ( cd player-mitsuami && cargo build --release --features qemu-x86_64 --target-dir target/qemu-x86_64 )
 fi
 need launcher-mitsuami/target/release/launcher-mitsuami "scripts/build.sh mitsuami"
-need target/release/player
-need target/qemu-x86_64/release/player "scripts/build.sh rust"
+need player-mitsuami/target/release/player-mitsuami "scripts/build.sh mitsuami"
+need player-mitsuami/target/qemu-x86_64/release/player-mitsuami "scripts/build.sh mitsuami"
 
 # Only ever clear a staging directory of our own making. `--prefix` names
 # somewhere that already exists and belongs to someone else (`/app`).
@@ -107,8 +108,8 @@ mkdir -p "$STAGE"/{bin,lib/2ksbox,libexec/2ksbox,share/2ksbox/desktop,share/doc/
 STAGE=$(cd "$STAGE" && pwd -P)
 
 install -m755 launcher-mitsuami/target/release/launcher-mitsuami "$STAGE/bin/2ksbox"
-install -m755 target/release/player "$STAGE/bin/2ksbox-player"
-install -m755 target/qemu-x86_64/release/player "$STAGE/bin/2ksbox-player-x86_64"
+install -m755 player-mitsuami/target/release/player-mitsuami "$STAGE/bin/2ksbox-player"
+install -m755 player-mitsuami/target/qemu-x86_64/release/player-mitsuami "$STAGE/bin/2ksbox-player-x86_64"
 install -m755 build/qemu/libqemu-embed-i386.so build/qemu/libqemu-embed-x86_64.so "$STAGE/lib/2ksbox/"
 install -m755 build/qemu/qemu-img "$STAGE/libexec/2ksbox/"
 # The Direct3D executor and the DXVK it runs on (doc 14), found the same
@@ -230,7 +231,7 @@ while read -r what path; do
   esac
 done <<< "$resolved"
 # The players' own dependency: an installed tree has no build/qemu, so the
-# origin-relative rpath (player/build.rs) is what has to find each one's
+# origin-relative rpath (player-mitsuami/build.rs) is what has to find each one's
 # embed library. ldd resolves it exactly as the loader will.
 for pair in "2ksbox-player i386" "2ksbox-player-x86_64 x86_64"; do
   set -- $pair
