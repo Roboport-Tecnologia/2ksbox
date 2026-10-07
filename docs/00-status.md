@@ -122,6 +122,18 @@ mtools`.
 Unfinished or unexplained things across tracks. A track's own open items
 live in its track doc; fixed things leave this list.
 
+- **A TCG crash unlinking a dropped block (2026-10-07).** Twice on the
+  Air, Win98 running Duke Nukem 3D after the user paused and resumed a few
+  times: SIGSEGV in `tb_jmp_unlink` from `do_tb_phys_invalidate`, reached
+  through patch 15's single-page path (`tb_invalidate_phys_range_fast`)
+  on a guest store, with a jump-list entry that reads as host code (a
+  block freed with the code buffer still linked). The DOS build under the
+  standalone QEMU with 75 pauses in 5 minutes
+  (`tools/duke-guest-test.py --pause 3`) did not crash. Next: the Win98
+  run headless (`tools/win98-game-test.sh` as `w98-blood.sh` does), and
+  the machine form's `tb-invalidate-fast`, `soft-imm`,
+  `jump-cache-keep` off as the A/B.
+
 - **GL on a Windows host.** The OpenGL pass-through runs there
   (`GLPROBE.EXE` in `base98-br` reads the host's renderer since the WGL
   fix, doc 12 "The WGL rule"), but no game has run on it. GLQuake is the

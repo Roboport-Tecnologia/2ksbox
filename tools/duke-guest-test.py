@@ -416,7 +416,7 @@ def parse_keys(spec):
     return sorted(out)
 
 
-def run(disk, floppy, disc, wav, seconds, music, shots, keys=()):
+def run(disk, floppy, disc, wav, seconds, music, shots, keys=(), pause=0):
     sock = os.path.join(OUT, "qmp.sock")
     if os.path.exists(sock):
         os.unlink(sock)
@@ -446,7 +446,7 @@ def run(disk, floppy, disc, wav, seconds, music, shots, keys=()):
     try:
         qmp = Qmp(sock)
         t0 = time.time()
-        taken, pressed = 0, 0
+        taken, pressed, paused_at = 0, 0, 0.0
         pending = list(keys)
         def shot(tag):
             ppm = os.path.join(OUT, "shot-%s.ppm" % tag)
@@ -458,6 +458,12 @@ def run(disk, floppy, disc, wav, seconds, music, shots, keys=()):
             if p.poll() is not None:
                 break
             now = time.time() - t0
+            if pause and now - paused_at >= pause:
+                # the player's Pause: a stop, a second, and a cont
+                paused_at = now
+                qmp.cmd("stop")
+                time.sleep(1)
+                qmp.cmd("cont")
             while pending and pending[0][0] <= now:
                 when, key = pending.pop(0)
                 pressed += 1
@@ -467,7 +473,10 @@ def run(disk, floppy, disc, wav, seconds, music, shots, keys=()):
             if shots and now >= (taken + 1) * (seconds / shots):
                 taken += 1
                 shot("%02d" % taken)
-        qmp.cmd("quit")
+        if p.poll() is not None:
+            print("QEMU died: exit status %d after %.0f s" % (p.returncode, time.time() - t0))
+        else:
+            qmp.cmd("quit")
         for _ in range(50):
             if p.poll() is not None:
                 break
@@ -519,6 +528,8 @@ def main():
     ap.add_argument("--run", default=None, help="a DOS command line to run instead of the game")
     ap.add_argument("--cfg", default=None, help="a DUKE3D.CFG to stage with the game")
     ap.add_argument("--keep-disk", action="store_true", help="reuse the staged disk")
+    ap.add_argument("--pause", type=float, default=0,
+                    help="every this many seconds, pause the guest for one (QMP stop/cont)")
     ap.add_argument("--keys", default="", help="<seconds>:<key>,… sent over QMP, each with a screendump")
     args = ap.parse_args()
 
@@ -537,7 +548,7 @@ def main():
     floppy = boot_floppy(args.run or ("SETUP.EXE" if args.setup else "DUKE3D.EXE"))
     wav = os.path.join(OUT, "duke-%s.wav" % args.music)
     text = run(disk, floppy, args.disc, wav, args.seconds, args.music, args.shots,
-               parse_keys(args.keys))
+               parse_keys(args.keys), args.pause)
 
     # What the device saw. This is the half a recording cannot give:
     # whether the *game* drove the port, and how hard.
