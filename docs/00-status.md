@@ -301,9 +301,11 @@ tracks, plus the items no track owns.
    `LIBSYNTH_MIDI_LOG` and `LIBSYNTH_OPL_LOG` set (doc 20 §7.2). Then
    "MPU-401 Compatible" from Add New Hardware, the step Win98 needs
    before it plays MIDI to the port, and a host MIDI port (doc 20 §8).
-9. **M6, launcher and packages.** An AppImage (6b′), the Windows
-    installer (6d; the MSIX covers the Store, above), screenshots for a
-    Flathub submission, `CDSHELF.EXE`'s Win98 (ASPI) run.
+9. **M6, launcher and packages.** `CDSHELF.EXE`'s Win98 (ASPI) run.
+    The AppImage (6b′), the standalone Windows installer (6d) and a
+    Flathub submission are dropped: the project publishes binaries only
+    through app stores (ADR-028, 2026-10-06), and the MSIX is the
+    Store's.
 9a. **M19, the launcher on mitsuami.** The flip is done (2026-10-02);
     mitsuami pinned at 1.0.0 (`0e21f20`) since 2026-10-04; left: run
     the Linux packager with it (the Windows, macOS and Flatpak ones

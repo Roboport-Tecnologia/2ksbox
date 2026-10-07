@@ -4,8 +4,8 @@
 open source (the code is at <https://github.com/Roboport-Tecnologia/2ksbox>), and
 this page says what it does with your data, which is almost nothing.
 
-*This page is the privacy policy for every build of 2ksbox, including
-the Microsoft Store package. Last changed 2026-10-05.*
+*This page is the privacy policy for every build of 2ksbox, from an
+app store or built from source. Last changed 2026-10-06.*
 
 ## What 2ksbox collects
 
@@ -19,9 +19,13 @@ Everything 2ksbox keeps stays on your computer, in a folder you can
 open and delete:
 
 - On Windows, installed from the Microsoft Store: `%USERPROFILE%\2ksbox`.
-- On Windows, from the zip: `%APPDATA%\2ksbox\data`.
+- On Windows, any other build: `%APPDATA%\2ksbox\data`.
+- On macOS, installed from the Mac App Store:
+  `~/Library/Containers/com.2ksbox.2ksbox/Data/Library/Application Support/2ksbox`
+  (the app runs in Apple's sandbox, which keeps its files in that
+  container).
+- On macOS, any other build: `~/Library/Application Support/2ksbox`.
 - On Linux: `~/.local/share/2ksbox`.
-- On macOS: `~/Library/Application Support/2ksbox`.
 
 That folder holds your machines (their settings, disk images and
 snapshots), your disc shelf (paths to disc images you added), your
@@ -33,6 +37,10 @@ are never sent anywhere, and you can delete them at any time.
 Uninstalling the Microsoft Store package leaves that folder in place,
 so your machines survive a reinstall. Delete the folder yourself if you
 want everything gone.
+
+If you got 2ksbox from an app store, the store handles the download
+(and any payment) under its own privacy policy. 2ksbox receives
+nothing about you from the store.
 
 ## When 2ksbox uses the network
 

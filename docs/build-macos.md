@@ -346,7 +346,7 @@ retries.
 |---|---|---|
 | macOS | 26+, Apple Silicon | the floor (12.0, "The floor" below); Intel permitted, untested ("The Intel build" below) |
 | Direct3D | DXVK on KosmicKrisp | the same, plus the executor on Wine below Vulkan 1.3 |
-| Distribution | App Store | Developer ID DMG (`--community`) |
+| Distribution | App Store | Developer ID app (`--community`): a store that takes a non-sandboxed app, or a build from source; no DMG on GitHub (ADR-028) |
 
 Both send the host's shortcuts to the guest the same way, through the
 window server's private hot key mode (doc 03 "Input path"): UTM ships
@@ -477,8 +477,8 @@ x86_64, minimum macOS 12.0, the loader's images all inside the app, the
 window), and `scripts/test.sh` runs that as `package-x86_64`. That was
 measured with the Qt launcher, and again with the AppKit one on QEMU
 11.1 (2026-10-04).
-What is left is an Intel Mac for the reference scene; the DMG stays
-"untested" until then.
+What is left is an Intel Mac for the reference scene; the Intel app
+stays "untested" until then.
 
 The Intel app is the community build and nothing else: macOS 12 (the
 floor), no App Store version, and **no Vulkan at all**, since KosmicKrisp
@@ -531,9 +531,9 @@ Rosetta (the loader's image list, the window, `--host-check`,
 the wizard), and the app can be opened under Rosetta for a look. TCG's
 x86-64 backend and the Voodoo 2's SSE2 rasteriser are the Linux rig's
 every day. But Rosetta translates the JIT's output and says nothing about
-speed, and no Intel Mac is among the test machines, so the DMG goes on
-the release page labelled untested until one has run the reference scene
-(ADR-019).
+speed, and no Intel Mac is among the test machines, so the Intel app is
+labelled untested wherever it goes until one has run the reference
+scene (ADR-019; the project publishes it only through a store, ADR-028).
 
 ### The libraries
 

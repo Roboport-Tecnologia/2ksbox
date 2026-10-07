@@ -72,13 +72,21 @@ Detail in each one's ADR (`docs/10-decisions.md`) or design doc.
   invisible to every other check. On Windows it is MSVC like the whole package
   (WinUI 3, static C runtime, the Windows App Runtime 2.4+), built only
   on a PC (`build-windows.sh mitsuami`).
+- **Binaries only through app stores; GitHub is source only** (ADR-028,
+  user decision 2026-10-06): no release binaries, DMG, Windows zip,
+  Linux tarball, Flatpak or AppImage published by the project, Linux
+  included; never propose one. Building from source stays supported,
+  the packaging scripts stay public, and distributions or the community
+  may package it. "2ksbox" is a trademark of Roboport Tecnologia (David
+  Rios Gomes Ltda), `TRADEMARKS.md`; the GPL covers the code, not the
+  name.
 - **Rust wherever possible** (ADR-004); C only inside QEMU/qemu-3dfx and
   guest-side era code. Python is uv-managed (3.12).
 - **Everything open source; Apple Silicon must work (TCG).** Two macOS
   builds (ADR-019). The **App Store** build is macOS 26+ on Apple Silicon
   only (DXVK + KosmicKrisp, no Wine, no Rosetta) and never gets a pre-26
   version. The **community** build (`scripts/package-macos.sh
-  --community`, Developer ID DMG) runs down to **macOS 12**
+  --community`, Developer ID-signed) runs down to **macOS 12**
   (`scripts/macos-floor.sh`; Qt 6.9 set it, and it stands until the
   AppKit launcher's own floor is measured), carries the M15 Wine
   executor, and permits Intel Macs untested; no row claims Intel until

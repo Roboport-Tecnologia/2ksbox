@@ -60,9 +60,13 @@ your own discs.
 
 ## Getting 2ksbox
 
-There are no downloadable packages yet, so build 2ksbox from source.
-Once the tools are installed the build is one command, and it produces
-the same launcher, player and guest-tools disc as a packaged release.
+Ready-to-run 2ksbox comes through the app stores: the Mac App Store
+and the Microsoft Store (not yet published). This repository is the
+source, and building it yourself is supported on every platform: once
+the tools are installed the build is one command, and it produces the
+same launcher, player and guest-tools disc as the store builds.
+Distributions and others are welcome to package it (see
+[TRADEMARKS.md](TRADEMARKS.md) for the name).
 
 ## Building from source
 
@@ -318,6 +322,10 @@ GPL-2.0. The player links QEMU in-process and is GPL-2.0-only. The
 launcher is GPL-2.0-or-later. The licence text is in [COPYING](COPYING)
 and every third-party component is listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+"2ksbox" and its logo are trademarks of Roboport Tecnologia (David
+Rios Gomes Ltda); the GPL covers the code, not the name.
+[TRADEMARKS.md](TRADEMARKS.md) says what you may do with it.
 
 2ksbox collects nothing and connects to the internet only for the
 shader download you accept and for a machine whose network you turn on:

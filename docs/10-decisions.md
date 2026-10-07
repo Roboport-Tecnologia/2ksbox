@@ -26,7 +26,7 @@ The roadmap is doc 08.
 | 016 | The Voodoo 2 is emulated beside the Glide pass-through | accepted; "beside" superseded by 020 |
 | 017 | The egui front end is retired | accepted; its "`launcher-qt` is the only front end" **superseded by 023** |
 | 018 | Below the Vulkan floor, the executor runs on Wine on the host; WineD3D-in-guest retired | accepted, retirement done 2026-09-23 |
-| 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted; addenda 2026-09-23 (the Intel build; nothing from Homebrew, community floor macOS 12) |
+| 019 | Two macOS builds: App Store 26+, community at Homebrew's floor | accepted; addenda 2026-09-23 (the Intel build; nothing from Homebrew, community floor macOS 12); 2026-10-06 no DMG on GitHub (ADR-028) |
 | 020 | The Glide pass-through is removed; the Voodoo 2 is the only Glide | accepted |
 | 021 | The driver is a DirectX 9 driver; no per-game graphics DLLs | accepted; done for Direct3D, the OpenGL ICD left open (2026-09-27) |
 | 022 | Aero on Windows 7 through a WDDM driver of our own, beside the XP one | accepted, work in M18; amended 2026-10-02 (the WDK's headers, built on Windows) |
@@ -35,6 +35,7 @@ The roadmap is doc 08.
 | 025 | The player moves to mitsuami, over a shared `player-core` | accepted, work in M22; the Windows packages ship it since 2026-10-03 |
 | 026 | Windows builds natively with MSVC; QEMU and the old guests stay on mingw | accepted, done 2026-10-03; amended 2026-10-03 and twice 2026-10-04 (DXVK, the executor and the package's QEMU are MSVC too) |
 | 027 | Shared folders through an SMB server in the player; the clipboard through QEMU's vdagent | accepted, work in M23 |
+| 028 | Binaries only through app stores; GitHub carries the source; the name is a trademark | accepted (2026-10-06) |
 
 ## ADR-001: QEMU as the base (2026-08-31)
 
@@ -611,14 +612,16 @@ with both back ends, and `no-exec=on` still means no executor at all.
 2. **Community** (`--community`). Homebrew's floor
    (`scripts/macos-floor.sh`; 15.0 since Homebrew dropped Sonoma on
    2026-09-10, and the number follows `brew update`), the M15 Wine
-   executor pair in. A Developer ID-signed, notarized DMG on the GitHub
-   release, with the from-source build as the alternative. It **permits
+   executor pair in. Developer ID-signed and notarized, for a store
+   that takes a non-sandboxed app and for anyone building from source
+   (until 2026-10-06 a DMG on the GitHub release; ADR-028). It **permits
    Intel Macs**, because the Wine is x86_64 on both architectures and
    only this build starts it.
 
 The App Store never gets a pre-26 version: it keeps one current version
 per app, and two listings with different minimums are reviewed as
-duplicates (guideline 4.3). The pre-26 path lives on the release page.
+duplicates (guideline 4.3). The pre-26 path is the community build
+(ADR-028: through a store, or from source).
 Both apps stage the Vulkan loader and KosmicKrisp ICD, so the community
 app on a 26 Mac still takes DXVK (`build-macos.md`, "Two builds").
 
@@ -1059,3 +1062,42 @@ in doc 24 §2–3.
 vintage guests is a second dialect on top. One QEMU patch, one libslirp
 patch for Windows hosts, and spice-protocol's headers as a new pinned
 dependency.
+
+## ADR-028: Binaries only through app stores; GitHub carries the source; the name is a trademark (2026-10-06)
+
+**Status.** Accepted (user decisions, 2026-10-06).
+
+**Decision.** The project publishes ready-to-run 2ksbox only through
+app stores: the Mac App Store and the Microsoft Store, and others that
+accept it. GitHub carries the source and nothing built from it: no
+release binaries, no DMG, no Windows zip, and no Linux tarball,
+Flatpak or AppImage published by the project, on any platform.
+Building from source stays supported and documented (README,
+`docs/development.md`), and anyone may build, package and share it
+under the GPL: distributions and the community are welcome to.
+
+The packaging scripts stay public and maintained: the stores' packages
+come from them, the GPL's corresponding source includes them, and a
+packager outside the project uses them. Their checks are unchanged.
+
+**The name.** "2ksbox" and its logo are trademarks of Roboport
+Tecnologia (David Rios Gomes Ltda), written 2ksbox™.
+[`TRADEMARKS.md`](../TRADEMARKS.md) says what anyone may do with the
+name without asking (say a build is based on 2ksbox, write about it,
+package it unchanged for a distribution) and what needs permission (a
+modified build or a store listing under the name). The GPL covers the
+code and grants nothing in the name.
+
+**Why.** Ready-to-run builds come from one place per platform, the
+stores, which sign, install and update them; a package of our own for
+one platform only would be unfair to the others (user). Linux users build
+software as a matter of course, and distributions package what they
+want. The trademark keeps the name meaning "from this project" once
+others publish builds.
+
+**Consequences.** ADR-019's community build is no longer a DMG on the
+release page: it is the macOS build for a store that takes a
+non-sandboxed app, and for anyone building from source; the Intel app
+likewise. Flathub is not submitted to by the project
+(`docs/00-status.md`); the Flatpak manifest and its add-ons stay for
+whoever packages it.

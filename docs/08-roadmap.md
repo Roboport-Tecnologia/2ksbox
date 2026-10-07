@@ -115,8 +115,9 @@ Packages: a Linux tarball (the host's GTK 4), a Flatpak
 (`org.gnome.Platform` 49, offline), a macOS app in two builds (ADR-019)
 and a Windows zip and Store MSIX.
 
-**Left:** an AppImage, a Windows installer, grid thumbnails, bundle
-import/export, Flathub screenshots (the track doc's "Open"); the Linux
+**Left:** grid thumbnails, bundle import/export (the track doc's
+"Open"; the AppImage, the Windows installer and Flathub are dropped,
+ADR-028: binaries only through app stores); the Linux
 tarball packager's first run with the mitsuami launcher (M19; the macOS
 and Flatpak ones passed on 2026-10-04).
 

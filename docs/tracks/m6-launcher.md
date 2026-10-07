@@ -117,10 +117,10 @@ in-guest shelf on a real XP.
   import/export**, in doc 07's launcher list, not built.
 - **The player's own overlay** (pause, snapshot, disc swap, doc 07's
   Player section); today these live in the launcher only.
-- **Packaging.** Flathub (metainfo screenshots need hosting on
-  2ksbox.com, and the manifest's sources should be a repository, not a
-  local directory), the AppImage the user asked for (not started), and a
-  Windows installer beside the zip. Windows live control (AF_UNIX) is
+- **Packaging.** Flathub, the AppImage and a Windows installer beside
+  the zip are dropped (ADR-028, 2026-10-06: the project publishes
+  binaries only through app stores; the packagers stay for the stores
+  and for anyone packaging it). Windows live control (AF_UNIX) is
   M11's item. The Linux packager has not yet run with the mitsuami
   launcher; the Windows, macOS and Flatpak ones have (track M19,
   "Left").
