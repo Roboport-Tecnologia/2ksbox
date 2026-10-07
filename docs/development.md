@@ -301,8 +301,10 @@ Linux `build.sh mitsuami` builds it beside the launcher, with Windows
 builds only for `test.sh` and the tools until they move. It is the default player: once it
 is built, a launcher in the checkout starts it instead of the winit one
 (`launcherx --paths`; `LAUNCHER_PLAYER_BIN` overrides). Its chords are the winit player's, as menu shortcuts
-(Machine: Send Ctrl+Alt+Del, Pause, Reset, Power Button, Close; View: Full
-Screen, Release Mouse, Send Shortcuts to Guest, the two screenshots), and
+(Machine: Send Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse,
+Pause, Reset, Power Button, Close; View: Full Screen, the two
+screenshots; on macOS View has AppKit's own Enter Full Screen instead of
+ours, which the chord still toggles), and
 a keyboard close asks in the platform's alert. Two knobs of its own:
 `PLAYER_INPUT_LOG=1` prints every input the surface reports, with the lock
 and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.

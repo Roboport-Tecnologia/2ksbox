@@ -83,9 +83,10 @@ embed library, as for the winit player, into a target dir of its own:
    by mitsuami), a `GpuSurface` presented to in Mailbox from the UI thread
    on each QEMU wake (`wake.rs`, a future the QEMU thread's waker
    resolves through mitsuami's executor), and the menus: Machine (Send
-   Ctrl+Alt+Del, Pause, Reset, Power Button, Close as the platform's
-   Quit) and View (Full Screen, Release Mouse, Send Shortcuts to Guest,
-   Save Screenshot, Save Screenshot as Shown), with the winit player's
+   Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse, Pause, Reset,
+   Power Button, Close as the platform's Quit) and View (Full Screen, left
+   out on macOS for AppKit's own Enter Full Screen, which `w.full`
+   follows; Save Screenshot, Save Screenshot as Shown), with the winit player's
    chords as their shortcuts, answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the

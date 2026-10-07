@@ -271,10 +271,26 @@ fn content(w: Window_) -> impl View {
 /// answers the same ones (`chord`).
 fn menus(w: Window_) -> MenuBar {
     let primary_alt = |c: char| Shortcut::primary(Key::Char(c)).alt();
+    // AppKit puts its own Enter Full Screen (Ctrl+Cmd+F) in a menu named
+    // View, and mitsuami keeps `w.full` in step with it, so a second item
+    // there would only repeat it; the grabbed chord still toggles it.
+    let mut view = Menu::new("View");
+    if !cfg!(target_os = "macos") {
+        view = view
+            .item(MenuItem::new("Full Screen").bind(w.full).shortcut(primary_alt('f').shift()))
+            .separator();
+    }
     MenuBar::new()
         .menu(
             Menu::new("Machine")
                 .item(MenuItem::new("Send Ctrl+Alt+Del").on_select(send_ctrl_alt_del))
+                .item(MenuItem::new("Send Shortcuts to Guest").bind(w.want_grab).shortcut(primary_alt('k')))
+                .item(
+                    MenuItem::new("Release Mouse")
+                        .enabled(move || w.locked.get())
+                        .shortcut(primary_alt('g'))
+                        .on_select(move || w.locked.set(false)),
+                )
                 .separator()
                 .item(MenuItem::new("Pause").checked(move || w.paused.get()).on_select(move || {
                     let Some(vm) = vm() else { return };
@@ -305,17 +321,7 @@ fn menus(w: Window_) -> MenuBar {
                 ),
         )
         .menu(
-            Menu::new("View")
-                .item(MenuItem::new("Full Screen").bind(w.full).shortcut(primary_alt('f').shift()))
-                .item(
-                    MenuItem::new("Release Mouse")
-                        .enabled(move || w.locked.get())
-                        .shortcut(primary_alt('g'))
-                        .on_select(move || w.locked.set(false)),
-                )
-                .item(MenuItem::new("Send Shortcuts to Guest").bind(w.want_grab).shortcut(primary_alt('k')))
-                .separator()
-                .item(MenuItem::new("Save Screenshot").shortcut(primary_alt('s')).on_select(|| {
+            view.item(MenuItem::new("Save Screenshot").shortcut(primary_alt('s')).on_select(|| {
                     with(|p| p.gpu.as_ref().map(Gpu::screenshot));
                 }))
                 .item(MenuItem::new("Save Screenshot as Shown").shortcut(primary_alt('s').shift()).on_select(|| {
