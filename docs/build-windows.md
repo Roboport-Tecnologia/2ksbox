@@ -554,10 +554,11 @@ emulated regardless.
   certification kit ("The Store package"); its
   packaged library location has been checked with `LAUNCHER_PACKAGED=1`,
   not yet read back from the installed package (`win-sideload.ps1
-  -Check`). The Partner Center account is open and the workspace
-  version is 1.0.0 (2026-10-06); what is left needs the user: the name
-  reservation (the identity triple) and screenshots of the player's
-  window with games in it.
+  -Check`). The Partner Center account is open, the name `2ksbox` is
+  reserved (2026-10-07) and the workspace version is 1.0.0; what is
+  left needs the user: packing with the reservation's identity triple
+  (`--identity`, `--publisher`, `--publisher-display`) and screenshots
+  of the player's window with games in it.
 
 ## Building on Windows
 

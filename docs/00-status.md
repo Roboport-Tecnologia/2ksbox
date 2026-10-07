@@ -288,7 +288,8 @@ tracks, plus the items no track owns.
    certification kit, and the listing, privacy policy and steps are in
    the store repo; the Partner Center account is open (2026-10-06) and
    the workspace version is 1.0.0 (2026-10-06; the Store refuses a
-   first number of 0); left for the user, the name reservation and
+   first number of 0) and the name `2ksbox` is reserved (2026-10-07);
+   left for the user, packing with the reserved identity and
    screenshots of the player's window with games in it (never the
    guest-frame shot scaled up). Zero-copy frames through a DXGI shared handle.
 6. **M14, Voodoo 2** (its track doc, "Open, in order"): the glitched
