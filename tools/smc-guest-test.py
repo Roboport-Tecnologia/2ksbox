@@ -681,13 +681,13 @@ area: times 8192 db 0
 """
 
 
-def run_qemu(opts, img, log, trace=None):
+def run_qemu(opts, img, log, trace=None, events="soft_imm_block,soft_imm_absorb"):
     p = x87gt.subprocess.Popen([
         x87gt.QEMU, "-machine", "pc", *x87gt.tcg_opts(*opts),
         "-cpu", "pentium3", "-m", "64",
         "-L", os.path.join(ROOT, "qemu/pc-bios"), "-display", "none", "-net", "none",
         "-fda", img, "-boot", "a", "-serial", "file:" + log, "-monitor", "none",
-        *(["-d", "trace:soft_imm_block,trace:soft_imm_absorb", "-D", trace] if trace else []),
+        *(["-d", ",".join("trace:" + e for e in events.split(",")), "-D", trace] if trace else []),
     ])
     t0 = x87gt.time.time()
     try:
@@ -779,6 +779,37 @@ def main():
                               "wanted at least %d" % (name, k, n, N // 2))
                         bad += 1
             print("%s: %d/%d cases right%s" % (name, right, len(EXPECTED), note))
+    # The same battery in a code buffer small enough to fill over and over
+    # (patch 85). With one vCPU QEMU empties a full buffer in the middle of
+    # translating, and the block that ran before the flush was chained to
+    # the new one from freed memory; the next invalidation of that block
+    # walked into garbage. A crash or a wrong sum fails, and so does a run
+    # that never flushed, since then it tested nothing. It did not crash the
+    # build without patch 85 (314 flushes), so it is coverage of the path,
+    # not a reproducer: that is Duke Nukem 3D in a Win98 DOS box
+    # (tools/win98-game-test.sh), which needs the user's disc.
+    name = "tiny-buffer"
+    log = os.path.join(OUT, "serial-%s.log" % name)
+    trace = os.path.join(OUT, "trace-%s.log" % name)
+    for f in (log, trace):
+        if os.path.exists(f):
+            os.unlink(f)
+    lines = run_qemu(["smc-same-value=off", "soft-imm=off", "tb-size=1"], img, log, trace, "tb_flush")
+    got = {}
+    for l in lines:
+        parts = l.split()
+        if len(parts) == 2 and parts[0] in EXPECTED and len(parts[1]) == 8:
+            got[parts[0]] = int(parts[1], 16)
+    right = sum(1 for k in EXPECTED if got.get(k) == EXPECTED[k])
+    flushes = open(trace).read().count("tb_flush") if os.path.exists(trace) else 0
+    if right != len(EXPECTED):
+        print("FAIL: %s: %d/%d cases right (QEMU crashed or computed wrong)"
+              % (name, right, len(EXPECTED)))
+        bad += len(EXPECTED) - right
+    if flushes == 0:
+        print("FAIL: %s never flushed the code buffer" % name)
+        bad += 1
+    print("%s: %d/%d cases right, %d code buffer flushes" % (name, right, len(EXPECTED), flushes))
     if bad:
         print("FAIL: %d mismatches" % bad)
         return 1

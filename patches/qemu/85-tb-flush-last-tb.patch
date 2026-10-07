@@ -1,0 +1,46 @@
+A use-after-free of the chaining block after an in-place code-buffer flush.
+
+Since upstream ebf7a5d294 (QEMU 10.2), a vCPU in serial context -- every
+machine with one vCPU, MTTCG or not, since CF_PARALLEL needs max_cpus > 1 --
+empties a full code buffer inside tb_gen_code() and goes on translating
+instead of leaving to the main loop.  cpu_exec_loop() then chains the block
+that ran before (last_tb) to the new one.  last_tb was in the buffer just
+emptied: tb_add_jump() patched a jump into whatever code now lies there and
+put the stale pointer on the new block's incoming-jump list, and the next
+invalidation of that block (tb_jmp_unlink) followed it into host code and
+crashed.  A Win98 DOS box running Duke Nukem 3D, which patches its own
+renderer and so fills the buffer, died this way within minutes
+(tools/win98-game-test.sh, 2026-10-07).
+
+The loop now notes the flush count around tb_gen_code() and drops last_tb
+when it moved.
+
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index a677261..e7bfae6 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -1024,11 +1024,24 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
+             if (tb == NULL) {
+                 CPUJumpCache *jc;
+                 uint32_t h;
++                unsigned flushes = qatomic_read(&tb_ctx.tb_flush_count);
+ 
+                 mmap_lock();
+                 tb = tb_gen_code(cpu, s);
+                 mmap_unlock();
+ 
++                /*
++                 * With one vCPU, tb_gen_code empties a full code buffer in
++                 * place and carries on (upstream ebf7a5d294), so last_tb
++                 * may now be memory a new block's code or struct occupies:
++                 * chaining it would write a jump into that code and put
++                 * the stale pointer on the new block's jump list, where
++                 * the next invalidation of it walks into garbage.
++                 */
++                if (unlikely(qatomic_read(&tb_ctx.tb_flush_count) != flushes)) {
++                    last_tb = NULL;
++                }
++
+                 /*
+                  * We add the TB in the virtual pc hash table
+                  * for the fast lookup

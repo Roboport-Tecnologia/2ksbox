@@ -975,6 +975,25 @@ the union is 32 bits and `write_val_to_reg`'s 4-byte store writes one
 `whpx-i386` (SeaBIOS under WHPX to "No bootable device"); XP under WHPX at its desktop in 29 s, `TEST_ACCEL=whpx tools/xp-cdimage-test.sh` passing (2026-10-04).
 **Drop:** upstream builds WHPX into `i386-softmmu` again.
 
+### 85-tb-flush-last-tb
+A use-after-free in upstream's TCG main loop. Since `ebf7a5d294` (QEMU
+10.2), a vCPU in serial context empties a full code buffer *inside*
+`tb_gen_code()` and goes on translating. That is every machine with one
+vCPU, MTTCG included, since `CF_PARALLEL` needs `max_cpus > 1`.
+`cpu_exec_loop()` then chains the block that ran before (`last_tb`),
+which lived in the buffer just emptied: `tb_add_jump()` patches a jump
+into whatever code lies there now and puts the stale pointer on the new
+block's incoming-jump list, and the next invalidation of that block
+(`tb_jmp_unlink`) follows it into host code and segfaults. The loop now
+notes `tb_flush_count` around `tb_gen_code()` and drops `last_tb` when
+it moved. Found on 2026-10-07: Duke Nukem 3D in a Win98 DOS box patches
+its own renderer, fills the buffer, and killed the player within minutes
+(the user, twice; `tools/win98-game-test.sh` with the game, 58 s and
+183 s). **Test:** the same run survives 8 minutes, paused every 3 s or
+not; `smc-guest`'s `tiny-buffer` run covers the in-place flush but did not
+crash the unpatched build. **Drop:** upstream drops
+`last_tb` after its in-place flush.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

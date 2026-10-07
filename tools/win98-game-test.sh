@@ -62,6 +62,10 @@
 #   TEXT_AT=n           read the VGA text page out of VRAM at t seconds too
 #                       (always done at the end): a blue screen a key will
 #                       continue from has gone by then
+#   PAUSE=n             every n seconds, pause the guest for one: QMP stop,
+#                       a second, cont, which is what the player's Pause
+#                       does (`qemu_embed_vm_pause` / `vm_start`). The run
+#                       clock keeps going while it is paused
 #   JIGGLE=1            move the mouse every second (relative events, like a
 #                       hand on it): the reported cursor glitches only show
 #                       up while the pointer is moving, and a screendump of a
@@ -455,7 +459,7 @@ PYTXT
 
 # The run: one tick a second, so KEYS and CLICKS land near their times and
 # JIGGLE looks like a hand on the mouse rather than one teleport.
-r=0; prev=-1; r0=$(date +%s); last_shot=0
+r=0; prev=-1; r0=$(date +%s); last_shot=0; last_pause=0; pauses=0
 while [ $r -lt "$RUN_SECS" ]; do
   sleep 1; prev=$r; r=$(( $(date +%s) - r0 ))
   gw_dead && { echo "==> the guest exited ${r}s into the run"; break; }
@@ -478,6 +482,11 @@ while [ $r -lt "$RUN_SECS" ]; do
         else qmp relclick "${xy%%,*}" "${xy##*,}"; fi
       fi
     done
+  fi
+  if [ -n "${PAUSE:-}" ] && [ $((r - last_pause)) -ge "$PAUSE" ]; then
+    last_pause=$r; pauses=$((pauses + 1))
+    qmp json '{"execute":"stop"}'; sleep 1; qmp json '{"execute":"cont"}'
+    [ $((pauses % 50)) = 0 ] && echo "    t+${r}s $(ts) $pauses pauses"
   fi
   if [ "${JIGGLE:-0}" = 1 ]; then
     dx=$(( (r % 7) * 9 - 27 )); dy=$(( (r % 5) * 11 - 22 ))
