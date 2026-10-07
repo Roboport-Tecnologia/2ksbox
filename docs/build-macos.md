@@ -421,6 +421,27 @@ fails it. After signing it checks each executable is sandboxed and the
 launcher carries the profile's App ID, then `productbuild`s the app for
 `/Applications` and checks the package's signature.
 
+**Two things App Store Connect rejects in the bundle itself**, both
+checked after signing:
+
+- **The icon's 512@2x.** An `.icns` without a 1024 × 1024 image fails
+  the upload (ITMS-90236). `scripts/gen-icons.sh` makes
+  `packaging/icon/2ksbox-1024.png` only from a master of 1024 px or
+  more (it never scales up), and the `.icns` takes it as
+  `icon_512x512@2x`. The master is 500 px today, so **`--app-store`
+  refuses to start until a larger master is in** (2026-10-06: the
+  artwork is to be re-exported at 1024 or more, user). The other builds
+  carry the 512@2x whenever the 1024 exists.
+- **The export compliance answer.** `Info.plist` says
+  `ITSAppUsesNonExemptEncryption` = false (user decision, 2026-10-06),
+  so App Store Connect stops asking on every upload. The app's
+  cryptography is standard and open source, built from this public
+  source: rustls for the preset download, OpenSSL's libcrypto (static
+  in `libqemu-embed`) for Windows 11's TPM 2.0. A change that adds
+  proprietary or non-standard cryptography reopens the answer. Only App
+  Store Connect reads the key, so the community build carries it
+  inertly.
+
 A build signed for the store does not launch outside it, so the
 sandboxed app first runs through TestFlight. Upload the `.pkg` with
 Transporter (or `xcrun altool --upload-package`); each upload needs a

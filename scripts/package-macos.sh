@@ -126,6 +126,9 @@ if [ "$APP_STORE" = 1 ]; then
   [ "$SIGN" = 1 ] || { echo "package-macos.sh: --app-store signs; stage unsigned without it" >&2; exit 2; }
   [ -n "$PROVISION" ] || { echo "package-macos.sh: --app-store needs --provision <Mac App Store profile for com.2ksbox.2ksbox>" >&2; exit 2; }
   [ -f "$PROVISION" ] || { echo "package-macos.sh: no provisioning profile at $PROVISION" >&2; exit 2; }
+  # App Store Connect refuses an icon set without 512@2x (ITMS-90236), and
+  # gen-icons.sh makes the 1024 only from a master that large.
+  [ -f packaging/icon/2ksbox-1024.png ] || { echo "package-macos.sh: --app-store needs packaging/icon/2ksbox-1024.png: put a master of 1024 px or more at packaging/icon/2ksbox.png and run scripts/gen-icons.sh" >&2; exit 2; }
   case "$PROVISION" in /*) ;; *) PROVISION="$PWD/$PROVISION" ;; esac
   NOTARIZE=0 DMG=0
 fi
@@ -376,13 +379,18 @@ done < <(machos)
 # The same PNGs the Linux package installs (`scripts/gen-icons.sh`), so
 # the three platforms draw one icon from one master. Nothing is
 # rasterized here. An .icns is a container, and iconutil accepts a
-# partial set; 512@2x would need a 1024 the artwork does not have.
+# partial set; 512@2x is there when the master made a 1024 (gen-icons.sh),
+# which the App Store build requires (checked at the top).
 set=$(mktemp -d)/2ksbox.iconset; mkdir -p "$set"
-for s in 16 32 64 128 256 512; do
+for s in 16 32 64 128 256 512 1024; do
+  [ -f "packaging/icon/2ksbox-$s.png" ] || continue
   cp "packaging/icon/2ksbox-$s.png" "$set/icon_${s}x${s}.png"
 done
 # The @2x names Apple wants are the next size up under the previous name.
-for s in 16 32 128 256; do cp "$set/icon_$((s*2))x$((s*2)).png" "$set/icon_${s}x${s}@2x.png"; done
+for s in 16 32 128 256 512; do
+  if [ -f "$set/icon_$((s*2))x$((s*2)).png" ]; then cp "$set/icon_$((s*2))x$((s*2)).png" "$set/icon_${s}x${s}@2x.png"; fi
+done
+rm -f "$set/icon_1024x1024.png"
 rm -f "$set/icon_64x64.png"
 iconutil -c icns "$set" -o "$C/Resources/2ksbox.icns"
 
@@ -754,6 +762,14 @@ if [ "$SIGN" = 1 ]; then
     codesign -d --entitlements - --xml "$C/MacOS/2ksbox" 2>/dev/null | grep -q "$APP_ID" \
       || { echo "package-macos.sh: the signed launcher lacks the App ID $APP_ID" >&2; exit 1; }
     echo "sandboxed      every executable; the launcher is $APP_ID"
+    # The two upload rejections the bundle itself can cause: an icon with
+    # no 512@2x (ITMS-90236), and the export compliance answer.
+    ics=$(mktemp -d)/check.iconset
+    iconutil -c iconset "$C/Resources/2ksbox.icns" -o "$ics"
+    [ -f "$ics/icon_512x512@2x.png" ] || { echo "package-macos.sh: the icon has no 512x512@2x" >&2; exit 1; }
+    [ "$(plutil -extract ITSAppUsesNonExemptEncryption raw "$C/Info.plist" 2>/dev/null)" = false ] \
+      || { echo "package-macos.sh: Info.plist lacks ITSAppUsesNonExemptEncryption=false" >&2; exit 1; }
+    echo "store checks   512@2x icon; ITSAppUsesNonExemptEncryption false"
   else
     # The question Gatekeeper will ask on the other Mac. Before notarization
     # it answers "not notarized", which is the one remaining step, not a

@@ -20,6 +20,14 @@
   <key>LSMinimumSystemVersion</key>    <string>@MINOS@</string>
   <key>LSApplicationCategoryType</key> <string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key>   <true/>
+  <!-- The export compliance answer App Store Connect otherwise asks on
+       every upload (user decision, 2026-10-06): exempt. The app's
+       cryptography is standard and open source, built from this public
+       source (rustls for the preset download, OpenSSL's libcrypto for
+       Windows 11's TPM 2.0). Read only by App Store Connect, so the
+       community build carries it inertly. docs/build-macos.md, "The App
+       Store package". -->
+  <key>ITSAppUsesNonExemptEncryption</key> <false/>
   <key>NSHumanReadableCopyright</key>  <string>GPL-2.0-only. Source: github.com/Roboport-Tecnologia/2ksbox</string>
 </dict>
 </plist>

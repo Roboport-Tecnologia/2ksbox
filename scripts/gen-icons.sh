@@ -22,6 +22,10 @@
 #   16, 24, 32, 48   task switchers, window decorations, small menus
 #   64, 128          the applications menu, GNOME Software's lists
 #   256, 512         software-centre banners, macOS, HiDPI everywhere
+#   1024             macOS's 512@2x, which App Store Connect requires
+#                    (ITMS-90236); made only from a master of 1024 or
+#                    more, so `package-macos.sh --app-store` refuses to
+#                    build until the master is that large
 #   2ksbox.ico       Windows: 16/32/48/256 in one file, which is what a
 #                    shortcut and an .exe resource both want
 #
@@ -35,7 +39,8 @@
 #                              background behind it (BackgroundColor)
 #
 # Nothing is ever scaled *up*. The master is first padded with
-# transparency to 512x512, centred, and every size is a downscale of that.
+# transparency to 512x512 (1024x1024 when the master is at least 1024 on
+# a side), centred, and every size is a downscale of that.
 # Padding rather than resizing keeps the drawing at its native size in the
 # largest icon. If the artwork is redrawn larger, nothing here changes.
 set -euo pipefail
@@ -56,14 +61,18 @@ command -v magick >/dev/null || { echo "gen-icons.sh: ImageMagick (magick) is re
 # unconverted, and it segfaults on it instead of saying so.
 tmpdir() { local d; d=$(mktemp -d); command -v cygpath >/dev/null && d=$(cygpath -m "$d"); echo "$d"; }
 
-# The square the sizes come from: the master centred on a 512x512
-# transparent canvas. A master already 512x512 passes through unchanged,
-# and one *larger* than that is scaled down to fit first, so this stays
-# right whatever the artwork's canvas is.
-pad=$(tmpdir)/master-512.png
+# The square the sizes come from: the master centred on a transparent
+# canvas, 1024x1024 for a master at least 1024 on a side (which adds the
+# 1024 size) and 512x512 below that. A master already that size passes
+# through unchanged, and one *larger* is scaled down to fit first, so this
+# stays right whatever the artwork's canvas is.
+side=$(magick identify -format '%[fx:max(w,h)]' "$MASTER")
+canvas=512
+[ "$side" -ge 1024 ] && { canvas=1024; SIZES+=(1024); }
+pad=$(tmpdir)/master-$canvas.png
 trap 'rm -rf "$(dirname "$pad")"' EXIT
 magick "$MASTER" -background none -colorspace sRGB \
-  -resize '512x512>' -gravity center -extent 512x512 -strip "PNG32:$pad"
+  -resize "${canvas}x${canvas}>" -gravity center -extent "${canvas}x${canvas}" -strip "PNG32:$pad"
 
 # `-background none` keeps the alpha the master has (the icon is not a
 # square: it has to sit on whatever colour a desktop puts behind it), and
@@ -80,6 +89,8 @@ if [ "$check" = 1 ]; then
 fi
 
 for s in "${SIZES[@]}"; do render "$s" "$out/2ksbox-$s.png"; done
+# A smaller master has no 1024: drop one an older, larger master made.
+[ "$check" = 1 ] || [ "$canvas" = 1024 ] || rm -f "$DIR/2ksbox-1024.png"
 # One .ico holding the four sizes Windows actually picks from.
 ico_inputs=(); for s in "${ICO_SIZES[@]}"; do ico_inputs+=("$out/2ksbox-$s.png"); done
 magick "${ico_inputs[@]}" "$out/2ksbox.ico"
@@ -113,6 +124,10 @@ if [ "$check" = 1 ]; then
     n=$(basename "$f")
     same "$f" "$ASSETS/$n" || { echo "gen-icons.sh: $ASSETS/$n is out of date"; rc=1; }
   done
+  # A 1024 left from a larger master would ship a picture the master no
+  # longer is.
+  [ "$canvas" = 1024 ] || [ ! -e "$DIR/2ksbox-1024.png" ] \
+    || { echo "gen-icons.sh: $DIR/2ksbox-1024.png is left from an older master (this one is ${side}px)"; rc=1; }
   [ $rc = 0 ] && echo "gen-icons.sh: every size matches the master"
   exit $rc
 fi
