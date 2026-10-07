@@ -445,7 +445,8 @@ checked after signing:
   Xcode's `actool` into `Assets.car` and adds `CFBundleIconName`; the
   `.icns` stays for older macOS and the 512@2x check. `--app-store`
   refuses to run without `actool`; a community build without Xcode warns
-  and ships the `.icns` alone.
+  and ships the `.icns` alone. Every appearance checked by hand in the
+  Dock on macOS 26 (user, 2026-10-07).
 - **The export compliance answer.** `Info.plist` says
   `ITSAppUsesNonExemptEncryption` = false (user decision, 2026-10-06),
   so App Store Connect stops asking on every upload. The app's
