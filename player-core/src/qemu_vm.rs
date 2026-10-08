@@ -22,14 +22,51 @@ pub struct DmaBuf {
     pub iosurface: usize,
 }
 
-pub struct Frame {
-    /// Some(slot): the frame lives in an imported dma-buf, `pixels` is empty
+/// A rectangle of guest pixels, `x0..x1` by `y0..y1`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x0: usize,
+    pub y0: usize,
+    pub x1: usize,
+    pub y1: usize,
+}
+
+impl Rect {
+    pub fn whole(w: usize, h: usize) -> Rect {
+        Rect { x0: 0, y0: 0, x1: w, y1: h }
+    }
+    fn union(a: Option<Rect>, b: Rect) -> Rect {
+        match a {
+            None => b,
+            Some(a) => Rect { x0: a.x0.min(b.x0), y0: a.y0.min(b.y0), x1: a.x1.max(b.x1), y1: a.y1.max(b.y1) },
+        }
+    }
+}
+
+/// The frame the QEMU thread published, kept whole in `pixels`.
+struct Frame {
+    /// Some(slot): the frame lives in an imported dma-buf
+    ext_slot: Option<usize>,
+    width: usize,
+    height: usize,
+    pixels: Vec<u32>,
+    /// what changed since the render thread last took it (M22): only that
+    /// is uploaded
+    pending: Option<Rect>,
+    seq: u64,
+    /// when the QEMU refresh tick published this frame
+    published: std::time::Instant,
+}
+
+/// The newest frame, lent to the render thread under the lock
+/// (`Display::take_newer`): `dirty` is what changed since its last take.
+pub struct FrameRef<'a> {
     pub ext_slot: Option<usize>,
     pub width: usize,
     pub height: usize,
-    pub pixels: Vec<u32>,
+    pub pixels: &'a [u32],
+    pub dirty: Option<Rect>,
     pub seq: u64,
-    /// when the QEMU refresh tick published this frame
     pub published: std::time::Instant,
 }
 
@@ -140,6 +177,12 @@ struct Shared {
     width: usize,
     height: usize,
     back: Vec<u32>,
+    // what changed in `back` since the last publish: only that is copied
+    // into `front` (M22)
+    back_dirty: Option<Rect>,
+    // `front` does not hold `back`'s picture (a 3D readback, a frame shown
+    // black): the next VGA publish copies all of it
+    front_stale: bool,
     // a real mode change happened at this instant; while it is recent, a
     // uniform single-colour VGA frame is the guest's transitional fill (XP
     // paints white around a switch) and is published as black instead
@@ -203,19 +246,26 @@ impl Display {
         self.0.lock().unwrap().released = true;
     }
     /// Copy out the latest frame if it changed since `last_seq`.
-    pub fn take_if_newer(&self, last_seq: u64) -> Option<Frame> {
-        let s = self.0.lock().unwrap();
+    /// Lend the newest frame to `f` if it is newer than `last_seq`, under
+    /// the lock: `f` uploads what changed straight from the published
+    /// pixels, so no whole frame is copied to take it (M22). What changed
+    /// is then the render thread's.
+    pub fn take_newer<R>(&self, last_seq: u64, f: impl FnOnce(FrameRef) -> R) -> Option<R> {
+        let mut s = self.0.lock().unwrap();
         if s.front.seq == last_seq || s.front.width == 0 {
             return None;
         }
-        Some(Frame {
-            ext_slot: s.front.ext_slot,
-            width: s.front.width,
-            height: s.front.height,
-            pixels: if s.front.ext_slot.is_some() { Vec::new() } else { s.front.pixels.clone() },
-            seq: s.front.seq,
-            published: s.front.published,
-        })
+        let dirty = s.front.pending.take();
+        let fr = &s.front;
+        Some(f(FrameRef {
+            ext_slot: fr.ext_slot,
+            width: fr.width,
+            height: fr.height,
+            pixels: &fr.pixels,
+            dirty,
+            seq: fr.seq,
+            published: fr.published,
+        }))
     }
 
     /// dma-buf slots offered since the last call (import them on the GPU thread).
@@ -424,6 +474,8 @@ unsafe extern "C" fn on_3d_frame(ud: *mut c_void, px: *const u8, w: c_int, h: c_
         let row = std::slice::from_raw_parts(px.add(y * stride) as *const u32, w);
         s.front.pixels[y * w..(y + 1) * w].copy_from_slice(row);
     }
+    s.front.pending = Some(Rect::whole(w, h));
+    s.front_stale = true;
     publish_trace(&format_args!("readback {w}x{h}"));
     s.front.ext_slot = None;
     s.front.seq += 1;
@@ -582,10 +634,18 @@ unsafe extern "C" fn on_refresh_done(ud: *mut c_void) {
     }
     s.vga_dirty = false;
     let (w, h) = (s.width, s.height);
-    if s.front.width != w || s.front.height != h {
+    // only what changed since the last publish is copied (M22), and a tick
+    // with no change copies nothing (it published the whole frame on every
+    // tick before, ~45 times a second on an idle desktop); all of it after
+    // a resize or a 3D readback. The frame still counts: scripted keys and
+    // pads step by published frames.
+    let mut region = s.back_dirty.take();
+    if s.front.width != w || s.front.height != h || s.front_stale {
         s.front.width = w;
         s.front.height = h;
         s.front.pixels = vec![0; w * h];
+        s.front_stale = false;
+        region = Some(Rect::whole(w, h));
     }
     let Shared {
         back,
@@ -595,6 +655,7 @@ unsafe extern "C" fn on_refresh_done(ud: *mut c_void) {
         waker,
         switched_at,
         blanked,
+        front_stale,
         ..
     } = &mut *s;
     // XP paints the whole screen white around a mode switch (seen on the
@@ -615,8 +676,16 @@ unsafe extern "C" fn on_refresh_done(ud: *mut c_void) {
     if transitional {
         *blanked += 1;
         front.pixels.fill(0);
-    } else {
-        front.pixels.copy_from_slice(back);
+        region = Some(Rect::whole(w, h));
+        *front_stale = true;
+    } else if let Some(r) = region {
+        for y in r.y0..r.y1 {
+            let row = y * w;
+            front.pixels[row + r.x0..row + r.x1].copy_from_slice(&back[row + r.x0..row + r.x1]);
+        }
+    }
+    if let Some(r) = region {
+        front.pending = Some(Rect::union(front.pending, r));
     }
     publish_trace(&format_args!("vga {}x{}{}", front.width, front.height,
                                 if transitional { " (transitional)" } else { "" }));
@@ -682,6 +751,10 @@ fn copy_rect(s: &mut Shared, x: usize, y: usize, w: usize, h: usize) {
     let (sw, sh) = (s.width, s.height);
     let x1 = (x + w).min(sw);
     let y1 = (y + h).min(sh);
+    if x >= x1 || y >= sh.min(y1) {
+        return;
+    }
+    s.back_dirty = Some(Rect::union(s.back_dirty, Rect { x0: x, y0: y.min(sh), x1, y1 }));
     for row in y.min(sh)..y1 {
         // SAFETY: surface valid until the next on_switch (header contract);
         // rows are `stride` bytes apart and the rect is pre-clamped by QEMU.
@@ -740,6 +813,8 @@ pub fn start(
         width: 0,
         height: 0,
         back: Vec::new(),
+        back_dirty: None,
+        front_stale: false,
         switched_at: None,
         blanked: 0,
         front: Frame {
@@ -747,6 +822,7 @@ pub fn start(
             width: 0,
             height: 0,
             pixels: Vec::new(),
+            pending: None,
             seq: 0,
             published: std::time::Instant::now(),
         },

@@ -292,10 +292,27 @@ embed library, as for the winit player, into a target dir of its own:
    `tools/win11-frames-test.py` (`win11-frames`) finds no torn frame with
    patch 86 on or off, so the tearing the user saw was most likely the
    first probe's own window (a WinForms paint loop with no double
-   buffer). Left: four full-frame copies per frame (the transfer, the
-   rect into `back`, `back` to `front`, `front` to the upload) and the
-   whole-texture upload. Not a 1x guest screen (user: "I don't want to
-   run windows blurry"): the guest keeps the window's pixels.
+   buffer). Not a 1x guest screen (user: "I don't want to run windows
+   blurry"): the guest keeps the window's pixels.
+   **Only what changed is copied (2026-10-08).** A frame went from the
+   guest to the screen in five copies, three of them whole: `back` to
+   `front` at each publish, `front` to the render thread
+   (`take_if_newer`'s clone) and the texture upload. And
+   `on_refresh_done` published, so copied and uploaded, the whole frame
+   on every refresh tick whether anything had changed or not (the
+   "49 fps" of an idle desktop was the tick, not the guest). Now
+   `copy_rect` records the changed rectangle (`back_dirty`), the publish
+   copies only it into `front` and adds it to `front.pending`, a tick
+   with no change copies nothing (the frame still counts, for scripted
+   keys and pads), and the render thread uploads `pending` straight from
+   `front` under the lock (`Display::take_newer`, `Gpu::upload_rect`).
+   Whole copies remain for a resize, a 3D readback (`front_stale`), a
+   frame shown black after a switch, a new texture and the cursor sprite
+   composited into the frame. `win11-frames` compares the player's frame
+   with the surface. Player CPU on an idle Windows 11 desktop 59 % → 33 %
+   of a core, 275 % → 228 % with a window dragged (the tool's dumps
+   included); the user saw no difference by eye ("given that it's a
+   profiled improvement you can leave it in").
    **The window's size per machine (2026-10-08, user: "remember the
    window size per machine").** Windows 11 lost 2560x1920: viogpudo's
    modes are QEMU's EDID list plus one custom mode, the window's pixel

@@ -499,9 +499,17 @@ the moving window is torn (its left edge one column from top to bottom;
 the first three torn ones are kept as `torn-*.ppm`), at least 10 dumps
 caught it, and at least 50 frames a second were published while it moved
 (the player shows each guest flush, embed v12; the refresh tick alone
-held it to ~44). The idle rate and the player's CPU per phase are
-printed, not judged. `PLAYER_FLUSH=0` in the environment is the A/B.
-About 4 minutes; the window opens.
+held it to ~44). Then, with the guest idle, the player's own frame (a
+`PLAYER_SHOT_EVERY=600` shot of the texture it uploads into, read through
+`sips`) must match virtio-gpu's surface within 0.5 % of its pixels: the
+player uploads only what changed, so a missed rectangle would stay stale
+(`shown.bmp` and `surface.ppm` are kept). Shots are rare on purpose: each
+is a whole frame PNG-encoded on the player's main thread, which stalls
+the picture (one a second took half of it). The idle rate and the
+player's CPU per phase are printed, not judged. `PLAYER_FLUSH=0` in the
+environment is the A/B; `PLAYER=` another player binary (an aarch64 one
+needs the hypervisor entitlement: a bare `cargo build` drops it). About 4
+minutes; the window opens.
 
 `tools/clipboard-win11-test.sh [base]` (M23 steps 4-6): the clipboard
 and the shared folder between the host and Windows 11, end to end, the

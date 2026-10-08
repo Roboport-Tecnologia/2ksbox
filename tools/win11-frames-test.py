@@ -14,9 +14,12 @@ sideways as fast as it can. Meanwhile it counts the frames the player
 publishes (PLAYER_REFRESH_LOG) and dumps virtio-gpu's surface over QMP.
 
 PASS: no dump of the moving window is torn (its left edge is one column
-from its top row to its bottom), at least 10 dumps caught it, and the
-player published at least 50 frames a second while it moved (it shows
-each guest flush, embed v12; the refresh tick alone gave ~44). The idle
+from its top row to its bottom), at least 10 dumps caught it, the player
+published at least 50 frames a second while it moved (it shows each guest
+flush, embed v12; the refresh tick alone gave ~44), and afterwards, with
+the guest idle, the player's own frame (a PLAYER_SHOT_EVERY shot of the
+texture it uploads into) matches the surface within 0.5 % of its pixels:
+the player uploads only what changed, so a missed rectangle stays stale. The idle
 rate and the player's CPU in each phase are printed, not judged: the
 guest decides the rate. PLAYER_FLUSH=0 in the environment is the A/B.
 
@@ -189,7 +192,10 @@ def main():
              "-qmp", "unix:%s,server,nowait" % SOCK]
     open(os.path.join(OUT, "qemu.args"), "w").write(" ".join(argv) + "\n")
     plog = os.path.join(OUT, "player.log")
-    env = dict(os.environ, PLAYER_REFRESH_LOG="1")
+    # a shot is a whole frame PNG-encoded on the player's main thread, which
+    # stalls the picture: rare, for the comparison at the end only
+    env = dict(os.environ, PLAYER_REFRESH_LOG="1", PLAYER_SHOT_EVERY="600",
+               PLAYER_SHOT_DIR=os.path.join(OUT, "shots"))
     p = subprocess.Popen([PLAYER, "--"] + argv, stdout=open(plog, "w"), stderr=subprocess.STDOUT, env=env)
     log("player %d, log %s" % (p.pid, plog))
     ok = False
@@ -223,7 +229,16 @@ def connect():
 
 
 def run(p, img, plog):
+    # QMP serves one client at a time: this connection must be closed
+    # whatever happens, or power_off's waits for a greeting forever
     qmp = connect()
+    try:
+        return measure(p, img, plog, qmp)
+    finally:
+        qmp.close()
+
+
+def measure(p, img, plog, qmp):
     # viogpudo takes the screen once Windows runs: virtio-gpu's surface
     # turns from its placeholder to the lock screen's photograph (the
     # firmware's logo on black has few distinct bytes)
@@ -306,25 +321,109 @@ def run(p, img, plog):
     if drag_fps < 50:
         log("FAIL: %.1f fps published while the window moved (want 50)" % drag_fps)
         ok = False
+    # what the player shows is QEMU's surface: the player uploads only what
+    # changed (M22), so a rectangle it missed stays stale on screen
+    shown = shown_vs_surface(qmp)
+    if shown is None:
+        log("FAIL: no player shot to compare with the surface (OUT/shots)")
+        ok = False
+    else:
+        diff, total = shown
+        log("player's frame vs virtio-gpu's surface, idle: %d of %d pixels differ" % (diff, total))
+        if diff > total // 200:
+            log("FAIL: the player's frame is stale (OUT/shown.bmp, OUT/surface.ppm)")
+            ok = False
     return ok
+
+
+def bmp_rgb(path):
+    """A BMP as (width, height, RGB bytes top-down)."""
+    b = open(path, "rb").read()
+    off = int.from_bytes(b[10:14], "little")
+    w = int.from_bytes(b[18:22], "little", signed=True)
+    h = int.from_bytes(b[22:26], "little", signed=True)
+    bpp = int.from_bytes(b[28:30], "little")
+    n = bpp // 8
+    stride = (w * n + 3) & ~3
+    rows = []
+    for y in range(abs(h)):
+        row = b[off + y * stride:off + y * stride + w * n]
+        rows.append(bytes(c for i in range(0, w * n, n) for c in (row[i + 2], row[i + 1], row[i])))
+    if h > 0:
+        rows.reverse()
+    return w, abs(h), b"".join(rows)
+
+
+def shown_vs_surface(qmp):
+    """With the guest idle: the player's next guest-frame shot (the texture
+    it uploads into, PLAYER_SHOT_EVERY) against virtio-gpu's surface just
+    after it. (differing pixels, all pixels), or None without a shot."""
+    shots = os.path.join(OUT, "shots")
+    time.sleep(3)
+    before = set(os.listdir(shots)) if os.path.isdir(shots) else set()
+    for _ in range(240):
+        new = sorted(set(os.listdir(shots)) - before) if os.path.isdir(shots) else []
+        if new:
+            break
+        time.sleep(0.25)
+    else:
+        return None
+    d = dump(qmp, "surface")
+    if not d:
+        return None
+    sw, sh, sraw = d
+    open(os.path.join(OUT, "surface.ppm"), "wb").write(b"P6\n%d %d\n255\n" % (sw, sh) + sraw)
+    # the player may still be writing the PNG (a whole frame takes a while)
+    bmp = os.path.join(OUT, "shown.bmp")
+    for _ in range(10):
+        time.sleep(1)
+        r = subprocess.run(["sips", "-s", "format", "bmp", os.path.join(shots, new[-1]), "--out", bmp],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+    else:
+        log("  sips could not read %s: %s" % (new[-1], r.stderr.strip()[-200:]))
+        return None
+    w, h, raw = bmp_rgb(bmp)
+    if (w, h) != (sw, sh):
+        log("  the shot is %dx%d, the surface %dx%d" % (w, h, sw, sh))
+        return (w * h, w * h)
+    diff = 0
+    row = w * 3
+    for y in range(h):
+        a, b = raw[y * row:(y + 1) * row], sraw[y * row:(y + 1) * row]
+        if a != b:
+            diff += sum(1 for x in range(0, row, 3) if a[x:x + 3] != b[x:x + 3])
+    return diff, w * h
 
 
 def power_off(p):
     if p.poll() is not None:
         return
+    # never wait on the monitor for long: a client still holding it would
+    # keep the greeting from ever coming
+    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError()))
+    signal.alarm(10)
     try:
         q = qmpc.connect(SOCK)
         qmpc.cmd(q, "qmp_capabilities")
         qmpc.cmd(q, "system_powerdown")
-    except OSError:
-        pass
+        q.close()
+    except (OSError, TimeoutError):
+        log("no answer on QMP; the power button not pressed")
+    finally:
+        signal.alarm(0)
     for _ in range(180):
         if p.poll() is not None:
             return
         time.sleep(1)
-    log("no answer to the power button in 180 s; killing the player")
-    p.send_signal(signal.SIGKILL)
-    p.wait()
+    log("no answer to the power button in 180 s; stopping the player")
+    p.send_signal(signal.SIGTERM)
+    try:
+        p.wait(15)
+    except subprocess.TimeoutExpired:
+        p.send_signal(signal.SIGKILL)
+        p.wait()
 
 
 if __name__ == "__main__":

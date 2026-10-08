@@ -39,6 +39,9 @@ pub struct Gpu {
     /// that image while one is up
     overlay: Option<Shown>,
     fb_tex: Option<Shown>,
+    /// `fb_tex` does not hold the published frame (new, or the cursor
+    /// sprite drawn into it): the next upload is whole, not what changed
+    fb_whole: bool,
     /// zero-copy 3D frames: imported dma-buf ring slots and the one on show
     ext: Vec<Option<Shown>>,
     ext_current: Option<usize>,
@@ -239,6 +242,7 @@ impl Gpu {
             overlay_pipeline,
             overlay: None,
             fb_tex: None,
+            fb_whole: true,
             ext: Vec::new(),
             ext_current: None,
             zero_copy,
@@ -373,6 +377,7 @@ impl Gpu {
         });
         let bg = self.make_bind_group(&tex);
         self.fb_tex = Some((tex, bg, w, h));
+        self.fb_whole = true;
         if self.ext_current.is_none() {
             self.guest_surface_changed();
         }
@@ -578,24 +583,37 @@ impl Gpu {
     }
 
     pub fn upload(&mut self, pixels: &[u32], w: u32, h: u32) {
+        self.upload_rect(pixels, w, h, qemu_vm::Rect::whole(w as usize, h as usize));
+    }
+
+    /// Upload `r` of a `w`x`h` frame (M22): what changed since the last
+    /// upload, read straight from the published pixels.
+    pub fn upload_rect(&mut self, pixels: &[u32], w: u32, h: u32, r: qemu_vm::Rect) {
         self.ensure_texture(w, h);
+        self.fb_whole = false;
+        if r.x0 >= r.x1 || r.y0 >= r.y1 {
+            return;
+        }
         let (tex, _, _, _) = self.fb_tex.as_ref().unwrap();
+        // the data from the rect's first pixel on, rows `w` apart
+        let first = r.y0 * w as usize + r.x0;
+        let last = (r.y1 - 1) * w as usize + r.x1;
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: tex,
                 mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
+                origin: wgpu::Origin3d { x: r.x0 as u32, y: r.y0 as u32, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(pixels),
+            bytemuck::cast_slice(&pixels[first..last]),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(w * 4),
-                rows_per_image: Some(h),
+                rows_per_image: Some((r.y1 - r.y0) as u32),
             },
             wgpu::Extent3d {
-                width: w,
-                height: h,
+                width: (r.x1 - r.x0) as u32,
+                height: (r.y1 - r.y0) as u32,
                 depth_or_array_layers: 1,
             },
         );
@@ -967,27 +985,41 @@ pub(crate) fn present_guest_frame(
     for d in display.take_dmabufs() {
         gpu.import_slot(&d);
     }
-    let mut f = display.take_if_newer(*last_seq)?;
-    *last_seq = f.seq;
-    if std::env::var_os("PLAYER_PUBLISH_LOG").is_some() {
-        match f.ext_slot {
-            Some(s) => eprintln!("[present] seq {} slot {s}", f.seq),
-            None => eprintln!("[present] seq {} surface {}x{}", f.seq, f.width, f.height),
+    // the guest's hardware cursor as a sprite in the frame, where the host
+    // cursor cannot stand in for it (a relative mouse, a grab); asked
+    // before the frame is lent, which holds the same lock
+    let sprite = if composite_cursor { display.cursor_sprite() } else { None };
+    display.take_newer(*last_seq, |f| {
+        *last_seq = f.seq;
+        if std::env::var_os("PLAYER_PUBLISH_LOG").is_some() {
+            match f.ext_slot {
+                Some(s) => eprintln!("[present] seq {} slot {s}", f.seq),
+                None => eprintln!("[present] seq {} surface {}x{} {:?}", f.seq, f.width, f.height, f.dirty),
+            }
         }
-    }
-    match f.ext_slot {
-        Some(s) => gpu.use_slot(Some(s)),
-        None => {
-            // the guest's hardware cursor as a sprite in the frame, where the
-            // host cursor cannot stand in for it (a relative mouse, a grab)
-            if composite_cursor {
-                if let Some((c, x, y)) = display.cursor_sprite() {
-                    qemu_vm::composite_cursor(&mut f.pixels, f.width, f.height, &c, x, y);
+        match f.ext_slot {
+            Some(s) => gpu.use_slot(Some(s)),
+            None => {
+                gpu.use_slot(None);
+                let (w, h) = (f.width as u32, f.height as u32);
+                if let Some((c, x, y)) = sprite {
+                    // a copy to draw on, all of it uploaded; the next frame
+                    // is whole too, to take the sprite off
+                    let mut px = f.pixels.to_vec();
+                    qemu_vm::composite_cursor(&mut px, f.width, f.height, &c, x, y);
+                    gpu.upload(&px, w, h);
+                    gpu.fb_whole = true;
+                } else {
+                    // what changed since the last take, read straight from
+                    // the published frame (M22: no whole-frame copies)
+                    let whole = gpu.fb_whole || !matches!(gpu.fb_tex, Some((_, _, tw, th)) if tw == w && th == h);
+                    let region = if whole { Some(qemu_vm::Rect::whole(f.width, f.height)) } else { f.dirty };
+                    if let Some(r) = region {
+                        gpu.upload_rect(f.pixels, w, h, r);
+                    }
                 }
             }
-            gpu.use_slot(None);
-            gpu.upload(&f.pixels, f.width as u32, f.height as u32);
         }
-    }
-    Some(f.published)
+        f.published
+    })
 }

@@ -286,7 +286,9 @@ including the two earlier designs that failed. The rules:
 ## Player side
 
 `player-core/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
-a shared staging frame under the callback and publishes it on
+a shared staging frame under the callback (recording the changed
+rectangle, so a publish copies and the render thread uploads only that;
+a tick with no change copies nothing) and publishes it on
 `on_refresh_done`, or at once on `on_flush` (v12) when the device pushed
 the update itself: the library marks updates made inside its own
 `dpy_refresh` (a VGA scan) as the tick's and any other as a flush. A

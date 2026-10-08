@@ -315,10 +315,10 @@ tracks, plus the items no track owns.
 9b. **M22, the player on mitsuami.** Step 2: the pointer, the menus and
     the close alert on a real desktop, latency against the winit player,
     and mitsuami's tiled-window offset (`tracks/m22-mitsuami-player.md`).
-    Windows 11 on Arm's desktop (step 7): four full-frame copies per
-    frame are the next lead (never a 1x guest screen: the user wants the
-    window's pixels); the guest is not short of CPU (dwm 59 % of a core
-    while a window moves).
+    Windows 11 on Arm's desktop (step 7): the copies are down to what
+    changed (2026-10-08) and the guest is not short of CPU (dwm 59 % of a
+    core while a window moves); never a 1x guest screen (the user wants
+    the window's pixels).
 10. **M5, CD-ROM.** Triage FIFA 2002's no-match. Age of Mythology disc 1
     as a second SafeDisc 2 title. SecuROM (needs DPM in `mds.rs`).
     Multisession. CHD. Win98's CD Player by ear. M5g: a guest-side check
