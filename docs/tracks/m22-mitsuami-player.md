@@ -105,7 +105,13 @@ embed library, as for the winit player, into a target dir of its own:
    `set_window_placement(WindowPlacement::Centred)`, mitsuami `89926f0`,
    user 2026-10-08, where Windows' own cascade opened each a step further
    down until it ran past the bottom of the desktop: six openings of the
-   pattern, the same place each time), answered on the surface too while the
+   pattern, the same place each time; in full screen, where the title
+   bar and its menus are hidden, the menus drop over the picture while
+   the released pointer is at the screen's top edge and go when it comes
+   back down, `set_full_screen_menu_bar(FullScreenMenuBar::AtTopEdge)`,
+   mitsuami `2c5a9ce`, user 2026-10-08, checked with the pattern: the bar
+   at the edge, Machine opening over the picture, the bar gone below it
+   and back in the title bar after leaving full screen), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the

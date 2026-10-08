@@ -142,13 +142,18 @@ fn main() {
     // The menu bar in the title bar, after the title, rather than on a row
     // of its own that the picture sits under (user, 2026-10-08).
     // ... and every machine's window opening in the middle of the screen,
-    // not a step further down Windows' cascade each time (user,
-    // 2026-10-08).
+    // not a step further down Windows' cascade each time; in full screen
+    // the menus drop over the picture while the released pointer is at the
+    // top edge (user, 2026-10-08).
     #[cfg(windows)]
     {
-        use mitsuami::winui::{MenuBarPlace, WindowPlacement, set_menu_bar_place, set_window_placement};
+        use mitsuami::winui::{
+            FullScreenMenuBar, MenuBarPlace, WindowPlacement, set_full_screen_menu_bar, set_menu_bar_place,
+            set_window_placement,
+        };
         set_menu_bar_place(MenuBarPlace::InTitleBar);
         set_window_placement(WindowPlacement::Centred);
+        set_full_screen_menu_bar(FullScreenMenuBar::AtTopEdge);
     }
     App::new()
         .id("com._2ksbox.Launcher")
