@@ -227,7 +227,14 @@ macOS and KDE (user, 2026-10-01; 1060, 920 and 820 wide before). The debug verbs
    core's lists, notes and warnings, the platform file dialog for the
    four path fields (the MT-32 ROMs pick a folder), `browse::picked` and
    `remember` on what it returns. Reopening the same machine returns to
-   its page. Checked headless: every page, a DOS machine created (the
+   its page. The page's scroll view is the content's top edge, its
+   padding inside it (2026-10-08, user: the title bar wants the glass),
+   so on macOS 26 it runs under the title bar and what scrolls blurs
+   through it, as mitsuami `28d93aa` does only for a scroll view at the
+   top; checked by the user on the Air. Since then the headless shot
+   (`LAUNCHER_SHOT`) of a page draws blank but for the buttons:
+   mitsuami's offscreen capture misses a scroll view running above the
+   host. Checked headless: every page, a DOS machine created (the
    core's DOS defaults in its `machine.toml`) and one opened for editing.
    Not yet driven by hand on a desktop. What mitsuami lacks for it:
    - Text colour: done in step 6 (mitsuami 0e474a9, `Color::Warning`).

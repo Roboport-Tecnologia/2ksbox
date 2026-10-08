@@ -185,30 +185,37 @@ pub fn WizardWindow() -> impl View {
             // as its content unless told otherwise (as in CSS), so without
             // it a long page grew the window's content past the window and
             // pushed the buttons out, instead of the scroll view taking only
-            // the room left.
-            <Column padding=Spacing::Lg gap=Spacing::Md grow=1.0 min_height=0>
+            // the room left. The scroll view is the content's top edge, the
+            // page's padding inside it, so on macOS 26 it runs up under the
+            // title bar and what scrolls shows through it, as in System
+            // Settings (mitsuami does that only for a scroll view at the top).
+            <Column grow=1.0 min_height=0>
                 {crate::shot::arm(&["wizard", "edit"])}
                 <Sections/>
                 <ScrollView grow=1.0 min_height=0>
-                    <Column gap=Spacing::Md padding_x=Spacing::Sm>
-                        <Show when=on(wiz, Section::General)><GeneralPage/></Show>
-                        <Show when=on(wiz, Section::System)><SystemPage/></Show>
-                        <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
-                        <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
-                        <Show when=on(wiz, Section::Input)><InputPage/></Show>
-                        <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
-                        <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
+                    <Column padding=Spacing::Lg>
+                        <Column gap=Spacing::Md padding_x=Spacing::Sm>
+                            <Show when=on(wiz, Section::General)><GeneralPage/></Show>
+                            <Show when=on(wiz, Section::System)><SystemPage/></Show>
+                            <Show when=on(wiz, Section::Display)><DisplayPage/></Show>
+                            <Show when=on(wiz, Section::Audio)><AudioPage/></Show>
+                            <Show when=on(wiz, Section::Input)><InputPage/></Show>
+                            <Show when=on(wiz, Section::Network)><NetworkPage/></Show>
+                            <Show when=on(wiz, Section::Storage)><StoragePage/></Show>
+                        </Column>
                     </Column>
                 </ScrollView>
-                <Show when=get(wiz, |f| f.error.is_some())>
-                    <Text color=Color::Error>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
-                </Show>
-                <Row gap=Spacing::Sm justify=Justify::End shrink=0.0>
-                    <Button role=ButtonRole::Cancel @click=move || wiz.close()>"Cancel"</Button>
-                    <Button role=ButtonRole::Default @click=move || wiz.submit(library)>
-                        {get(wiz, |f| if f.is_editing() { "Save" } else { "Create" }.to_owned())}
-                    </Button>
-                </Row>
+                <Column gap=Spacing::Md padding_x=Spacing::Lg padding_bottom=Spacing::Lg shrink=0.0>
+                    <Show when=get(wiz, |f| f.error.is_some())>
+                        <Text color=Color::Error>{get(wiz, |f| f.error.clone().unwrap_or_default())}</Text>
+                    </Show>
+                    <Row gap=Spacing::Sm justify=Justify::End>
+                        <Button role=ButtonRole::Cancel @click=move || wiz.close()>"Cancel"</Button>
+                        <Button role=ButtonRole::Default @click=move || wiz.submit(library)>
+                            {get(wiz, |f| if f.is_editing() { "Save" } else { "Create" }.to_owned())}
+                        </Button>
+                    </Row>
+                </Column>
             </Column>
         </Window>
     }
