@@ -420,24 +420,26 @@ fn MachineList() -> impl View {
 fn MachineList() -> impl View {
     let library = use_store::<Library>();
     view! {
-        <List
-            each=move || library.dirs()
-            key=|d: &PathBuf| d.clone()
-            selection_mode=SelectionMode::Single
-            selected=library.selected
-            list_style=ListStyle::Plain
-            width=LIST_W
-            shrink=0.0
-            @activate=move |dir: PathBuf| {
-                if !library.is_running(&dir) {
-                    library.play(&dir);
+        <Row shrink=0.0>
+            <List
+                each=move || library.dirs()
+                key=|d: &PathBuf| d.clone()
+                selection_mode=SelectionMode::Single
+                selected=library.selected
+                list_style=ListStyle::Plain
+                width=LIST_W
+                shrink=0.0
+                @activate=move |dir: PathBuf| {
+                    if !library.is_running(&dir) {
+                        library.play(&dir);
+                    }
                 }
-            }
-            let:dir
-        >
-            <MachineRow dir=dir/>
-        </List>
-        <Separator orientation=Orientation::Vertical/>
+                let:dir
+            >
+                <MachineRow dir=dir/>
+            </List>
+            <Separator orientation=Orientation::Vertical/>
+        </Row>
     }
 }
 
