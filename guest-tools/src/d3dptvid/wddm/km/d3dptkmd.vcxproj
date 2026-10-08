@@ -11,6 +11,11 @@
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <!-- x64: Windows 11 (track M20), test signed in the guest -->
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{6D3A2B1E-7C44-4E0B-9B57-3D00D3D7A001}</ProjectGuid>
@@ -19,7 +24,8 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
-    <TargetVersion>Windows7</TargetVersion>
+    <TargetVersion Condition="'$(Platform)'=='Win32'">Windows7</TargetVersion>
+    <TargetVersion Condition="'$(Platform)'=='x64'">Windows10</TargetVersion>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
     <ConfigurationType>Driver</ConfigurationType>

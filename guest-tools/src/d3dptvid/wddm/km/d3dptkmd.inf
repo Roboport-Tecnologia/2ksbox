@@ -1,5 +1,6 @@
 ; d3dptkmd.inf - 2ksbox paravirtual display adapter (d3dpt-vga), WDDM,
-; Windows 7 32-bit (M18 step 2, ADR-022). Kernel-mode driver d3dptkmd.sys,
+; Windows 7 32-bit (M18 step 2, ADR-022) and Windows 11 x64 (M20; test
+; signed in the guest by wddm-install.ps1, which writes the catalog). Kernel-mode driver d3dptkmd.sys,
 ; Direct3D 9's user-mode driver d3dptumd.dll (plan step 6). The XP-model driver
 ; (../../nt/d3dptvid.inf) matches the same device and stays the fallback:
 ; Device Manager > Update Driver > "Let me pick" brings it back.
@@ -9,7 +10,8 @@ Signature="$WINDOWS NT$"
 Class=Display
 ClassGUID={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=10/03/2026,0.2.0.0
+DriverVer=10/08/2026,0.3.0.0
+CatalogFile.NTamd64=d3dptkmd.cat
 
 [DestinationDirs]
 DefaultDestDir=12
@@ -23,9 +25,12 @@ d3dptkmd.sys=1
 d3dptumd.dll=1
 
 [Manufacturer]
-%Mfg%=d3dpt.Mfg,NTx86
+%Mfg%=d3dpt.Mfg,NTx86,NTamd64
 
 [d3dpt.Mfg.NTx86]
+%d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
+
+[d3dpt.Mfg.NTamd64]
 %d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
 
 ; The install section's own AddReg: its HKR is the adapter's software key,
@@ -34,7 +39,10 @@ d3dptumd.dll=1
 ; never composes). An XP-style <install>.SoftwareSettings section is not
 ; processed for this driver on Windows 7: a fresh install left the key
 ; without the value (track M18 finding 15).
+; FeatureScore: Windows 10 and 11 rank Basic Display (display.inf, FB) above
+; a package without one, whatever its hardware ID match; WDDM drivers say F8.
 [d3dpt_Install]
+FeatureScore=F8
 CopyFiles=d3dpt.Miniport, d3dpt.UserMode
 AddReg=d3dpt_SoftwareDeviceSettings
 

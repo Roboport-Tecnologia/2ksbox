@@ -62,7 +62,7 @@ is missing, the compiler or the QEMU release changed, or a meson file or
 | `rust` | `target/x86_64-pc-windows-gnu/release/player.exe`, `target/x86_64-pc-windows-msvc/release/{launcherx,discx,synthx}.exe` | `qemu-embed/build.rs` finds the DLL in `build/win/qemu`; the winit player is for `test.sh`; the tools are MSVC (`scripts/cargo-msvc.sh`, rustup's `stable-x86_64-pc-windows-msvc`), skipped without it |
 | `mitsuami` | `launcher-mitsuami/target/release/launcher-mitsuami.exe`, `player-mitsuami/target/release/player-mitsuami.exe`, `player-mitsuami/target/qemu-x86_64/release/player-mitsuami.exe` | the package's `2ksbox.exe`, `2ksbox-player.exe` and `2ksbox-player-x86_64.exe` (ADR-023, track M22; the last `--features qemu-x86_64`, Windows 11's, track M20); their own workspaces; MSVC ("The launcher") |
 | `exec` | `build/win/dxvk/src/d3d9/d3d9.dll`, `build/win/d3dpt/d3dpt_exec.dll`, `build/win/d3dpt-dp2-test.exe`, `build/win/wgl-probe.exe` | DXVK (patch 08's headless WSI), the executor and the offscreen-GL probe, MSVC; the executor's host test (mingw, so it loads the executor as QEMU does). Skipped without Visual Studio's C++ tools |
-| `wddm` | `build/wddm/x86/{d3dptkmd.sys,d3dptumd.dll,d3dptkmd.inf}` | Windows 7's WDDM driver through a mounted EWDK, or the published build for these sources without one ("The WDDM driver") |
+| `wddm` | `build/wddm/x86/{d3dptkmd.sys,d3dptumd.dll,d3dptkmd.inf}`, and `build/wddm/x64` for Windows 11 (unsigned; `wddm-install.ps1` test signs it in the guest) | Windows 7's WDDM driver through a mounted EWDK, or the published build for these sources without one ("The WDDM driver") |
 | `guest` | `guest-tools/out/guest-tools-*.iso` | host-independent, rebuilt when its sources move (`build.sh`'s stamp) |
 
 ## The package

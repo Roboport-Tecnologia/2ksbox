@@ -1169,6 +1169,10 @@ impl Form {
                 "2ksbox's own display adapter and driver: Aero, the full mode table and Direct3D through the driver.",
                 "Needs the driver from the guest-tools ISO (SETUP). Until it's installed, Windows uses a basic VGA driver.",
             ],
+            (Video::D3dpt, Family::Win11) => &[
+                "2ksbox's own display adapter and driver, an early test build. x64 only.",
+                "Install the driver from the guest tools disc's WDDM folder (wddm-install.ps1), then restart. Windows runs in test mode.",
+            ],
             (Video::Std, Family::Win7) => &[
                 "Windows drives it with its own VGA driver. 2D only: no Aero and no Direct3D through a driver.",
             ],

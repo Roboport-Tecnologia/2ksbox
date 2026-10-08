@@ -13,6 +13,11 @@
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <!-- x64: Windows 11 (track M20), test signed in the guest -->
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{6D3A2B1E-7C44-4E0B-9B57-3D00D3D7A002}</ProjectGuid>
@@ -42,7 +47,7 @@
       <!-- guest code's CPU floor is the Pentium III (no SSE2); v142 targets
            SSE2 by default on x86. The static C runtime's own SSE2 routines
            are chosen at run time by its CPU check, so they are safe -->
-      <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='Win32'">NoExtensions</EnableEnhancedInstructionSet>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WIN32_WINNT=0x0601;__GNU_EXTENSION=;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- __GNU_EXTENSION: the core's DDI header marks a nameless union
            with mingw's macro. 4201: the kit's nameless unions; 4214: its bit fields of other

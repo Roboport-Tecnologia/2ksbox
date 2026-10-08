@@ -328,11 +328,12 @@ pub fn video_choices(family: Family) -> &'static [Video] {
         // own adapter is not offered, since it has no DOS driver.
         Family::Dos => &[Video::Std, Video::Cirrus],
         // Windows 11's Basic Display Adapter drives the standard VGA's
-        // linear frame buffer; nothing of ours runs there (an XP-model
-        // driver does not load past Windows 7). Beside it every x64
-        // machine has a virtio-gpu (`modern_args`), whose screen follows
-        // the window once viogpudo is in.
-        Family::Win11 => &[Video::Std],
+        // linear frame buffer. Beside it every x64 machine has a
+        // virtio-gpu (`modern_args`), whose screen follows the window once
+        // viogpudo is in. Ours is the Windows 7 WDDM driver built for x64
+        // and test signed in the guest (track M20, `video_args`); Arm
+        // keeps its own screens whatever this says (`arm_args`).
+        Family::Win11 => &[Video::Std, Video::D3dpt],
     }
 }
 
@@ -1747,6 +1748,20 @@ impl Machine {
     fn video_args(&self) -> Vec<String> {
         const RETRACE: &str = ",retrace=precise";
         let mut args = vec!["-vga".to_string(), format!("none{RETRACE}")];
+        // x64 Windows 11 on ours: the standard VGA stays for the firmware,
+        // which has no driver for d3dpt-vga, and for Windows until the
+        // WDDM driver starts; ours comes after it, so the player follows
+        // it once the driver draws (`embed_live_console`). With its
+        // interrupt, as on Windows 7, and no fixed slot: the q35's xHCI
+        // may hold 2.
+        if self.family == Family::Win11 && self.effective_video() == Some(Video::D3dpt) {
+            let mut dev = "d3dpt-vga,irq=on".to_string();
+            if let Some(which) = self.d3d9_arg() {
+                dev.push_str(",d3d9=");
+                dev.push_str(which);
+            }
+            return vec!["-vga".into(), format!("std{RETRACE}"), "-device".into(), dev];
+        }
         if let Some(video) = self.effective_video() {
             let [flag, value] = video.args();
             // `-vga <name>` replaces the `none` above rather than adding
@@ -2215,8 +2230,11 @@ impl Machine {
         }
         args.extend(self.clipboard_args());
         // After the cards an installed machine already had, so none of
-        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm.
-        args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
+        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm. Not beside
+        // our adapter: viogpudo would make Windows a third screen.
+        if self.effective_video() != Some(Video::D3dpt) {
+            args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
+        }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
         args.extend(boot_prompt_args());
