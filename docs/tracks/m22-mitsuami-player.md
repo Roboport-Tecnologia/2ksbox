@@ -99,7 +99,11 @@ embed library, as for the winit player, into a target dir of its own:
    a keymap moved read by keysym, keys let go on focus loss. Every close (the
    title bar's button, Alt+F4, the menu's Close; the button since
    2026-10-07, user) asks in the platform's alert, Cancel first, when the
-   guest has drawn something. Pause lets go of the mouse, and a click
+   guest has drawn something. On Windows the alert was drawn under the
+   picture (a darkened window with nothing to answer; user, 2026-10-08)
+   until mitsuami `e8ac083` hid a window's surfaces while one is up;
+   checked by sending a close to a BIOS-screen machine, Cancel bringing
+   the picture back, and by the user. Pause lets go of the mouse, and a click
    doesn't take it again until the guest runs. Checked headless: the mode
    sweep (19 modes), the pattern, XP (`basexp-br` on an overlay, KVM) to
    the desktop through CRT Aperture with the d3dpt-vga driver and the

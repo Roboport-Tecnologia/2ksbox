@@ -39,12 +39,15 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami `c0b6963` since 2026-10-07: 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami `e8ac083` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
 (`CGSSetGlobalHotKeyOperatingMode`), so Control-arrows, Command-Space and
-Command-Tab reach the guest. Both crates built with no change.
+Command-Tab reach the guest; and `e8ac083` (2026-10-08) hides a WinUI
+window's surfaces while an alert is up on it, which XAML drew under the
+player's picture (the close question: a darkened window, the dialog
+hidden, nothing to answer). Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
 Runtime 2.4+, so the launcher is built only on a PC:
