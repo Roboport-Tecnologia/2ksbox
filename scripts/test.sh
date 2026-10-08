@@ -2774,6 +2774,17 @@ guest_stage() {
   else for c in x87-guest rep-guest smc-guest sse-guest atapi-guest atapi-read-error midi-guest pit-guest voodoo-guest voodoo-guest-d3dpt voodoo-guest-mmiofifo voodoo-guest-undither vbe-palette pad-guest; do
     skip "$c" "needs nasm, mtools and build/qemu"
   done; fi
+  # A new Windows 11 machine starts setup from its disc with no key
+  # pressed (M20): the boot order and the player's answer to the disc's
+  # prompt. Skips itself without the Arm64 ISO or off Apple Silicon.
+  # Before the XP half's Linux/Windows return: both checks are the Mac's.
+  run_check win11-boot-prompt win11-boot-prompt.log tools/win11-boot-prompt-test.sh || true
+  # Windows 11 on Arm's desktop in whole frames at the guest's pace (M22):
+  # no torn frame while a window moves, and the player publishing on the
+  # guest's flush (embed v12) rather than the refresh tick. On a copy of
+  # an installed launcher machine (WIN11_FRAMES_MACHINE, default the
+  # library's win11); skips without one or without W11_PASSWORD.
+  run_check win11-frames win11-frames.log tools/win11-frames-test.py ${WIN11_FRAMES_MACHINE:+"$WIN11_FRAMES_MACHINE"} || true
   case "$OS" in Linux|Windows) ;; *) skip guest "Linux and Windows only for now (mtools)"; return;; esac
   for t in mcopy mmd mformat; do command -v $t >/dev/null || { skip guest "needs $t (mtools)"; return; }; done
   [ -f "$img" ] || { skip guest "no XP image at $img (WINXP_IMG)"; return; }
@@ -2858,10 +2869,6 @@ guest_stage() {
     skip pad-guest-98 "needs $PLAYER and a display (it runs the player)"
   fi
 
-  # A new Windows 11 machine starts setup from its disc with no key
-  # pressed (M20): the boot order and the player's answer to the disc's
-  # prompt. Skips itself without the Arm64 ISO or off Apple Silicon.
-  run_check win11-boot-prompt win11-boot-prompt.log tools/win11-boot-prompt-test.sh || true
 }
 
 win98_checks() { # the Win98 driver's Direct3D (M16 step 5): its own boots, whatever the XP stage had

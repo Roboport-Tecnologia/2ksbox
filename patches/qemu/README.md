@@ -994,6 +994,23 @@ not; `smc-guest`'s `tiny-buffer` run covers the in-place flush but did not
 crash the unpatched build. **Drop:** upstream drops
 `last_tb` after its in-place flush.
 
+### 86-virtio-gpu-sync-ctrl
+`virtio-gpu`'s `sync-ctrl` property (track M22): the control queue runs
+inside the guest's notify instead of a bottom half, so each command is
+done before the vCPU resumes. Windows' display-only driver (`viogpudo`,
+virtio-win) sends a present as `TRANSFER_TO_HOST_2D` +
+`RESOURCE_FLUSH` and returns without waiting, and DWM copies its next
+frame into the same backing; from the bottom half a present waits for the
+main loop, and presents can bunch up and be copied late. The notify is a
+synchronous MMIO exit (`virtio-gpu-pci` has no ioeventfd). 2D device only
+(realize refuses it with virgl or rutabaga); the launcher's Windows 11
+board sets it. **Evidence:** the user's eye, 2026-10-08 ("it does seem to
+be less choppy", an A/B through the launcher); `tools/win11-frames-test.py`
+found no torn frame and the same publish rate with it on or off (0 of
+38 and 0 of 36 dumps torn), so a window moving does not measure it.
+**Drop:** viogpudo waits for its transfer (a fence), or upstream
+processes the queue synchronously.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

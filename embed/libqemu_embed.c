@@ -73,6 +73,7 @@ struct qemu_embed {
     void *ud;
     QemuConsole *con;
     bool follow_pending;    /* bh_follow_console scheduled */
+    bool in_refresh;        /* inside embed_dpy_refresh: updates are the tick's */
     uint32_t win_w, win_h, win_dpi;     /* qemu_embed_set_window_size, 0 = none */
     bool win_seen;          /* the console was told a size at least once */
 
@@ -273,7 +274,9 @@ static void embed_dpy_refresh(DisplayChangeListener *dcl)
         e->follow_pending = true;
         aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_follow_console, e);
     }
+    e->in_refresh = true;
     qemu_console_hw_update(dcl->con);
+    e->in_refresh = false;
     if (e->cb.on_refresh_done) {
         e->cb.on_refresh_done(e->ud);
     }
@@ -285,6 +288,12 @@ static void embed_dpy_gfx_update(DisplayChangeListener *dcl,
     qemu_embed_t *e = container_of(dcl, qemu_embed_t, dcl);
     if (e->cb.on_update) {
         e->cb.on_update(e->ud, x, y, w, h);
+    }
+    /* v12: an update the device pushed on its own (a guest flush) is a
+       whole frame; one made by the tick's scan is finished by
+       on_refresh_done */
+    if (!e->in_refresh && e->cb.on_flush) {
+        e->cb.on_flush(e->ud);
     }
 }
 

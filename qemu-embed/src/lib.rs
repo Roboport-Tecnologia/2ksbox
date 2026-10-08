@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 11;
+pub const API_VERSION: u32 = 12;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -44,6 +44,9 @@ pub struct RawDisplayCb {
     /// v6 (macOS): a ring slot backed by an IOSurface (pointer stays valid while offered); return nonzero to accept
     pub on_3d_iosurface:
         Option<unsafe extern "C" fn(*mut c_void, c_int, *mut c_void, c_int, c_int) -> c_int>,
+    /// v12: the updates just delivered were pushed by the device outside a
+    /// refresh tick (a guest flush) and complete a frame
+    pub on_flush: Option<unsafe extern "C" fn(*mut c_void)>,
 }
 
 #[repr(C)]

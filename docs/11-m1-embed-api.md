@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v11** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v12** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references were taken
@@ -54,6 +54,7 @@ not block. Everything else may come from any thread.
 | 9 | `set_window_size`, `display_follows_window`: the window's size as a monitor's (M20, below) |
 | 10 | `setenv`: an environment variable set on the library's C runtime ("The C runtime boundary") |
 | 11 | `set_clipboard_cb`, `clipboard_set_text`: the clipboard, text, through QEMU's own (M23, below) |
+| 12 | `on_flush`: the updates just delivered were pushed by the device outside a refresh tick (virtio-gpu's `RESOURCE_FLUSH`, the Voodoo 2's end of frame) and complete a frame (M22, below) |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -286,7 +287,14 @@ including the two earlier designs that failed. The rules:
 
 `player-core/src/qemu_vm.rs` spawns the QEMU thread, copies dirty rects into
 a shared staging frame under the callback and publishes it on
-`on_refresh_done`. While 3D is active, the VGA surface is shown only
+`on_refresh_done`, or at once on `on_flush` (v12) when the device pushed
+the update itself: the library marks updates made inside its own
+`dpy_refresh` (a VGA scan) as the tick's and any other as a flush. A
+device that flushes (virtio-gpu, the Voodoo 2) is then shown at its own
+frame boundaries, not the tick's. The tick alone held a Windows 11 on Arm
+desktop to ~44 frames a second whatever the guest drew: QEMU's
+`gui_update` re-arms its timer after the refresh's own work (the
+full-frame copy), so a 16 ms interval ran at ~22 ms. While 3D is active, the VGA surface is shown only
 once 3D frames stop and the guest has drawn on it. 3D frames arrive as a
 copy or a ring slot index (`dmabuf.rs`, `iosurface.rs`). Keyboard and
 mouse go from the window (`player-core/src/input.rs`) through

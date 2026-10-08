@@ -2271,11 +2271,13 @@ impl Machine {
             // `embed_live_console`): the firmware, Windows setup and its
             // recovery draw on ramfb, an installed Windows on virtio-gpu
             // through viogpudo from the drivers disc. ramfb first, so it
-            // is the default console.
+            // is the default console. `sync-ctrl` (QEMU patch 86) runs
+            // virtio-gpu's queue inside the guest's notify, so each of
+            // viogpudo's presents is copied before it draws the next.
             "-device".into(),
             "ramfb".into(),
             "-device".into(),
-            "virtio-gpu-pci".into(),
+            "virtio-gpu-pci,sync-ctrl=on".into(),
             "-device".into(),
             "qemu-xhci".into(),
             "-device".into(),

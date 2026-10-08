@@ -239,6 +239,34 @@ embed library, as for the winit player, into a target dir of its own:
    `smb-try.sh`, `player-as-qemu.sh`) and the Windows test build (GNU)
    to `player-mitsuami`, then drop it from the `rust` stages and delete
    `player/`.
+7. **Windows 11 on Arm's desktop (2026-10-08, user: "windows 11
+   experience is pretty bad", then "very choppy and teary").** Measured
+   first on the Air, the user's machine on an overlay in the app's
+   player: Windows is not short of CPU (`dwm.exe` 12 % of a core with the
+   Start menu, 39 % in Task View, 59 % dragging a window; the guest 20 %
+   of its four vCPUs) at 1920x1440 (the window's Retina pixels) through
+   viogpudo with WARP, so no 3D card or signed driver would change what
+   the user saw. Windows reports 1 Hz and DWM runs a 64 Hz timer: a
+   display-only driver has no vertical blank. The player took frames
+   only on QEMU's refresh tick, which re-arms after the refresh's own
+   full-frame copy (`ui/console.c` `gui_update`): ~44 published frames a
+   second in that session, 49-60 in later ones. Two changes, both kept:
+   - **embed v12 `on_flush`**: an update the device pushed outside the
+     tick (virtio-gpu's `RESOURCE_FLUSH`, the Voodoo 2's end of frame)
+     is published at once (`qemu_vm.rs` `on_flush`; `PLAYER_FLUSH=0` the
+     A/B). 98 published frames a second while a window moves, the same
+     player CPU. The user saw no difference from it alone.
+   - **QEMU patch 86, `virtio-gpu,sync-ctrl=on`** on the launcher's
+     Windows 11 board: viogpudo queues its transfer and flush without
+     waiting, so the queue now runs inside the guest's notify. The user,
+     by eye through the launcher: "it does seem to be less choppy".
+   `tools/win11-frames-test.py` (`win11-frames`) finds no torn frame with
+   patch 86 on or off, so the tearing the user saw was most likely the
+   first probe's own window (a WinForms paint loop with no double
+   buffer). Left: four full-frame copies per frame (the transfer, the
+   rect into `back`, `back` to `front`, `front` to the upload) and the
+   whole-texture upload. Not a 1x guest screen (user: "I don't want to
+   run windows blurry"): the guest keeps the window's pixels.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)
 

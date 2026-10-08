@@ -661,6 +661,20 @@ unsafe extern "C" fn on_refresh_done(ud: *mut c_void) {
     }
 }
 
+/// v12: the device pushed a whole frame outside the tick (virtio-gpu's
+/// RESOURCE_FLUSH, the Voodoo 2's end of frame): publish it now instead of
+/// at the next tick, which then finds nothing dirty. The tick alone held a
+/// Windows 11 desktop to ~44 frames a second whatever the guest drew (QEMU
+/// re-arms it after the refresh's own copy) and showed frames out of step
+/// with the guest's presents. `PLAYER_FLUSH=0` leaves it to the tick, the
+/// A/B.
+unsafe extern "C" fn on_flush(ud: *mut c_void) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var("PLAYER_FLUSH").as_deref() != Ok("0")) {
+        on_refresh_done(ud);
+    }
+}
+
 fn copy_rect(s: &mut Shared, x: usize, y: usize, w: usize, h: usize) {
     if s.surface.is_null() || w == 0 || h == 0 {
         return;
@@ -769,6 +783,7 @@ pub fn start(
                 on_3d_dmabuf: Some(on_3d_dmabuf),
                 on_3d_frame_ready: Some(on_3d_frame_ready),
                 on_3d_iosurface: Some(on_3d_iosurface),
+                on_flush: Some(on_flush),
             };
             if let Some((r, _)) = ring_ptrs {
                 let ring = unsafe { &*(r as *const crate::audio::Ring) };

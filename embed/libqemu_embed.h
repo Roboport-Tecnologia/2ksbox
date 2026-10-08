@@ -72,6 +72,11 @@ typedef struct qemu_embed_display_cb {
        until the slot is re-offered or 3D ends; wrap it in a Metal texture.
        Return nonzero to accept; 0 keeps the readback path. vCPU thread. */
     int (*on_3d_iosurface)(void *ud, int slot, void *iosurface, int width, int height);
+    /* v12: the device pushed its updates itself, outside a refresh tick
+       (virtio-gpu's RESOURCE_FLUSH, the Voodoo 2's end of frame), and the
+       on_update calls just made complete a frame: show it now rather than
+       at the next tick. Main loop or vCPU thread, BQL held. */
+    void (*on_flush)(void *ud);
 } qemu_embed_display_cb;
 
 /* Create + initialize QEMU. argv is a plain qemu-system command line
@@ -193,7 +198,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 11
+#define QEMU_EMBED_API_VERSION 12
 
 #ifdef __cplusplus
 }

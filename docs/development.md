@@ -231,6 +231,12 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   shows the VGA surface, frozen while the 3D device presents.
 - `PLAYER_REFRESH_MS=16` (default) is the guest frame pull interval
   (QEMU's own default is 30).
+- `PLAYER_FLUSH=0` publishes a device's own flushes (virtio-gpu's
+  `RESOURCE_FLUSH`, the Voodoo 2's end of frame; embed v12's `on_flush`)
+  at the next refresh tick instead of at once, as before 2026-10-08: the
+  A/B for frame pacing. The tick is QEMU's `gui_update`, re-armed after
+  the refresh's own work, so a 16 ms interval runs at ~22 ms on a
+  1920x1440 Windows 11 screen.
 - `PLAYER_REFRESH_LOG=1` prints a frame counter every 100 guest frames:
   is the guest drawing at all.
 - `PLAYER_LATENCY=1` prints publish→present latency percentiles every

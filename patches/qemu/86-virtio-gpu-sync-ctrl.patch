@@ -1,0 +1,78 @@
+virtio-gpu: sync-ctrl, the control queue run inside the guest's notify.
+
+Windows' display-only virtio-gpu driver (viogpudo, from virtio-win) sends
+each present as TRANSFER_TO_HOST_2D + RESOURCE_FLUSH and returns without
+waiting for either; DWM's next present then copies its next frame into the
+same framebuffer backing.  QEMU runs the queue from a bottom half on the
+main loop, so a transfer may copy rows of two frames.  With sync-ctrl=on
+the notify (a synchronous MMIO exit: virtio-gpu-pci has no ioeventfd)
+processes the queue before the vCPU resumes.  2D device only.  Track M22,
+2026-10-08: the user saw a Windows 11 on Arm desktop move less choppily
+with it; no torn frame was measured either way.
+
+diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
+index 271b3f8..bd18611 100644
+--- a/hw/display/virtio-gpu.c
++++ b/hw/display/virtio-gpu.c
+@@ -1135,9 +1135,23 @@ void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
+     }
+ }
+ 
++static void virtio_gpu_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq);
++
+ static void virtio_gpu_handle_ctrl_cb(VirtIODevice *vdev, VirtQueue *vq)
+ {
+     VirtIOGPU *g = VIRTIO_GPU(vdev);
++
++    /*
++     * sync-ctrl: run the queue inside the guest's notify, so a command is
++     * done before the vCPU returns.  A display-only guest driver (Windows'
++     * viogpudo) queues TRANSFER_TO_HOST_2D and RESOURCE_FLUSH without
++     * waiting and draws its next frame into the same backing at once; run
++     * later from the bottom half, the transfer copies rows of two frames.
++     */
++    if (virtio_gpu_sync_ctrl(g->parent_obj.conf)) {
++        virtio_gpu_handle_ctrl(vdev, vq);
++        return;
++    }
+     qemu_bh_schedule(g->ctrl_bh);
+ }
+ 
+@@ -1627,6 +1641,12 @@ void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
+     VirtIODevice *vdev = VIRTIO_DEVICE(qdev);
+     VirtIOGPU *g = VIRTIO_GPU(qdev);
+ 
++    if (virtio_gpu_sync_ctrl(g->parent_obj.conf) &&
++        VIRTIO_GPU_GET_CLASS(g)->handle_ctrl != virtio_gpu_handle_ctrl) {
++        error_setg(errp, "sync-ctrl is for the 2D device only");
++        return;
++    }
++
+     if (virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+         if (!virtio_gpu_rutabaga_enabled(g->parent_obj.conf) &&
+             !virtio_gpu_virgl_enabled(g->parent_obj.conf) &&
+@@ -1852,6 +1872,8 @@ static const Property virtio_gpu_properties[] = {
+                      256 * MiB),
+     DEFINE_PROP_BIT("blob", VirtIOGPU, parent_obj.conf.flags,
+                     VIRTIO_GPU_FLAG_BLOB_ENABLED, false),
++    DEFINE_PROP_BIT("sync-ctrl", VirtIOGPU, parent_obj.conf.flags,
++                    VIRTIO_GPU_FLAG_SYNC_CTRL, false),
+     DEFINE_PROP_SIZE("hostmem", VirtIOGPU, parent_obj.conf.hostmem, 0),
+     DEFINE_PROP_UINT8("x-scanout-vmstate-version", VirtIOGPU, scanout_vmstate_version, 2),
+ };
+diff --git a/include/hw/virtio/virtio-gpu.h b/include/hw/virtio/virtio-gpu.h
+index 220231e..4c77f73 100644
+--- a/include/hw/virtio/virtio-gpu.h
++++ b/include/hw/virtio/virtio-gpu.h
+@@ -101,8 +101,11 @@ enum virtio_gpu_base_conf_flags {
+     VIRTIO_GPU_FLAG_VENUS_ENABLED,
+     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
+     VIRTIO_GPU_FLAG_DRM_ENABLED,
++    VIRTIO_GPU_FLAG_SYNC_CTRL,
+ };
+ 
++#define virtio_gpu_sync_ctrl(_cfg) \
++    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_SYNC_CTRL))
+ #define virtio_gpu_virgl_enabled(_cfg) \
+     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_VIRGL_ENABLED))
+ #define virtio_gpu_stats_enabled(_cfg) \
