@@ -515,7 +515,15 @@ static NTSTATUS driver_caps(const D3DPT_ADAPTER *a, DXGK_DRIVERCAPS *c)
         c->PointerCaps.Color = 1;
         c->PointerCaps.MaskedColor = 1;
     }
+#ifdef _WIN64
+    /* The device reads any guest-physical address (DMA_ADDR_HI) and the
+     * aperture is the CPU's own mappings. Below 4 GB only, Windows 11 on
+     * a guest with memory above it fails the adapter's start ("Not Enough
+     * Quota", StartAdapter_AddAdapterFailed; track M20 step 5). */
+    c->HighestAcceptableAddress.QuadPart = ~0ull;
+#else
     c->HighestAcceptableAddress.QuadPart = 0xffffffffull;
+#endif
     c->MaxAllocationListSlotId = 16;
     c->MaxQueuedFlipOnVSync = 1;
     c->GpuEngineTopology.NbAsymetricProcessingNodes = 1;
@@ -561,6 +569,10 @@ static NTSTATUS query_segment(const D3DPT_ADAPTER *a, const DXGKARG_QUERYADAPTER
     return STATUS_SUCCESS;
 }
 
+/* DXGKQAITYPE_64BITONLYCAPS: Windows 11 24H2's, newer than the EWDK
+ * 10.0.19041 headers; undocumented past its name, a 4-byte output. */
+#define D3DPT_QAITYPE_64BITONLYCAPS 47
+
 static DXGKDDI_QUERYADAPTERINFO d3dpt_query_adapter_info;
 static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
                                                   IN_CONST_PDXGKARG_QUERYADAPTERINFO q)
@@ -568,7 +580,7 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
     const D3DPT_ADAPTER *a = (const D3DPT_ADAPTER *)h;
     NTSTATUS st;
 
-    switch (q->Type) {
+    switch ((ULONG)q->Type) {
     case DXGKQAITYPE_DRIVERCAPS:
         st = q->OutputDataSize < sizeof(DXGK_DRIVERCAPS)
              ? STATUS_INVALID_PARAMETER : driver_caps(a, (DXGK_DRIVERCAPS *)q->pOutputData);
@@ -595,6 +607,12 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
         st = STATUS_SUCCESS;
         break;
     }
+    case D3DPT_QAITYPE_64BITONLYCAPS:
+        /* Windows 11 asks it of every driver, and stops a driver that
+         * fails it (track M20 step 5). Zero: no 64-bit-only claim. */
+        RtlZeroMemory(q->pOutputData, q->OutputDataSize);
+        st = STATUS_SUCCESS;
+        break;
     default:
         st = STATUS_NOT_SUPPORTED;
         break;

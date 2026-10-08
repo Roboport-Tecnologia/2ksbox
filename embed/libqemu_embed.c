@@ -203,6 +203,28 @@ static QemuConsole *embed_live_console(void)
     return live ? live : qemu_console_lookup_default();
 }
 
+/*
+ * A VGA-style adapter makes its surface only in its own refresh, and QEMU
+ * refreshes only a console a listener is on, so on x64 Windows 11 with
+ * d3dpt-vga beside the standard VGA (M20) our adapter would hold its
+ * placeholder however much the driver draws. Each refresh also refreshes
+ * the other graphic consoles still on a placeholder (an idle one draws
+ * nothing); one that makes a picture is then followed.
+ */
+static void embed_wake_placeholders(QemuConsole *shown)
+{
+    for (unsigned i = 0;; i++) {
+        QemuConsole *con = qemu_console_lookup_by_index(i);
+        if (!con) {
+            break;
+        }
+        if (con != shown && qemu_console_is_graphic(con) &&
+            surface_is_placeholder(qemu_console_surface(con))) {
+            qemu_console_hw_update(con);
+        }
+    }
+}
+
 /* Out of the listener's own refresh: re-registering inside it would edit
  * the display state's listener list while QEMU walks it. Registering fires
  * gfx_switch with the new console's surface, so the player sees a mode
@@ -270,6 +292,7 @@ bool qemu_embed_display_follows_window(qemu_embed_t *e)
 static void embed_dpy_refresh(DisplayChangeListener *dcl)
 {
     qemu_embed_t *e = container_of(dcl, qemu_embed_t, dcl);
+    embed_wake_placeholders(dcl->con);
     if (!e->follow_pending && embed_live_console() != e->con) {
         e->follow_pending = true;
         aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_follow_console, e);
