@@ -135,6 +135,10 @@ fn main() {
     // 2ksbox's desktop entry and icon by it. mitsuami makes no
     // single-instance application of it, so players run side by side.
     let icon = include_bytes!("../../packaging/icon/2ksbox-256.png");
+    // The menu bar in the title bar, after the title, rather than on a row
+    // of its own that the picture sits under (user, 2026-10-08).
+    #[cfg(windows)]
+    mitsuami::winui::set_menu_bar_place(mitsuami::winui::MenuBarPlace::InTitleBar);
     App::new()
         .id("com._2ksbox.Launcher")
         .name("2ksbox")
