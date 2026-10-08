@@ -88,13 +88,20 @@ embed library, as for the winit player, into a target dir of its own:
    out on macOS for AppKit's own Enter Full Screen, which `w.full`
    follows; Scale, a submenu of Largest That Fits and 1x to 4x, and Fit
    Window to Picture, both 2026-10-07 and both `Gpu`'s geometry
-   (`set_fixed_scale`, `picture_px`); Save Screenshot, Save Screenshot as
+   (`set_fixed_scale`, `picture_px`; Fit is enabled by a `fits` signal
+   `draw` keeps, as the GPU and `follows_window` are no signals: it read
+   them directly and stayed off until another signal moved, user
+   2026-10-08); Save Screenshot, Save Screenshot as
    Shown), with the winit player's
    chords as their shortcuts (on Windows in the title bar after the
    title, not on a row of their own above the picture: user, 2026-10-08,
    mitsuami `c885ca8`'s `set_menu_bar_place(MenuBarPlace::InTitleBar)`;
    checked on the PC with the test pattern: the menus open, the title
-   and the room after the menus still drag the window), answered on the surface too while the
+   and the room after the menus still drag the window; the title bar
+   went tall only after the window was sized, so a remembered size came
+   back 16 epx short, a scale smaller with Largest That Fits, until
+   mitsuami `a2a8f36`: 800x600 points reopen at exactly 1200x900 at
+   1.5x), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the

@@ -107,6 +107,10 @@ struct Window_ {
     /// View > Scale: the picture held at a whole scale, in points per
     /// scanline (`physical_scale`), or `None` for the largest that fits
     scale: Signal<Option<u32>>,
+    /// there is a picture to fit the window to: a GPU, and a guest that
+    /// doesn't take the window's size; kept by `draw`, since neither is a
+    /// signal the menu could follow
+    fits: Signal<bool>,
 }
 
 fn main() {
@@ -173,6 +177,7 @@ fn player_window(guest: bool) -> Window {
         cursor: signal(Cursor::Default),
         paused: signal(false),
         scale: signal(None),
+        fits: signal(false),
     };
     let title = move || {
         let mut notes = Vec::new();
@@ -335,9 +340,7 @@ fn menus(w: Window_) -> MenuBar {
     }
     // Nothing to fit while the guest takes the window's size (the
     // picture is the window), nor in full screen.
-    let sized = move || {
-        !w.full.get() && with(|p| p.gpu.as_ref().is_some_and(|g| !g.follows_window())).unwrap_or(true)
-    };
+    let sized = move || !w.full.get() && w.fits.get();
     let mut scale = Menu::new("Scale").item(
         MenuItem::new("Largest That Fits")
             .radio((w.scale, None))
@@ -567,6 +570,10 @@ fn draw(w: Window_) {
         gpu.take_min_size().map(|m| (m, scale))
     })
     .flatten();
+    let fits = with(|p| p.gpu.as_ref().is_some_and(|g| !g.follows_window())).unwrap_or(false);
+    if w.fits.get_untracked() != fits {
+        w.fits.set(fits);
+    }
     // What the picture wants of the window's size; mitsuami caps it at the
     // screen and grows a window smaller than it.
     if let Some((min, scale)) = min {
