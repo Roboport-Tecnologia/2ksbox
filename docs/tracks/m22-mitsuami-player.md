@@ -120,7 +120,12 @@ embed library, as for the winit player, into a target dir of its own:
    the bar drops again after a capture and release; from a menu's second
    opening Ctrl+Alt+K sat left of the other shortcuts, until mitsuami
    `9621205` builds the bar again after each close: three openings line
-   up as the first), answered on the surface too while the
+   up as the first; a click on the picture with a menu open captured the
+   mouse and left the menu open over it, as the surface's window took the
+   click XAML's light dismiss needed, until mitsuami `c40691b` closes the
+   window's menus on a click on the surface or a lock: checked on a
+   BIOS-screen machine, Machine open, a click captures and the menu is
+   gone, twice), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the
