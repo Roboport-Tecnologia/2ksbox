@@ -18,7 +18,7 @@ commands `docs/development.md` and `docs/build-macos.md` /
   deprecated, user 2026-10-07).
 - **What it runs is a QEMU command line**, not a bundle:
   `player [--shader <preset>] [--shader-params k=v,…] [--pad <mode>]
-  [--share <dir>] -- <qemu args>` (in that order; `docs/development.md`
+  [--share <dir>] [--window-state <file>] -- <qemu args>` (in that order; `docs/development.md`
   has every option). The launcher translates a bundle into that line
   (`launcherx --print-player-args <bundle>`), so everything a bundle
   means lives in `launcher-core`. The player boots QEMU in-process (doc

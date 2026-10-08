@@ -160,6 +160,9 @@ if ! command -v timeout >/dev/null; then
   fi
 fi
 
+player_args() { # launcherx --print-player-args without --window-state, which every machine has (M22)
+  $LAUNCHERX --print-player-args "$1" | sed -E 's/ ?--window-state .*window\.toml//'
+}
 run_check() { # name, log file, command...
   local name="$1" lf="$OUT/$2"; shift 2
   "$@" >"$lf" 2>&1; local rc=$?
@@ -623,19 +626,22 @@ sharing_check() { # Windows 11's clipboard and shared folder, from the form to t
   a="$($LAUNCHERX --print-args "$bundle")"
   case "$a" in *"-chardev qemu-vdagent,id=vda,clipboard=on,mouse=off"*"virtserialport,chardev=vda,name=com.redhat.spice.0"*) ;;
     *) echo "no clipboard channel on a new machine: $a"; return 1 ;; esac
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ -z "$o" ] || { echo "player options nobody asked for: $o"; return 1; }
+  # the window's size is remembered beside the bundle (M22)
+  o="$($LAUNCHERX --print-player-args "$bundle")"
+  [ "$o" = "--window-state $(dirname "$bundle")/window.toml" ] || { echo "no --window-state beside the bundle: $o"; return 1; }
   # a folder without the network is not shared; with it, the player serves it
   edit - - - - - - - - - - - - - "$dir/folder" || return 1
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ -z "$o" ] || { echo "a share without the network: $o"; return 1; }
   edit - - - net || return 1
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ "$o" = "--share $dir/folder" ] || { echo "the share's player option: '$o'"; return 1; }
   grep -q "^shared_folder = \"$dir/folder\"" "$bundle" || { echo "no shared_folder in the bundle"; return 1; }
   # both off again
   edit - - - - - - - - - - - - noclipboard none || return 1
-  a="$($LAUNCHERX --print-args "$bundle")"; o="$($LAUNCHERX --print-player-args "$bundle")"
+  a="$($LAUNCHERX --print-args "$bundle")"; o="$(player_args "$bundle")"
   case "$a" in *qemu-vdagent*) echo "the clipboard stayed on"; return 1 ;; esac
   [ -z "$o" ] || { echo "the share stayed: $o"; return 1; }
   grep -q '^clipboard = false' "$bundle" || { echo "no clipboard = false in the bundle"; return 1; }
@@ -972,7 +978,7 @@ pad_check() { # the gamepad host end (M13 step 0) and the machine setting behind
   args="$($LAUNCHERX --print-args "$bundle")"
   local before="$args"
   # A machine with the pad off says nothing to the player either.
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ -z "$o" ] || { echo "a machine with the pad off still passed the player something: $o"; rc=1; }
   $LAUNCHERX --wizard-edit "$bundle" - - - - - - - - keys >/dev/null \
     || { echo "--wizard-edit keys failed"; rc=1; }
@@ -980,7 +986,7 @@ pad_check() { # the gamepad host end (M13 step 0) and the machine setting behind
   args="$($LAUNCHERX --print-args "$bundle")"
   [ "$args" = "$before" ] || { echo "turning the gamepad on changed the QEMU command line"; diff <(echo "$before") <(echo "$args"); rc=1; }
   # ...and the whole of what it does say is the setting (path C).
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ "$o" = "--pad keys" ] || { echo "expected '--pad keys' for the player, got: $o"; rc=1; }
   $LAUNCHERX --wizard-edit "$bundle" - - - - - - - - none >/dev/null \
     || { echo "--wizard-edit none failed"; rc=1; }
@@ -1009,7 +1015,7 @@ pad_check() { # the gamepad host end (M13 step 0) and the machine setting behind
     || { echo "--wizard-edit usb failed"; rc=1; }
   args="$($LAUNCHERX --print-args "$bundle")"
   case "$args" in *"-device usb-gamepad"*) ;; *) echo "an XP machine with the pad on has no usb-gamepad"; echo "$args"; rc=1;; esac
-  o="$($LAUNCHERX --print-player-args "$bundle")"
+  o="$(player_args "$bundle")"
   [ "$o" = "--pad usb" ] || { echo "expected '--pad usb' for the player, got: $o"; rc=1; }
   # The controller comes with it even when the pointer does not want one:
   # a `-device usb-gamepad` with no bus to attach to is a machine that
@@ -1035,7 +1041,7 @@ pad_check() { # the gamepad host end (M13 step 0) and the machine setting behind
   # and a DOS guest has no USB stack to drive one with anyway; a stray
   # `-usb` here would be a device in the machine nothing can use.
   case "$args" in *"-usb"*) echo "the gameport dragged a USB controller in"; echo "$args"; rc=1;; esac
-  o="$($LAUNCHERX --print-player-args "$dos")"
+  o="$(player_args "$dos")"
   [ "$o" = "--pad gameport" ] || { echo "expected '--pad gameport' for the player, got: $o"; rc=1; }
   # ...while XP is not offered it and must refuse it rather than write a
   # port its guest has no way to enumerate: XP's answer is path A.

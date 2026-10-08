@@ -57,6 +57,13 @@ struct Player {
     asking: bool,
     /// The window, for sizing it to the picture (`fit_window`).
     window: Option<(Ui, NodeId)>,
+    /// The content size in points the window opened at or last
+    /// remembered (`--window-state`): a resize to another one is the
+    /// user's, and is written (`remember_size`).
+    remembered: Option<(f32, f32)>,
+    /// When the surface first had a real size: the sizes of the next
+    /// moments are the platform's opening, not the user's.
+    opened_at: Option<std::time::Instant>,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -120,6 +127,8 @@ fn main() {
             motion_rest: (0.0, 0.0),
             asking: false,
             window: None,
+            remembered: None,
+            opened_at: None,
         })
     });
     // The launcher's identity: a compositor matches the player's window to
@@ -175,8 +184,12 @@ fn player_window(guest: bool) -> Window {
         }
         title
     };
+    // the machine's remembered size (M22), else 1280x960 points
+    let remembered = with(|p| p.args.window_state.as_deref().and_then(player_core::window_state::load)).flatten();
+    let (width, height) = remembered.unwrap_or((1280.0, 960.0));
+    eprintln!("[window] opens at {width}x{height} points{}", if remembered.is_some() { " (remembered)" } else { "" });
     Window::new(title)
-        .size(Size::new(1280.0, 960.0))
+        .size(Size::new(width, height))
         .min_size(w.min)
         .full_screen(w.full)
         .open(w.open)
@@ -254,8 +267,10 @@ fn content(w: Window_) -> impl View {
             eprintln!("[surface] {}x{} at {}x", size.width, size.height, size.scale);
         }
         let held = w.scale.get_untracked();
+        let full = w.full.get_untracked();
         with(|p| {
             p.scale = if size.scale > 0.0 { size.scale } else { 1.0 };
+            remember_size(p, (size.width as f32 / p.scale, size.height as f32 / p.scale), full);
             if let (Some(gpu), Some(session)) = (p.gpu.as_mut(), p.session.as_ref()) {
                 // a held scale is in points: another screen, other pixels
                 gpu.set_fixed_scale(held.map(|n| physical_scale(n, p.scale)));
@@ -273,6 +288,31 @@ fn content(w: Window_) -> impl View {
                 pointer_lock=w.locked keyboard_grab=w.grabbed cursor=w.cursor/>
         </Column>
     }
+}
+
+/// A new content size, in points, written to the machine's
+/// `--window-state` file when it is the user's: not a size of the first
+/// two seconds (0x0 comes first, then the size asked for, then, on macOS,
+/// that size shrunk to fit a screen too small for it), not full screen's,
+/// and not the size it already had (a move to a screen of another scale
+/// reports the same points).
+const OPENING: Duration = Duration::from_secs(2);
+
+fn remember_size(p: &mut Player, size: (f32, f32), full: bool) {
+    let Some(path) = p.args.window_state.as_deref() else { return };
+    if size.0 < 1.0 || size.1 < 1.0 {
+        return;
+    }
+    let opened = *p.opened_at.get_or_insert_with(std::time::Instant::now);
+    let Some((w, h)) = p.remembered.filter(|_| opened.elapsed() >= OPENING) else {
+        p.remembered = Some(size);
+        return;
+    };
+    if full || ((w - size.0).abs() < 1.0 && (h - size.1).abs() < 1.0) {
+        return;
+    }
+    player_core::window_state::save(path, size.0, size.1);
+    p.remembered = Some(size);
 }
 
 /// The menu bar. The chords are the winit player's: the window takes them

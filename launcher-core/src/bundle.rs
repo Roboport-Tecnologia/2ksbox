@@ -2121,6 +2121,14 @@ impl Machine {
         self.efi_vars.clone().unwrap_or_else(|| self.disk.with_file_name(EFI_VARS_FILE))
     }
 
+    /// The player window's remembered size, `window.toml` beside the
+    /// disk. A Windows 11 guest takes its screen from the window's size
+    /// when it boots (viogpudo offers no other mode above 1920 wide), so
+    /// the size the user gave it is the screen it gets next time.
+    pub fn window_state_file(&self) -> PathBuf {
+        self.disk.with_file_name(WINDOW_STATE_FILE)
+    }
+
     /// The TPM's state file (`tpm_state`), or `tpm.permall` beside the
     /// disk.
     pub fn effective_tpm_state(&self) -> PathBuf {
@@ -2363,6 +2371,9 @@ impl Machine {
 pub const EFI_VARS_FILE: &str = "efivars.qcow2";
 /// A modern machine's TPM state, in its bundle directory.
 pub const TPM_STATE_FILE: &str = "tpm.permall";
+/// The player window's size, in its bundle directory: the player reads it
+/// when it opens and writes it when the user resizes the window (M22).
+pub const WINDOW_STATE_FILE: &str = "window.toml";
 
 /// One line of arguments, as the form's "Extra QEMU arguments" field
 /// takes them, into a list. Whitespace separates; single or double quotes

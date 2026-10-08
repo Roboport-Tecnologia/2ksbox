@@ -218,6 +218,13 @@ pub fn share_args(machine: &Machine) -> Vec<String> {
     }
 }
 
+/// The window's remembered size (M22): `--window-state <file>`, after
+/// `--share`. The player opens at the size in it and writes it when the
+/// user resizes the window, so each machine keeps its own.
+pub fn window_args(machine: &Machine) -> Vec<String> {
+    vec!["--window-state".to_string(), machine.window_state_file().display().to_string()]
+}
+
 /// The player that runs `machine`. Each player binary links one QEMU
 /// (`libqemu-embed-<target>`), because QEMU has to be loaded with the
 /// process, not opened later: patch 63 reserves TCG's code buffer next to
@@ -385,6 +392,7 @@ pub fn spawn(
     let mut argv: Vec<String> = shader_args(machine);
     argv.extend(pad_args(machine));
     argv.extend(share_args(machine));
+    argv.extend(window_args(machine));
     argv.push("--".into());
     argv.extend(args);
     // Log the command line before anything is spawned: it is the first

@@ -91,6 +91,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             let mut argv = player::shader_args(&machine);
             argv.extend(player::pad_args(&machine));
             argv.extend(player::share_args(&machine));
+            argv.extend(player::window_args(&machine));
             println!("{}", argv.join(" "));
         }
         "--prepare" => {

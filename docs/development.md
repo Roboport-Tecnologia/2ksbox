@@ -183,7 +183,8 @@ exact line a launcher machine runs.
 
 ```
 player [--shader <preset.slangp>] [--shader-params <k=v,...>]
-       [--pad usb|gameport|keys] [--share <dir>] [--pads] [--pad-sweep <frames>]
+       [--pad usb|gameport|keys] [--share <dir>] [--window-state <file>]
+       [--pads] [--pad-sweep <frames>]
        [--mode-sweep <dir>] [--calib <bmp|dir>] [--companions]
        [--] <qemu args...>
 ```
@@ -346,6 +347,20 @@ and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
 - `LIBSYNTH_MIDI_LOG=<file>` / `LIBSYNTH_OPL_LOG=<file>` capture what a
   guest wrote to a music device, for `synthx midilog` / `opllog` /
   `play` (doc 20 §7.2).
+
+### The window's size (M22)
+
+- `--window-state <file>` (after `--share`) opens the window at the
+  content size in `<file>` (`width = …`, `height = …`, in points; 1280x960
+  without it) and writes the new size there when the user resizes the
+  window (`player_core::window_state`; `player-mitsuami` only, the winit
+  player reads past it). Sizes of the first two seconds are the
+  platform's opening (macOS shrinks a window too tall for its screen) and
+  full screen's are not written. The launcher passes `<bundle>/window.toml`
+  (`player::window_args`), so each machine keeps its own; a Windows 11
+  guest takes its screen from the window when it boots, so that is its
+  resolution too (viogpudo offers nothing else above 1920 wide).
+  `[window] opens at WxH points (remembered)` is logged.
 
 ### The shared folder and the clipboard (M23)
 

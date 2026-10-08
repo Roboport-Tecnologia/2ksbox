@@ -271,6 +271,17 @@ embed library, as for the winit player, into a target dir of its own:
    rect into `back`, `back` to `front`, `front` to the upload) and the
    whole-texture upload. Not a 1x guest screen (user: "I don't want to
    run windows blurry"): the guest keeps the window's pixels.
+   **The window's size per machine (2026-10-08, user: "remember the
+   window size per machine").** Windows 11 lost 2560x1920: viogpudo's
+   modes are QEMU's EDID list plus one custom mode, the window's pixel
+   size at boot, and it reads no EDID detailed timing, so nothing above
+   1920 wide can come from the EDID (its standard timings stop at 2288,
+   its VIC table has no 2560-wide mode). The 1280x960-point window gave
+   2560x1920 on the LG 4K and less on the Air's screen. Now the launcher
+   passes `--window-state <bundle>/window.toml` and the player opens at
+   the size the user last gave the machine's window (`window_state.rs`;
+   `docs/development.md`). mitsuami has no window position, so the
+   screen is the platform's choice.
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)
 
