@@ -39,7 +39,7 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami `6602f81` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami `f15e59f` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
@@ -69,7 +69,9 @@ lock, which the surface's window kept from XAML's light dismiss, then
 matched neither the title bar nor Finder's content side; now only while
 captured), and `28d93aa`, a scroll view at the top of an AppKit sidebar
 window running up under the title bar and toolbar, as AppKit's split
-views do, and `252c7f0` with `6602f81`, the same for lists and tables.
+views do, and `252c7f0` with `6602f81`, the same for lists and tables, and
+`f15e59f`, sidebar items with a subtitle, a context menu and activation
+(`children_with` for items that come and go), for the machine sidebar.
 Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
@@ -96,7 +98,15 @@ as in Windows 11's own apps (user, 2026-10-01): `main` calls mitsuami's
 `winui::set_toolbar_place(ToolbarPlace::InTitleBar(ToolbarAlign::End))`,
 a WinUI-only choice (`Start` and `Center` are the others), before the app
 runs. The machine window starts 50 wider and taller there (820 × 610,
-user), and on GTK too (user, 2026-10-01); 770 × 560 on macOS and KDE. Its details are a shade darker there than the
+user), and on GTK too (user, 2026-10-01); 770 × 560 on KDE. On macOS the
+machines are the window's sidebar since 2026-10-08 (user: the system's
+sidebar glass, not the list's solid colour): `MachineList` is a
+`Sidebar` there, each machine's name, its family and state as the
+subtitle, the list's right-click menu and a double-click to start, and
+the details' scroll view, at the content's top, runs under the toolbar.
+The sidebar is 250 wide (a minimum set on the split view item through
+`Sidebar::native`, from AppKit's 140, user) and the details 540, so the
+window is about 790 (user). Elsewhere the list stays. On Windows its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a
 tweak on the details' `ScrollView`, user), and the machine form's
 sidebar is half WinUI's default width (160, user), open from an 800-wide

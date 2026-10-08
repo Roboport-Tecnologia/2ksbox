@@ -32,7 +32,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 /// The machine list's width, beside the details.
+#[cfg(not(target_os = "macos"))]
 const LIST_W: f32 = 260.0;
+/// The machine sidebar's on macOS.
+#[cfg(target_os = "macos")]
+const SIDEBAR_W: f64 = 250.0;
 /// The details' label column.
 const LABEL_W: f32 = 150.0;
 
@@ -341,35 +345,9 @@ pub fn MachinesWindow() -> impl View {
 #[component]
 fn MachineLibrary() -> impl View {
     let library = use_store::<Library>();
-    // On macOS the list a shade darker than the details beside it (user),
-    // in light and dark alike: a colour AppKit asks for each appearance.
-    let darker = platform! {
-        macos => mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
-            table.setBackgroundColor(&darker_list_background())
-        }),
-        _ => Tweak::none(),
-    };
     view! {
         <Row grow=1.0 min_height=0>
-            <List
-                each=move || library.dirs()
-                key=|d: &PathBuf| d.clone()
-                native=darker
-                selection_mode=SelectionMode::Single
-                selected=library.selected
-                list_style=ListStyle::Plain
-                width=LIST_W
-                shrink=0.0
-                @activate=move |dir: PathBuf| {
-                    if !library.is_running(&dir) {
-                        library.play(&dir);
-                    }
-                }
-                let:dir
-            >
-                <MachineRow dir=dir/>
-            </List>
-            <Separator orientation=Orientation::Vertical/>
+            <MachineList/>
             <Show when=move || library.current().is_some()>
                 <Details/>
             </Show>
@@ -377,26 +355,90 @@ fn MachineLibrary() -> impl View {
     }
 }
 
-/// The machine list's background on macOS: the details' (control
-/// background, 0x1E in dark, white in light) a few steps darker.
+/// The machines on macOS: the window's sidebar (user), as UTM's, so it is
+/// the system's sidebar glass and the details run up under the toolbar,
+/// each machine its name, its family and state under it, the list's menu
+/// and a double-click to start it.
 #[cfg(target_os = "macos")]
-fn darker_list_background() -> mitsuami::appkit::objc2::rc::Retained<mitsuami::appkit::objc2_app_kit::NSColor> {
-    use mitsuami::appkit::objc2_app_kit::{NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor};
-    use mitsuami::appkit::objc2_foundation::NSArray;
-    use std::ptr::NonNull;
-    let (light, dark) = (
-        NSColor::colorWithSRGBRed_green_blue_alpha(0.949, 0.949, 0.949, 1.0),
-        NSColor::colorWithSRGBRed_green_blue_alpha(0.090, 0.090, 0.090, 1.0),
-    );
-    let provider = block2::RcBlock::new(move |appearance: NonNull<NSAppearance>| -> NonNull<NSColor> {
-        let names = unsafe { NSArray::from_slice(&[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]) };
-        let is_dark = unsafe { appearance.as_ref() }
-            .bestMatchFromAppearancesWithNames(&names)
-            .is_some_and(|name| unsafe { &*name == NSAppearanceNameDarkAqua });
-        // The block keeps both colours, and the colour keeps the block.
-        NonNull::from(&**if is_dark { &dark } else { &light })
+#[component]
+fn MachineList() -> impl View {
+    let library = use_store::<Library>();
+    let stores = Stores::get();
+    let chosen = signal(library.current());
+    // The sidebar follows the library (the first machine while none is
+    // chosen) and the library follows a click; each side only writes when
+    // they differ.
+    effect(move || {
+        let current = library.current();
+        if chosen.get_untracked() != current {
+            chosen.set(current);
+        }
     });
-    unsafe { NSColor::colorWithName_dynamicProvider(None, &provider) }
+    effect(move || {
+        let now: Vec<PathBuf> = chosen.get().into_iter().collect();
+        if library.selected.get_untracked() != now {
+            library.selected.set(now);
+        }
+    });
+    Sidebar::new(chosen)
+        .children_with(move || {
+            library
+                .dirs()
+                .into_iter()
+                .map(|dir| {
+                    let name = library.field(&dir, |m, row| m.machine(row).map(|x| x.name.clone()));
+                    let subtitle = library.field(&dir, |m, row| Some(m.subtitle(row)));
+                    let (start, more) = (Rc::new(dir.clone()), Rc::new(dir.clone()));
+                    SidebarItem::new(name, Some(dir)).icon(icons::MACHINE).subtitle(subtitle).context_menu((
+                        Command::Start.item(stores, Rc::new(move || Some(start.to_path_buf()))),
+                        MenuSeparator::new(),
+                        machine_actions(Rc::new(move || more.to_path_buf())),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        // 250, from AppKit's 140 (user), which the window grows by: the split
+        // view is the window's, reached from the sidebar's table.
+        .native(mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
+            use mitsuami::appkit::objc2_app_kit::NSSplitViewController;
+            let split = table.window().and_then(|w| w.contentViewController());
+            let split = split.and_then(|c| c.downcast::<NSSplitViewController>().ok());
+            if let Some(item) = split.and_then(|s| s.splitViewItems().firstObject()) {
+                item.setMinimumThickness(SIDEBAR_W);
+            }
+        }))
+        .on_activate(move |dir: Option<PathBuf>| {
+            if let Some(dir) = dir.filter(|d| !library.is_running(d)) {
+                library.play(&dir);
+            }
+        })
+}
+
+/// The machines elsewhere: a list beside the details, a line between.
+#[cfg(not(target_os = "macos"))]
+#[component]
+fn MachineList() -> impl View {
+    let library = use_store::<Library>();
+    view! {
+        <List
+            each=move || library.dirs()
+            key=|d: &PathBuf| d.clone()
+            selection_mode=SelectionMode::Single
+            selected=library.selected
+            list_style=ListStyle::Plain
+            width=LIST_W
+            shrink=0.0
+            @activate=move |dir: PathBuf| {
+                if !library.is_running(&dir) {
+                    library.play(&dir);
+                }
+            }
+            let:dir
+        >
+            <MachineRow dir=dir/>
+        </List>
+        <Separator orientation=Orientation::Vertical/>
+    }
 }
 
 /// What can be done to a machine besides starting it, each opening its
@@ -576,6 +618,7 @@ fn command_menus(s: Stores) -> Option<MenuBar> {
 
 /// One machine in the list: its name, and its family and state under it.
 /// A right click offers what the details' Start and More do.
+#[cfg(not(target_os = "macos"))]
 #[component]
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
