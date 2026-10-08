@@ -111,7 +111,11 @@ embed library, as for the winit player, into a target dir of its own:
    back down, `set_full_screen_menu_bar(FullScreenMenuBar::AtTopEdge)`,
    mitsuami `2c5a9ce`, user 2026-10-08, checked with the pattern: the bar
    at the edge, Machine opening over the picture, the bar gone below it
-   and back in the title bar after leaving full screen), answered on the surface too while the
+   and back in the title bar after leaving full screen; after the first
+   capture it stopped, as activating the window raised XAML's title bar
+   input window over the top of the picture, which also took clicks
+   there, until mitsuami `04b6ac2`: checked on a BIOS-screen machine,
+   the bar drops again after a capture and release), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the
