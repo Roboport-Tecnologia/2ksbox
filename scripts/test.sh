@@ -628,6 +628,10 @@ sharing_check() { # Windows 11's clipboard and shared folder, from the form to t
     *) echo "no clipboard channel on a new machine: $a"; return 1 ;; esac
   o="$(player_args "$bundle")"
   [ -z "$o" ] || { echo "player options nobody asked for: $o"; return 1; }
+  # x64 has Arm's two screens: the standard VGA, and a virtio-gpu that
+  # viogpudo makes follow the window (M22)
+  case "$a" in *"virt,gic"*|*"-vga std,retrace=precise "*"-device virtio-gpu-pci,sync-ctrl=on"*) ;;
+    *) echo "an x64 Windows 11 machine lacks the standard VGA or the virtio-gpu: $a"; return 1 ;; esac
   # the window's size is remembered beside the bundle (M22)
   o="$($LAUNCHERX --print-player-args "$bundle")"
   [ "$o" = "--window-state $(dirname "$bundle")/window.toml" ] || { echo "no --window-state beside the bundle: $o"; return 1; }

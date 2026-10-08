@@ -282,6 +282,23 @@ embed library, as for the winit player, into a target dir of its own:
    the size the user last gave the machine's window (`window_state.rs`;
    `docs/development.md`). mitsuami has no window position, so the
    screen is the platform's choice.
+   **x64 Windows 11 follows the window too (2026-10-08, user: "here on
+   linux, win11 is not working like in the mac").** It had only the
+   standard VGA, where Windows' Basic Display keeps the mode the firmware
+   set. It now has Arm's two screens: the standard VGA, and
+   `virtio-gpu-pci,sync-ctrl=on` after the cards it already had, with
+   viogpudo on the x64 drivers disc; the player shows the live console
+   (`embed_live_console`) and sets virtio-gpu's mode from the window as
+   on Arm. `virtio-vga` alone was tried and refused: on the user's
+   installed machine (fresh overlay, KVM, headless) OVMF binds its
+   virtio half, which has no frame buffer, and Windows without viogpudo
+   left the boot manager's text on screen for 120 s while it idled; the
+   standard VGA alone and the pair both reached Windows by 10 s, the
+   virtio-gpu at QEMU's placeholder, so the player stays on the VGA.
+   Fast startup carries device state across overlay runs: compare
+   layouts on fresh overlays only. An installed machine gets viogpudo
+   from `2ksbox\install.cmd` on the drivers disc; its resizing on x64 is
+   not seen yet (it needs the guest's login).
 
 ## The spike it came from (2026-09-27, RX 9060 XT / RADV, sway 1.12, GTK 4.22)
 

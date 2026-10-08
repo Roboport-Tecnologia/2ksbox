@@ -1194,6 +1194,7 @@ impl Form {
             ],
             (Video::Std, Family::Win11) => &[
                 "Windows drives it with its own basic display driver. No 3D.",
+                "With the display driver from the drivers disc, the screen follows the window's size.",
             ],
             (Video::Std, _) => &[
                 "The Bochs adapter: VBE 2.0 with a linear frame buffer. Works with period VESA drivers and with a modern Linux (bochs-drm).",

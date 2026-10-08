@@ -328,8 +328,10 @@ pub fn video_choices(family: Family) -> &'static [Video] {
         // own adapter is not offered, since it has no DOS driver.
         Family::Dos => &[Video::Std, Video::Cirrus],
         // Windows 11's Basic Display Adapter drives the standard VGA's
-        // linear frame buffer at any resolution; nothing of ours runs
-        // there (an XP-model driver does not load past Windows 7).
+        // linear frame buffer; nothing of ours runs there (an XP-model
+        // driver does not load past Windows 7). Beside it every x64
+        // machine has a virtio-gpu (`modern_args`), whose screen follows
+        // the window once viogpudo is in.
         Family::Win11 => &[Video::Std],
     }
 }
@@ -2151,9 +2153,15 @@ impl Machine {
     ///   list needs.
     /// * The RTC in local time, which is what Windows reads it as.
     /// * The PS/2 keyboard the q35 has; the tablet and a pad on xHCI.
+    /// * Two screens, as on Arm: the standard VGA, which the firmware,
+    ///   setup and Windows' Basic Display draw on, and `virtio-gpu-pci`,
+    ///   which viogpudo drives on an installed Windows at the player
+    ///   window's size (M22). virtio-vga alone does not do: the
+    ///   firmware binds its virtio half, which has no frame buffer, and
+    ///   Windows without viogpudo shows nothing.
     /// * The drivers disc (`disc_library::drivers_iso`: virtio-win's x64
-    ///   serial driver, the clipboard's, and the 2ksbox agent) in a CD
-    ///   drive of its own on `ide.2`, as on Arm.
+    ///   display and serial drivers, and the 2ksbox agent) in a CD drive
+    ///   of its own on `ide.2`, as on Arm.
     fn modern_args(&self, pc_bios_dir: &Path, shelf: Option<&Path>) -> Vec<String> {
         if self.effective_arch() == Arch::Aarch64 {
             return self.arm_args(pc_bios_dir, shelf);
@@ -2206,6 +2214,9 @@ impl Machine {
             args.extend(["-nic".into(), "none".into()]);
         }
         args.extend(self.clipboard_args());
+        // After the cards an installed machine already had, so none of
+        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm.
+        args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
         args.extend(boot_prompt_args());

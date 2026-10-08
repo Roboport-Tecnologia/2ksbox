@@ -8,8 +8,9 @@
 #   (viogpudo, for virtio-gpu) and virtio-serial driver (vioser, the
 #   clipboard's channel to QEMU's qemu-vdagent). Windows on Arm has none
 #   of the three in the box.
-# - x64, Windows 11 on a PC: vioser alone. The q35's network card
-#   (e1000e) and display have drivers in the box; virtio-serial has none.
+# - x64, Windows 11 on a PC: viogpudo and vioser. The q35's network
+#   card (e1000e) has a driver in the box; virtio-vga's virtio-gpu (the
+#   screen that follows the window, M22) and virtio-serial have none.
 #
 #   scripts/build-virtio-win.sh [-f] [arm64|x64]...
 #       the discs named (default: the host's own processor's), each only
@@ -101,9 +102,10 @@ disc() {
   \$WinPEDriver\$\\vioserial  the clipboard's channel to the host (VirtIO Serial)" ;;
     x64)
       dir=amd64; title="Windows 11"
-      drivers=(vioserial)
-      files=(vioserial/vioser)
-      readme="  \$WinPEDriver\$\\vioserial  the clipboard's channel to the host (VirtIO Serial)" ;;
+      drivers=(viogpudo vioserial)
+      files=(viogpudo/viogpudo vioserial/vioser)
+      readme="  \$WinPEDriver\$\\viogpudo   the display (Red Hat VirtIO GPU DOD controller)
+  \$WinPEDriver\$\\vioserial  the clipboard's channel to the host (VirtIO Serial)" ;;
   esac
   local iso=$OUT/2ksbox-drivers-$arch.iso tree=$OUT/tree-$arch
   echo "==> virtio-win: the $dir ${drivers[*]} for Windows 11"
