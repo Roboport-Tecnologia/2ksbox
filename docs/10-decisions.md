@@ -1086,9 +1086,10 @@ packager outside the project uses them. Their checks are unchanged.
 Tecnologia (David Rios Gomes Ltda), written 2ksbox™.
 [`TRADEMARKS.md`](../TRADEMARKS.md) says what anyone may do with the
 name without asking (say a build is based on 2ksbox, write about it,
-package it unchanged for a distribution) and what needs permission (a
-modified build or a store listing under the name). The GPL covers the
-code and grants nothing in the name.
+package it unchanged for a distribution) and what is not allowed (a
+modified build or a store listing under the name; no permission is
+offered, user 2026-10-07). The GPL covers the code and grants nothing
+in the name.
 
 **Why.** Ready-to-run builds come from one place per platform, the
 stores, which sign, install and update them; a package of our own for

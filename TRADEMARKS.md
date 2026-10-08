@@ -16,12 +16,12 @@ people which builds come from this project.
   provided the package's description says it is packaged by the
   distribution and not by this project.
 
-**Please don't, without permission:**
+**Not allowed:**
 
-- publish a build with other changes, or an app in any store, under the
-  name 2ksbox or a confusingly similar one; pick your own name, and say
-  it is based on 2ksbox;
-- use the 2ksbox logo for a modified build;
-- suggest that this project made, checked or endorses your build.
+- publishing a build with other changes, or an app in any store, under
+  the name 2ksbox or a confusingly similar one; pick your own name, and
+  say it is based on 2ksbox;
+- using the 2ksbox logo for a modified build;
+- suggesting that this project made, checked or endorses your build.
 
-Questions or permission requests: open an issue.
+Questions: open an issue.
