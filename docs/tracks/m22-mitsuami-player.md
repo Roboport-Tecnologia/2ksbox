@@ -101,7 +101,11 @@ embed library, as for the winit player, into a target dir of its own:
    went tall only after the window was sized, so a remembered size came
    back 16 epx short, a scale smaller with Largest That Fits, until
    mitsuami `a2a8f36`: 800x600 points reopen at exactly 1200x900 at
-   1.5x), answered on the surface too while the
+   1.5x; and each machine's window opens centred on the screen,
+   `set_window_placement(WindowPlacement::Centred)`, mitsuami `89926f0`,
+   user 2026-10-08, where Windows' own cascade opened each a step further
+   down until it ran past the bottom of the desktop: six openings of the
+   pattern, the same place each time), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the

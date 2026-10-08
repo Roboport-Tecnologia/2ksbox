@@ -141,8 +141,15 @@ fn main() {
     let icon = include_bytes!("../../packaging/icon/2ksbox-256.png");
     // The menu bar in the title bar, after the title, rather than on a row
     // of its own that the picture sits under (user, 2026-10-08).
+    // ... and every machine's window opening in the middle of the screen,
+    // not a step further down Windows' cascade each time (user,
+    // 2026-10-08).
     #[cfg(windows)]
-    mitsuami::winui::set_menu_bar_place(mitsuami::winui::MenuBarPlace::InTitleBar);
+    {
+        use mitsuami::winui::{MenuBarPlace, WindowPlacement, set_menu_bar_place, set_window_placement};
+        set_menu_bar_place(MenuBarPlace::InTitleBar);
+        set_window_placement(WindowPlacement::Centred);
+    }
     App::new()
         .id("com._2ksbox.Launcher")
         .name("2ksbox")

@@ -39,7 +39,7 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami `a2a8f36` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami `89926f0` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
@@ -51,8 +51,11 @@ hidden, nothing to answer); then 1.1.0 (a version bump and the macOS
 disk images) and `c885ca8`, `winui::set_menu_bar_place`, which the
 player uses to put its menus in the title bar, and `a2a8f36`, which
 gives a tall WinUI title bar its 48 epx before the window is sized (the
-player reopened 16 epx short, a scale smaller). Both crates built with
-no change.
+player reopened 16 epx short, a scale smaller), then `1fc1b37` and
+`89926f0`: a WinUI window opens where Windows puts it, moved back inside
+the work area if it would run past it, or centred with
+`winui::set_window_placement(WindowPlacement::Centred)`, which the player
+uses. Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
 Runtime 2.4+, so the launcher is built only on a PC:
