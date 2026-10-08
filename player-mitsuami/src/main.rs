@@ -389,7 +389,15 @@ fn menus(w: Window_) -> MenuBar {
     MenuBar::new()
         .menu(
             Menu::new("Machine")
-                .item(MenuItem::new("Send Ctrl+Alt+Del").on_select(send_ctrl_alt_del))
+                // Its chord (`chord`) holds Ctrl+Alt+Del for as long as D
+                // is; the menu's shortcut, which the window takes first
+                // while the keyboard isn't grabbed, taps it, as the item
+                // does (user, 2026-10-08).
+                .item(
+                    MenuItem::new("Send Ctrl+Alt+Del")
+                        .shortcut(primary_alt('d').shift())
+                        .on_select(send_ctrl_alt_del),
+                )
                 .item(MenuItem::new("Send Shortcuts to Guest").bind(w.want_grab).shortcut(primary_alt('k')))
                 .item(
                     MenuItem::new("Release Mouse")

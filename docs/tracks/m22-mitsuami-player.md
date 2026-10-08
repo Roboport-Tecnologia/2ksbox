@@ -83,7 +83,9 @@ embed library, as for the winit player, into a target dir of its own:
    by mitsuami), a `GpuSurface` presented to in Mailbox from the UI thread
    on each QEMU wake (`wake.rs`, a future the QEMU thread's waker
    resolves through mitsuami's executor), and the menus: Machine (Send
-   Ctrl+Alt+Del, Send Shortcuts to Guest, Release Mouse, Pause, Reset,
+   Ctrl+Alt+Del, its Ctrl+Alt+Shift+D shown and a tap where the window
+   takes it, held while D is held where the surface does, user
+   2026-10-08; Send Shortcuts to Guest, Release Mouse, Pause, Reset,
    Power Button, Close as the platform's Quit) and View (Full Screen, left
    out on macOS for AppKit's own Enter Full Screen, which `w.full`
    follows; Scale, a submenu of Largest That Fits and 1x to 4x, and Fit
@@ -115,7 +117,10 @@ embed library, as for the winit player, into a target dir of its own:
    capture it stopped, as activating the window raised XAML's title bar
    input window over the top of the picture, which also took clicks
    there, until mitsuami `04b6ac2`: checked on a BIOS-screen machine,
-   the bar drops again after a capture and release), answered on the surface too while the
+   the bar drops again after a capture and release; from a menu's second
+   opening Ctrl+Alt+K sat left of the other shortcuts, until mitsuami
+   `9621205` builds the bar again after each close: three openings line
+   up as the first), answered on the surface too while the
    keyboard is grabbed. What winit's player did by hand is mitsuami's:
    the keyboard grab (Ctrl+Alt+K turns the wish off; the platform ends the
    grab on every focus loss and the next key or click takes it again), the
