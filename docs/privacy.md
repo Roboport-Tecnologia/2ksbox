@@ -5,7 +5,7 @@ open source (the code is at <https://github.com/Roboport-Tecnologia/2ksbox>), an
 this page says what it does with your data, which is almost nothing.
 
 *This page is the privacy policy for every build of 2ksbox, from an
-app store or built from source. Last changed 2026-10-07.*
+app store or built from the official source. Last changed 2026-10-09.*
 
 ## What 2ksbox collects
 
