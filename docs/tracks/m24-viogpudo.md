@@ -44,8 +44,9 @@ measurement says whether it is worth it.
   `virtio-win/kvm-guest-drivers-windows` at `fbcc19d7` (the last commit
   before 0.1.302's viogpudo, the one on our drivers disc), and its README.
 - `scripts/build-viogpudo.sh`: the source (any host), the build (the PC,
-  MSYS2, an EWDK for Windows 11), publish / fetch by source hash (as
-  `wddm-prebuilt.sh`), and a test ISO.
+  MSYS2, the WDK from NuGet) and a test ISO; `scripts/windows-drivers.sh`
+  publishes the PC's build by source hash and fetches it elsewhere, beside
+  M18's WDDM driver.
 - `guest-tools/viogpudo/viogpudo-install.ps1`: test mode, a certificate,
   signing, upstream's viogpudo out of the store, ours in.
 - This doc; the `build-windows.md` section "Our viogpudo".

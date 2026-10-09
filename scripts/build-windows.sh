@@ -68,7 +68,7 @@
 #           32-bit kernel drivers for Windows 7: one ISO, mounted (or
 #           EWDK_ISO=<iso> to mount it, EWDK=<drive:> to name it),
 #           nothing installed. With none mounted it fetches the driver
-#           the PC published for these sources (scripts/wddm-prebuilt.sh),
+#           the PC published for these sources (scripts/windows-drivers.sh),
 #           or is skipped with a note. --publish then uploads the build
 #           for Linux and macOS ISOs. The guest stage puts the result on
 #           the ISO, in WDDM\.
@@ -419,7 +419,7 @@ if want wddm; then
          [ -f "$d/Program Files/Windows Kits/10/Include/10.0.19041.0/km/dispmprt.h" ]; then ewdk="$d"; fi
     done
   fi
-  if [ -z "$ewdk" ] && [ -z "$PUBLISH" ] && scripts/wddm-prebuilt.sh fetch; then
+  if [ -z "$ewdk" ] && [ -z "$PUBLISH" ] && scripts/windows-drivers.sh fetch wddm; then
     echo "    no EWDK mounted; the published driver for these sources is in build/wddm/x86"
   elif [ -z "$ewdk" ]; then
     skip wddm "no EWDK 10.0.19041 mounted (mount it, or EWDK_ISO=<iso>; docs/build-windows.md \"The WDDM driver\")" || true
@@ -427,11 +427,11 @@ if want wddm; then
     say "wddm: d3dptkmd.sys + d3dptumd.dll (MSVC, the EWDK)"
     cmd //c "$(cygpath -w guest-tools/build-wddm.cmd)"
     # the sources it was built from, which a publish checks
-    scripts/wddm-prebuilt.sh key > build/wddm/x86/.key
+    scripts/windows-drivers.sh key wddm > build/wddm/x86/.key
     BUILT+=(wddm)
     if [ -n "$PUBLISH" ]; then
-      say "wddm: publish for Linux and macOS (scripts/wddm-prebuilt.sh)"
-      scripts/wddm-prebuilt.sh publish
+      say "wddm: publish for Linux and macOS (scripts/windows-drivers.sh)"
+      scripts/windows-drivers.sh publish wddm
     fi
   fi
 fi

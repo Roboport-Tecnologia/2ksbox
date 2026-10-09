@@ -12,15 +12,13 @@
 #                                        into build/viogpudo/{arm64,x64} (Windows,
 #                                        MSYS2, Visual Studio 2022 with the WDK
 #                                        component; the kit itself from NuGet)
-#   scripts/build-viogpudo.sh publish    upload build/viogpudo as a release asset
-#                                        named by the sources' hash (the PC, after
-#                                        build; needs gh, logged in)
-#   scripts/build-viogpudo.sh fetch      download the build for these sources
-#                                        (Linux, macOS)
 #   scripts/build-viogpudo.sh iso        build/viogpudo/viogpudo-test.iso: both
-#                                        drivers and the installer, for a guest's
-#                                        CD drive (needs xorriso)
-#   scripts/build-viogpudo.sh key        the hash of the sources
+#                                        drivers, the resolution service and the
+#                                        installer, for a guest's CD drive (needs
+#                                        xorriso)
+#
+# Hosts that cannot build it fetch the PC's build for their checkout,
+# which the PC publishes: scripts/windows-drivers.sh fetch|publish viogpudo.
 #
 # The WDK and SDK are Microsoft's NuGet packages at the versions below,
 # restored into build/viogpudo/packages by a nuget.exe fetched next to them;
@@ -40,14 +38,6 @@ UPSTREAM=https://github.com/virtio-win/kvm-guest-drivers-windows.git
 PIN=fbcc19d763f92a8281abe364c7ea1de3de87e61d
 OUT=build/viogpudo
 SRC=$OUT/src
-REPO="${VIOGPUDO_PREBUILT_REPO:-Roboport-Tecnologia/2ksbox}"
-TAG=viogpudo-prebuilt
-# with upstream's resolution service (vgpusrv, viogpuap), built from the
-# same tree, which applies the window's size to the desktop
-FILES=(arm64/viogpudo.sys arm64/viogpudo.inf arm64/vgpusrv.exe arm64/viogpuap.exe
-       x64/viogpudo.sys x64/viogpudo.inf x64/vgpusrv.exe x64/viogpuap.exe
-       viogpudo-install.ps1)
-SOURCES=(patches/viogpudo guest-tools/viogpudo scripts/build-viogpudo.sh)
 WDK_VER=10.0.26100.6584
 # the SDK the WDK packages depend on, at their floor (what NuGet resolves)
 SDK_VER=10.0.26100.1
@@ -56,18 +46,6 @@ VS_COMPONENTS=(Component.Microsoft.Windows.DriverKit
                Microsoft.VisualStudio.Component.VC.Tools.ARM64
                Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre
                Microsoft.VisualStudio.Component.VC.Runtimes.ARM64.Spectre)
-
-if command -v sha256sum >/dev/null 2>&1; then SHA=(sha256sum); else SHA=(shasum -a 256); fi
-
-key() {
-  local f
-  { echo "$PIN"
-    git ls-files -- "${SOURCES[@]}" | LC_ALL=C sort | while IFS= read -r f; do
-      printf '%s\n' "$f"; cat "$f"
-    done; } | "${SHA[@]}" | cut -c1-16
-}
-
-have_all() { local f; for f in "${FILES[@]}"; do [ -f "$OUT/$f" ] || return 1; done; }
 
 # Upstream at the pin, every patch in filename order, from a clean tree
 # each time (a patch edited since the last run applies to the pristine
@@ -160,63 +138,15 @@ build() {
        "$OUT/$arch/"
   done
   cp guest-tools/viogpudo/viogpudo-install.ps1 "$OUT/"
-  key > "$OUT/.key"
+  # the sources it was built from (scripts/windows-drivers.sh publishes by them)
+  scripts/windows-drivers.sh key viogpudo > "$OUT/.key"
   echo "==> $OUT/arm64, $OUT/x64 (sources $(cat "$OUT/.key"))"
-}
-
-fetch() {
-  local k cur url tmp
-  k=$(key)
-  cur=$(cat "$OUT/.key" 2>/dev/null || true)
-  if have_all && [ "$cur" = "$k" ]; then
-    echo "    our viogpudo for these sources is in $OUT ($k)"; return 0
-  fi
-  url="https://github.com/$REPO/releases/download/$TAG/viogpudo-$k.tar.gz"
-  tmp=$(mktemp -d)
-  if ! curl -fsSL --connect-timeout 10 -o "$tmp/v.tar.gz" "$url"; then
-    rm -rf "$tmp"
-    echo "    no viogpudo published for these sources ($k), or no network;" >&2
-    echo "    on the PC: scripts/build-viogpudo.sh build && scripts/build-viogpudo.sh publish" >&2
-    return 1
-  fi
-  mkdir -p "$OUT"
-  tar -xzf "$tmp/v.tar.gz" -C "$OUT"
-  rm -rf "$tmp"
-  have_all || { echo "    viogpudo-$k.tar.gz lacks a file" >&2; return 1; }
-  printf '%s\n' "$k" > "$OUT/.key"
-  echo "    fetched our viogpudo for these sources ($k) into $OUT"
-}
-
-publish() {
-  local k cur dirty tmp
-  command -v gh >/dev/null 2>&1 || { echo "build-viogpudo.sh: publish needs gh (GitHub's CLI), logged in" >&2; exit 1; }
-  have_all || { echo "build-viogpudo.sh: nothing built in $OUT (build first)" >&2; exit 1; }
-  k=$(key)
-  cur=$(cat "$OUT/.key" 2>/dev/null || true)
-  [ "$cur" = "$k" ] || {
-    echo "build-viogpudo.sh: $OUT was not built from these sources (${cur:-no .key}, sources $k); build again" >&2; exit 1; }
-  dirty=$(git status --porcelain -- "${SOURCES[@]}")
-  [ -z "$dirty" ] || {
-    printf 'build-viogpudo.sh: uncommitted changes in the sources:\n%s\n' "$dirty" >&2; exit 1; }
-  if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-    gh release create "$TAG" -R "$REPO" --prerelease --latest=false \
-      --title "viogpudo, prebuilt (test signed in the guest)" \
-      --notes "Track M24's viogpudo for Linux and macOS test runs, one asset per source hash (scripts/build-viogpudo.sh). Not a release."
-  fi
-  if gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name' | grep -qx "viogpudo-$k.tar.gz"; then
-    echo "    viogpudo-$k.tar.gz is already published"; return 0
-  fi
-  tmp=$(mktemp -d)
-  printf 'sources %s\ncommit %s\nupstream %s\n' "$k" "$(git rev-parse HEAD)" "$PIN" > "$tmp/BUILT-FROM"
-  tar -czf "$tmp/viogpudo-$k.tar.gz" -C "$OUT" "${FILES[@]}" -C "$tmp" BUILT-FROM
-  gh release upload "$TAG" -R "$REPO" "$tmp/viogpudo-$k.tar.gz"
-  rm -rf "$tmp"
-  echo "    published viogpudo-$k.tar.gz"
 }
 
 iso() {
   command -v xorriso >/dev/null || { echo "build-viogpudo.sh: iso needs xorriso" >&2; exit 1; }
-  have_all || { echo "build-viogpudo.sh: nothing in $OUT (build or fetch first)" >&2; exit 1; }
+  [ -f "$OUT/x64/viogpudo.sys" ] || {
+    echo "build-viogpudo.sh: nothing in $OUT (build, or scripts/windows-drivers.sh fetch viogpudo)" >&2; exit 1; }
   local tmp
   tmp=$(mktemp -d)
   mkdir -p "$tmp/arm64" "$tmp/x64"
@@ -232,9 +162,6 @@ iso() {
 case "${1:-}" in
   source) source_tree ;;
   build) build ;;
-  publish) publish ;;
-  fetch) fetch ;;
   iso) iso ;;
-  key) key ;;
-  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

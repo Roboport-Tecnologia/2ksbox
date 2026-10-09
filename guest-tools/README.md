@@ -68,7 +68,7 @@ DRIVER9X\   the 98/Me display driver for d3dpt-vga: D3DPT9X.INF,
 WDDM\       the Windows 7 WDDM driver for d3dpt-vga,irq=on (track M18):
             D3DPTKMD.SYS, D3DPTUMD.DLL, D3DPTKMD.INF; MSVC, built on
             Windows (build-windows.sh's wddm stage) and fetched for
-            the same sources elsewhere (scripts/wddm-prebuilt.sh);
+            the same sources elsewhere (scripts/windows-drivers.sh);
             SETUP installs it on 32-bit Windows 7 with the interrupt
 DINPUT\     per game: DINPUT.DLL, the DirectInput keyboard fix
 OPENGL\     per game: OPENGL32.DLL (the GL pass-through) and

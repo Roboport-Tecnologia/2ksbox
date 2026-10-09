@@ -721,7 +721,7 @@ Then in MSYS2:
 
 ```sh
 scripts/build-viogpudo.sh build      # build/viogpudo/{arm64,x64}/viogpudo.{sys,inf}, ~30 s
-scripts/build-viogpudo.sh publish    # for the Air and Linux (gh, logged in)
+scripts/windows-drivers.sh publish viogpudo   # for the Air and Linux ("Prebuilt drivers")
 ```
 
 The first run fetches upstream's tree at the pin into
@@ -730,6 +730,32 @@ The first run fetches upstream's tree at the pin into
 unsigned; the guest test signs them
 (`guest-tools/viogpudo/viogpudo-install.ps1`, which writes its own
 catalog; upstream's `inf2cat` step only has to not fail).
+
+## Prebuilt drivers
+
+Two of our drivers build only on this PC: Windows 7's WDDM driver (M18,
+the EWDK 10.0.19041) and our viogpudo (M24, the WDK from NuGet). Linux
+and macOS get the PC's builds through `scripts/windows-drivers.sh`
+(user, 2026-10-09: "so they can just fetch"):
+
+```sh
+scripts/windows-drivers.sh publish          # the PC: build what is stale, upload both
+scripts/windows-drivers.sh fetch            # elsewhere (build.sh's guest stage does it)
+scripts/windows-drivers.sh key viogpudo     # one driver's source hash
+```
+
+Each build is `<driver>-<hash>.tar.gz` in the repository's
+`windows-drivers` release (a prerelease that holds nothing else; `gh`,
+logged in; the script finds GitHub CLI's install folder when MSYS2's
+PATH lacks it), the hash over the committed sources the driver is built
+from. `publish` refuses sources with uncommitted changes, so a name
+always means committed sources, and builds a driver whose `.key` is not
+the checkout's (`build-windows.sh wddm`, `build-viogpudo.sh build`)
+before uploading it. `fetch` downloads the asset for its own hash (and
+removes one fetched for other sources); the WDDM driver is also looked
+for in the older `wddm-prebuilt` release. `WINDOWS_DRIVERS_PREBUILT=0`
+(or the old `WDDM_PREBUILT=0`) never fetches, and
+`WINDOWS_DRIVERS_REPO=owner/name` uses another repository.
 
 ## The WDDM driver
 
@@ -741,23 +767,18 @@ an EWDK is mounted (or named by `EWDK` / `EWDK_ISO`) and is skipped with
 a note otherwise; the `guest` stage after it puts the result on the
 guest-tools ISO, in `WDDM\`.
 
-**Linux and macOS ISOs get the PC's build** (2026-10-04, user):
-`scripts/wddm-prebuilt.sh` names the driver by a hash of the sources it
-is built from (`guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`, `d3dpt_enc.h`,
-`d3dpt_proto.h`, `build-wddm.cmd`; `wddm-prebuilt.sh key`). The `wddm`
-stage writes that hash to `build/wddm/x86/.key`, and `build-windows.sh
-wddm --publish` uploads the three files as `wddm-<hash>.tar.gz` to the
-repository's `wddm-prebuilt` release (a prerelease that holds nothing
-else; `gh`, logged in). It refuses a build whose `.key` is not the
-checkout's and sources with uncommitted changes, so a name always means
-committed sources. `scripts/build.sh`'s `guest` stage on Linux or a Mac
-runs `wddm-prebuilt.sh fetch` first, which downloads the asset for its
-own hash into `build/wddm/x86` (and removes one fetched for other
-sources); the ISO's stamp then sees the driver. Nothing published for
-the hash means an ISO with no `WDDM\` and a note, so **after a commit
-that changes the driver's sources, publish from the PC** or the other
-hosts' ISOs lose it. `WDDM_PREBUILT=0` never fetches. On the PC with no
-EWDK mounted, the `wddm` stage fetches too.
+**Linux and macOS ISOs get the PC's build** (2026-10-04, user), through
+`scripts/windows-drivers.sh` ("Prebuilt drivers" below; until
+2026-10-09 `wddm-prebuilt.sh`). The hash covers
+`guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`,
+`d3dpt_enc.h`, `d3dpt_proto.h` and `build-wddm.cmd` (`windows-drivers.sh
+key wddm`); the `wddm` stage writes it to `build/wddm/x86/.key`, and
+`build-windows.sh wddm --publish` uploads the build. `scripts/build.sh`'s
+`guest` stage on Linux or a Mac fetches first, so the ISO's stamp sees
+the driver. Nothing published for the hash means an ISO with no `WDDM\`
+and a note, so **after a commit that changes the driver's sources,
+publish from the PC** or the other hosts' ISOs lose it. On the PC with
+no EWDK mounted, the `wddm` stage fetches too.
 
 **The kit: the Enterprise WDK for Windows 10, version 2004**
 (10.0.19041, with VS 2019 Build Tools 16.7). It is the last WDK that

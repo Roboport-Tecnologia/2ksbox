@@ -2941,7 +2941,7 @@ win7_checks() { # Windows 7 from its install disc to Aero (M18 finding 14)
   elif ! command -v mcopy >/dev/null || [ ! -x $QSYS ] || [ ! -x "$TREL/launcherx" ]; then
     skip win7-aero "needs mtools, $QSYS and $TREL/launcherx"
   elif [ ! -f guest-tools/out/iso/WDDM/D3DPTKMD.SYS ]; then
-    skip win7-aero "no WDDM\\ on the guest-tools ISO (build-windows.sh's wddm stage, or scripts/wddm-prebuilt.sh)"
+    skip win7-aero "no WDDM\\ on the guest-tools ISO (build-windows.sh's wddm stage, or scripts/windows-drivers.sh)"
   else
     run_check win7-aero win7-aero.log tools/win7-aero-test.sh "$WIN7_ISO" || true
     grep "^-- " "$OUT/win7-aero.log" | sed 's/^/     /'

@@ -232,7 +232,7 @@ device's half is plain QEMU C and builds anywhere.
    built on Linux had none until 2026-10-04 (user): the PC publishes the
    drivers by a hash of their sources (`build-windows.sh wddm --publish`)
    and `build.sh` on Linux and macOS fetches the matching one
-   (`scripts/wddm-prebuilt.sh`, `docs/build-windows.md` "The WDDM
+   (`scripts/wddm-prebuilt.sh`, since 2026-10-09 `scripts/windows-drivers.sh`, `docs/build-windows.md` "The WDDM
    driver"). The drivers' three files are part of the ISO's
    stamp in both build scripts. SETUP installs it (finding 12) when the
    adapter has its interrupt: the driver starts only with `-device
@@ -663,7 +663,7 @@ kernel driver). A Direct3D 11 user-mode driver is its own project.
 `win7-aero` check of `scripts/test.sh` with `WIN7_ISO` set: Windows 7 from
 its disc on the launcher's Windows 7 family, SETUP, Aero, D3DGAME9 under
 composition. Run on the PC under TCG; written for Linux too (KVM there,
-with an ISO carrying the PC's driver, `scripts/wddm-prebuilt.sh`), not
+with an ISO carrying the PC's driver, `scripts/wddm-prebuilt.sh`, now `scripts/windows-drivers.sh`), not
 yet run there. The XP-model
 driver on Windows 7 is still `tools/xp-driver-test.sh` on an XP-family
 bundle.
