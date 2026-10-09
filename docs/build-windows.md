@@ -40,6 +40,7 @@ re-applies the patch queue) while another build reads `qemu/`
 | DXVK's `d3d9.dll`, `d3dpt_exec.dll` | Visual Studio's `cl`, static C runtime, in the environment `scripts/msvc-env.sh` sets up | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the two moved to MSVC together (ADR-026's amendments). QEMU loads the executor by name; only C crosses that edge. DXVK under MSVC needed patch 15 ("DXVK under MSVC" below) |
 | the guest-tools ISO | MSYS2's i686 GCC with Linux's i686 runtime, Open Watcom | Windows 9x and XP guests; modern MSVC targets neither |
 | the WDDM driver | the Enterprise WDK 10.0.19041 | Windows 7 and 32-bit kernel drivers ("The WDDM driver") |
+| our viogpudo (track M24) | an Enterprise WDK for Windows 11 (10.0.2xxxx) | upstream's own build environment (EWDK 26H1) for ARM64 and x64 Windows 11 ("Our viogpudo") |
 
 The mingw QEMU's libraries are MSYS2's (`--msys2-deps`), the MSVC one's
 ours (`build-deps.sh`), libslirp among them: every launcher machine asks
@@ -695,6 +696,25 @@ which first sources `guest-tools/msys2-i686.sh`, the whole port:
   Watcom's `@file` gets `cygpath -m`.
 - QEMU's seven symbolic links are in Linux-only subprojects that are
   never built, so a checkout without symlink support is fine.
+
+## Our viogpudo
+
+Track M24's build of virtio-win's display-only driver
+(`docs/tracks/m24-viogpudo.md`), not a `build-windows.sh` stage: nothing
+ships it. Mount an Enterprise WDK for Windows 11 (24H2 or later; upstream
+uses 26H1; Microsoft's "Download the Windows Driver Kit" page has the
+EWDK ISO, nothing to install), then in MSYS2:
+
+```sh
+scripts/build-viogpudo.sh build      # build/viogpudo/{arm64,x64}/viogpudo.{sys,inf}
+scripts/build-viogpudo.sh publish    # for the Air and Linux (gh, logged in)
+```
+
+`EWDK11=<drive:>` names the EWDK when two are mounted (the M18 one,
+10.0.19041, cannot build ARM64 Windows 11 drivers), `EWDK11_ISO=<iso>`
+mounts it. The first run fetches upstream's tree at the pin into
+`build/viogpudo/src`. The drivers are unsigned; the guest test signs them
+(`guest-tools/viogpudo/viogpudo-install.ps1`).
 
 ## The WDDM driver
 
