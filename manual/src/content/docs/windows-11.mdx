@@ -1,0 +1,93 @@
+---
+title: Windows 11 machines
+description: Today's Windows beside the old ones, with a shared clipboard and a shared folder.
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+A Windows 11 machine is a current PC: UEFI firmware with Secure Boot, a
+TPM 2.0, and your computer's own hypervisor. Microsoft's own ISO
+installs with no tricks to get past its requirements.
+
+## Which Windows 11
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
+Windows 11 on Arm, from Microsoft's Windows 11 ISO for Arm64. It runs on
+the Mac's hypervisor. Most x64 programs run in it too, through Windows'
+own emulation, but drivers must be built for Arm64.
+
+Windows 11 for x64 doesn't run on a Mac.
+
+</TabItem>
+<TabItem label="Windows">
+
+Windows 11 for x64, from Microsoft's Windows 11 ISO. It needs the
+Windows Hypervisor Platform: turn it on under *Turn Windows features on
+or off* and restart.
+
+</TabItem>
+<TabItem label="Linux">
+
+Windows 11 for x64, from Microsoft's Windows 11 ISO. It needs KVM.
+Without hardware virtualization the machine is too slow to use.
+
+</TabItem>
+</Tabs>
+
+## Install it
+
+<Steps>
+
+1. Click **New Machine** and pick **Windows 11** as the **Family**.
+2. On the **Storage** page, set **CD in drive** to the Windows 11 ISO.
+   The machine starts with 4 GB of memory and a 64 GB disk. Give it more
+   memory on the **System** page if you can spare it.
+3. Click **Create**, then **Start**.
+4. The machine boots from the ISO by itself. You don't need to press a
+   key for "Press any key to boot from CD or DVD".
+5. Go through Windows setup as usual.
+
+</Steps>
+
+Every Windows 11 machine has a second CD drive with the 2ksbox drivers
+disc. Windows setup finds its drivers there by itself, including the
+network card on Arm.
+
+## The clipboard and a shared folder
+
+After Windows is installed, open the drivers disc in File Explorer and
+run `2ksbox\install.cmd` once. It asks for administrator rights. It
+installs the drivers and the 2ksbox agent, which shares the clipboard
+and the folder.
+
+- **Clipboard**, on the **Input** page, is on for a new Windows 11
+  machine. Text you copy on either side can be pasted on the other.
+- **Shared folder**, on the **Network** page, gives Windows one folder of
+  your computer's to read and write. Windows needs **Networking** turned
+  on to reach it. The agent puts it on a drive letter, counting down from
+  Z:. Windows also sees it as `\\10.0.2.4\host`, with user `2ksbox` and
+  password `2ksbox`.
+
+The clipboard and the folder stay between your computer and the machine.
+
+## The screen
+
+Windows 11 starts on a standard display adapter. With the display driver
+from the drivers disc, which setup or `install.cmd` installs, the
+machine's screen follows the window's size. Make the window bigger and
+the desktop grows.
+
+<Aside>
+A Windows 11 machine has no shader by default, no floppy, no Voodoo 2
+and no MIDI port. It's for modern Windows. Old games belong on a Windows
+98, XP or 7 machine.
+</Aside>
+
+## The TPM and cloning
+
+Each machine has its own TPM, saved with the machine. When you
+[clone](../snapshots/#clones) a Windows 11 machine, the copy keeps the
+same TPM unless you tick **Give the copy a new TPM**. If Windows uses
+BitLocker, a copy with a new TPM asks for the recovery key.

@@ -1,0 +1,132 @@
+---
+title: 3D games
+description: Direct3D, OpenGL and the Voodoo 2, and what each kind of game needs.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+Games of the era drew 3D in three ways, and 2ksbox handles each one
+differently:
+
+| The game uses | What runs it | What you do |
+|---|---|---|
+| Direct3D (DirectX 1 to 9) | The 2ksbox adapter, drawing on your graphics card | Install the guest tools once |
+| OpenGL | Your graphics card's own OpenGL | Copy one file next to the game |
+| Glide (3dfx) | An emulated 3dfx Voodoo 2 | Turn the card on and install 3dfx's driver |
+
+Many games of the time offer two or three of these. Any of them works.
+Direct3D and OpenGL are usually the fastest.
+
+## Direct3D
+
+Direct3D games need nothing per game. Once the guest tools are installed
+(see [Your first machine](../first-machine/#install-the-guest-tools)),
+the 2ksbox adapter's driver gives Windows 98, XP and 7 a DirectX 9 card
+with hardware transform and lighting and shader model 3.0. Every
+DirectX version from 1 to 9 runs on it.
+
+On Windows 98, install DirectX 9.0c first. The DirectX 6.1 that comes
+with Windows 98 SE has no Direct3D for the driver.
+
+### How your computer draws it
+
+The machine's **Direct3D** setting, on the **Display** page, picks how
+your computer draws the game's frames. The note under it says what your
+computer can do.
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
+On macOS 26 or newer, Direct3D runs at full speed through Vulkan
+(**DXVK**). On older macOS it runs through Wine, if Wine is installed,
+and the note says which Wine to get. Without Wine, games have no
+Direct3D. They still have DirectDraw, OpenGL and the Voodoo 2.
+
+</TabItem>
+<TabItem label="Windows">
+
+With a graphics card that has Vulkan 1.3, Direct3D runs through
+**DXVK**, the tested path. On an older card, pick **This PC's own
+Direct3D 9**. It runs on any card, and older cards often draw well with
+it.
+
+</TabItem>
+<TabItem label="Linux">
+
+With a graphics card that has Vulkan 1.3, Direct3D runs through
+**DXVK**, the tested path. Without it, Direct3D runs through Wine if Wine
+is installed, and the note says which Wine package to get. Without Wine,
+games have no Direct3D. They still have DirectDraw, OpenGL and the
+Voodoo 2.
+
+</TabItem>
+</Tabs>
+
+**Automatic** picks the best one your computer has. If the note says
+"in software (slow)", your computer found only a software Vulkan. Try the
+game both ways and keep the faster one.
+
+<Aside>
+Keep the 2ksbox adapter even when your computer has no Direct3D for the
+machine. Only its Direct3D needs your graphics card. Its 2D, DirectDraw
+and every resolution still work, and still beat the Cirrus card.
+</Aside>
+
+## OpenGL
+
+OpenGL games, like Quake II and Half-Life, draw on your graphics card
+through a small `OPENGL32.DLL` that goes next to the game's program
+file. From the guest tools disc:
+
+```
+D:\SETUP /GAME 3 C:\GAMES\QUAKE2
+```
+
+Use the folder that holds the game's `.EXE`. You can also copy the disc's
+`OPENGL\` folder there by hand. The guest tools install the other half,
+*the device mapper*, with `/ALL`.
+
+## Glide and the Voodoo 2
+
+Glide was 3dfx's own interface, and many 1997 to 2000 games look their
+best on it. 2ksbox emulates a real 8 MB 3dfx Voodoo 2 card, and the game
+talks to it the way it talked to the real one.
+
+1. In the machine's settings, on the **Display** page, turn on **3dfx
+   Voodoo 2**.
+2. Start the machine. Windows finds a new card.
+3. Install 3dfx's own Voodoo 2 driver for Windows 98. The guest tools
+   don't include it, so download it yourself.
+4. In the game, pick Glide or 3dfx.
+
+The Voodoo 2 draws at 640×480 to 800×600, like the real card. It runs
+on your computer's processor, not the graphics card. Quake II runs at
+well over 100 frames a second on an M1 Mac or a Ryzen.
+
+**Voodoo3 undither filter** removes the speckled 16-bit dither pattern
+the Voodoo 2 draws with, so skies and shading come out smooth. Unlike a
+real Voodoo3's filter, it doesn't blur textures or edges.
+
+DOS Glide games work too, in a Windows 98 DOS box or in pure DOS. They
+bring their own Glide file (`GLIDE2X.OVL`).
+
+## Windows 7 and Aero
+
+On Windows 7, the 2ksbox adapter's driver gives the desktop Aero glass,
+and Direct3D 9 games run on it as on XP. The guest tools' SETUP installs
+the driver and turns Aero on.
+
+## When a 3D game misbehaves
+
+- **It seems frozen.** It's often a message box hidden behind the game's
+  screen. Press Enter, or Alt+Tab to look.
+- **Wrong colours or a garbled menu.** Try another way of drawing it: a
+  different renderer in the game's own setup, or a different **Direct3D**
+  setting.
+- **It runs far too fast.** Old games often have no frame limiter. A DOS
+  game may want a slower processor, which a DOS machine can have.
+- **A keyboard that does nothing in a DirectInput game on XP.** FIFA 2000
+  is one. Copy the DirectInput fix next to the game:
+  `D:\SETUP /GAME 2 <game folder>`.
+
+More in [Troubleshooting](../troubleshooting/).

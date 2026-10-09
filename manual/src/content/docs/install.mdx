@@ -1,0 +1,78 @@
+---
+title: Getting 2ksbox
+description: What your computer needs to run 2ksbox, and where to get it.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## Where to get it
+
+The ready-to-run app comes from the app stores: the Mac App Store and the
+Microsoft Store. Neither listing is up yet.
+
+You can also build 2ksbox yourself from
+[the source code](https://github.com/Roboport-Tecnologia/2ksbox). Once the
+tools are installed, one command builds the same launcher, player and
+guest tools disc as the store builds. The steps are in the project's
+[README](https://github.com/Roboport-Tecnologia/2ksbox#building-from-source).
+Linux distributions and other packagers are welcome to ship it.
+
+## What your computer needs
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
+- A Mac with Apple Silicon (M1 or newer).
+- macOS 26 or newer for the Mac App Store build. The community build runs
+  on macOS 12 or newer.
+- For Direct3D games at full speed, macOS 26. On older releases Direct3D
+  runs through Wine if you have it installed. Without Wine, the machine
+  has no Direct3D, but OpenGL games and the Voodoo 2 still work.
+
+Your Mac emulates the old PCs, because it can't run x86 code natively.
+They still run faster than a real PC of the time. Windows 11 for Arm runs
+on the Mac's own hypervisor.
+
+</TabItem>
+<TabItem label="Windows">
+
+- 64-bit Windows 10 or 11.
+- The Windows App Runtime 2.4 or later. Microsoft installs it once per PC.
+- For fast Windows XP, 7 and 11, turn on the Windows Hypervisor Platform
+  under *Turn Windows features on or off*. Windows 98 is always emulated,
+  on purpose.
+- A graphics card with Vulkan 1.3 for the fastest Direct3D. Without it,
+  Direct3D games run on Windows' own Direct3D 9.
+
+</TabItem>
+<TabItem label="Linux">
+
+- A 64-bit x86 PC with GTK 4.10 or newer.
+- KVM, for Windows XP, 7 and 11 at close to full speed. It is optional.
+  Windows 98 is always emulated, on purpose.
+- A graphics card with Vulkan 1.3 for the fastest Direct3D. Without it,
+  Direct3D runs through Wine if Wine is installed. Without Wine either,
+  the machine has no Direct3D, but OpenGL games and the Voodoo 2 still
+  work.
+
+</TabItem>
+</Tabs>
+
+## What else you need
+
+- **Install media** for the operating system: your own Windows 98, XP, 7
+  or 11 CD or ISO, or a DOS floppy or CD.
+- **Your games**, as disc images (dumps) of discs you own, or folders.
+
+<Aside type="caution">
+Use only install media, licences and disc dumps that you own. 2ksbox
+doesn't come with any operating system or game.
+</Aside>
+
+## How fast is it?
+
+On an M1 Mac or a Ryzen 7 5700X, an emulated Windows 98 machine runs
+about as fast as a 1.7 GHz Pentium 4 from around 2001. That's quicker
+than most of the games of the era expect. Windows XP, 7 and 11 run
+close to your computer's own speed wherever your computer can virtualize
+them.

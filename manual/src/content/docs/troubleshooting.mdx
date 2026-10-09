@@ -1,0 +1,113 @@
+---
+title: Troubleshooting
+description: What to do when a machine or a game doesn't behave, and how to report a bug.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## The machine won't start
+
+The launcher shows an alert that says why. The usual reasons:
+
+- **The disk or a disc image moved.** Check the paths on the
+  machine's **Storage** page.
+- **The machine needs hardware virtualization your computer doesn't
+  offer.** Windows 11 does. Turn on KVM (Linux) or the Windows Hypervisor
+  Platform (Windows), or set **Acceleration** to **Emulation** for an
+  older Windows.
+- **The MT-32 is picked but its ROMs aren't there.** See
+  [Music](../music/#roland-mt-32).
+- **Something in Extra QEMU arguments is wrong.** Empty that field on
+  the **System** page.
+
+## Windows 98 starts ScanDisk or safe mode
+
+The machine was turned off without Windows shutting down. Let ScanDisk
+finish, or restore a snapshot. Next time, shut down from the Start menu
+or with *Machine* > **Power Button**.
+
+## A black desktop or a crash after changing the display adapter
+
+Windows wants a driver for the new adapter. If the guest tools were
+installed before the change, Windows finds the driver on the next start.
+If not, switch back, run `SETUP /ALL` from the guest tools disc, and
+switch again.
+
+## A game
+
+- **It seems frozen.** It's usually a message box hidden behind the
+  game's screen. Press Enter, or Alt+Tab to see it.
+- **No Direct3D.** Read the note under **Direct3D** on the machine's
+  **Display** page. It says what your computer gives the machine, and
+  what to install if it gives nothing. On Windows 98, install DirectX
+  9.0c. See [3D games](../3d/).
+- **Too fast, too slow, or wrong colours.** The game probably wants
+  another setting. On a DOS machine, try a slower **Processor**. Try a
+  different display adapter or a sound card the game knows. The note
+  under each setting says what it's for.
+- **The mouse moves strangely in a game.** Turn off **Seamless mouse** on
+  the **Input** page.
+
+## Keyboard shortcuts go to my computer
+
+Press Ctrl+Alt+K (⌥⌘K on macOS) to send the Windows key, Alt+Tab and the
+like to the machine. The window's title says where they go.
+
+On the Flatpak under sway or another wlroots compositor, the sandbox
+can't take the shortcuts at all. Run the app under X11 instead, once:
+
+```sh
+flatpak override --user --nosocket=wayland --socket=x11 com._2ksbox.Launcher
+```
+
+## The emulation optimizations
+
+A machine that is emulated has an **Emulation optimizations** group on
+its **System** page. They ship at the settings that measured best. Leave
+them alone unless a program crashes in a way that the same program on a
+real PC doesn't. Then turn them all off to see whether one of them is
+the cause, and **All defaults** puts them back.
+
+## Reporting a bug
+
+Run 2ksbox with `--diagnose`. It prints where it found each of its parts
+and what it found of your computer's 3D, and writes the same to
+`launcher.log`. Attach that file, and `player.log` from the same folder,
+to a report on the
+[issue tracker](https://github.com/Roboport-Tecnologia/2ksbox/issues).
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
+```sh
+/Applications/2ksbox.app/Contents/MacOS/2ksbox --diagnose
+```
+
+The logs are in `~/Library/Containers/com.2ksbox.2ksbox/Data/Library/Application Support/2ksbox`
+for the App Store build, and `~/Library/Application Support/2ksbox`
+for any other.
+
+</TabItem>
+<TabItem label="Windows">
+
+In a build of your own, run `2ksbox-debug.bat` from the 2ksbox folder.
+It runs `--diagnose` in a console window. With the Microsoft Store
+build, attach the two logs.
+
+The logs are in `%USERPROFILE%\2ksbox` for the Microsoft Store build,
+and `%APPDATA%\2ksbox\data` for any other.
+
+</TabItem>
+<TabItem label="Linux">
+
+```sh
+2ksbox --diagnose
+```
+
+The logs are in `~/.local/share/2ksbox`.
+
+</TabItem>
+</Tabs>
+
+The logs describe what the program did and never leave your computer
+unless you send them. See [Privacy](../privacy/).

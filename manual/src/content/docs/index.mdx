@@ -1,0 +1,50 @@
+---
+title: 2ksbox
+description: Run Windows 98, Windows XP, Windows 7 and DOS the way the machines of the era did, and Windows 11 beside them.
+template: splash
+hero:
+  tagline: Windows 98, XP, 7 and DOS the way the machines of the era ran them, with their 3D games on your GPU and a CRT on your monitor. Windows 11 too.
+  image:
+    file: ../../assets/hero.png
+  actions:
+    - text: Get started
+      link: /2ksbox/install/
+      icon: right-arrow
+    - text: Create your first machine
+      link: /2ksbox/first-machine/
+      icon: rocket
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<Card title="A machine library" icon="laptop">
+		One window makes a Windows 98, XP, 7, 11, DOS or other machine
+		with settings that suit it. Each machine opens in its own window.
+	</Card>
+	<Card title="Period 3D, accelerated" icon="rocket">
+		DirectX 1 to 9 and OpenGL run on your graphics card, and an
+		emulated 3dfx Voodoo 2 runs Glide games with 3dfx's own driver.
+	</Card>
+	<Card title="Your discs" icon="document">
+		cue/bin, CloneCD, Alcohol, ISO, or a folder. Copy-protected discs
+		and CD audio work. Swap discs while the machine runs.
+	</Card>
+	<Card title="A CRT look" icon="seti:image">
+		The guest's picture at its own resolution, through a CRT shader
+		you can tune, instead of a blurry stretched rectangle.
+	</Card>
+</CardGrid>
+
+## Where to start
+
+<CardGrid>
+	<LinkCard title="Getting 2ksbox" href="/2ksbox/install/" description="What your computer needs, and where to get the app." />
+	<LinkCard title="Your first machine" href="/2ksbox/first-machine/" description="From an install CD to a Windows desktop with its drivers." />
+	<LinkCard title="Discs and the disc shelf" href="/2ksbox/discs/" description="Add your disc images and put them in a machine's drive." />
+	<LinkCard title="3D games" href="/2ksbox/3d/" description="Direct3D, OpenGL and the Voodoo 2, and what each game needs." />
+</CardGrid>
+
+2ksbox is free software under the GPL. It runs only the operating systems,
+licences and disc dumps that you own.

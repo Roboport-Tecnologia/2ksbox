@@ -1,0 +1,46 @@
+---
+title: Controllers
+description: Play with your PlayStation, Xbox or Switch controller.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Plug your controller into your computer as usual. PlayStation, Xbox and
+Switch controllers all work. Then choose, in the machine's settings on
+the **Input** page, how the machine sees it:
+
+| Gamepad setting | The machine sees | Best for |
+|---|---|---|
+| **USB gamepad** | A USB controller with two sticks, a hat and twelve buttons | Windows games |
+| **Gameport joystick** | The classic joystick port: two sticks, two axes and two buttons each | DOS games |
+| **Gamepad as keyboard keys** | No controller. The pad presses keys | Games that only read the keyboard |
+| **No gamepad** | Nothing | The default |
+
+## USB gamepad
+
+Windows XP installs its own driver the next time it starts. Windows 98
+SE does too, but asks for its install files the first time. Keep the
+Windows CD in the drive, or point it at the CAB folder on the disk.
+
+Games find it through DirectInput, and it shows in *Game Controllers* in
+the Control Panel.
+
+## Gameport joystick
+
+This is the only kind of controller DOS knows. A DOS game reads the port
+directly with nothing to install, in a Windows 98 DOS box too. The d-pad
+moves the stick.
+
+For Windows games on Windows 98, pick the USB gamepad instead. The
+gameport needs *Add New Hardware* and a calibration in *Game Controllers*
+first.
+
+## Gamepad as keyboard keys
+
+The d-pad and the left stick are the arrow keys. The four face buttons
+are Ctrl, Alt, Space and Enter. There's no analog steering, and a game
+that looks for a joystick finds none.
+
+<Aside>
+The mouse and keyboard keep working whatever you pick.
+</Aside>

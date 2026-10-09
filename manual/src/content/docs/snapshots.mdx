@@ -1,0 +1,53 @@
+---
+title: Snapshots and clones
+description: Save a machine's state to come back to, or copy a whole machine.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Snapshots
+
+A snapshot saves a machine as it is, so you can come back to that moment
+later. Good ones to keep: "fresh install" right after Windows and the
+guest tools, and "before Diablo II" before you try something risky.
+
+Open the machine's **Snapshots** window and click **Take snapshot**.
+Give it a name.
+
+- **Machine turned off:** the snapshot saves the disk.
+- **Machine running:** it also saves the memory and the processor, so
+  restoring it brings back the running machine, programs and all. The
+  **VM state** column shows how much it saved.
+
+**Restore** puts the machine back to a snapshot. Whatever changed since
+is lost, so take a new snapshot first if you want to keep it. **Delete**
+removes a snapshot for good.
+
+Snapshots form a tree. A snapshot taken after a restore sits under the
+one you restored, and the current one is marked **current**.
+
+<Aside type="tip">
+On Windows 98 a snapshot is the fastest fix for almost anything. A
+driver that broke the desktop, a game that wrecked the registry, a
+ScanDisk after a crash: restore "fresh install" and you're back in
+seconds.
+</Aside>
+
+## Clones
+
+**Clone** makes a new machine with the same settings. Type a name for
+the copy and click **Clone**.
+
+By default the copy gets its own copy of the disk, snapshots included.
+That takes as long as copying the file, and as much space.
+
+**Use the same hard disk instead of copying it** makes a second machine
+on the same disk, for example to try other settings. Only one of them
+may run at a time. Two running at once will corrupt the disk.
+
+Shut a machine down before you clone it. A copy of a disk that is being
+written wouldn't boot.
+
+On Windows 11, **Give the copy a new TPM** makes the copy a different
+PC as far as Windows is concerned. If the original uses BitLocker, the
+copy will ask for its recovery key.

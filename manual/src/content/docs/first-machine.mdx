@@ -1,0 +1,155 @@
+---
+title: Your first machine
+description: From an install CD to a Windows desktop with its drivers.
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+This page takes a Windows 98 machine from nothing to a desktop with 3D
+drivers. Windows XP and 7 go the same way. Windows 11 has
+[its own page](../windows-11/).
+
+## The shader presets
+
+The first time 2ksbox starts, it asks to download CRT shader presets
+(about 50 MB). Say yes. They make the picture look like the monitor the
+game was played on, and they come with three ready-made profiles: CRT
+Aperture, CRT Royale and Apple II. Every machine uses CRT Aperture until
+you pick something else. [The CRT look](../crt-look/) has the details.
+
+If you said no, you can download them later from *Shader Profiles*.
+
+## Create the machine
+
+<Steps>
+
+1. Click **New Machine**. It's in the *File* menu on macOS and Linux, and
+   on the toolbar as **New** on Windows. A settings window opens.
+
+2. On the **General** page, pick the **Family** (Windows 98) and type a
+   **Name**.
+
+3. Look through the other pages if you like. Every setting starts at what
+   suits the family, and the note under each one explains it. You can
+   change any of them later.
+
+4. On the **Storage** page, the machine gets a new 10 GB disk. Under
+   **CD in drive**, pick your Windows 98 CD image.
+
+5. Click **Create**.
+
+</Steps>
+
+The machine appears in the library. Select it to see its settings.
+Double-click it, or click **Start**, to turn it on.
+
+## Install Windows
+
+Windows setup runs from the CD the way it did on a real PC. Nothing about
+it is special to 2ksbox. When setup restarts the machine, it boots from
+the hard disk by itself.
+
+<Aside>
+Windows 98 is always emulated, never run on your computer's hypervisor.
+Under virtualization its setup and Explorer break. Emulation runs it at
+about the speed of an early 2000s PC, which suits it fine.
+</Aside>
+
+## Install the guest tools
+
+The guest tools disc has the drivers that give the machine 3D, a sharp
+desktop at any resolution, and the disc shelf inside Windows.
+
+<Steps>
+
+1. With the machine running, open its **Discs** window.
+
+2. Click **Add** and choose **Guest tools ISO**. It joins your disc shelf.
+
+3. Click **Insert** next to it. The disc goes into the machine's drive.
+
+4. In Windows, open the Run box (*Start* > *Run*) and type
+   `D:\SETUP.EXE /ALL`. Use your CD drive's letter if it isn't D:.
+
+5. Restart Windows when it asks.
+
+</Steps>
+
+`SETUP` on its own shows a menu where you pick what to install.
+`SETUP /LIST` lists what's on the disc, and the disc's `README.TXT`
+explains every folder.
+
+On Windows 7, confirm the prompt about an unsigned driver with *Install
+this driver software anyway*. SETUP also turns on Aero.
+
+## Take a snapshot
+
+Now is the moment to save this state. Open the machine's **Snapshots**
+window, click **Take snapshot**, and call it "fresh install". When a game
+install goes wrong later, you can come back here in a few seconds.
+[Snapshots and clones](../snapshots/) explains more.
+
+## Before you install games on Windows 98
+
+Install DirectX 9.0c in the machine first. Windows 98 SE comes with
+DirectX 6.1, which gives games DirectDraw but no Direct3D.
+
+## Where things are in the launcher
+
+The launcher uses each system's own controls, so it looks a little
+different on each.
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
+Your machines are in the sidebar. The toolbar has **Start** and buttons
+for the selected machine's **Settings**, **Discs**, **Snapshots** and
+**Clone**. **New Machine**, **Disc Shelf** and **Shader Profiles** are in
+the *File* menu. Right-click a machine for the same commands.
+
+</TabItem>
+<TabItem label="Windows">
+
+Your machines are listed on the left, and the selected one's details on
+the right. The toolbar has **New**, **Shelf**, **Shaders** and an **i**
+button for *About*. The details have **Start** and a **More** menu with
+**Settings**, **Discs**, **Snapshots** and **Clone**. Right-click a
+machine for the same commands.
+
+</TabItem>
+<TabItem label="Linux">
+
+Your machines are in the sidebar. The toolbar has **Start** and buttons
+for the selected machine's **Settings**, **Discs**, **Snapshots** and
+**Clone**. **New Machine**, **Disc Shelf** and **Shader Profiles** are in
+the main menu at the top of the sidebar. Right-click a machine for the
+same commands.
+
+On KDE Plasma, the launcher looks like the Windows one.
+
+</TabItem>
+</Tabs>
+
+Keyboard shortcuts use Ctrl on Windows and Linux, and ⌘ on macOS:
+
+| Command | Key |
+|---|---|
+| New Machine | Ctrl+N |
+| Start | Ctrl+R |
+| Settings | Ctrl+I |
+| Discs | Ctrl+E |
+| Snapshots | Ctrl+Shift+S |
+| Clone | Ctrl+D |
+| Disc Shelf | Ctrl+Shift+D |
+| Shader Profiles | Ctrl+Shift+P |
+
+## Machine families
+
+| Family | Good for | Starts with |
+|---|---|---|
+| Windows 98 | Games from about 1996 to 2003, DOS games in a DOS box | 256 MB, 10 GB disk, emulated, Sound Blaster 16 |
+| Windows XP | Games from about 2001 to 2008 | 512 MB, 20 GB disk, AC'97 sound |
+| Windows 7 | Later games, with Aero | 2 GB, 40 GB disk, HD Audio. Install from a 32-bit ISO |
+| Windows 11 | Today's Windows | 4 GB, 64 GB disk, UEFI and a TPM. See [Windows 11 machines](../windows-11/) |
+| DOS | DOS games that need a slower PC | 64 MB, 2 GB disk, a 486DX2-66 |
+| Other | BeOS, a period Linux, OS/2 | 512 MB, 10 GB disk, standard hardware, no 3D |

@@ -305,6 +305,10 @@ machine's settings for games that want a real PS/2 mouse.
 
 ## Documentation
 
+- [The user manual](https://roboport-tecnologia.github.io/2ksbox/):
+  installing, your first machine, discs, 3D games, controllers,
+  snapshots, the CRT look, music, Windows 11 and troubleshooting. Its
+  source is `manual/`.
 - [docs/06-guest-machines.md](docs/06-guest-machines.md): what each
   machine family is, its defaults, and what to expect from it.
 - [docs/07-frontend.md](docs/07-frontend.md): the launcher and the

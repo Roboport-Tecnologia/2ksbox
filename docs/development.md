@@ -588,6 +588,30 @@ host|all`; policy and tools in [testing.md](testing.md). CI
 (`.github/workflows/ci.yml`) is manual-trigger only (`workflow_dispatch`)
 and never runs the suite.
 
+## The user manual
+
+`manual/` is the end-user manual, a Starlight (Astro) site published to
+GitHub Pages at <https://roboport-tecnologia.github.io/2ksbox/> by
+`.github/workflows/manual.yml`, the one workflow that runs by itself: a
+push to `main` that touches `manual/` builds and deploys it. It is the
+only Node project in the repo; it needs Node 22 and nothing from the
+rest of the build.
+
+```sh
+cd manual
+npm ci
+npm run dev      # http://localhost:4321/2ksbox/, reloads on save
+npm run build    # into manual/dist, as the workflow does
+```
+
+Pages are `manual/src/content/docs/*.md(x)`; the sidebar's order is in
+`manual/astro.config.mjs`. The privacy page shows `docs/privacy.md`,
+which stays the policy's only copy. Window and setting names in the
+manual are the launcher's own strings (`launcher-core/src`); a change
+to one of them, or to anything a user sees, updates the manual in the
+same commit. Versions are pinned exactly in `package.json`, with the
+lock file committed.
+
 ## Packaging
 
 Everything is named **2ksbox** (ADR-011). The install layout every

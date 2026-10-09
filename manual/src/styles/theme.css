@@ -1,0 +1,21 @@
+/* The icon's teal and green. Dark is Starlight's default theme. */
+:root {
+	--sl-color-accent-low: #0f3236;
+	--sl-color-accent: #3a9aa6;
+	--sl-color-accent-high: #b9e4e8;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #cdeef1;
+	--sl-color-accent: #1f6f79;
+	--sl-color-accent-high: #0d3a40;
+}
+
+.hero img {
+	filter: drop-shadow(0 12px 28px rgb(0 0 0 / 0.35));
+}
+
+/* A page that shows a repository doc already has Starlight's title. */
+.imported-doc > h1:first-child {
+	display: none;
+}

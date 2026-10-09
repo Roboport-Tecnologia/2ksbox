@@ -23,6 +23,9 @@ on Apple Silicon as ARM64 under HVF.
 - `patches/qemu/README.md`: every QEMU patch, what it does, when to drop
   it. `patches/deps/README.md`: the same for the libraries
   `scripts/build-deps.sh` builds (macOS; on Linux QEMU's own GLib).
+- `manual/`: the end-user manual (Starlight, published to GitHub Pages
+  by `.github/workflows/manual.yml`). A change a user sees updates it
+  in the same commit; `docs/development.md` "The user manual".
 - `docs/build-macos.md`, `docs/build-windows.md`: platform specifics.
   The M1 Air is the Apple test machine, the reference rig (doc 09) the
   oracle, the user's own PC the only Windows test machine.

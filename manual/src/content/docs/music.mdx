@@ -1,0 +1,59 @@
+---
+title: Music
+description: Sound cards, FM synthesis, General MIDI and the Roland MT-32.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Game music in the 1990s came from the sound card's FM chip or from a MIDI
+synthesizer, and the same game could sound completely different on each.
+2ksbox has both.
+
+## The sound card
+
+Pick it in the machine's settings, on the **Audio** page.
+
+| Sound card | Use it for |
+|---|---|
+| Sound Blaster 16 (with FM) | Windows 98 and DOS. Almost every game knows it. The default on both |
+| Intel AC'97 | Windows XP. The default there |
+| Intel HD Audio | Windows 7 and 11 |
+| Gravis Ultrasound | DOS games that support it |
+| AdLib (FM only) | Very old DOS games |
+| Ensoniq AudioPCI (ES1370) | Other operating systems: BeOS, Linux, OS/2 |
+
+The Sound Blaster's FM chip is a real OPL3 synthesizer, not a sample of
+one. A DOS game set to "Sound Blaster" or "AdLib" music sounds the way it
+did on the card.
+
+## MIDI music
+
+**Music (MIDI)** adds a MIDI port (an MPU-401) with a synthesizer behind
+it, on Windows 98, XP, DOS and Other machines.
+
+### General MIDI
+
+**General MIDI (SoundFont)** is what a game's setup calls "General MIDI"
+or "MPU-401". 2ksbox includes a sound bank, so it works out of the box.
+Under **SoundFont (optional)**, you can pick a `.sf2` bank of your own,
+which changes how every instrument sounds.
+
+On Windows 98, Windows finds the port after you add "MPU-401 Compatible"
+in *Add New Hardware* and pick it under *Multimedia* in the Control
+Panel. It sounds much better than the FM chip Windows plays MIDI on
+otherwise.
+
+### Roland MT-32
+
+**Roland MT-32 / CM-32L** is what a 1990 game means by "Roland". Many
+Sierra and LucasArts games were composed on it, and they sound nothing
+like General MIDI.
+
+The MT-32 needs your own ROM images. 2ksbox doesn't include anything of
+Roland's. Under **MT-32 ROMs**, pick the folder with your CM-32L control
+and PCM ROM files. The machine won't start without them.
+
+<Aside>
+A game set to General MIDI or Roland with **No MIDI port** finds nothing
+and falls back to FM or digital music.
+</Aside>

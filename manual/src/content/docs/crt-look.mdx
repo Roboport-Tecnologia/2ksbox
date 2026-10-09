@@ -1,0 +1,79 @@
+---
+title: The CRT look
+description: Shader profiles, the default profile, and how the player scales the picture.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Games of the era were drawn for a CRT monitor. Their pixels were meant
+to blur into each other a little, with scanlines and a glow. On a flat
+panel, stretched to fit, they look blocky and soft at the same time.
+
+2ksbox takes the machine's own picture, at its own resolution, and runs
+it through a CRT shader before it reaches your screen. The shaders come
+from libretro's collection, the same ones RetroArch uses.
+
+## Shader profiles
+
+A *shader profile* is a shader preset plus your own adjustments to it,
+under a name. The download on first start adds three:
+
+- **CRT Aperture**, a sharp aperture-grille look. It's the default.
+- **CRT Royale**, a detailed CRT with a phosphor mask and glow. It needs
+  a strong graphics card.
+- **Apple II**, for something different.
+
+Open **Shader Profiles** to see them. The switch in the **Default**
+column marks the profile that every machine set to "(default)" uses.
+**No default** clears it, and those machines then show the picture with
+no shader.
+
+## Make your own
+
+<Steps>
+
+1. In **Shader Profiles**, click **New**.
+2. Type a **Name** and pick a **Preset (.slangp)**. The collection has
+   hundreds, in folders by kind. The `crt` folder is the place to start.
+3. Pick a **Preview image**: a screenshot of a game you play. The
+   preview shows it through the shader as you change things. The
+   **Scale** slider shows it at the size you'll play at.
+4. Adjust the preset's parameters until it looks right.
+5. Click **Save**.
+
+</Steps>
+
+A good preview image is one the player saved with Ctrl+Alt+S (⌥⌘S on
+macOS). It is the machine's own picture before the shader.
+
+## Pick a profile for a machine
+
+In the machine's settings, on the **Display** page, set **Shader
+profile**. "(default)" follows whatever profile you marked as the
+default, so changing the default changes every machine set to it.
+
+A Windows 11 machine starts with no shader, because a modern desktop is
+meant for a flat panel.
+
+## How the player scales the picture
+
+The player keeps the machine's picture in proportion and adds black
+bars rather than stretching it. 320×200 games get the 4:3 shape they had
+on a monitor.
+
+The *View* menu's **Scale** chooses the size:
+
+- **Largest That Fits** fills the window as far as whole steps allow.
+- **1x** to **4x** show each of the machine's pixels as exactly that
+  many of yours. Retina screens have more steps. A size that doesn't fit
+  the window is cropped.
+- **Fit Window to Picture** sizes the window to the picture.
+
+Whole steps matter for a CRT shader: its scanlines land on the same rows
+of your screen every time, so the picture doesn't shimmer.
+
+<Aside type="tip">
+**Full Screen** (Ctrl+Alt+Shift+F, or the green button on macOS) with
+**Largest That Fits** is the closest to sitting in front of the old
+monitor.
+</Aside>

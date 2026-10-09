@@ -1,0 +1,79 @@
+---
+title: Discs and the disc shelf
+description: Add your disc images, put them in a machine's drive, and swap them while it runs.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+All your machines share one disc shelf. Add a disc once and any machine
+can use it.
+
+## What 2ksbox reads
+
+| Format | Files |
+|---|---|
+| CUE/BIN | `.cue` with its `.bin` files |
+| CloneCD | `.ccd` with its `.img` and `.sub` |
+| Alcohol 120% | `.mds` with its `.mdf` |
+| ISO | `.iso` |
+| A folder | Any folder on your computer, served as a CD |
+
+The drive reads raw dumps the way a real CD-ROM drive does, so CD audio
+plays and many copy-protected discs work. A folder becomes an ordinary
+data CD, which is handy for patches, drivers and your own files.
+
+## Add discs
+
+Open the **Disc Shelf**, or a machine's **Discs** window, and click
+**Add**:
+
+- **Disc image…** picks an image file.
+- **Folder as disc…** picks a folder.
+- **Guest tools ISO** adds the disc with 2ksbox's drivers.
+
+You can also drag disc images or folders from your file manager onto the
+window.
+
+Click the pencil next to a disc to rename it. The trash button takes it
+off the shelf, and leaves the files on your disk where they are.
+
+## Put a disc in the drive
+
+Open the machine's **Discs** window. The card at the top is the
+machine's CD drive. Click **Insert** next to a disc in the library
+below. **Eject** empties the drive.
+
+- **Machine turned off:** the disc waits in the drive and the machine
+  starts with it.
+- **Machine running:** the disc goes into the drive at once, as if you
+  had swapped it by hand. Windows sees the change, and AutoPlay runs.
+
+## Swap discs from inside the machine
+
+Games that span several CDs ask for the next disc in the middle of an
+install. You can swap from the launcher, or from inside the machine with
+the disc shelf tool that the guest tools install:
+
+- On Windows, run `CDSHELF`. With no arguments it opens a window that
+  lists the shelf.
+- At a command prompt, `CDSHELF` lists the shelf, `CDSHELF 3` inserts
+  disc 3, and `CDSHELF E` empties the drive.
+- In DOS, `CDSHELF.COM` takes keys: 0 to 9 load a disc, E empties the
+  drive, R reads the list again and Esc quits.
+
+<Aside type="tip">
+On Windows 98, the guest tools can also put an *MS-DOS mode* shortcut on
+the desktop with the CD drive and the Sound Blaster set up, for DOS games
+that won't run in a DOS box. Choose it from the `SETUP` menu.
+</Aside>
+
+## Install a game
+
+<Steps>
+
+1. Add the game's disc to the shelf.
+2. Insert it in a running machine.
+3. Install the game the way the box says.
+4. Before you play, read [3D games](../3d/) if it's a 3D game.
+
+</Steps>
