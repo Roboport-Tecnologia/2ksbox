@@ -125,12 +125,33 @@ fn credit_groups() -> Vec<impl View + use<>> {
         .collect()
 }
 
+/// A link button as wide as its label: Breeze gives every button an 80 px
+/// minimum and centres the label in it, so names sat in the middle of the
+/// name column (user). The desktop style draws the label itself (the
+/// button has no content item to measure), so it's measured in the
+/// button's font, and the button made that wide plus half a grid unit a
+/// side. Elsewhere the button already hugs its label.
+fn hug() -> Tweak<Button> {
+    platform! {
+        kde => mitsuami::kirigami::tweak(|button: &mitsuami::kirigami::QmlObject| {
+            use mitsuami::kirigami::QmlObject;
+            let metrics = button.child("hugMetrics").unwrap_or_else(|| {
+                QmlObject::load_in("TextMetrics { objectName: \"hugMetrics\"; font: parent.font }", *button)
+            });
+            metrics.set_str("text", &button.str("text"));
+            let width = metrics.real("advanceWidth") + mitsuami::kirigami::grid_unit();
+            button.set_real("implicitWidth", width.ceil());
+        }),
+        _ => Tweak::none(),
+    }
+}
+
 /// One project: its name as a link, what it does for us, its licence.
 fn credit_row(c: &'static Credit) -> impl View + use<> {
     view! {
         <Row gap=Spacing::Md align=Align::Center>
             <Row width=NAME_W shrink=0.0>
-                <Button button_style=ButtonStyle::Borderless tooltip=c.url @click=move || open_url(c.url)>
+                <Button button_style=ButtonStyle::Borderless tooltip=c.url native=hug() @click=move || open_url(c.url)>
                     {c.name}
                 </Button>
             </Row>
