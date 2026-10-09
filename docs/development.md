@@ -606,7 +606,8 @@ npm run build    # into manual/dist, as the workflow does
 
 Pages are `manual/src/content/docs/*.md(x)`; the sidebar's order is in
 `manual/astro.config.mjs`. The privacy page shows `docs/privacy.md`,
-which stays the policy's only copy. Window and setting names in the
+which stays the policy's only copy, and Acknowledgements reads
+`launcher_core::about`'s list, the About window's. Window and setting names in the
 manual are the launcher's own strings (`launcher-core/src`); a change
 to one of them, or to anything a user sees, updates the manual in the
 same commit. Versions are pinned exactly in `package.json`, with the

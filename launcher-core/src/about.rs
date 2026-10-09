@@ -2,6 +2,9 @@
 //! and the projects it is built on, grouped by what they do for it.
 //! Here and not in a front end (ADR-014), so every launcher thanks the
 //! same people in the same order. `launcherx --about` prints it.
+//! The manual's Acknowledgements page reads `GROUPS` from this file
+//! (`manual/src/components/Credits.astro`): keep each `title:` and `c(...)`
+//! on one line.
 //!
 //! The list is the projects the app runs or ships, plus Wine, which a
 //! host below DXVK's floor brings itself. A library one of these pulls

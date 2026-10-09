@@ -1,0 +1,45 @@
+---
+// The projects 2ksbox is built on, read from launcher-core/src/about.rs at
+// build time: that file is the list's only copy, the one the launcher's
+// About window and `launcherx --about` show.
+import src from '../../../launcher-core/src/about.rs?raw';
+
+const groups: { title: string; credits: string[][] }[] = [];
+for (const line of src.slice(src.indexOf('pub const GROUPS')).split('\n')) {
+	const title = line.match(/^\s*title: "([^"]+)",/);
+	if (title) groups.push({ title: title[1], credits: [] });
+	const credit = line.match(/^\s*c\("([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"\),/);
+	if (credit && groups.length) groups[groups.length - 1].credits.push(credit.slice(1));
+}
+if (groups.length === 0 || groups.some((g) => g.credits.length === 0)) {
+	throw new Error('Credits: no groups or an empty group read from launcher-core/src/about.rs');
+}
+---
+
+{
+	groups.map((g) => (
+		<>
+			<h2 id={g.title.toLowerCase()}>{g.title}</h2>
+			<table>
+				<thead>
+					<tr>
+						<th>Project</th>
+						<th>What it does for 2ksbox</th>
+						<th>Licence</th>
+					</tr>
+				</thead>
+				<tbody>
+					{g.credits.map(([name, what, license, url]) => (
+						<tr>
+							<td>
+								<a href={url}>{name}</a>
+							</td>
+							<td>{what}</td>
+							<td>{license}</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</>
+	))
+}
