@@ -179,8 +179,9 @@ driver.
 
    **A. The rate follows the screen** (2026-10-09: done on the PC; embed
    API v15, `player-core/src/screen.rs`, patch 02; the screen's rate is
-   read on Windows and macOS so far, so Linux sends 60 Hz; on the Air the
-   player logs `host screen at 60.002 Hz`, Core Video's nominal period). On the
+   read on Windows, macOS and Linux; on the Air the player logs `host
+   screen at 60.002 Hz`, Core Video's nominal period, on Linux `59.996 Hz`
+   from the CRTC's mode, "On Linux" below). On the
    PC's 144 Hz screen the player logs `[display] host screen at 144.000
    Hz: the guest's blank at 72.000 Hz`, the driver takes 71.999 Hz from
    the EDID (its pixel clock is in 10 kHz steps), and DWM composes every
@@ -308,6 +309,23 @@ driver.
      config interrupt is message 0 as on x64. Same driver and device code
      as the PC's, where it works.
 
+   **On Linux (2026-10-09; the user: "now I want to see windows 11
+   smooth here on linux too").** `screen.rs` reads the screen through
+   DRM, so it works the same under any compositor or X server: the CRTC
+   that lights the screen (`DRM_IOCTL_MODE_GETCRTC`), its mode's exact
+   rate (pixel clock over the total size: `59.996 Hz` for the user's
+   3840x2160 DP-1, which sway rounds to 59.997), and
+   `DRM_IOCTL_WAIT_VBLANK` on the card's primary node for the blank. The
+   wait needs no DRM master, only the seat's access to `/dev/dri/card*`
+   (logind's ACL; the render node does not take the call): 120 waits in
+   a plain process came 16.662 to 16.672 ms apart. Which screen a window
+   is on is the compositor's to say, and GTK's surface hides Wayland's
+   `enter` events from us, so with one screen lit that one is followed,
+   with several none (the guest keeps its timer) unless
+   `PLAYER_HOST_SCREEN` names the connector (`DP-1`, as the compositor
+   and `/sys/class/drm` name it). A screen with variable refresh on
+   blanks at the compositor's pace, not the mode's.
+
    **The stall was lost interrupts: QEMU patch 91 (2026-10-09).** Once
    the guest froze (this time after the user had logged in: "it even
    worked for a bit"), QMP hung in `run_on_cpu` and the player's samples
@@ -341,6 +359,10 @@ Windows 11 test here.
 
 ## Open
 
+- Linux with several screens lit: the window's screen is not asked of
+  the compositor (`PLAYER_HOST_SCREEN` picks one by hand). Wayland's
+  `wp_presentation` feedback on the player's surface would name its
+  output (`sync_output`) and give the exact refresh; X11 has RandR.
 - Windows 11 on Arm: the driver's timer bunching on a coarse tick under
   HVF (only the watchdog now, patch 91 above), and Basic Display on
   ramfb drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").

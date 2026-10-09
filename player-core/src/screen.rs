@@ -12,8 +12,10 @@
 //! a rational such as 143.981 Hz) and its adapter's vertical blank event
 //! (`D3DKMTWaitForVerticalBlankEvent`); on macOS a `CVDisplayLink` for the
 //! window's `NSScreen`, its nominal period (a rational too) and its
-//! callback. Elsewhere neither is read yet: the guest gets 60 Hz, which a
-//! 60 Hz screen and a 120 Hz ProMotion one both divide, from its own timer.
+//! callback; on Linux the CRTC that lights the screen, through DRM (its
+//! mode's exact rate, and `DRM_IOCTL_WAIT_VBLANK`). Elsewhere neither is
+//! read: the guest gets 60 Hz, which a 60 Hz screen and a 120 Hz ProMotion
+//! one both divide, from its own timer.
 
 use qemu_embed::Qemu;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -379,7 +381,307 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+mod platform {
+    //! DRM, under any compositor or X server: the CRTC that drives the
+    //! screen, its mode's exact rate, and `DRM_IOCTL_WAIT_VBLANK` on the
+    //! card's primary node, which needs no master (only the seat's access
+    //! to `/dev/dri/card*`, which logind gives). Which screen a window is on
+    //! is the compositor's to say and is not asked: with one screen lit that
+    //! one, with several none (the guest keeps its timer), unless
+    //! `PLAYER_HOST_SCREEN` names the connector (`DP-1`, as
+    //! `/sys/class/drm` and the compositor name it).
+
+    use super::Shared;
+    use qemu_embed::Qemu;
+    use std::fs::File;
+    use std::os::fd::AsRawFd;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use wgpu::rwh::RawWindowHandle;
+
+    pub const HAS_VBLANK: bool = true;
+
+    /// A lit screen: its card's node, and its CRTC's index on that card.
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct Screen {
+        card: String,
+        pipe: u32,
+        mhz: u32,
+    }
+
+    const fn iowr(nr: u32, size: usize) -> libc::c_ulong {
+        ((3 << 30) | ((size as u32) << 16) | ((b'd' as u32) << 8) | nr) as libc::c_ulong
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct CardRes {
+        fb_id_ptr: u64,
+        crtc_id_ptr: u64,
+        connector_id_ptr: u64,
+        encoder_id_ptr: u64,
+        count_fbs: u32,
+        count_crtcs: u32,
+        count_connectors: u32,
+        count_encoders: u32,
+        min_width: u32,
+        max_width: u32,
+        min_height: u32,
+        max_height: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ModeInfo {
+        clock: u32,
+        hdisplay: u16,
+        hsync_start: u16,
+        hsync_end: u16,
+        htotal: u16,
+        hskew: u16,
+        vdisplay: u16,
+        vsync_start: u16,
+        vsync_end: u16,
+        vtotal: u16,
+        vscan: u16,
+        vrefresh: u32,
+        flags: u32,
+        kind: u32,
+        name: [u8; 32],
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Crtc {
+        set_connectors_ptr: u64,
+        count_connectors: u32,
+        crtc_id: u32,
+        fb_id: u32,
+        x: u32,
+        y: u32,
+        gamma_size: u32,
+        mode_valid: u32,
+        mode: ModeInfo,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Connector {
+        encoders_ptr: u64,
+        modes_ptr: u64,
+        props_ptr: u64,
+        prop_values_ptr: u64,
+        count_modes: u32,
+        count_props: u32,
+        count_encoders: u32,
+        encoder_id: u32,
+        connector_id: u32,
+        connector_type: u32,
+        connector_type_id: u32,
+        connection: u32,
+        mm_width: u32,
+        mm_height: u32,
+        subpixel: u32,
+        pad: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Encoder {
+        encoder_id: u32,
+        encoder_type: u32,
+        crtc_id: u32,
+        possible_crtcs: u32,
+        possible_clones: u32,
+    }
+
+    /// `union drm_wait_vblank`: the request, and the reply in its place.
+    #[repr(C)]
+    #[derive(Default)]
+    struct WaitVBlank {
+        kind: u32,
+        sequence: u32,
+        tval_sec: i64,
+        tval_usec: i64,
+    }
+
+    const GETRESOURCES: libc::c_ulong = iowr(0xa0, std::mem::size_of::<CardRes>());
+    const GETCRTC: libc::c_ulong = iowr(0xa1, std::mem::size_of::<Crtc>());
+    const GETENCODER: libc::c_ulong = iowr(0xa6, std::mem::size_of::<Encoder>());
+    const GETCONNECTOR: libc::c_ulong = iowr(0xa7, std::mem::size_of::<Connector>());
+    const WAIT_VBLANK: libc::c_ulong = iowr(0x3a, std::mem::size_of::<WaitVBlank>());
+    const VBLANK_RELATIVE: u32 = 0x1;
+    const VBLANK_HIGH_CRTC_SHIFT: u32 = 1;
+    const VBLANK_HIGH_CRTC_MASK: u32 = 0x3e;
+
+    fn ioctl<T>(card: &File, request: libc::c_ulong, arg: &mut T) -> bool {
+        loop {
+            let r = unsafe { libc::ioctl(card.as_raw_fd(), request as _, arg as *mut T) };
+            if r == 0 {
+                return true;
+            }
+            let e = std::io::Error::last_os_error().raw_os_error();
+            if e != Some(libc::EINTR) && e != Some(libc::EAGAIN) {
+                return false;
+            }
+        }
+    }
+
+    /// The kernel's names for connector types (`drm_connector_enum_list`),
+    /// for those a screen can be on.
+    fn type_name(kind: u32) -> &'static str {
+        match kind {
+            1 => "VGA",
+            2 => "DVI-I",
+            3 => "DVI-D",
+            4 => "DVI-A",
+            7 => "LVDS",
+            10 => "DisplayPort",
+            11 => "HDMI-A",
+            12 => "HDMI-B",
+            14 => "eDP",
+            15 => "Virtual",
+            16 => "DSI",
+            17 => "DPI",
+            _ => "Unknown",
+        }
+    }
+
+    /// The connector's name as the compositor gives it: `DP-1`, `HDMI-A-1`.
+    fn connector_name(c: &Connector) -> String {
+        let t = match type_name(c.connector_type) {
+            "DisplayPort" => "DP",
+            t => t,
+        };
+        format!("{t}-{}", c.connector_type_id)
+    }
+
+    /// Every lit screen on one card: its CRTC's index and rate, and the
+    /// names of the connectors it drives.
+    fn lit(path: &str) -> Vec<(Screen, Vec<String>)> {
+        let Ok(card) = File::options().read(true).write(true).open(path) else { return vec![] };
+        let mut res = CardRes::default();
+        if !ioctl(&card, GETRESOURCES, &mut res) {
+            return vec![];
+        }
+        let mut crtcs = vec![0u32; res.count_crtcs as usize];
+        let mut connectors = vec![0u32; res.count_connectors as usize];
+        let mut res = CardRes {
+            crtc_id_ptr: crtcs.as_mut_ptr() as u64,
+            connector_id_ptr: connectors.as_mut_ptr() as u64,
+            count_crtcs: crtcs.len() as u32,
+            count_connectors: connectors.len() as u32,
+            ..Default::default()
+        };
+        if !ioctl(&card, GETRESOURCES, &mut res) {
+            return vec![];
+        }
+        // which CRTC each connected connector is driven by
+        let mut driven: Vec<(u32, String)> = vec![];
+        for &id in connectors.iter().take(res.count_connectors as usize) {
+            let mut c = Connector { connector_id: id, ..Default::default() };
+            if !ioctl(&card, GETCONNECTOR, &mut c) || c.encoder_id == 0 {
+                continue;
+            }
+            let mut e = Encoder { encoder_id: c.encoder_id, ..Default::default() };
+            if ioctl(&card, GETENCODER, &mut e) && e.crtc_id != 0 {
+                driven.push((e.crtc_id, connector_name(&c)));
+            }
+        }
+        let mut out = vec![];
+        for (pipe, &id) in crtcs.iter().take(res.count_crtcs as usize).enumerate() {
+            let mut c = Crtc { crtc_id: id, ..Default::default() };
+            if !ioctl(&card, GETCRTC, &mut c) || c.mode_valid == 0 {
+                continue;
+            }
+            let m = &c.mode;
+            let total = m.htotal as u64 * m.vtotal as u64;
+            if m.clock == 0 || total == 0 {
+                continue;
+            }
+            // the pixel clock is in kHz; the rate the exact quotient
+            let mut mhz = m.clock as u64 * 1_000_000 / total;
+            if m.flags & 0x10 != 0 {
+                mhz *= 2; // DRM_MODE_FLAG_INTERLACE: a field a blank
+            }
+            if m.flags & 0x20 != 0 {
+                mhz /= 2; // DRM_MODE_FLAG_DBLSCAN
+            }
+            let names = driven.iter().filter(|(c, _)| *c == id).map(|(_, n)| n.clone()).collect();
+            out.push((Screen { card: path.to_string(), pipe: pipe as u32, mhz: mhz as u32 }, names));
+        }
+        out
+    }
+
+    /// The screen to follow: the one named by `PLAYER_HOST_SCREEN`, or the
+    /// only one lit on any card.
+    fn the_screen() -> Option<Screen> {
+        let mut cards: Vec<String> = std::fs::read_dir("/dev/dri")
+            .ok()?
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.strip_prefix("card").is_some_and(|d| d.parse::<u32>().is_ok()))
+            .map(|n| format!("/dev/dri/{n}"))
+            .collect();
+        cards.sort();
+        let all: Vec<_> = cards.iter().flat_map(|c| lit(c)).collect();
+        match std::env::var("PLAYER_HOST_SCREEN") {
+            Ok(want) => all.into_iter().find(|(_, names)| names.contains(&want)).map(|(s, _)| s),
+            Err(_) if all.len() == 1 => all.into_iter().next().map(|(s, _)| s),
+            Err(_) => None,
+        }
+    }
+
+    pub fn screen_name(_raw: RawWindowHandle) -> Option<Screen> {
+        the_screen()
+    }
+
+    pub fn refresh_mhz(_raw: RawWindowHandle) -> Option<u32> {
+        the_screen().map(|s| s.mhz)
+    }
+
+    /// The host-vblank thread: the screen's card, opened again when the
+    /// screen changes, and its CRTC's vertical blank, one at a time.
+    pub fn vblank_loop(shared: &Shared, vm: Qemu) {
+        let mut open: Option<(Screen, File)> = None;
+        let mut count = 0u32;
+        while !shared.stop.load(Ordering::Relaxed) {
+            let every = shared.every.load(Ordering::Relaxed);
+            let want = shared.screen.lock().unwrap().clone().filter(|_| every > 0);
+            let Some(want) = want else {
+                open = None;
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            };
+            if open.as_ref().is_none_or(|(s, _)| *s != want) {
+                open = File::options().read(true).write(true).open(&want.card).ok().map(|f| (want.clone(), f));
+                if open.is_none() {
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+            }
+            let (screen, card) = open.as_ref().unwrap();
+            let mut w = WaitVBlank {
+                kind: VBLANK_RELATIVE | ((screen.pipe << VBLANK_HIGH_CRTC_SHIFT) & VBLANK_HIGH_CRTC_MASK),
+                sequence: 1,
+                ..Default::default()
+            };
+            if !ioctl(card, WAIT_VBLANK, &mut w) {
+                // the screen is off (blanked, unplugged): again in a while,
+                // the guest's own timer filling in meanwhile
+                open = None;
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            count = count.wrapping_add(1);
+            if count % every == 0 {
+                vm.vblank();
+            }
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod platform {
     use super::Shared;
     use qemu_embed::Qemu;
