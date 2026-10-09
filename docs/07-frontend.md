@@ -82,7 +82,10 @@ player line runs a machine with nothing else.
   Ctrl elsewhere) with N New Machine, R Start, I Settings, E Discs,
   Shift+S Snapshots, D Clone (macOS's Duplicate), Shift+D Disc Shelf,
   Shift+P Shader Profiles; the machine ones act on the chosen machine.
-  On macOS they are the menu bar's File, Machine and Window menus;
+  On macOS they are the menu bar's File (New Machine, Disc Shelf,
+  Shader Profiles) and Machine menus, and the toolbar is Start and the
+  machine's Settings, Discs, Snapshots and Clone as one capsule of icons
+  (user, 2026-10-08; the details have no Start or More there);
   elsewhere there is no menu bar, so the window takes the keys
   (`on_key`) and the More and context menus and the toolbar's tooltips
   show them.

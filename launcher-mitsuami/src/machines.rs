@@ -273,21 +273,57 @@ pub fn MachinesWindow() -> impl View {
             library.selected.set(shown);
         }
     });
+    // On macOS (user): Start, then the chosen machine's windows as one
+    // capsule of icons, each named by its tooltip; New and the two
+    // libraries are the File menu's (`command_menus`).
+    #[cfg(target_os = "macos")]
+    let toolbar_buttons = {
+        let stores = Stores::get();
+        let tool = move |command: Command, icon: &'static str| {
+            view! {
+                <Button
+                    icon=icon
+                    icon_only=true
+                    tooltip=command.tooltip()
+                    enabled=move || command.enabled(stores, library.current().as_deref())
+                    @click=move || command.run(stores, library.current().as_deref())
+                >{command.label()}</Button>
+            }
+        };
+        view! {
+            <Button
+                icon=icons::START
+                tooltip=Command::Start.tooltip()
+                enabled=move || Command::Start.enabled(stores, library.current().as_deref())
+                @click=move || Command::Start.run(stores, library.current().as_deref())
+            >"Start"</Button>
+            <Row>
+                {tool(Command::Settings, icons::SETTINGS)}
+                {tool(Command::Discs, icons::DISCS)}
+                {tool(Command::Snapshots, icons::SNAPSHOTS)}
+                {tool(Command::Clone, icons::CLONE)}
+            </Row>
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
     let shelf = move || {
         view! {
             <Button icon=icons::DISCS tooltip=Command::Shelf.tooltip() @click=move || discs.open_library(library)>"Shelf"</Button>
         }
     };
+    #[cfg(not(target_os = "macos"))]
     let shaders_button = move || {
         view! {
             <Button icon=icons::SHADERS tooltip=Command::Shaders.tooltip() @click=move || shaders.open_list()>"Shaders"</Button>
         }
     };
-    // On macOS 26 one item, a row, so one capsule (user); elsewhere two
-    // items, which the platform spaces as its toolbars do.
-    let shelf_and_shaders = platform! {
-        macos => view! { <Row>{shelf()}{shaders_button()}</Row> },
-        _ => (shelf(), shaders_button()),
+    // Elsewhere New, Shelf and Shaders, two items the platform spaces as
+    // its toolbars do.
+    #[cfg(not(target_os = "macos"))]
+    let toolbar_buttons = view! {
+        <Button icon=icons::NEW tooltip=Command::New.tooltip() @click=move || wizard.open_fresh()>"New"</Button>
+        {shelf()}
+        {shaders_button()}
     };
     // About, at the toolbar's end. Not on macOS (user): there it is the
     // application menu's (`about::app_menu`).
@@ -319,8 +355,7 @@ pub fn MachinesWindow() -> impl View {
                         width=160
                     />
                 </Show>
-                <Button icon=icons::NEW tooltip=Command::New.tooltip() @click=move || wizard.open_fresh()>"New"</Button>
-                {shelf_and_shaders}
+                {toolbar_buttons}
                 {about_button}
             </Toolbar>
             <Show when=move || library.read(Machines::is_empty) fallback=|| view! { <MachineLibrary/> }>
@@ -444,8 +479,8 @@ fn MachineList() -> impl View {
 }
 
 /// What can be done to a machine besides starting it, each opening its
-/// window on it: the details' More menu, and the list's context menu
-/// under Start. `dir` names the machine when the menu is used.
+/// window on it: the details' More menu (not on macOS), and the list's
+/// context menu under Start. `dir` names the machine when the menu is used.
 fn machine_actions(dir: Rc<dyn Fn() -> PathBuf>) -> impl mitsuami::core::services::MenuEntries {
     let stores = Stores::get();
     let dir: Rc<dyn Fn() -> Option<PathBuf>> = Rc::new(move || Some(dir()));
@@ -594,8 +629,8 @@ impl Command {
 }
 
 /// The menu bar's commands on macOS, on the chosen machine: File's New
-/// Machine (AppKit's place for New), Machine's, and Window's two
-/// libraries. Elsewhere `None`: the window takes the keys.
+/// Machine (AppKit's place for New) and the two libraries (user), and
+/// Machine's. Elsewhere `None`: the window takes the keys.
 fn command_menus(s: Stores) -> Option<MenuBar> {
     if !cfg!(target_os = "macos") {
         return None;
@@ -604,7 +639,13 @@ fn command_menus(s: Stores) -> Option<MenuBar> {
     let item = |c: Command| c.item(s, current.clone());
     Some(
         MenuBar::new()
-            .menu(Menu::new("File").item(item(Command::New)))
+            .menu(
+                Menu::new("File")
+                    .item(item(Command::New))
+                    .separator()
+                    .item(item(Command::Shelf))
+                    .item(item(Command::Shaders)),
+            )
             .menu(
                 Menu::new("Machine")
                     .item(item(Command::Start))
@@ -613,8 +654,7 @@ fn command_menus(s: Stores) -> Option<MenuBar> {
                     .item(item(Command::Discs))
                     .item(item(Command::Snapshots))
                     .item(item(Command::Clone)),
-            )
-            .menu(Menu::new("Window").item(item(Command::Shelf)).item(item(Command::Shaders))),
+            ),
     )
 }
 
@@ -654,7 +694,24 @@ fn Details() -> impl View {
     let library = use_store::<Library>();
     let current = move || library.current().unwrap_or_default();
     let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
-    let running = move || library.is_running(&current());
+    // Start and More beside the name; not on macOS, where they are the
+    // toolbar's (user).
+    let actions = platform! {
+        macos => (),
+        _ => {
+            let running = move || library.is_running(&current());
+            view! {
+                <Button
+                    role=ButtonRole::Default
+                    icon=icons::START
+                    enabled=move || !running()
+                    tooltip=Command::Start.tooltip()
+                    @click=move || library.play(&current())
+                >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
+                <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>
+            }
+        },
+    };
     // On Windows the details are a shade darker than the list beside them
     // (user): Fluent's secondary background, which follows the theme as the
     // window's base one does, set as a style so it switches with it.
@@ -676,14 +733,7 @@ fn Details() -> impl View {
                         <Text text_style=TextStyle::LargeTitle max_lines=1>{field(|m, row| m.machine(row).map(|x| x.name.clone()))}</Text>
                         <Text color=Color::SecondaryLabel>{field(|m, row| Some(m.subtitle(row)))}</Text>
                     </Column>
-                    <Button
-                        role=ButtonRole::Default
-                        icon=icons::START
-                        enabled=move || !running()
-                        tooltip=Command::Start.tooltip()
-                        @click=move || library.play(&current())
-                    >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
-                    <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>
+                    {actions}
                 </Row>
                 <For
                     each=move || library.details(&current())
@@ -773,6 +823,17 @@ pub(crate) mod icons {
     pub const TRASH: &str = platform! {
         macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
     };
+    // The machine's Settings and Clone, the macOS toolbar's.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub const SETTINGS: &str = platform! {
+        macos => "gearshape", gtk => "emblem-system-symbolic", kde => "configure", windows => "\u{E713}",
+    };
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub const CLONE: &str = platform! {
+        macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
+    };
+    // The Shaders toolbar button's; on macOS the File menu has them.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
     };
