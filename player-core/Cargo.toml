@@ -41,9 +41,22 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 # the machine's shared folder, served in this process (M23)
 libsmb = { path = "../libsmb" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# which screen the window is on (screen.rs): Wayland's presentation
+# feedback on the toolkit's own connection, RandR on X11; the versions and
+# features mitsuami and winit already link, libwayland loaded at run time
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
+wayland-protocols = { version = "0.32", features = ["client"] }
+x11rb = { version = "0.13", features = ["randr"] }
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Media"] }
+# Win32_Graphics_Gdi, Win32_Devices_Display and Wdk_Graphics_Direct3D: the
+# window's screen's refresh and vertical blank (screen.rs)
+windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Devices_Display", "Wdk_Graphics_Direct3D"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# the window's screen (screen.rs); its rate and blank are Core Video's
+objc2 = "0.6"
 objc2-metal = { version = "0.3", features = ["MTLDevice", "MTLTexture", "MTLPixelFormat", "objc2-io-surface"] }
 objc2-io-surface = { version = "0.3", features = ["IOSurfaceRef"] }

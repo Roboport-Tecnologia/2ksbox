@@ -1,0 +1,444 @@
+viogpudo: a vertical blank of its own, from a high-resolution timer.
+
+viogpudo leaves every mode's refresh rate "not specified", which a
+display-only driver must do when it gives no vertical blank; dxgkrnl then
+simulates one, Windows reports 1 Hz, and DWM composes on the 15.6 ms
+system tick (64 Hz).  On a 60 Hz host screen that is a frame dropped four
+times a second: the Windows 11 desktop's choppiness (2ksbox track M24).
+
+With this patch the driver implements DxgkDdiControlInterrupt and
+DxgkDdiGetScanLine (a display-only driver must give both or neither),
+reports each mode at VSyncHz with a 1/20 blank, and while dxgkrnl has the
+interrupt enabled raises DXGK_INTERRUPT_DISPLAYONLY_VSYNC from an
+EX_TIMER_HIGH_RESOLUTION timer, through DxgkCbSynchronizeExecution.
+GetScanLine places the scan line by the time since the last blank.
+
+The timer is one-shot, re-armed in its callback toward an absolute
+schedule on the QPC (blank n at base + n * frequency / VSyncHz, a missed
+one skipped): a periodic timer's lateness adds up (59.6 Hz measured for
+60).  A second high-resolution timer, periodic with no callback, stays
+armed while the blank is on: without it the clock leaves its finest
+resolution between the one-shot's expiry and its re-arm, and blanks came
+up to a 15.6 ms tick late.  Measured on x64 Windows 11 under WHPX, DWM
+composes every 16.667 ms on average (DwmFlush; 5th to 95th percentile
+16.3 to 17.1 ms) against 15.6 ms with the tick's jitter before.
+
+VSyncHz (REG_DWORD) under HKLM\SYSTEM\CurrentControlSet\Services\VioGpuDod
+\Parameters, read at DriverEntry: 60 when absent, 0 for upstream's
+behaviour exactly, at most 240.  Target modes also get their active size
+(upstream copies the total size into it before the total is filled in).
+
+diff --git a/viogpu/viogpudo/driver.cpp b/viogpu/viogpudo/driver.cpp
+index 33f18c7..1f2c940 100644
+--- a/viogpu/viogpudo/driver.cpp
++++ b/viogpu/viogpudo/driver.cpp
+@@ -46,6 +46,35 @@ int bBreakAlways;
+ 
+ tDebugPrintFunc VirtioDebugPrintProc;
+ 
++// The vertical blank's rate (2ksbox): VSyncHz under the service's
++// Parameters key, 60 if absent, 0 for upstream's behaviour (no vertical
++// blank of ours; dxgkrnl simulates one and the modes carry no rate).
++ULONG g_VSyncHz = VIOGPU_VSYNC_DEFAULT_HZ;
++
++static VOID ReadVSyncHz(_In_ UNICODE_STRING *pRegistryPath)
++{
++    WCHAR Path[256];
++    if (pRegistryPath->Length >= sizeof(Path))
++    {
++        return;
++    }
++    RtlCopyMemory(Path, pRegistryPath->Buffer, pRegistryPath->Length);
++    Path[pRegistryPath->Length / sizeof(WCHAR)] = L'\0';
++
++    ULONG Hz = g_VSyncHz;
++    RTL_QUERY_REGISTRY_TABLE Table[3] = {};
++    Table[0].Flags = RTL_QUERY_REGISTRY_SUBKEY;
++    Table[0].Name = (PWSTR)L"Parameters";
++    Table[1].Flags = RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK;
++    Table[1].Name = (PWSTR)L"VSyncHz";
++    Table[1].EntryContext = &Hz;
++    Table[1].DefaultType = (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_NONE;
++    if (NT_SUCCESS(RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE, Path, Table, NULL, NULL)))
++    {
++        g_VSyncHz = min(Hz, VIOGPU_VSYNC_MAX_HZ);
++    }
++}
++
+ #ifdef DBG
+ void InitializeDebugPrints(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING RegistryPath)
+ {
+@@ -78,6 +107,9 @@ extern "C" NTSTATUS DriverEntry(_In_ DRIVER_OBJECT *pDriverObject, _In_ UNICODE_
+ 
+     KMDDOD_INITIALIZATION_DATA InitialData = {0};
+ 
++    ReadVSyncHz(pRegistryPath);
++    DbgPrint(TRACE_LEVEL_FATAL, ("VSyncHz = %lu\n", g_VSyncHz));
++
+     InitialData.Version = DXGKDDI_INTERFACE_VERSION_WIN8; // DXGKDDI_INTERFACE_VERSION;
+ 
+     InitialData.DxgkDdiAddDevice = VioGpuDodAddDevice;
+@@ -109,6 +141,13 @@ extern "C" NTSTATUS DriverEntry(_In_ DRIVER_OBJECT *pDriverObject, _In_ UNICODE_
+     InitialData.DxgkDdiStopDeviceAndReleasePostDisplayOwnership = VioGpuDodStopDeviceAndReleasePostDisplayOwnership;
+     InitialData.DxgkDdiSystemDisplayEnable = VioGpuDodSystemDisplayEnable;
+     InitialData.DxgkDdiSystemDisplayWrite = VioGpuDodSystemDisplayWrite;
++    // A display-only driver reports its vertical blank with both of these
++    // or neither ("Saving Energy with VSync Control", WDK docs).
++    if (g_VSyncHz)
++    {
++        InitialData.DxgkDdiControlInterrupt = VioGpuDodControlInterrupt;
++        InitialData.DxgkDdiGetScanLine = VioGpuDodGetScanLine;
++    }
+ 
+     NTSTATUS Status = DxgkInitializeDisplayOnlyDriver(pDriverObject, pRegistryPath, &InitialData);
+     if (!NT_SUCCESS(Status))
+@@ -621,6 +660,29 @@ VOID APIENTRY VioGpuDodSystemDisplayWrite(_In_ VOID *pDeviceContext,
+     pVioGpuDod->SystemDisplayWrite(Source, SourceWidth, SourceHeight, SourceStride, PositionX, PositionY);
+ }
+ 
++NTSTATUS
++APIENTRY
++VioGpuDodControlInterrupt(_In_ CONST HANDLE hAdapter,
++                          _In_ CONST DXGK_INTERRUPT_TYPE InterruptType,
++                          _In_ BOOLEAN EnableInterrupt)
++{
++    VIOGPU_ASSERT_CHK(hAdapter != NULL);
++    DbgPrint(TRACE_LEVEL_VERBOSE, ("<---> %s\n", __FUNCTION__));
++
++    VioGpuDod *pVioGpuDod = reinterpret_cast<VioGpuDod *>(hAdapter);
++    return pVioGpuDod->ControlInterrupt(InterruptType, EnableInterrupt);
++}
++
++NTSTATUS
++APIENTRY
++VioGpuDodGetScanLine(_In_ CONST HANDLE hAdapter, _Inout_ DXGKARG_GETSCANLINE *pGetScanLine)
++{
++    VIOGPU_ASSERT_CHK(hAdapter != NULL);
++
++    VioGpuDod *pVioGpuDod = reinterpret_cast<VioGpuDod *>(hAdapter);
++    return pVioGpuDod->GetScanLine(pGetScanLine);
++}
++
+ #if defined(DBG)
+ 
+ #if defined(COM_DEBUG)
+diff --git a/viogpu/viogpudo/driver.h b/viogpu/viogpudo/driver.h
+index 361f476..67bff46 100644
+--- a/viogpu/viogpudo/driver.h
++++ b/viogpu/viogpudo/driver.h
+@@ -163,6 +163,16 @@ VioGpuDodSystemDisplayEnable(_In_ VOID *pDeviceContext,
+                              _Out_ UINT *Height,
+                              _Out_ D3DDDIFORMAT *ColorFormat);
+ 
++NTSTATUS
++APIENTRY
++VioGpuDodControlInterrupt(_In_ CONST HANDLE hAdapter,
++                          _In_ CONST DXGK_INTERRUPT_TYPE InterruptType,
++                          _In_ BOOLEAN EnableInterrupt);
++
++NTSTATUS
++APIENTRY
++VioGpuDodGetScanLine(_In_ CONST HANDLE hAdapter, _Inout_ DXGKARG_GETSCANLINE *pGetScanLine);
++
+ VOID APIENTRY VioGpuDodSystemDisplayWrite(_In_ VOID *pDeviceContext,
+                                           _In_ VOID *Source,
+                                           _In_ UINT SourceWidth,
+diff --git a/viogpu/viogpudo/viogpudo.cpp b/viogpu/viogpudo/viogpudo.cpp
+index 4f684e5..4b2404b 100644
+--- a/viogpu/viogpudo/viogpudo.cpp
++++ b/viogpu/viogpudo/viogpudo.cpp
+@@ -57,6 +57,13 @@ VioGpuDod::VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject)
+     RtlZeroMemory(&m_PointerShape, sizeof(m_PointerShape));
+     m_PersistentDispMode0Width = 0;
+     m_PersistentDispMode0Height = 0;
++    m_VSyncTimer = NULL;
++    m_VSyncKeeper = NULL;
++    m_VSyncEnabled = 0;
++    m_VSyncLastQpc = 0;
++    m_QpcFrequency = 0;
++    m_VSyncBaseQpc = 0;
++    m_VSyncCount = 0;
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+ }
+ 
+@@ -64,6 +71,7 @@ VioGpuDod::~VioGpuDod(void)
+ {
+     PAGED_CODE();
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s 0x%p\n", __FUNCTION__, m_pHWDevice));
++    StopVSync();
+     delete m_pHWDevice;
+     m_pHWDevice = NULL;
+ }
+@@ -232,6 +240,7 @@ NTSTATUS VioGpuDod::StartDevice(_In_ DXGK_START_INFO *pDxgkStartInfo,
+     *pNumberOfViews = MAX_VIEWS;
+     *pNumberOfChildren = MAX_CHILDREN;
+     m_Flags.DriverStarted = TRUE;
++    StartVSync();
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+     return STATUS_SUCCESS;
+ }
+@@ -241,6 +250,7 @@ NTSTATUS VioGpuDod::StopDevice(VOID)
+     PAGED_CODE();
+ 
+     m_Flags.DriverStarted = FALSE;
++    StopVSync();
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -883,6 +893,46 @@ NTSTATUS VioGpuDod::AddSingleSourceMode(_In_ CONST DXGK_VIDPNSOURCEMODESET_INTER
+     return STATUS_SUCCESS;
+ }
+ 
++#define VSYNC_TOTAL(height) ((height) + max(1u, (UINT)(height) / 20))
++
++VOID VioGpuDod::StartVSync(VOID)
++{
++    PAGED_CODE();
++
++    if (!g_VSyncHz || m_VSyncTimer)
++    {
++        return;
++    }
++    LARGE_INTEGER Frequency;
++    KeQueryPerformanceCounter(&Frequency);
++    m_QpcFrequency = Frequency.QuadPart;
++    m_VSyncTimer = ExAllocateTimer(VSyncTimerCallback, this, EX_TIMER_HIGH_RESOLUTION);
++    m_VSyncKeeper = ExAllocateTimer(NULL, NULL, EX_TIMER_HIGH_RESOLUTION);
++    if (!m_VSyncTimer || !m_VSyncKeeper)
++    {
++        DbgPrint(TRACE_LEVEL_ERROR, ("%s: ExAllocateTimer failed\n", __FUNCTION__));
++        StopVSync();
++    }
++}
++
++VOID VioGpuDod::StopVSync(VOID)
++{
++    PAGED_CODE();
++
++    InterlockedExchange(&m_VSyncEnabled, 0);
++    if (m_VSyncTimer)
++    {
++        // cancels it and waits for a callback under way
++        ExDeleteTimer(m_VSyncTimer, TRUE, TRUE, NULL);
++        m_VSyncTimer = NULL;
++    }
++    if (m_VSyncKeeper)
++    {
++        ExDeleteTimer(m_VSyncKeeper, TRUE, TRUE, NULL);
++        m_VSyncKeeper = NULL;
++    }
++}
++
+ VOID VioGpuDod::BuildVideoSignalInfo(D3DKMDT_VIDEO_SIGNAL_INFO *pVideoSignalInfo, PVIDEO_MODE_INFORMATION pModeInfo)
+ {
+     PAGED_CODE();
+@@ -897,6 +947,22 @@ VOID VioGpuDod::BuildVideoSignalInfo(D3DKMDT_VIDEO_SIGNAL_INFO *pVideoSignalInfo
+     pVideoSignalInfo->HSyncFreq.Denominator = D3DKMDT_FREQUENCY_NOTSPECIFIED;
+     pVideoSignalInfo->PixelRate = D3DKMDT_FREQUENCY_NOTSPECIFIED;
+     pVideoSignalInfo->ScanLineOrdering = D3DDDI_VSSLO_PROGRESSIVE;
++
++    // With a vertical blank of our own every rate must be given: a frame
++    // of VSYNC_TOTAL lines (a 1/20 blank) at g_VSyncHz. The active size is
++    // set here too (upstream copies the total before it is filled in).
++    if (g_VSyncHz)
++    {
++        pVideoSignalInfo->ActiveSize.cx = pModeInfo->VisScreenWidth;
++        pVideoSignalInfo->ActiveSize.cy = pModeInfo->VisScreenHeight;
++        pVideoSignalInfo->TotalSize.cy = VSYNC_TOTAL(pModeInfo->VisScreenHeight);
++        pVideoSignalInfo->VSyncFreq.Numerator = g_VSyncHz;
++        pVideoSignalInfo->VSyncFreq.Denominator = 1;
++        pVideoSignalInfo->HSyncFreq.Numerator = g_VSyncHz * (UINT)pVideoSignalInfo->TotalSize.cy;
++        pVideoSignalInfo->HSyncFreq.Denominator = 1;
++        pVideoSignalInfo->PixelRate = (SIZE_T)g_VSyncHz * (UINT)pVideoSignalInfo->TotalSize.cx *
++                                      (UINT)pVideoSignalInfo->TotalSize.cy;
++    }
+ }
+ 
+ NTSTATUS VioGpuDod::AddSingleTargetMode(_In_ CONST DXGK_VIDPNTARGETMODESET_INTERFACE *pVidPnTargetModeSetInterface,
+@@ -1915,6 +1981,125 @@ VOID VioGpuDod::DpcRoutine(VOID)
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+ }
+ 
++NTSTATUS VioGpuDod::ControlInterrupt(_In_ CONST DXGK_INTERRUPT_TYPE InterruptType, _In_ BOOLEAN EnableInterrupt)
++{
++    DbgPrint(TRACE_LEVEL_INFORMATION, ("<---> %s Type = %d Enable = %d\n", __FUNCTION__, InterruptType, EnableInterrupt));
++    if (InterruptType != DXGK_INTERRUPT_DISPLAYONLY_VSYNC)
++    {
++        return STATUS_NOT_IMPLEMENTED;
++    }
++    if (!m_VSyncTimer)
++    {
++        return STATUS_UNSUCCESSFUL;
++    }
++    if (EnableInterrupt)
++    {
++        if (!InterlockedExchange(&m_VSyncEnabled, 1))
++        {
++            // the schedule starts now; the callback arms each next blank
++            m_VSyncBaseQpc = KeQueryPerformanceCounter(NULL).QuadPart;
++            m_VSyncCount = 0;
++            // every second, for ever: only its being set matters
++            ExSetTimer(m_VSyncKeeper, -10000000LL, 10000000LL, NULL);
++            ArmVSync(m_VSyncBaseQpc);
++        }
++    }
++    else if (InterlockedExchange(&m_VSyncEnabled, 0))
++    {
++        ExCancelTimer(m_VSyncTimer, NULL);
++        ExCancelTimer(m_VSyncKeeper, NULL);
++    }
++    return STATUS_SUCCESS;
++}
++
++NTSTATUS VioGpuDod::GetScanLine(_Inout_ DXGKARG_GETSCANLINE *pGetScanLine)
++{
++    UINT Height = m_CurrentMode.DispInfo.Height;
++    UINT Total = VSYNC_TOTAL(Height);
++    LONGLONG Period = m_QpcFrequency / max(1ul, g_VSyncHz);
++    LONGLONG Since = KeQueryPerformanceCounter(NULL).QuadPart - InterlockedCompareExchange64(&m_VSyncLastQpc, 0, 0);
++
++    if (Period <= 0 || Height == 0)
++    {
++        pGetScanLine->InVerticalBlank = TRUE;
++        pGetScanLine->ScanLine = 0;
++        return STATUS_SUCCESS;
++    }
++    if (Since < 0)
++    {
++        Since = 0;
++    }
++    // the blank ends at the timer's tick; the frame's lines follow it
++    UINT Line = (UINT)((Since % Period) * Total / Period);
++    pGetScanLine->InVerticalBlank = Line >= Height;
++    pGetScanLine->ScanLine = Line >= Height ? 0 : Line;
++    return STATUS_SUCCESS;
++}
++
++LONGLONG VioGpuDod::VSyncDue(ULONGLONG n) const
++{
++    return m_VSyncBaseQpc + (LONGLONG)(n * (ULONGLONG)m_QpcFrequency / max(1ul, g_VSyncHz));
++}
++
++// The timer, once, at the next blank on the schedule.
++VOID VioGpuDod::ArmVSync(LONGLONG Now)
++{
++    LONGLONG Ahead = VSyncDue(m_VSyncCount + 1) - Now;
++    // 100 ns units, relative (negative)
++    LONGLONG Due = Ahead > 0 ? Ahead * 10000000LL / m_QpcFrequency : 0;
++    ExSetTimer(m_VSyncTimer, -max(1LL, Due), 0, NULL);
++}
++
++VOID VioGpuDod::VSyncTimerCallback(_In_ PEX_TIMER Timer, _In_opt_ PVOID Context)
++{
++    UNREFERENCED_PARAMETER(Timer);
++    VioGpuDod *pVioGpuDod = reinterpret_cast<VioGpuDod *>(Context);
++    if (!pVioGpuDod)
++    {
++        return;
++    }
++    LONGLONG Now = KeQueryPerformanceCounter(NULL).QuadPart;
++    // the blank that was due; a timer that fired more than a period late
++    // skips the ones it missed rather than raising them back to back
++    LONGLONG Due = pVioGpuDod->VSyncDue(pVioGpuDod->m_VSyncCount + 1);
++    while (pVioGpuDod->VSyncDue(pVioGpuDod->m_VSyncCount + 2) <= Now)
++    {
++        pVioGpuDod->m_VSyncCount++;
++        Due = pVioGpuDod->VSyncDue(pVioGpuDod->m_VSyncCount + 1);
++    }
++    pVioGpuDod->m_VSyncCount++;
++    InterlockedExchange64(&pVioGpuDod->m_VSyncLastQpc, Due <= Now ? Due : Now);
++    if (!pVioGpuDod->m_VSyncEnabled)
++    {
++        return;
++    }
++    // one shot at a time toward the absolute schedule: a periodic timer's
++    // lateness adds up (59.6 Hz measured for 60), this one's does not
++    pVioGpuDod->ArmVSync(Now);
++    if (!pVioGpuDod->IsDriverActive())
++    {
++        return;
++    }
++    // DxgkCbNotifyInterrupt is called at the device's IRQL, as from an ISR
++    BOOLEAN Ret = FALSE;
++    pVioGpuDod->m_DxgkInterface.DxgkCbSynchronizeExecution(pVioGpuDod->m_DxgkInterface.DeviceHandle,
++                                                          VSyncNotify,
++                                                          pVioGpuDod,
++                                                          0,
++                                                          &Ret);
++}
++
++BOOLEAN VioGpuDod::VSyncNotify(_In_opt_ PVOID Context)
++{
++    VioGpuDod *pVioGpuDod = reinterpret_cast<VioGpuDod *>(Context);
++    DXGKARGCB_NOTIFY_INTERRUPT_DATA NotifyInterrupt = {};
++    NotifyInterrupt.InterruptType = DXGK_INTERRUPT_DISPLAYONLY_VSYNC;
++    NotifyInterrupt.DisplayOnlyVsync.VidPnTargetId = 0;
++    pVioGpuDod->m_DxgkInterface.DxgkCbNotifyInterrupt(pVioGpuDod->m_DxgkInterface.DeviceHandle, &NotifyInterrupt);
++    pVioGpuDod->m_DxgkInterface.DxgkCbQueueDpc(pVioGpuDod->m_DxgkInterface.DeviceHandle);
++    return TRUE;
++}
++
+ BOOLEAN VioGpuDod::InterruptRoutine(_In_ ULONG MessageNumber)
+ {
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--> %s\n", __FUNCTION__));
+diff --git a/viogpu/viogpudo/viogpudo.h b/viogpu/viogpudo/viogpudo.h
+index dc9a403..c4701c4 100644
+--- a/viogpu/viogpudo/viogpudo.h
++++ b/viogpu/viogpudo/viogpudo.h
+@@ -32,6 +32,15 @@
+ #include "viogpu.h"
+ #include "viogpu_queue.h"
+ 
++// The vertical blank (2ksbox): a high-resolution kernel timer stands in for
++// the scanout's, which virtio-gpu does not have. Without one dxgkrnl
++// simulates it for a mode with no refresh rate, and DWM composes on the
++// 15.6 ms system tick (64 Hz), which a 60 Hz host screen shows as a frame
++// dropped four times a second.
++#define VIOGPU_VSYNC_DEFAULT_HZ 60
++#define VIOGPU_VSYNC_MAX_HZ     240
++extern ULONG g_VSyncHz;
++
+ #pragma pack(push)
+ #pragma pack(1)
+ 
+@@ -234,6 +243,20 @@ class VioGpuDod
+     USHORT m_PersistentDispMode0Width;
+     USHORT m_PersistentDispMode0Height;
+ 
++    PEX_TIMER m_VSyncTimer;
++    // armed, periodic and with nothing to do, while the blank is on: a
++    // pending high-resolution timer keeps the clock at its finest, which the
++    // blank's one-shot timer alone loses between its expiry and the re-arm
++    // in its callback (blanks up to a 15.6 ms tick late, measured)
++    PEX_TIMER m_VSyncKeeper;
++    volatile LONG m_VSyncEnabled;
++    volatile LONG64 m_VSyncLastQpc;
++    LONGLONG m_QpcFrequency;
++    // the blanks' schedule, on the QPC: blank n is due at
++    // m_VSyncBaseQpc + n * m_QpcFrequency / g_VSyncHz (the timer callback's)
++    LONGLONG m_VSyncBaseQpc;
++    ULONGLONG m_VSyncCount;
++
+   public:
+     VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject);
+     ~VioGpuDod(void);
+@@ -359,6 +382,8 @@ class VioGpuDod
+                             _In_ INT PositionX,
+                             _In_ INT PositionY);
+     NTSTATUS SetRegisterConfigInfo(void);
++    NTSTATUS ControlInterrupt(_In_ CONST DXGK_INTERRUPT_TYPE InterruptType, _In_ BOOLEAN EnableInterrupt);
++    NTSTATUS GetScanLine(_Inout_ DXGKARG_GETSCANLINE *pGetScanLine);
+ 
+     PDXGKRNL_INTERFACE GetDxgkInterface(void)
+     {
+@@ -385,4 +410,10 @@ class VioGpuDod
+     NTSTATUS SetRegisterInfo(_In_ ULONG Id, _In_ DWORD MemSize);
+     NTSTATUS GetRegisterInfo(void);
+     VOID BuildVideoSignalInfo(D3DKMDT_VIDEO_SIGNAL_INFO *pVideoSignalInfo, PVIDEO_MODE_INFORMATION pModeInfo);
++    VOID StartVSync(VOID);
++    VOID StopVSync(VOID);
++    LONGLONG VSyncDue(ULONGLONG n) const;
++    VOID ArmVSync(LONGLONG Now);
++    static VOID VSyncTimerCallback(_In_ PEX_TIMER Timer, _In_opt_ PVOID Context);
++    static BOOLEAN VSyncNotify(_In_opt_ PVOID Context);
+ };

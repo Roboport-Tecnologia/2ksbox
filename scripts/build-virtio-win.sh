@@ -25,8 +25,10 @@
 # The drivers sit under `$WinPEDriver$` at the disc's root: Windows Setup
 # looks for that folder on every drive and installs what is in it into the
 # new system, so a machine installed with the disc in has its drivers
-# without a click. On an installed Windows, 2ksbox\install.cmd adds them
-# (and the agent).
+# without a click, and its autounattend.xml (guest-agent/) has Windows run
+# 2ksbox\install.ps1 at the first logon, so a new machine has the agent
+# too. On a Windows installed without the disc, 2ksbox\install.cmd adds
+# them (and the agent).
 #
 # Out: build/virtio-win/2ksbox-drivers-<arm64|x64>.iso, which the
 # launcher puts in a CD drive of its own on every Windows 11 machine of
@@ -61,7 +63,15 @@ fi
 # from guest-agent/ for x64 (Windows 11 on Arm runs it under emulation;
 # rustup's x86_64-pc-windows-gnu and mingw-w64 build it).
 AGENT=guest-agent/target/x86_64-pc-windows-gnu/release/2ksbox-agent.exe
-STAMP=$( { echo "$VERSION $SHA256"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.*; } \
+# viogpudo's resolution helpers (vgpusrv, viogpuap) are ours, from our
+# viogpudo's build (track M24, patch 03: upstream's viogpuap stops at the
+# first display device that is not virtio-gpu's, the standard VGA or ramfb
+# here, so the desktop never followed the window). The PC builds them; any
+# host fetches its build for these sources; without one the disc keeps
+# upstream's.
+scripts/windows-drivers.sh fetch viogpudo >/dev/null 2>&1 || true
+STAMP=$( { echo "$VERSION $SHA256"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.* guest-agent/autounattend.xml
+           cat build/viogpudo/{arm64,x64}/{vgpusrv,viogpuap}.exe 2>/dev/null; } \
   | shasum -a 256 | cut -c1-16)
 
 TODO=()
@@ -128,10 +138,25 @@ disc() {
       [ -f "$tree/\$WinPEDriver\$/$f.$ext" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir $f.$ext" >&2; exit 1; }
     done
   done
+  # viogpudo's resolution service, which 2ksbox\install.ps1 installs (M24):
+  # ours, with patch 03, over upstream's
+  if [ -f "build/viogpudo/$arch/viogpuap.exe" ] && [ -f "build/viogpudo/$arch/vgpusrv.exe" ]; then
+    cp "build/viogpudo/$arch/vgpusrv.exe" "build/viogpudo/$arch/viogpuap.exe" "$tree/\$WinPEDriver\$/viogpudo/"
+    echo "    viogpudo's resolution helpers: ours (build/viogpudo/$arch)"
+  else
+    echo "note: no viogpudo build of ours for $arch (scripts/windows-drivers.sh fetch viogpudo): upstream's resolution helpers, and a desktop that takes the window's size only at boot" >&2
+  fi
+  for f in vgpusrv viogpuap; do
+    [ -f "$tree/\$WinPEDriver\$/viogpudo/$f.exe" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir viogpudo/$f.exe" >&2; exit 1; }
+  done
   mkdir -p "$tree/2ksbox"
   cp "$AGENT" guest-agent/install.ps1 "$tree/2ksbox/"
   # cmd.exe misreads a batch file's parenthesized blocks with LF line ends
   sed 's/$/\r/' guest-agent/install.cmd > "$tree/2ksbox/install.cmd"
+  # a new machine runs install.ps1 by itself at its first logon
+  local pa=amd64
+  [ "$arch" = arm64 ] && pa=arm64
+  sed -e "s/@ARCH@/$pa/" -e 's/$/\r/' guest-agent/autounattend.xml > "$tree/autounattend.xml"
   cat > "$tree/README.txt" <<EOF
 2ksbox: drivers for $title
 
@@ -143,7 +168,10 @@ Windows Setup installs them by itself when this disc is in a drive.
 
 2ksbox\\install.cmd installs the drivers on an installed Windows, and
 2ksbox's agent: the clipboard shared with the host, and the host's
-shared folder on a drive letter when the machine has one. Run it once.
+shared folder on a drive letter when the machine has one. It also starts
+viogpudo's resolution service, so the desktop follows the window's size.
+A Windows installed with this disc in a drive runs it by itself at the
+first logon (autounattend.xml); on one installed without it, run it once.
 
 License: virtio-win_license.txt (BSD-3-Clause).
 EOF

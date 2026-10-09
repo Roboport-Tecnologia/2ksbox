@@ -40,6 +40,7 @@ re-applies the patch queue) while another build reads `qemu/`
 | DXVK's `d3d9.dll`, `d3dpt_exec.dll` | Visual Studio's `cl`, static C runtime, in the environment `scripts/msvc-env.sh` sets up | DXVK throws C++ exceptions out of `Direct3DCreate9`, which only an executor built by the same compiler catches, so the two moved to MSVC together (ADR-026's amendments). QEMU loads the executor by name; only C crosses that edge. DXVK under MSVC needed patch 15 ("DXVK under MSVC" below) |
 | the guest-tools ISO | MSYS2's i686 GCC with Linux's i686 runtime, Open Watcom | Windows 9x and XP guests; modern MSVC targets neither |
 | the WDDM driver | the Enterprise WDK 10.0.19041 | Windows 7 and 32-bit kernel drivers ("The WDDM driver") |
+| our viogpudo (track M24) | Visual Studio 2022 with the WDK 10.0.26100 from NuGet | ARM64 and x64 Windows 11 kernel drivers; the NuGet kit needs no EWDK ISO ("Our viogpudo") |
 
 The mingw QEMU's libraries are MSYS2's (`--msys2-deps`), the MSVC one's
 ours (`build-deps.sh`), libslirp among them: every launcher machine asks
@@ -269,7 +270,11 @@ directory as meson's `pkg_config_libdir`, so a regeneration under a
 plain `ninja` does not take MSYS2's mingw glib. A build directory
 configured before 2026-10-04's fix wants `msvc-env.sh` sourced first
 (`fatal error: 'sys/types.h' file not found` otherwise), or configuring
-again.
+again. GLib's two include directories also go in as `-isystem`: its
+headers test `#if __GNUC__`, which this target leaves undefined, and
+QEMU's `-Wundef` otherwise prints four warnings for every file that
+includes `glib.h`. Clang drops pkg-config's `-I` for the same
+directory, so QEMU's own code keeps the warning.
 
 - **The compiler** is MSYS2's clang targeting `x86_64-pc-windows-msvc`
   (its GNU driver, since QEMU's flags are GCC's; Visual Studio ships no
@@ -617,7 +622,7 @@ finds converted.
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu qemu-msvc rust mitsuami exec wddm, and the ISO when its sources moved
+scripts/build-windows.sh                  # qemu-msvc rust mitsuami exec wddm edk2 virtio, and the ISO when its sources moved (the mingw `qemu` only when named)
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, whatever the stamp says
 scripts/win-run.sh launcher               # the launcher, out of the checkout
@@ -696,6 +701,71 @@ which first sources `guest-tools/msys2-i686.sh`, the whole port:
 - QEMU's seven symbolic links are in Linux-only subprojects that are
   never built, so a checkout without symlink support is fine.
 
+## Our viogpudo
+
+Track M24's build of virtio-win's display-only driver
+(`docs/tracks/m24-viogpudo.md`), not a `build-windows.sh` stage: nothing
+ships it. The kit is Microsoft's WDK and SDK NuGet packages (user
+decision 2026-10-09, over the 26H1 EWDK's 15 GB ISO), which the script
+restores into `build/viogpudo/packages` with a `nuget.exe` it fetches,
+and imports through a `Directory.Build.props` it writes at the source
+tree's root, as Microsoft's driver samples do. Visual Studio 2022 brings
+the rest; it needs four components, which the script names when one is
+missing (Visual Studio Installer > Modify, or `setup.exe modify --add`):
+
+- `Component.Microsoft.Windows.DriverKit`: the "Windows Driver Kit"
+  extension, without which MSBuild finds no `WindowsKernelModeDriver10.0`
+  toolset (MSB8020) even with the packages restored;
+- `Microsoft.VisualStudio.Component.VC.Tools.ARM64`;
+- `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre` and
+  `...ARM64.Spectre`.
+
+WDK 10.0.26100 is the last for Visual Studio 2022 (10.0.28000 wants 2026).
+Then in MSYS2:
+
+```sh
+scripts/build-viogpudo.sh build      # build/viogpudo/{arm64,x64}/viogpudo.{sys,inf}, ~30 s
+scripts/windows-drivers.sh publish viogpudo   # for the Air and Linux ("Prebuilt drivers")
+```
+
+The first run fetches upstream's tree at the pin into
+`build/viogpudo/src` and the packages (~2 GB). It builds `viogpu.sln`'s
+`viogpudo` target, which links upstream's `VirtioLib`. The drivers are
+unsigned; the guest test signs them
+(`guest-tools/viogpudo/viogpudo-install.ps1`, which writes its own
+catalog; upstream's `inf2cat` step only has to not fail). That
+installer and `dwm-pace.ps1` are not part of the build: `build-viogpudo.sh
+iso` takes them from the source tree, and the published build's hash
+leaves them out, so editing one needs no new build from this PC.
+
+## Prebuilt drivers
+
+Two of our drivers build only on this PC: Windows 7's WDDM driver (M18,
+the EWDK 10.0.19041) and our viogpudo (M24, the WDK from NuGet). Linux
+and macOS get the PC's builds through `scripts/windows-drivers.sh`
+(user, 2026-10-09: "so they can just fetch"):
+
+```sh
+scripts/windows-drivers.sh publish          # the PC: build what is stale, upload both
+scripts/windows-drivers.sh fetch            # elsewhere (build.sh's guest stage does it)
+scripts/windows-drivers.sh key viogpudo     # one driver's source hash
+```
+
+Each build is `<driver>-<hash>.tar.gz` in the repository's
+`windows-drivers` release (a prerelease that holds nothing else; `gh`,
+logged in; the script finds GitHub CLI's install folder when MSYS2's
+PATH lacks it), the hash over the committed sources the driver is built
+from. `publish` refuses sources with uncommitted changes, so a name
+always means committed sources, and builds a driver whose `.key` is not
+the checkout's (`build-windows.sh wddm`, `build-viogpudo.sh build`)
+before uploading it. `fetch` downloads the asset for its own hash (and
+removes one fetched for other sources). The `wddm` asset holds both
+pairs, `x86/` (Windows 7) and `x64/` (Windows 11, track M20, with
+`d3dptumd32.dll`); the older `wddm-prebuilt` release, the x86 files alone,
+is no longer read. `WINDOWS_DRIVERS_PREBUILT=0`
+(or the old `WDDM_PREBUILT=0`) never fetches, and
+`WINDOWS_DRIVERS_REPO=owner/name` uses another repository.
+
 ## The WDDM driver
 
 Windows 7's WDDM display driver (track M18 step 2, ADR-022) builds on
@@ -706,23 +776,18 @@ an EWDK is mounted (or named by `EWDK` / `EWDK_ISO`) and is skipped with
 a note otherwise; the `guest` stage after it puts the result on the
 guest-tools ISO, in `WDDM\`.
 
-**Linux and macOS ISOs get the PC's build** (2026-10-04, user):
-`scripts/wddm-prebuilt.sh` names the driver by a hash of the sources it
-is built from (`guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`, `d3dpt_enc.h`,
-`d3dpt_proto.h`, `build-wddm.cmd`; `wddm-prebuilt.sh key`). The `wddm`
-stage writes that hash to `build/wddm/x86/.key`, and `build-windows.sh
-wddm --publish` uploads the three files as `wddm-<hash>.tar.gz` to the
-repository's `wddm-prebuilt` release (a prerelease that holds nothing
-else; `gh`, logged in). It refuses a build whose `.key` is not the
-checkout's and sources with uncommitted changes, so a name always means
-committed sources. `scripts/build.sh`'s `guest` stage on Linux or a Mac
-runs `wddm-prebuilt.sh fetch` first, which downloads the asset for its
-own hash into `build/wddm/x86` (and removes one fetched for other
-sources); the ISO's stamp then sees the driver. Nothing published for
-the hash means an ISO with no `WDDM\` and a note, so **after a commit
-that changes the driver's sources, publish from the PC** or the other
-hosts' ISOs lose it. `WDDM_PREBUILT=0` never fetches. On the PC with no
-EWDK mounted, the `wddm` stage fetches too.
+**Linux and macOS ISOs get the PC's build** (2026-10-04, user), through
+`scripts/windows-drivers.sh` ("Prebuilt drivers" below; until
+2026-10-09 `wddm-prebuilt.sh`). The hash covers
+`guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`,
+`d3dpt_enc.h`, `d3dpt_proto.h` and `build-wddm.cmd` (`windows-drivers.sh
+key wddm`); the `wddm` stage writes it to `build/wddm/.key`, and
+`build-windows.sh wddm --publish` uploads the build. `scripts/build.sh`'s
+`guest` stage on Linux or a Mac fetches first, so the ISO's stamp sees
+the driver. Nothing published for the hash means an ISO with no `WDDM\`
+and a note, so **after a commit that changes the driver's sources,
+publish from the PC** or the other hosts' ISOs lose it. On the PC with
+no EWDK mounted, the `wddm` stage fetches too.
 
 **The kit: the Enterprise WDK for Windows 10, version 2004**
 (10.0.19041, with VS 2019 Build Tools 16.7). It is the last WDK that

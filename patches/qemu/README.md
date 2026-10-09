@@ -1059,6 +1059,38 @@ as before. **Test:** the launcher's Windows 11 machine under WHPX with
 its TPM, `Get-Tpm` in the guest. **Drop:** upstream skips unaligned
 sections in `whpx_set_phys_mem()`.
 
+### 90-virtio-gpu-host-vblank
+`virtio-gpu`'s `host-vblank` property (track M24 step 4 B): the host
+screen's vertical blank as the guest's. Our viogpudo times a vertical
+blank of its own (`patches/viogpudo/`), and a guest timer free-runs
+against the host screen, so its frames slide across the host's blank.
+With the property on, the device offers feature bit 23 (ours, high in
+the device's range); a guest that takes it turns the ticks on and off
+with command `0x0f00` (`VIRTIO_GPU_CMD_SET_HOST_VBLANK`), and each
+`qemu_host_vblank()` (a notifier list in `ui/console.c`, which the embed
+library's `qemu_embed_vblank` calls from a bottom half, embed API v16)
+sets bit 31 of `events_read` and raises the config interrupt. 2D device;
+off by default, the launcher's Windows 11 machines set it.
+**Test:** the M24 test machine, `dwm-pace.ps1` and QEMU's
+`virtio_gpu_cmd_res_flush` cadence against the host's 144 Hz.
+**Drop:** if upstream ever gives virtio-gpu a vertical blank event.
+
+### 91-hvf-gic-latch-msi
+Under HVF with Apple's in-kernel VGIC (the `virt` board's default) each
+rising edge of an SPI also sets its `GICD_ISPENDR` bit (track M24). MSIs
+go through GICv2m there, which pulses the SPI (`hv_gic_set_spi(intid,
+1)`, then `0` at once), and a pulse that rises and falls before the VGIC
+samples the line is lost. Windows 11 on Arm with viogpudo on patch 90's
+host blank (an MSI 60 times a second) froze within minutes, three vCPUs
+asleep in the VGIC's WFI for good; with the latch it runs, DWM composing
+every 16.661 ms (5th to 95th percentile 16.45 to 16.93). A level device
+is still asserted when the guest takes the interrupt, so latching its
+edge costs nothing. (`kernel-irqchip=off`, QEMU's own GICv3 with its
+ITS, did not boot Windows 11 at all.) **Test:** the M24 run on the Air
+(`tracks/m24-viogpudo.md`, step 4 "On the Air"), `dwm-pace.ps1`.
+**Drop:** upstream latches GICv2m's pulses under HVF, or delivers MSIs
+some other way.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

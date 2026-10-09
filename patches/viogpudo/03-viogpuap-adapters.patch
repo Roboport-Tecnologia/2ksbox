@@ -1,0 +1,45 @@
+viogpuap: look past display devices of other cards for virtio-gpu's.
+
+The resolution helper (viogpuap, started in the console session by the
+vgpusrv service) finds virtio-gpu's display devices by walking
+EnumDisplayDevices, but FindDisplayDevice returned FALSE at the first
+device whose ID did not match, which ended FindAdapters' loop.  On a
+machine with another card enumerated first (2ksbox's keep the standard
+VGA on x64, ramfb on Arm, for setup and recovery) it found no adapter at
+all, so a new size from the host never reached the desktop.  It now walks
+every display device until one matches.  Measured on x64 Windows 11: the
+desktop follows the player window again within QEMU's one-second settle.
+
+diff --git a/viogpu/viogpuap/GpuAdaptersMgr.cpp b/viogpu/viogpuap/GpuAdaptersMgr.cpp
+index 34111b6..19f93e8 100644
+--- a/viogpu/viogpuap/GpuAdaptersMgr.cpp
++++ b/viogpu/viogpuap/GpuAdaptersMgr.cpp
+@@ -56,17 +56,23 @@ BOOL GpuAdaptersMgr::FindDisplayDevice(PDISPLAY_DEVICE lpDisplayDevice, std::wst
+ {
+     PrintMessage(L"%ws\n", __FUNCTIONW__);
+ 
+-    DWORD index = *adapterIndex;
+-    (*adapterIndex)++;
+-
+-    if (GetDisplayDevice(NULL, index, lpDisplayDevice, 0))
++    // every display device until one matches, not only the next: the first
++    // is often another card's (2ksbox's machines keep the standard VGA, or
++    // ramfb on Arm, beside virtio-gpu), which ended the search at once
++    for (;;)
+     {
++        DWORD index = *adapterIndex;
++        (*adapterIndex)++;
++
++        if (!GetDisplayDevice(NULL, index, lpDisplayDevice, 0))
++        {
++            return FALSE;
++        }
+         if (!name.empty() && !_wcsnicmp(lpDisplayDevice->DeviceID, name.c_str(), name.size()))
+         {
+             return TRUE;
+         }
+     }
+-    return FALSE;
+ }
+ 
+ BOOL GpuAdaptersMgr::Init()

@@ -2564,6 +2564,7 @@ dependencies = [
  "gilrs",
  "libc",
  "libsmb",
+ "objc2",
  "objc2-io-surface",
  "objc2-metal",
  "png",
@@ -2571,8 +2572,12 @@ dependencies = [
  "qemu-embed",
  "serde_json",
  "shader-chain",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "windows-sys 0.52.0",
+ "x11rb",
 ]
 
 [[package]]

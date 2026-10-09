@@ -1,0 +1,212 @@
+virtio-gpu: host-vblank, the host screen's vertical blank as the guest's.
+
+Track M24 step 4 B.  A display-only guest driver with a vertical blank of
+its own (2ksbox's viogpudo) times it with a guest timer, which free-runs
+against the host screen: its frames slide across the host's blank and one
+lands a refresh late every so often.  With host-vblank=on the device
+offers feature bit 23 (VIRTIO_GPU_F_HOST_VBLANK, ours, high in the
+device's range); a guest that takes it turns the ticks on and off with
+command 0x0f00 (VIRTIO_GPU_CMD_SET_HOST_VBLANK, a range upstream leaves
+free), and each qemu_host_vblank() a front end calls on the main loop then
+sets bit 31 of events_read (VIRTIO_GPU_EVENT_HOST_VBLANK) and raises the
+config interrupt.  qemu_host_vblank() is a notifier list in ui/console.c,
+so a front end needs no link to virtio-gpu.  The 2D device's property;
+off by default.
+
+diff --git a/hw/display/virtio-gpu-base.c b/hw/display/virtio-gpu-base.c
+index 270fbaa..4975e6d 100644
+--- a/hw/display/virtio-gpu-base.c
++++ b/hw/display/virtio-gpu-base.c
+@@ -27,6 +27,7 @@ virtio_gpu_base_reset(VirtIOGPUBase *g)
+     int i;
+ 
+     g->enable = 0;
++    g->host_vblank_on = false;
+ 
+     for (i = 0; i < g->conf.max_outputs; i++) {
+         g->scanout[i].resource_id = 0;
+@@ -178,6 +179,21 @@ static const GraphicHwOps virtio_gpu_ops = {
+     .gl_block = virtio_gpu_gl_block,
+ };
+ 
++/* A host blank: the guest's event, if it asked for the ticks. */
++static void virtio_gpu_base_host_vblank(Notifier *n, void *data)
++{
++    VirtIOGPUBase *g = container_of(n, VirtIOGPUBase, host_vblank);
++    VirtIODevice *vdev = VIRTIO_DEVICE(g);
++
++    if (!g->host_vblank_on ||
++        !virtio_vdev_has_feature(vdev, VIRTIO_GPU_F_HOST_VBLANK) ||
++        !(vdev->status & VIRTIO_CONFIG_S_DRIVER_OK)) {
++        return;
++    }
++    g->virtio_config.events_read |= VIRTIO_GPU_EVENT_HOST_VBLANK;
++    virtio_notify_config(vdev);
++}
++
+ bool
+ virtio_gpu_base_device_realize(DeviceState *qdev,
+                                VirtIOHandleOutput ctrl_cb,
+@@ -236,6 +252,11 @@ virtio_gpu_base_device_realize(DeviceState *qdev,
+     virtio_init(VIRTIO_DEVICE(g), VIRTIO_ID_GPU,
+                 sizeof(struct virtio_gpu_config));
+ 
++    if (virtio_gpu_host_vblank(g->conf)) {
++        g->host_vblank.notify = virtio_gpu_base_host_vblank;
++        qemu_host_vblank_add_notifier(&g->host_vblank);
++    }
++
+     if (virtio_gpu_virgl_enabled(g->conf)) {
+         /* use larger control queue in 3d mode */
+         virtio_add_queue(vdev, 256, ctrl_cb);
+@@ -276,6 +297,9 @@ virtio_gpu_base_get_features(VirtIODevice *vdev, uint64_t features,
+     if (virtio_gpu_resource_uuid_enabled(g->conf)) {
+         features |= (1 << VIRTIO_GPU_F_RESOURCE_UUID);
+     }
++    if (virtio_gpu_host_vblank(g->conf)) {
++        features |= (1ULL << VIRTIO_GPU_F_HOST_VBLANK);
++    }
+ 
+     return features;
+ }
+@@ -294,6 +318,9 @@ virtio_gpu_base_device_unrealize(DeviceState *qdev)
+     VirtIOGPUBase *g = VIRTIO_GPU_BASE(qdev);
+     VirtIODevice *vdev = VIRTIO_DEVICE(qdev);
+ 
++    if (virtio_gpu_host_vblank(g->conf)) {
++        notifier_remove(&g->host_vblank);
++    }
+     virtio_del_queue(vdev, 0);
+     virtio_del_queue(vdev, 1);
+     virtio_cleanup(vdev);
+diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
+index bd18611..ea5fa65 100644
+--- a/hw/display/virtio-gpu.c
++++ b/hw/display/virtio-gpu.c
+@@ -1075,6 +1075,20 @@ virtio_gpu_resource_detach_backing(VirtIOGPU *g,
+     virtio_gpu_cleanup_mapping(g, res);
+ }
+ 
++/* host-vblank: the guest wants the host's blanks, or no longer does */
++static void
++virtio_gpu_set_host_vblank(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd)
++{
++    struct virtio_gpu_set_host_vblank hv;
++
++    if (!virtio_gpu_host_vblank(g->parent_obj.conf)) {
++        cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
++        return;
++    }
++    VIRTIO_GPU_FILL_CMD(hv);
++    g->parent_obj.host_vblank_on = le32_to_cpu(hv.enable) != 0;
++}
++
+ void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
+                                    struct virtio_gpu_ctrl_command *cmd)
+ {
+@@ -1123,6 +1137,9 @@ void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
+     case VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING:
+         virtio_gpu_resource_detach_backing(g, cmd);
+         break;
++    case VIRTIO_GPU_CMD_SET_HOST_VBLANK:
++        virtio_gpu_set_host_vblank(g, cmd);
++        break;
+     default:
+         cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+         break;
+@@ -1874,6 +1891,8 @@ static const Property virtio_gpu_properties[] = {
+                     VIRTIO_GPU_FLAG_BLOB_ENABLED, false),
+     DEFINE_PROP_BIT("sync-ctrl", VirtIOGPU, parent_obj.conf.flags,
+                     VIRTIO_GPU_FLAG_SYNC_CTRL, false),
++    DEFINE_PROP_BIT("host-vblank", VirtIOGPU, parent_obj.conf.flags,
++                    VIRTIO_GPU_FLAG_HOST_VBLANK, false),
+     DEFINE_PROP_SIZE("hostmem", VirtIOGPU, parent_obj.conf.hostmem, 0),
+     DEFINE_PROP_UINT8("x-scanout-vmstate-version", VirtIOGPU, scanout_vmstate_version, 2),
+ };
+diff --git a/include/hw/virtio/virtio-gpu.h b/include/hw/virtio/virtio-gpu.h
+index 4c77f73..a0534ed 100644
+--- a/include/hw/virtio/virtio-gpu.h
++++ b/include/hw/virtio/virtio-gpu.h
+@@ -102,8 +102,28 @@ enum virtio_gpu_base_conf_flags {
+     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
+     VIRTIO_GPU_FLAG_DRM_ENABLED,
+     VIRTIO_GPU_FLAG_SYNC_CTRL,
++    VIRTIO_GPU_FLAG_HOST_VBLANK,
+ };
+ 
++/*
++ * host-vblank (2ksbox): the host screen's vertical blank as the guest's.
++ * A feature bit, an event bit and a command of our own, in places upstream
++ * leaves free: the guest turns the ticks on and off with the command, and
++ * each host blank (qemu_host_vblank) sets the event and raises the config
++ * interrupt. Our viogpudo raises its display-only vertical blank from it.
++ */
++#define VIRTIO_GPU_F_HOST_VBLANK        23
++#define VIRTIO_GPU_EVENT_HOST_VBLANK    (1u << 31)
++#define VIRTIO_GPU_CMD_SET_HOST_VBLANK  0x0f00
++struct virtio_gpu_set_host_vblank {
++    struct virtio_gpu_ctrl_hdr hdr;
++    uint32_t enable;
++    uint32_t padding;
++};
++
++#define virtio_gpu_host_vblank(_cfg) \
++    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_HOST_VBLANK))
++
+ #define virtio_gpu_sync_ctrl(_cfg) \
+     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_SYNC_CTRL))
+ #define virtio_gpu_virgl_enabled(_cfg) \
+@@ -165,6 +185,10 @@ struct VirtIOGPUBase {
+ 
+     int enabled_output_bitmask;
+     struct virtio_gpu_requested_state req_state[VIRTIO_GPU_MAX_SCANOUTS];
++
++    /* host-vblank: the guest wants the ticks; the host blank's listener */
++    bool host_vblank_on;
++    Notifier host_vblank;
+ };
+ 
+ struct VirtIOGPUBaseClass {
+diff --git a/include/ui/console.h b/include/ui/console.h
+index 7ecc6b3..7d4bce9 100644
+--- a/include/ui/console.h
++++ b/include/ui/console.h
+@@ -443,6 +443,14 @@ typedef struct QemuConsoleEvent {
+ 
+ void qemu_console_add_notifier(Notifier *notifier);
+ void qemu_console_remove_notifier(Notifier *notifier);
++
++/*
++ * The host screen's vertical blank (2ksbox): a front end that hears it
++ * calls qemu_host_vblank() on the main loop, and a display device that
++ * can pass it to its guest (virtio-gpu's host-vblank) listens.
++ */
++void qemu_host_vblank_add_notifier(Notifier *notifier);
++void qemu_host_vblank(void);
+ void qemu_console_notify(QemuConsoleEventType type, QemuConsole *con);
+ 
+ /* vnc.c */
+diff --git a/ui/console.c b/ui/console.c
+index cdf57a5..9b17cea 100644
+--- a/ui/console.c
++++ b/ui/console.c
+@@ -1132,6 +1132,19 @@ void qemu_console_remove_notifier(Notifier *notifier)
+     notifier_remove(notifier);
+ }
+ 
++static NotifierList host_vblank_notifiers =
++    NOTIFIER_LIST_INITIALIZER(host_vblank_notifiers);
++
++void qemu_host_vblank_add_notifier(Notifier *notifier)
++{
++    notifier_list_add(&host_vblank_notifiers, notifier);
++}
++
++void qemu_host_vblank(void)
++{
++    notifier_list_notify(&host_vblank_notifiers, NULL);
++}
++
+ /*
+  * Called by main(), after creating QemuConsoles
+  * and before initializing ui (sdl/vnc/...).

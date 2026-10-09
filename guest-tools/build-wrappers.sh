@@ -342,7 +342,7 @@ while IFS= read -r f; do check_crt "$f"; check_isa "$f"; done \
 # The WDDM display driver for Windows 7 (track M18), when build/wddm/x86
 # has it (build-windows.sh's wddm stage: MSVC through the EWDK, so Windows
 # only; Linux and macOS fetch the PC's build for the same sources,
-# scripts/wddm-prebuilt.sh), staged as WDDM\: the kernel driver, the Direct3D 9 user-mode
+# scripts/windows-drivers.sh), staged as WDDM\: the kernel driver, the Direct3D 9 user-mode
 # driver and the INF. Staged after the checks above, which are the mingw
 # rules for Win9x / XP guest code: the user-mode DLL is MSVC with a static
 # C runtime, whose own SSE2 routines are picked by a CPU check at run time
@@ -354,7 +354,7 @@ if [ -f "$WDDM_OUT/d3dptkmd.sys" ] && [ -f "$WDDM_OUT/d3dptumd.dll" ] && [ -f "$
   mkdir -p "$OUT/iso/WDDM"
   cp "$WDDM_OUT/d3dptkmd.sys" "$WDDM_OUT/d3dptumd.dll" "$WDDM_OUT/d3dptkmd.inf" "$OUT/iso/WDDM/"
 else
-  echo "note: the Windows 7 WDDM driver is not on this ISO (built on Windows only: build-windows.sh wddm; elsewhere scripts/wddm-prebuilt.sh fetch)" >&2
+  echo "note: the Windows 7 WDDM driver is not on this ISO (built on Windows only: build-windows.sh wddm; elsewhere scripts/windows-drivers.sh fetch wddm)" >&2
 fi
 # The same driver for 64-bit Windows 11 (track M20), from build/wddm/x64,
 # as WDDM64\ with its installer, wddm-install.ps1, which test signs it in

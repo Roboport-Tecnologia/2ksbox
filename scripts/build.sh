@@ -55,8 +55,9 @@
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO (it also
 #           calls build-driver.sh for the XP display driver), with the
 #           Windows 7 WDDM driver the PC published for these sources
-#           (scripts/wddm-prebuilt.sh fetch; needs the network once per
-#           driver change, WDDM_PREBUILT=0 skips it)
+#           (scripts/windows-drivers.sh fetch, which also gets our
+#           viogpudo for Windows 11 tests; needs the network once per
+#           driver change, WINDOWS_DRIVERS_PREBUILT=0 skips it)
 #
 # A stage whose tools are missing is skipped with the reason, or fails if
 # it was named on the command line. The summary at the end lists what
@@ -573,9 +574,10 @@ GUEST_STALE=""
 if want guest; then
   # The Windows 7 WDDM driver builds only on Windows; the PC publishes it
   # by a hash of its sources, and the one for this checkout is fetched
-  # into build/wddm/x86 before the stamp reads it. Nothing published
-  # means an ISO without WDDM\, as before (WDDM_PREBUILT=0 never asks).
-  scripts/wddm-prebuilt.sh fetch || true
+  # into build/wddm (x86, x64) before the stamp reads it. Nothing published
+  # means an ISO without WDDM\, as before (WINDOWS_DRIVERS_PREBUILT=0
+  # never asks). Our viogpudo (M24) comes along for Windows 11 tests.
+  scripts/windows-drivers.sh fetch || true
   # the stamp is computed before the tool check, so a host that cannot
   # build the ISO can still say whether the one it has is out of date
   if STAMP_GITS="third_party/qemu-3dfx" \

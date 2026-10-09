@@ -47,7 +47,8 @@ Without hardware virtualization the machine is too slow to use.
 3. Click **Create**, then **Start**.
 4. The machine boots from the ISO by itself. You don't need to press a
    key for "Press any key to boot from CD or DVD".
-5. Go through Windows setup as usual.
+5. Go through Windows setup as usual. Setup asks for a local account,
+   not a Microsoft account.
 
 </Steps>
 
@@ -57,10 +58,12 @@ network card on Arm.
 
 ## The clipboard and a shared folder
 
-After Windows is installed, open the drivers disc in File Explorer and
-run `2ksbox\install.cmd` once. It asks for administrator rights. It
-installs the drivers and the 2ksbox agent, which shares the clipboard
-and the folder.
+The first time you sign in, Windows installs the 2ksbox agent from the
+drivers disc by itself. The agent shares the clipboard and the folder,
+and keeps the desktop smooth by making the machine's screen the only
+one. On a Windows that was installed without the drivers disc, open the
+disc in File Explorer and run `2ksbox\install.cmd` once instead. It asks
+for administrator rights.
 
 - **Clipboard**, on the **Input** page, is on for a new Windows 11
   machine. Text you copy on either side can be pasted on the other.
@@ -75,7 +78,7 @@ and the folder.
 ## The screen
 
 Windows 11 starts on a standard display adapter. With the display driver
-from the drivers disc, which setup or `install.cmd` installs, the
+from the drivers disc, which setup installs, the
 machine's screen follows the window's size. Make the window bigger and
 the desktop grows.
 

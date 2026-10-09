@@ -3,7 +3,7 @@ name = "guest-agent"
 version = "0.0.1"
 edition = "2021"
 license = "GPL-2.0-or-later"
-description = "2ksbox's agent in a modern Windows guest: the clipboard over QEMU's vdagent (track M23)"
+description = "2ksbox's agent in a modern Windows guest: the clipboard over QEMU's vdagent, the shared folder, the virtio-gpu screen alone (tracks M23, M24)"
 
 [[bin]]
 name = "2ksbox-agent"
@@ -28,6 +28,7 @@ features = [
   "Win32_Security",
   "Win32_Graphics_Gdi",
   "Win32_NetworkManagement_WNet",
+  "Win32_Devices_Display",
 ]
 
 [profile.release]

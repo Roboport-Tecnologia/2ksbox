@@ -35,7 +35,7 @@
 # BOOT_WAIT (900 s, the cap on each desktop), KEEP=1 (leave the last
 # machine running; QMP in OUT). Needs mtools, python3, and the
 # guest-tools ISO built on Windows (build-windows.sh's wddm stage) or with
-# the PC's driver (scripts/wddm-prebuilt.sh).
+# the PC's driver (scripts/windows-drivers.sh).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

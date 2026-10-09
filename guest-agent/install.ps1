@@ -24,9 +24,60 @@ if (Test-Path -LiteralPath $drivers) {
 
 $dst = Join-Path $env:ProgramFiles '2ksbox'
 New-Item -ItemType Directory -Force $dst | Out-Null
-Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Stop-Process -Force
-Copy-Item (Join-Path $here '2ksbox-agent.exe') $dst -Force
+
+# viogpudo's resolution service (track M24): the driver hears the window's
+# new size from the device but cannot change the desktop's mode itself;
+# vgpusrv starts viogpuap in the console session, which waits on the
+# driver's event and applies the size with SetDisplayConfig. Without it a
+# Windows 11 guest takes the window's size only when it starts. viogpuap
+# is started by name, so it lives beside vgpusrv.
+$gpu = Join-Path $drivers 'viogpudo'
+if (Test-Path -LiteralPath (Join-Path $gpu 'vgpusrv.exe')) {
+  $gdst = Join-Path $dst 'viogpu'
+  New-Item -ItemType Directory -Force $gdst | Out-Null
+  $srv = Join-Path $gdst 'vgpusrv.exe'
+  $had = Get-Service vgpusrv -ErrorAction SilentlyContinue
+  if ($had) { Stop-Service vgpusrv -Force -ErrorAction SilentlyContinue }
+  # Stop-Service returns before the service's process has gone, and the
+  # helper it started holds its file too: both gone before the copy
+  Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+  Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+  Copy-Item (Join-Path $gpu 'vgpusrv.exe'), (Join-Path $gpu 'viogpuap.exe') $gdst -Force
+  if ($had) {
+    # one installed before, maybe elsewhere: pointed at this copy
+    sc.exe config vgpusrv binPath= "`"$srv`"" | Out-Null
+    Start-Service vgpusrv
+  } else {
+    foreach ($l in (& $srv -i 2>&1)) { if ("$l".Trim()) { say "  $("$l".Trim())" } }
+  }
+  say "resolution service: $srv ($((Get-Service vgpusrv -ErrorAction SilentlyContinue).Status))"
+}
+
+# An agent already running (both tasks', in every session) holds its file:
+# stopped, and waited for, since Stop-Process returns before the process
+# has gone. A file still held (a process this cannot stop) is renamed
+# aside, which Windows allows for a running image, and removed by a later
+# run once nothing holds it.
 $exe = Join-Path $dst '2ksbox-agent.exe'
+foreach ($t in '2ksbox agent', '2ksbox shared folder') {
+  Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+}
+Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+Get-ChildItem $dst -Filter '2ksbox-agent.old-*.exe' -ErrorAction SilentlyContinue |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+try {
+  Copy-Item (Join-Path $here '2ksbox-agent.exe') $exe -Force -ErrorAction Stop
+} catch {
+  $old = "2ksbox-agent.old-$(Get-Date -Format yyyyMMddHHmmss).exe"
+  say "agent: $exe is held ($($_.Exception.Message.Trim())); renamed to $old"
+  Rename-Item $exe $old -Force
+  Copy-Item (Join-Path $here '2ksbox-agent.exe') $exe -Force
+}
+if ((Get-FileHash $exe).Hash -ne (Get-FileHash (Join-Path $here '2ksbox-agent.exe')).Hash) {
+  say "agent: FAILED to update $exe"
+  exit 1
+}
 say "agent: $exe"
 
 $users = 'S-1-5-32-545'     # BUILTIN\Users, by SID (names are localized)
