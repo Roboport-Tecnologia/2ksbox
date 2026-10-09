@@ -53,9 +53,31 @@ if (Test-Path -LiteralPath (Join-Path $gpu 'vgpusrv.exe')) {
   say "resolution service: $srv ($((Get-Service vgpusrv -ErrorAction SilentlyContinue).Status))"
 }
 
-Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Stop-Process -Force
-Copy-Item (Join-Path $here '2ksbox-agent.exe') $dst -Force
+# An agent already running (both tasks', in every session) holds its file:
+# stopped, and waited for, since Stop-Process returns before the process
+# has gone. A file still held (a process this cannot stop) is renamed
+# aside, which Windows allows for a running image, and removed by a later
+# run once nothing holds it.
 $exe = Join-Path $dst '2ksbox-agent.exe'
+foreach ($t in '2ksbox agent', '2ksbox shared folder') {
+  Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+}
+Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process 2ksbox-agent -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+Get-ChildItem $dst -Filter '2ksbox-agent.old-*.exe' -ErrorAction SilentlyContinue |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+try {
+  Copy-Item (Join-Path $here '2ksbox-agent.exe') $exe -Force -ErrorAction Stop
+} catch {
+  $old = "2ksbox-agent.old-$(Get-Date -Format yyyyMMddHHmmss).exe"
+  say "agent: $exe is held ($($_.Exception.Message.Trim())); renamed to $old"
+  Rename-Item $exe $old -Force
+  Copy-Item (Join-Path $here '2ksbox-agent.exe') $exe -Force
+}
+if ((Get-FileHash $exe).Hash -ne (Get-FileHash (Join-Path $here '2ksbox-agent.exe')).Hash) {
+  say "agent: FAILED to update $exe"
+  exit 1
+}
 say "agent: $exe"
 
 $users = 'S-1-5-32-545'     # BUILTIN\Users, by SID (names are localized)

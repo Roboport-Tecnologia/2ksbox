@@ -174,7 +174,11 @@ without which the desktop takes the window's size only at boot:
 `vgpusrv` starts `viogpuap` in the console session, which applies each
 new size with `SetDisplayConfig`; both are ours on the disc, with M24's
 patch 03, since upstream's `viogpuap` found no virtio-gpu behind the
-other card). It does three jobs:
+other card). Run again, it updates the agent in place: it stops the
+logon tasks and every running agent and waits for them to exit, and a
+file still held is renamed aside (`2ksbox-agent.old-*.exe`, removed by
+the next run), since Windows lets a running image be renamed but not
+overwritten. It does three jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
    the agent protocol subset QEMU's `vdagent.c` implements: it announces
