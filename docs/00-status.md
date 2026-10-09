@@ -330,9 +330,13 @@ tracks, plus the items no track owns.
     (the PC) the guest's blank follows the host screen (72 Hz on 144),
     the desktop follows the window and the virtio-gpu's screen is the
     only one, and the host screen's blank raises the guest's (step 4 B).
-    Next: the screen's rate and blank on macOS and Linux, Windows 11 on
-    Arm on the Air (`windows-drivers.sh fetch`), then step 5 (shipping:
-    attestation signing or upstream).
+    The user: "super smooth, desktop resizes correctly" (2026-10-09).
+    Next, on the Air: `scripts/windows-drivers.sh fetch`, then
+    `build-viogpudo.sh iso` and `viogpudo-install.ps1` in an overlay of
+    Windows 11 on Arm; the screen's rate and blank on macOS
+    (`player-core/src/screen.rs`'s `platform` module: the window's
+    `NSScreen`, a `CVDisplayLink` for the blank) and Linux; then step 5
+    (shipping: attestation signing or upstream).
 12. **The finished tracks' leftovers.** M4: a decoder thread for the executor. M7: a shader title, a
     split-stream title, 3DMark2001's Nature for cubes, StarCraft / Age of
     Empires on 8 bpp, a driver stage in `scripts/test.sh`.

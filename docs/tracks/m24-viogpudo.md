@@ -223,7 +223,9 @@ driver.
    off by a control command from the driver's worker thread, which also
    now runs `ConfigChanged` only for a real display event (a tick must
    not make `viogpuap` resync the resolution). `PLAYER_HOST_VBLANK=0`
-   is the A/B. The host's blank raises the guest's, so a frame never
+   is the A/B. The user's eye, with all of it in (2026-10-09): "it's
+   super smooth, desktop resizes correctly". The host's blank raises the
+   guest's, so a frame never
    slides across it:
    - The player calls `qemu_embed_vblank(e)` (v15) on each host refresh
      that starts a guest frame (every Nth of A's divisor), from wherever
