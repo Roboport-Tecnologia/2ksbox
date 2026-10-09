@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v12** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v14** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references were taken
@@ -55,6 +55,8 @@ not block. Everything else may come from any thread.
 | 10 | `setenv`: an environment variable set on the library's C runtime ("The C runtime boundary") |
 | 11 | `set_clipboard_cb`, `clipboard_set_text`: the clipboard, text, through QEMU's own (M23, below) |
 | 12 | `on_flush`: the updates just delivered were pushed by the device outside a refresh tick (virtio-gpu's `RESOURCE_FLUSH`, the Voodoo 2's end of frame) and complete a frame (M22, below) |
+| 13 | `stopped_by_reset`: whether a reset under `-no-reboot` ended the loop, for the player's cold restart of a Windows 11 machine on a Windows host (M20 step 5) |
+| 14 | `stopped_by_reset` gone again: QEMU patch 87 made the reset itself work under WHPX, so nothing runs with `-no-reboot` |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).

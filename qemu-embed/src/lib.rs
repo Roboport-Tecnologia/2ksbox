@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 12;
+pub const API_VERSION: u32 = 14;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own

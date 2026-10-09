@@ -583,7 +583,8 @@ if want guest; then
        d3dpt/d3dpt_fb.h cdshelf/cdshelf_proto.h \
        guest-tools/build-wrappers.sh guest-tools/build-driver.sh \
        guest-tools/build-driver9x.sh \
-       build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf; then
+       build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf \
+       build/wddm/x64/d3dptkmd.sys build/wddm/x64/d3dptumd.dll build/wddm/x64/d3dptumd32.dll; then
     # (the WDDM driver is built only on Windows, build-windows.sh's wddm
     # stage, and fetched here; absent it adds nothing, so both scripts agree)
     GUEST_STALE=1

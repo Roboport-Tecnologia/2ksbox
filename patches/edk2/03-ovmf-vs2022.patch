@@ -1,0 +1,45 @@
+Two things the Windows build of OvmfPkgX64 (scripts/build-edk2.sh
+x86_64, Visual Studio 2022 17.14, MSVC 14.44) needs:
+- some structure copies compile to memcpy() calls, and EDK2 modules link
+  no C library (DisplayEngineDxe: LNK2001 memcpy). The DXE phase's module
+  types get CryptoPkg's IntrinsicLib, which provides memcpy and memset;
+  not SEC, whose ResetVector is a raw image, not a program to link.
+- VS2022 links every X64 module with /ALIGN:4096 and a 0x200 file
+  alignment, which GenFv cannot rebase for the PEI phase's
+  execute-in-place modules ("Section-Alignment and File-Alignment do not
+  match", PeiCore). SEC, PEI_CORE and PEIM link with /ALIGN:32
+  /FILEALIGN:32.
+
+diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+index efb0eed..f03fad4 100644
+--- a/OvmfPkg/OvmfPkgX64.dsc
++++ b/OvmfPkg/OvmfPkgX64.dsc
+@@ -122,6 +122,14 @@
+   XCODE:*_*_*_MTOC_FLAGS = -align 0x1000
+   CLANGPDB:*_*_*_DLINK_FLAGS = /ALIGN:4096
+ 
++# 2ksbox: VS2022 links every X64 module with /ALIGN:4096 and the linker
++# keeps a 0x200 file alignment, which GenFv cannot rebase for the PEI
++# phase's execute-in-place modules ("Section-Alignment and File-Alignment
++# do not match", PeiCore). Theirs match again, at the 32 bytes the
++# older Visual Studio toolchains gave them.
++[BuildOptions.common.EDKII.SEC, BuildOptions.common.EDKII.PEI_CORE, BuildOptions.common.EDKII.PEIM]
++  MSFT:*_VS2022_X64_DLINK_FLAGS = /ALIGN:32 /FILEALIGN:32
++
+ # Force PE/COFF sections to be aligned at 4KB boundaries to support page level
+ # protection of DXE_SMM_DRIVER/SMM_CORE modules
+ [BuildOptions.common.EDKII.DXE_SMM_DRIVER, BuildOptions.common.EDKII.SMM_CORE]
+@@ -275,6 +283,13 @@
+   TdxLib|MdePkg/Library/TdxLib/TdxLib.inf
+   TdxMailboxLib|OvmfPkg/Library/TdxMailboxLib/TdxMailboxLib.inf
+ 
++# 2ksbox: Visual Studio 2022 17.14 compiles some structure copies to
++# memcpy() calls, which EDK2 modules have no C library for
++# (DisplayEngineDxe: LNK2001 memcpy). IntrinsicLib provides them, to
++# the DXE phase's C modules (a SEC module like ResetVector is no program).
++[LibraryClasses.common.DXE_CORE, LibraryClasses.common.DXE_DRIVER, LibraryClasses.common.DXE_RUNTIME_DRIVER, LibraryClasses.common.UEFI_DRIVER, LibraryClasses.common.UEFI_APPLICATION]
++  NULL|CryptoPkg/Library/IntrinsicLib/IntrinsicLib.inf
++
+ [LibraryClasses.common.SEC]
+   TimerLib|OvmfPkg/Library/AcpiTimerLib/BaseRomAcpiTimerLib.inf
+   QemuFwCfgLib|OvmfPkg/Library/QemuFwCfgLib/QemuFwCfgSecLib.inf

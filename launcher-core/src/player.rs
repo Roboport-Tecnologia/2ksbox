@@ -333,17 +333,17 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
 }
 
 /// Why `machine` cannot start on this host, in the sentence a front end
-/// shows, or `None` when it can. Windows 11 alone has limits: no Windows
-/// host yet (QEMU 11.1 builds no TPM there), and on a Mac only Windows 11 on
-/// Arm, never x64 (user decision 2026-10-01: the Mac build has no x86_64
-/// QEMU or player, so an x64 bundle copied from Linux stops here rather
-/// than on a missing binary).
+/// shows, or `None` when it can. Windows 11 alone has limits: on a Mac only
+/// Windows 11 on Arm, never x64 (user decision 2026-10-01: the Mac build has
+/// no x86_64 QEMU or player, so an x64 bundle copied from Linux stops here
+/// rather than on a missing binary), and on Windows only x64 (the Windows
+/// build has no aarch64 QEMU or player).
 pub fn cannot_start(machine: &Machine) -> Option<&'static str> {
     if machine.family != crate::bundle::Family::Win11 {
         return None;
     }
-    if cfg!(target_os = "windows") {
-        return Some("Windows 11 machines don't run on this computer yet.");
+    if cfg!(target_os = "windows") && machine.effective_arch() != crate::bundle::Arch::X86_64 {
+        return Some("Windows 11 on Arm doesn't run on a Windows computer. Make an x64 Windows 11 machine instead.");
     }
     if cfg!(target_os = "macos") && machine.effective_arch() != crate::bundle::Arch::Aarch64 {
         return Some(mac_x64_refusal());

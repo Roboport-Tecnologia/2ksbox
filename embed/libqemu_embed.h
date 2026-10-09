@@ -198,7 +198,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 12
+#define QEMU_EMBED_API_VERSION 14
 
 #ifdef __cplusplus
 }

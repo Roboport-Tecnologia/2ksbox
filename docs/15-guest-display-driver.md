@@ -14,9 +14,9 @@ The driver came in three stages, which still name the parts: **M7a** the
 framebuffer driver, **M7b** the DirectDraw DDI, **M7c** the Direct3D DDI
 (a DirectX 7 HAL, grown into a DirectX 8 DDI with hardware T&L, and
 since M16 a DirectX 9 DDI with shader model 3.0). The
-register set is **v8** (`D3DPT_FB_VERSION`; v6 to v8 added only the
-WDDM driver's interrupt, fence, DMA append and CURSOR_FLAGS, which this
-driver never touches) and the protocol **v22**
+register set is **v9** (`D3DPT_FB_VERSION`; v6 to v9 added only the
+WDDM driver's interrupt, fence, DMA append, CURSOR_FLAGS and VRAM fill and copy,
+which this driver never touches) and the protocol **v24**
 (`D3DPT_PROTO_VERSION`). FIFA 2000, Max Payne, Diablo, Moto Racer 1997,
 GTA 2 and GTA Vice City run on it with no DLL in their folders.
 
@@ -1591,6 +1591,20 @@ own are `D9F_*` (doc 19).
   paints an artefact. A readback with no draw before it does not end the
   frame (`readback of N with no draw, the frame goes on`), because
   Crimson Skies reads its target back after every target switch.
+  With the variable set (armed or not), every DX9 shader is written as
+  created (`vs|ps-<ctx>-<handle>.bin`, for `D3DDisassemble`), a traced
+  draw's vertices go to `draw-<n>.vtx` (stream 0 in draw order) and a
+  render-target texture's VRAM beside its host pixels
+  (`tex-<handle>-vram.ppm`, colour above alpha).
+- **`D3DPT_WATCH=<w>x<h>[,<x>,<y>]`** hashes every A8R8G8B8 surface of
+  that size (or one texel of each) after every record and every DP2
+  token, a target as the host holds it and anything else from VRAM, and
+  logs the one that changed it with its non-zero texel count (`ddi:
+  watch: surface N (host|vram, caps ...) ... after op <n> at <offset>`,
+  a DP2 token as 1000 + its op). It names the batch that lost what
+  another process put there, the way Windows 11's taskbar lost the
+  opaque texel of Explorer's atlas, or shows that nothing ever wrote a
+  surface, as DWM's caption-button atlases (track M20).
 - **`D3DPT_DDI_REREAD=1`** re-reads every texture from VRAM at every bind
   (to tell a stale host copy from VRAM the guest never wrote).
   **`D3DPT_DDI_NOFOG=1`** forces fog off.

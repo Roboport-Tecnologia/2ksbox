@@ -540,9 +540,8 @@ impl Form {
                  and an ES1370 sound card.\n\
                  No 3D: the display driver and the Direct3D and OpenGL pass-through are Windows-only.",
             ),
-            // Not on a Windows host yet: QEMU has no TPM there (track
-            // M20). On an Arm host, Windows 11 on Arm (step 4).
-            Family::Win11 if !cfg!(target_os = "windows") && self.arch() == bundle::Arch::Aarch64 => Some(
+            // On an Arm host, Windows 11 on Arm (step 4).
+            Family::Win11 if self.arch() == bundle::Arch::Aarch64 => Some(
                 "Windows 11 on Arm: UEFI and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO for Arm64.\n\
                  A second CD drive holds the network and display drivers, and setup installs them.\n\
@@ -552,11 +551,13 @@ impl Form {
             // x86_64 machine there (an Intel Mac's, or one copied from
             // Linux) gets the refusal the player gives.
             Family::Win11 if cfg!(target_os = "macos") => Some(crate::player::mac_x64_refusal()),
-            Family::Win11 if cfg!(target_os = "linux") => Some(
+            // A Windows host's machine is the same since track M20 step 5:
+            // Secure Boot without SMM, and QEMU's TPM there too.
+            Family::Win11 if cfg!(target_os = "linux") || cfg!(target_os = "windows") => Some(
                 "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO (x64).",
             ),
-            Family::Win11 => Some("Windows 11 machines don't run on this computer yet."),
+            Family::Win11 => Some("Windows 11 machines don't run on this computer."),
             _ => None,
         }
     }
@@ -1168,6 +1169,10 @@ impl Form {
             (Video::D3dpt, Family::Win7) => &[
                 "2ksbox's own display adapter and driver: Aero, the full mode table and Direct3D through the driver.",
                 "Needs the driver from the guest-tools ISO (SETUP). Until it's installed, Windows uses a basic VGA driver.",
+            ],
+            (Video::D3dpt, Family::Win11) => &[
+                "2ksbox's own display adapter and driver, an early test build. x64 only.",
+                "Install the driver from the guest tools disc's WDDM folder (wddm-install.ps1), then restart. Windows runs in test mode.",
             ],
             (Video::Std, Family::Win7) => &[
                 "Windows drives it with its own VGA driver. 2D only: no Aero and no Direct3D through a driver.",

@@ -45,6 +45,7 @@
  * address reaches, which keeps the two apart in a trace. */
 #define D3DPT_AP_BASE 0x80000000u
 #define D3DPT_AP_PAGES ((64u * 1024 * 1024) / PAGE_SIZE)
+#define D3DPT_COPY_PAGES 65536u   /* the copy list: a transfer of up to 256 MiB the device makes (CAP_COPY) */
 
 /* One adapter: the device has no multi-head and the INF installs one. */
 typedef struct D3DPT_ADAPTER {
@@ -79,6 +80,11 @@ typedef struct D3DPT_ADAPTER {
      * records to the window from the DMA buffer (dma), and a submission's
      * fence is the device's DMA interrupt (fence_irq, with CAP_IRQ) */
     BOOLEAN dma, fence_irq;
+    BOOLEAN fill;                     /* register set v9 (CAP_FILL): the device fills VRAM */
+    /* register set v9 (CAP_COPY): the device copies between VRAM and guest
+     * pages, which a transfer lists here (contiguous, nonpaged) */
+    PULONGLONG copy_list;
+    PHYSICAL_ADDRESS copy_list_pa;
     PUCHAR sub_va;                    /* the DMA buffer of the submission being run: system VA */
     PHYSICAL_ADDRESS sub_pa;          /* and its physical address (contiguous) */
     ULONG dma_errors;                 /* appends the device refused, the first few logged */
@@ -87,6 +93,18 @@ typedef struct D3DPT_ADAPTER {
     volatile LONG vsync_on;
     BOOLEAN vsync_ready;              /* the timer and its DPC initialized (StartDevice) */
     volatile ULONG scan_addr;         /* what the scanout shows (OFFSET), as the vsync reports it */
+    /* a flip with a flip interval waits for the vertical blank, as a GPU's
+     * flip has a built-in wait for it (FlipWithNoWait says when not): its
+     * address goes to the scanout there, and its fence, and every fence
+     * submitted after it, is reported done there too, in order. Without it
+     * a full-screen Direct3D program presented as fast as it could draw
+     * (D3DGAME9 at 600 frames a second, track M20). Changed only under the
+     * interrupt's synchronization */
+    BOOLEAN flip_defer;               /* the submission being run is such a flip (SubmitCommand) */
+    BOOLEAN flip_pending;             /* flip_addr waits for the vertical blank */
+    ULONG flip_addr;
+    BOOLEAN fence_held;               /* held_fence waits for the vertical blank */
+    LONG held_fence;
     /* Direct3D: the command window (d3dpt_proto.h) the user-mode driver's
      * records are copied into at submit time, the host's surface handles
      * this driver hands out, and the handles of D3D allocations destroyed
@@ -100,6 +118,8 @@ typedef struct D3DPT_ADAPTER {
     KSPIN_LOCK rel_lock;
     ULONG rel_n;
     ULONG rel[256];
+    ULONG ctx_rel_n;                  /* host contexts to destroy at the next submission (rel_lock) */
+    ULONG ctx_rel[256];
 } D3DPT_ADAPTER;
 
 /* A device and a context are only names here: everything they would hold
@@ -111,6 +131,7 @@ typedef struct D3DPT_DEVICE {
 
 typedef struct D3DPT_CONTEXT {
     D3DPT_DEVICE *dev;
+    ULONG host_ctx;                   /* the user-mode driver's host context (D3DPT_CTX_PRIV), 0: none */
 } D3DPT_CONTEXT;
 
 /* An allocation (hAllocation): what its private driver data said
@@ -390,6 +411,7 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->d3d_errors = 0;
     a->next_handle = 0;
     a->rel_n = 0;
+    a->ctx_rel_n = 0;
     KeInitializeSpinLock(&a->rel_lock);
     dbg_hex("d3dptkmd: Direct3D window at ", a->d3d ? a->cmd_offset : 0);
     dbg_puts("\n");
@@ -408,6 +430,16 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->vsync_isr = 0;
     a->dma = a->d3d && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
     a->fence_irq = a->vsync_irq && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->fill = version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_FILL);
+    if (version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_COPY) && !a->copy_list) {
+        PHYSICAL_ADDRESS hi;
+
+        hi.QuadPart = -1;
+        a->copy_list = (PULONGLONG)MmAllocateContiguousMemory(D3DPT_COPY_PAGES * sizeof(ULONGLONG), hi);
+        if (a->copy_list) {
+            a->copy_list_pa = MmGetPhysicalAddress(a->copy_list);
+        }
+    }
     a->dma_errors = 0;
     a->irq_mask = a->fence_irq ? D3DPT_FB_IRQ_DMA : 0;
     if (a->vsync_irq) {
@@ -452,6 +484,10 @@ static void unmap(D3DPT_ADAPTER *a)
     if (a->ap_va) {
         ExFreePoolWithTag(a->ap_va, D3DPT_TAG);
         a->ap_va = NULL;
+    }
+    if (a->copy_list) {
+        MmFreeContiguousMemory(a->copy_list);
+        a->copy_list = NULL;
     }
     if (a->vram) {
         MmUnmapIoSpace(a->vram, a->vram_map);
@@ -515,7 +551,15 @@ static NTSTATUS driver_caps(const D3DPT_ADAPTER *a, DXGK_DRIVERCAPS *c)
         c->PointerCaps.Color = 1;
         c->PointerCaps.MaskedColor = 1;
     }
+#ifdef _WIN64
+    /* The device reads any guest-physical address (DMA_ADDR_HI) and the
+     * aperture is the CPU's own mappings. Below 4 GB only, Windows 11 on
+     * a guest with memory above it fails the adapter's start ("Not Enough
+     * Quota", StartAdapter_AddAdapterFailed; track M20 step 5). */
+    c->HighestAcceptableAddress.QuadPart = ~0ull;
+#else
     c->HighestAcceptableAddress.QuadPart = 0xffffffffull;
+#endif
     c->MaxAllocationListSlotId = 16;
     c->MaxQueuedFlipOnVSync = 1;
     c->GpuEngineTopology.NbAsymetricProcessingNodes = 1;
@@ -561,6 +605,10 @@ static NTSTATUS query_segment(const D3DPT_ADAPTER *a, const DXGKARG_QUERYADAPTER
     return STATUS_SUCCESS;
 }
 
+/* DXGKQAITYPE_64BITONLYCAPS: Windows 11 24H2's, newer than the EWDK
+ * 10.0.19041 headers; undocumented past its name, a 4-byte output. */
+#define D3DPT_QAITYPE_64BITONLYCAPS 47
+
 static DXGKDDI_QUERYADAPTERINFO d3dpt_query_adapter_info;
 static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
                                                   IN_CONST_PDXGKARG_QUERYADAPTERINFO q)
@@ -568,7 +616,7 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
     const D3DPT_ADAPTER *a = (const D3DPT_ADAPTER *)h;
     NTSTATUS st;
 
-    switch (q->Type) {
+    switch ((ULONG)q->Type) {
     case DXGKQAITYPE_DRIVERCAPS:
         st = q->OutputDataSize < sizeof(DXGK_DRIVERCAPS)
              ? STATUS_INVALID_PARAMETER : driver_caps(a, (DXGK_DRIVERCAPS *)q->pOutputData);
@@ -595,6 +643,12 @@ static NTSTATUS APIENTRY d3dpt_query_adapter_info(IN_CONST_HANDLE h,
         st = STATUS_SUCCESS;
         break;
     }
+    case D3DPT_QAITYPE_64BITONLYCAPS:
+        /* Windows 11 asks it of every driver, and stops a driver that
+         * fails it (track M20 step 5). Zero: no 64-bit-only claim. */
+        RtlZeroMemory(q->pOutputData, q->OutputDataSize);
+        st = STATUS_SUCCESS;
+        break;
     default:
         st = STATUS_NOT_SUPPORTED;
         break;
@@ -1032,6 +1086,11 @@ static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_
         return STATUS_NO_MEMORY;
     }
     x->dev = (D3DPT_DEVICE *)h;
+    x->host_ctx = 0;
+    if (c->pPrivateDriverData && c->PrivateDriverDataSize >= sizeof(D3DPT_CTX_PRIV) &&
+        ((const D3DPT_CTX_PRIV *)c->pPrivateDriverData)->magic == D3DPT_CTX_MAGIC) {
+        x->host_ctx = ((const D3DPT_CTX_PRIV *)c->pPrivateDriverData)->host_ctx;
+    }
     c->hContext = x;
     c->ContextInfo.DmaBufferSize = D3DPT_DMA_SIZE;
     c->ContextInfo.DmaBufferSegmentSet = 0;
@@ -1047,7 +1106,22 @@ static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_
 static DXGKDDI_DESTROYCONTEXT d3dpt_destroy_context;
 static NTSTATUS APIENTRY d3dpt_destroy_context(IN_CONST_HANDLE h)
 {
-    ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
+    D3DPT_CONTEXT *x = (D3DPT_CONTEXT *)h;
+
+    /* the host's context goes at the next submission, as a release does:
+     * only a submission writes the window. A second destroy after the
+     * user-mode driver's own is a no-op there. */
+    if (x->host_ctx) {
+        D3DPT_ADAPTER *a = x->dev->a;
+        KIRQL irql;
+
+        KeAcquireSpinLock(&a->rel_lock, &irql);
+        if (a->ctx_rel_n < RTL_NUMBER_OF(a->ctx_rel)) {
+            a->ctx_rel[a->ctx_rel_n++] = x->host_ctx;
+        }
+        KeReleaseSpinLock(&a->rel_lock, irql);
+    }
+    ExFreePoolWithTag(x, D3DPT_TAG);
     return STATUS_SUCCESS;
 }
 
@@ -1436,10 +1510,160 @@ static void run_unmap(D3DPT_ADAPTER *a, const PKT_MAP_T *p)
     }
 }
 
+/* the pages of a transfer's system side, into the copy list: an MDL's
+ * from its PFN array, the aperture's from each page's mapping. FALSE when
+ * they do not fit or a page is not mapped (the CPU copies then). */
+static BOOLEAN copy_pages(D3DPT_ADAPTER *a, const PKT_MEM *m, ULONG bytes, PULONG off0)
+{
+    ULONG i, n, first, start;
+
+    if (m->seg == 0) {
+        PPFN_NUMBER pfn;
+
+        if (!m->mdl) {
+            return FALSE;
+        }
+        pfn = MmGetMdlPfnArray(m->mdl);
+        start = MmGetMdlByteOffset(m->mdl) + m->mdl_off;
+        first = start >> PAGE_SHIFT;
+        *off0 = start & (PAGE_SIZE - 1);
+        n = (*off0 + bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+        if (n > D3DPT_COPY_PAGES ||
+            first + n > ADDRESS_AND_SIZE_TO_SPAN_PAGES(MmGetMdlVirtualAddress(m->mdl), MmGetMdlByteCount(m->mdl))) {
+            return FALSE;
+        }
+        for (i = 0; i < n; i++) {
+            a->copy_list[i] = (ULONGLONG)pfn[first + i] << PAGE_SHIFT;
+        }
+        return TRUE;
+    }
+    if (m->seg == 2 && m->addr >= D3DPT_AP_BASE) {
+        ULONG off = m->addr - D3DPT_AP_BASE;
+
+        if (off >= D3DPT_AP_PAGES * PAGE_SIZE || bytes > D3DPT_AP_PAGES * PAGE_SIZE - off) {
+            return FALSE;
+        }
+        first = off >> PAGE_SHIFT;
+        *off0 = off & (PAGE_SIZE - 1);
+        n = (*off0 + bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+        if (n > D3DPT_COPY_PAGES) {
+            return FALSE;
+        }
+        for (i = 0; i < n; i++) {
+            if (!a->ap_va[first + i]) {
+                return FALSE;
+            }
+            a->copy_list[i] = (ULONGLONG)MmGetPhysicalAddress(a->ap_va[first + i]).QuadPart & ~(ULONGLONG)(PAGE_SIZE - 1);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* A transfer between VRAM and system memory or the aperture, by the device
+ * (register set v9, CAP_COPY): the vCPU's copy through the BAR is uncached
+ * under WHPX (1.3 s of every 5 while a game ran, track M20). */
+static BOOLEAN host_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
+{
+    const PKT_MEM *sys = p->src.seg == 1 ? &p->dst : &p->src;
+    ULONG vram = p->src.seg == 1 ? p->src.addr : p->dst.addr, off0 = 0;
+
+    if (!a->copy_list || !p->bytes || (p->src.seg == 1) == (p->dst.seg == 1) ||
+        vram > a->seg_size || p->bytes > a->seg_size - vram || !copy_pages(a, sys, p->bytes, &off0)) {
+        return FALSE;
+    }
+    a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = vram;
+    a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = p->bytes;
+    a->regs[D3DPT_FB_REG_COPY_LIST_LO / 4] = a->copy_list_pa.LowPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_HI / 4] = (ULONG)a->copy_list_pa.HighPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_OFF / 4] = off0;
+    a->regs[D3DPT_FB_REG_COPY_LIST_COUNT / 4] = (off0 + p->bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = 1;
+    a->regs[D3DPT_FB_REG_COPY_GO / 4] = p->src.seg == 1 ? D3DPT_FB_COPY_TO_PAGES : D3DPT_FB_COPY_TO_VRAM;
+    return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+}
+
+/* A blit's rectangle by the device (CAP_COPY): VRAM to VRAM, or between
+ * VRAM and the aperture, row by row at each side's pitch. FALSE leaves it
+ * to the CPU. */
+static BOOLEAN host_blt_rect(D3DPT_ADAPTER *a, const PKT_BLT_T *p, const PKT_RECT *r)
+{
+    /* every extent in 64 bits: the rectangles and pitches are the
+     * runtime's, and a wrapped one would send the device past the list */
+    ULONGLONG w = (ULONGLONG)(r->r - r->l), hgt = (ULONGLONG)(r->b - r->t), row64 = w * p->dst.bpp;
+    ULONGLONG doff64 = p->dst.addr + (ULONGLONG)r->t * p->dst.pitch + (ULONGLONG)r->l * p->dst.bpp;
+    ULONGLONG soff64 = p->src.addr + (ULONGLONG)r->sy * p->src.pitch + (ULONGLONG)r->sx * p->src.bpp;
+    ULONGLONG span64;
+    const PKT_SURF *vs, *ps;
+    ULONG voff, poff, i, first, n, off0, row, doff, soff;
+
+    if (!a->copy_list || p->h.op != PKT_BLT || !hgt || !w || p->src.bpp != p->dst.bpp || row64 > MAXULONG ||
+        doff64 > MAXULONG || soff64 > MAXULONG || hgt > MAXULONG) {
+        return FALSE;
+    }
+    row = (ULONG)row64;
+    doff = (ULONG)doff64;
+    soff = (ULONG)soff64;
+    if (p->src.seg == 1 && p->dst.seg == 1) {
+        if ((ULONGLONG)doff + (ULONGLONG)(hgt - 1) * p->dst.pitch + row > a->seg_size ||
+            (ULONGLONG)soff + (ULONGLONG)(hgt - 1) * p->src.pitch + row > a->seg_size) {
+            return FALSE;
+        }
+        a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = doff;
+        a->regs[D3DPT_FB_REG_COPY_SRC_VRAM / 4] = soff;
+        a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = row;
+        a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = (ULONG)hgt;
+        a->regs[D3DPT_FB_REG_COPY_VRAM_PITCH / 4] = p->dst.pitch;
+        a->regs[D3DPT_FB_REG_COPY_PAGE_PITCH / 4] = p->src.pitch;
+        a->regs[D3DPT_FB_REG_COPY_GO / 4] = D3DPT_FB_COPY_VRAM_VRAM;
+        return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+    }
+    if (!((p->src.seg == 1 && p->dst.seg == 2) || (p->src.seg == 2 && p->dst.seg == 1))) {
+        return FALSE;
+    }
+    vs = p->dst.seg == 1 ? &p->dst : &p->src;
+    ps = p->dst.seg == 1 ? &p->src : &p->dst;
+    voff = p->dst.seg == 1 ? doff : soff;
+    poff = p->dst.seg == 1 ? soff : doff;
+    span64 = (hgt - 1) * ps->pitch + row64;
+    if ((ULONGLONG)voff + (hgt - 1) * vs->pitch + row64 > a->seg_size || poff < D3DPT_AP_BASE ||
+        poff - D3DPT_AP_BASE >= D3DPT_AP_PAGES * PAGE_SIZE ||
+        span64 > (ULONGLONG)D3DPT_AP_PAGES * PAGE_SIZE - (poff - D3DPT_AP_BASE)) {
+        return FALSE;
+    }
+    first = (poff - D3DPT_AP_BASE) >> PAGE_SHIFT;
+    off0 = (poff - D3DPT_AP_BASE) & (PAGE_SIZE - 1);
+    n = (ULONG)((off0 + span64 + PAGE_SIZE - 1) >> PAGE_SHIFT);
+    if (n > D3DPT_COPY_PAGES) {
+        return FALSE;
+    }
+    for (i = 0; i < n; i++) {
+        if (!a->ap_va[first + i]) {
+            return FALSE;
+        }
+        a->copy_list[i] = (ULONGLONG)MmGetPhysicalAddress(a->ap_va[first + i]).QuadPart & ~(ULONGLONG)(PAGE_SIZE - 1);
+    }
+    a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = voff;
+    a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = row;
+    a->regs[D3DPT_FB_REG_COPY_LIST_LO / 4] = a->copy_list_pa.LowPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_HI / 4] = (ULONG)a->copy_list_pa.HighPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_OFF / 4] = off0;
+    a->regs[D3DPT_FB_REG_COPY_LIST_COUNT / 4] = n;
+    a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = (ULONG)hgt;
+    a->regs[D3DPT_FB_REG_COPY_VRAM_PITCH / 4] = vs->pitch;
+    a->regs[D3DPT_FB_REG_COPY_PAGE_PITCH / 4] = ps->pitch;
+    a->regs[D3DPT_FB_REG_COPY_GO / 4] = p->dst.seg == 1 ? D3DPT_FB_COPY_TO_VRAM : D3DPT_FB_COPY_TO_PAGES;
+    return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+}
+
 static void run_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
 {
     PUCHAR src, dst, sm = NULL, dm = NULL;
     BOOLEAN smine = FALSE, dmine = FALSE;
+
+    if (host_transfer(a, p)) {
+        return;
+    }
 
     if (p->src.seg == 0) {
         sm = mdl_map(p->src.mdl, MmWriteCombined, &smine);
@@ -1470,9 +1694,22 @@ static void run_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
 
 static void run_fill(D3DPT_ADAPTER *a, const PKT_FILL_T *p)
 {
-    PULONG d = (PULONG)seg_va(a, p->seg, p->addr, p->bytes);
+    PULONG d;
     ULONG i;
 
+    /* VRAM: the device fills it from the host (register set v9, CAP_FILL);
+     * the vCPU's stores into the BAR are uncached under WHPX (~130 ms for
+     * a 2304x800 texture, track M20) */
+    if (p->seg == 1 && a->fill && !((p->addr | p->bytes) & 3)) {
+        a->regs[D3DPT_FB_REG_FILL_ADDR / 4] = p->addr;
+        a->regs[D3DPT_FB_REG_FILL_BYTES / 4] = p->bytes;
+        a->regs[D3DPT_FB_REG_FILL_PATTERN / 4] = p->pattern;
+        a->regs[D3DPT_FB_REG_FILL_GO / 4] = 1;
+        if (a->regs[D3DPT_FB_REG_FILL_GO / 4] == D3DPT_FB_FILL_OK) {
+            return;
+        }
+    }
+    d = (PULONG)seg_va(a, p->seg, p->addr, p->bytes);
     if (!d) {
         return;
     }
@@ -1494,6 +1731,9 @@ static void run_blt(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
 
         if (r->r <= r->l || r->b <= r->t || r->l < 0 || r->t < 0 ||
             (p->h.op == PKT_BLT && (r->sx < 0 || r->sy < 0))) {
+            continue;
+        }
+        if (host_blt_rect(a, p, r)) {   /* the device, from the host's side of the BAR */
             continue;
         }
         for (y = 0; y < hgt; y++) {
@@ -1577,6 +1817,15 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
     ULONG i;
 
     KeAcquireSpinLock(&a->rel_lock, &irql);
+    for (i = 0; i < a->ctx_rel_n; i++) {
+        d3dpt_handle *r = d3dpt_enc_cmd(&a->enc, D3DPT_OP_CTX_DESTROY, sizeof(*r), 0);
+
+        if (r) {
+            r->handle = a->ctx_rel[i];
+            r->pad = 0;
+        }
+    }
+    a->ctx_rel_n = 0;
     for (i = 0; i < a->rel_n; i++) {
         d3dpt_handle *r = d3dpt_enc_cmd(&a->enc, D3DPT_OP_VRAM_RELEASE, sizeof(*r), 0);
 
@@ -1700,12 +1949,51 @@ static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 }
 
 /* Execute one submission: every packet from start to end, in order. */
+/* where the guest's CPU goes in the packets (track M20: the System
+ * process at 73% of a CPU while a game ran): per packet kind, the
+ * microseconds of the last 5 s, the first few periods logged */
+static LONGLONG g_pkt_us[16], g_pkt_t0;
+static ULONG g_pkt_n[16], g_pkt_logs;
+
+static void pkt_time(ULONG op, LARGE_INTEGER t0)
+{
+    LARGE_INTEGER f, t1 = KeQueryPerformanceCounter(&f);
+    ULONG i;
+
+    if (op < 16) {
+        g_pkt_us[op] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
+        g_pkt_n[op]++;
+    }
+    if (!g_pkt_t0) {
+        g_pkt_t0 = t1.QuadPart;
+    }
+    if (t1.QuadPart - g_pkt_t0 < 5 * f.QuadPart) {
+        return;
+    }
+    if (g_pkt_logs < 24) {
+        g_pkt_logs++;
+        dbg_puts("d3dptkmd: packets in 5 s, op count microseconds:");
+        for (i = 1; i < 16; i++) {
+            if (g_pkt_n[i]) {
+                dbg_hex(" op", i);
+                dbg_hex(" n", g_pkt_n[i]);
+                dbg_hex(" us", (ULONG)g_pkt_us[i]);
+            }
+        }
+        dbg_puts("\n");
+    }
+    RtlZeroMemory(g_pkt_us, sizeof(g_pkt_us));
+    RtlZeroMemory(g_pkt_n, sizeof(g_pkt_n));
+    g_pkt_t0 = t1.QuadPart;
+}
+
 static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
 {
     ULONG off = 0;
 
     while (off + sizeof(PKT_HDR) <= len) {
         const PKT_HDR *hd = (const PKT_HDR *)(p + off);
+        LARGE_INTEGER t0 = KeQueryPerformanceCounter(NULL);
 
         if (hd->magic != D3DPT_PKT_MAGIC || hd->size < sizeof(*hd) || hd->size > len - off) {
             dbg_hex("d3dptkmd: bad packet at ", off);
@@ -1725,7 +2013,9 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
             run_blt(a, (const PKT_BLT_T *)hd);
             break;
         case PKT_FLIP:
-            if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
+            if (((const PKT_FLIP_T *)hd)->src.seg == 1 && a->flip_defer) {
+                a->flip_addr = ((const PKT_FLIP_T *)hd)->src.addr;     /* SubmitCommand queues it */
+            } else if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
                 a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
                 a->scan_addr = ((const PKT_FLIP_T *)hd)->src.addr;
             }
@@ -1760,10 +2050,14 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
             }
             break;
         }
+        pkt_time(hd->op, t0);
         off += hd->size;
     }
     if (a->d3d) {                   /* one doorbell per submission */
+        LARGE_INTEGER t0 = KeQueryPerformanceCounter(NULL);
+
         d3dpt_enc_flush(&a->enc);
+        pkt_time(15, t0);           /* the doorbell: the host runs the batch inside it */
     }
 }
 
@@ -1804,14 +2098,76 @@ static BOOLEAN notify_preempted(PVOID ctx)
     return TRUE;
 }
 
-static void complete_fence(D3DPT_ADAPTER *a, ULONG fence)
+/* a fence done, under the interrupt's synchronization: through the
+ * device's DMA interrupt (fence_irq: the FENCE register), else reported
+ * here as an interrupt would */
+static void fence_done_sync(D3DPT_ADAPTER *a, LONG fence)
 {
+    a->fence_done = fence;
+    if (a->fence_irq) {
+        a->regs[D3DPT_FB_REG_FENCE / 4] = (ULONG)fence;           /* IRQ_DMA: the ISR reports it */
+    } else {
+        a->fence_notify = fence;
+        notify_completed(a);
+    }
+}
+
+/* the held flip and fence, at the vertical blank (or when dxgkrnl stops
+ * it): the scanout takes the flip's address, then the fences are done */
+static volatile LONG g_flips_submitted;   /* the vertical blank's statistics: waiting flips submitted */
+
+static void release_flip_sync(D3DPT_ADAPTER *a)
+{
+    if (a->flip_pending) {
+        a->flip_pending = FALSE;
+        a->regs[D3DPT_FB_REG_OFFSET / 4] = a->flip_addr;
+        a->scan_addr = a->flip_addr;
+    }
+    if (a->fence_held) {
+        a->fence_held = FALSE;
+        fence_done_sync(a, a->held_fence);
+    }
+}
+
+static KSYNCHRONIZE_ROUTINE release_flip;
+static BOOLEAN release_flip(PVOID ctx)
+{
+    release_flip_sync((D3DPT_ADAPTER *)ctx);
+    return TRUE;
+}
+
+/* a submission run: its fence done now, or held behind a flip that waits
+ * for the vertical blank (this one, or an earlier one still waiting) */
+struct d3dpt_finish { D3DPT_ADAPTER *a; LONG fence; BOOLEAN flip; };
+static KSYNCHRONIZE_ROUTINE finish_submission;
+static BOOLEAN finish_submission(PVOID ctx)
+{
+    struct d3dpt_finish *f = (struct d3dpt_finish *)ctx;
+    D3DPT_ADAPTER *a = f->a;
+
+    if (f->flip && a->vsync_on) {
+        a->flip_pending = TRUE;
+        a->fence_held = TRUE;
+        a->held_fence = f->fence;
+    } else if (a->fence_held && a->vsync_on) {
+        a->held_fence = f->fence;
+    } else {
+        release_flip_sync(a);       /* the vertical blank went off meanwhile: nothing waits for it */
+        fence_done_sync(a, f->fence);
+    }
+    return TRUE;
+}
+
+static void complete_fence(D3DPT_ADAPTER *a, ULONG fence, BOOLEAN flip)
+{
+    struct d3dpt_finish f;
     BOOLEAN ret = FALSE;
     NTSTATUS st;
 
-    a->fence_done = (LONG)fence;
-    a->fence_notify = (LONG)fence;
-    st = a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_completed, a, 0, &ret);
+    f.a = a;
+    f.fence = (LONG)fence;
+    f.flip = flip;
+    st = a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, finish_submission, &f, 0, &ret);
     if (!NT_SUCCESS(st) || !ret) {
         dbg_hex("d3dptkmd: SynchronizeExecution ", (ULONG)st);
         dbg_hex(" ran ", (ULONG)ret);
@@ -2261,6 +2617,10 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
         dbg_hex(" bytes ", s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
         dbg_puts("\n");
     }
+    /* a flip with an interval waits for the vertical blank, while dxgkrnl
+     * has it on (it turns it on for the flips it schedules) */
+    a->flip_defer = s->Flags.Flip && !s->Flags.FlipWithNoWait && s->FlipInterval != D3DDDI_FLIPINTERVAL_IMMEDIATE &&
+                    a->vsync_on;
     if (s->DmaBufferSubmissionEndOffset > s->DmaBufferSubmissionStartOffset) {
         PHYSICAL_ADDRESS pa = s->DmaBufferPhysicalAddress;
         PUCHAR va;
@@ -2278,12 +2638,11 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
             dbg_puts("\n");
         }
     }
-    if (a->fence_irq) {
-        a->fence_done = (LONG)s->SubmissionFenceId;
-        a->regs[D3DPT_FB_REG_FENCE / 4] = s->SubmissionFenceId;   /* IRQ_DMA: the ISR reports it */
-    } else {
-        complete_fence(a, s->SubmissionFenceId);
+    if (a->flip_defer) {
+        InterlockedIncrement(&g_flips_submitted);
     }
+    complete_fence(a, s->SubmissionFenceId, a->flip_defer);
+    a->flip_defer = FALSE;
     return STATUS_SUCCESS;
 }
 
@@ -2770,6 +3129,21 @@ static BOOLEAN notify_vsync(PVOID ctx)
     D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
     DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
 
+    {
+        static ULONG blanks, flips, logs;
+
+        flips += a->flip_pending;
+        if (++blanks == 300 && logs < 8) {  /* the first few: how many of 300 vertical blanks showed a flip */
+            logs++;
+            dbg_hex("d3dptkmd: flips shown in 300 vertical blanks: ", flips);
+            dbg_hex(" submitted ", (ULONG)InterlockedExchange(&g_flips_submitted, 0));
+            dbg_puts("\n");
+        }
+        if (blanks == 300) {
+            blanks = flips = 0;
+        }
+    }
+    release_flip_sync(a);           /* a flip waiting for this vertical blank shows now */
     RtlZeroMemory(&n, sizeof(n));
     n.InterruptType = DXGK_INTERRUPT_CRTC_VSYNC;
     n.CrtcVsync.VidPnTargetId = 0;
@@ -2797,7 +3171,12 @@ static VOID vsync_tick(PKDPC dpc, PVOID ctx, PVOID a1, PVOID a2)
 
 static void vsync_stop(D3DPT_ADAPTER *a)
 {
+    BOOLEAN ret;
+
     InterlockedExchange(&a->vsync_on, 0);
+    if (a->regs) {                  /* nothing waits for a vertical blank that will not come */
+        a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, release_flip, a, 0, &ret);
+    }
     if (a->vsync_irq && a->regs) {
         a->irq_mask &= ~D3DPT_FB_IRQ_VBLANK;
         a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;   /* a pending vertical blank goes with it */

@@ -131,8 +131,9 @@ What differs from Linux, so a failure there reads right:
   `package` (the zip is rolled and checked by `scripts/package-windows.sh`,
   not by this check), `atapi-read-error` (an LD_PRELOAD), `mode-sweep` and the
   `pad-guest` checks (they want a display test.sh does not set up here yet),
-  `player-mitsuami` (sway), `tpm-qtest` (QEMU builds no TPM on Windows yet,
-  track M20), `exec-wine`.
+  `player-mitsuami` (sway), `exec-wine`. `tpm-qtest` runs on the MSVC
+  QEMU there (`build/win/qemu-msvc/qemu-system-i386.exe`): only it has the
+  TPM (patch 88).
 
 ### Host-stage checks
 
@@ -220,7 +221,7 @@ scene that left no frame on the scratch disk fails as `guest-G9`,
 | `win11-frames` | `tools/win11-frames-test.py` (a copy of an installed Windows 11 on Arm machine; skips without one, without `W11_PASSWORD` or off Apple Silicon) |
 | `win98-dx9` | Win98 on the display driver through Microsoft's runtimes (M16 step 5), one boot under TCG of `tools/win98-dx9-test.sh`: D3DGAME9/8 pixel-identical to the native frame outside the HUD, D3DFEAT9 byte-identical with its lines (the A16B16G16R16F readback expected to fail, finding 35), the DX8 probes, SHTEST, CKTEST, EBTEST, DDTEST's sysmem blits; one line each in the log |
 | `win98-winetest` | Wine's suites on Win98 (`tools/win98-winetest.sh`) against `reference/winetest/w98-driver.txt` |
-| `win7-aero` | Windows 7 from its install disc to Aero (M18 finding 14), `tools/win7-aero-test.sh $WIN7_ISO`: a machine of the launcher's Windows 7 family, Windows setup unattended once (the base, kept in `build/win7-aero-test`), then on an overlay SETUP, one restart, and five verdicts: SETUP chose the WDDM driver, the kernel driver started, `dwm.exe` has `d3dptumd.dll` loaded, the pointer was never hidden by a page flip (DWM's flips, finding 16), D3DGAME9's frame under composition within budget of the native one. Skipped without `WIN7_ISO` (a 32-bit Windows 7 disc of the user's) or without `WDDM\` on the guest-tools ISO |
+| `win7-aero` | Windows 7 from its install disc to Aero (M18 finding 14), `tools/win7-aero-test.sh $WIN7_ISO`: a machine of the launcher's Windows 7 family, Windows setup unattended once (the base, kept in `build/win7-aero-test`), then on an overlay SETUP, one restart, and five verdicts: SETUP chose the WDDM driver, the kernel driver started, `dwm.exe` has `d3dptumd.dll` loaded, the pointer was never hidden by a page flip (DWM's flips, finding 16), D3DGAME9's frame under composition within budget of the native one. Skipped without `WIN7_ISO` (a 32-bit Windows 7 disc of the user's) or without `WDDM\` on the guest-tools ISO. The `dwm` verdict is flaky: on 2026-10-09 it failed 2 runs of 9 (the first runs after a rebuild, DWM dropping its device after a display re-initialisation a minute into the session, before the check's `tasklist`), with the kernel driver of before and after that day's changes alike; a rerun passes |
 
 The two Win98 checks run after the XP stage, on a raw copy of
 `WIN98_DX9_MACHINE` kept in `build/test/w98.raw` (never the machine's
@@ -368,7 +369,8 @@ another.
 | `tools/win98-dx9-test.sh [image]` | the `win98-dx9` check alone: the scenes, the probes and DDTEST in one Win98 boot, PASS / FAIL per line, exit 1 on any failure (`RAW=`, `OUT=`, `FRESH=1`, `DDFLAGS=`; `DDFLAGS=0x40000000` is a control that must fail D3DFEAT9) |
 | `tools/win98-winetest.sh [image]` | the same tests through Win98's DirectX 9.0c runtime on the 9x driver (M16 step 5), on a raw copy of `base98-br` by default: stages them in `C:\WT`, switches the desktop to 32 bpp for the session (`SETBPP`; on 16 bpp d3d8 refuses the tests' windowed A8R8G8B8 device and every d3d8 file skips), runs each file under `WTRUN` and stops when COM1 says `WTALL` (`tools/win98-game-test.sh`'s `UNTIL=`). Without a `voodoo2` in `EXTRA` it renames 3dfx's `3DFX32V2.DLL` to `.OFF` in the raw copy (`base98-br` has 3dfx's driver installed, and d3d8.dll loaded it with no card and crashed in it). `WT_TESTS=`, `WT_CAP=`, `WT_CANARY=1` (a device after every test function; the first that fails stops the run, `STOP.TXT` names the test; winetest patch 09), `WT_SKIP=a,b` (leave test functions out), `WT_BASELINE=` (a name in `reference/winetest/` or a path; `w98-driver` is the driver's Win98 baseline, and with one the script exits 1 on a worse key), `WT_SAVE=`, `WT_BPP=` (0: leave the depth), `FRESH=1` |
 | `tools/winetest-dxvk.sh` | the same test EXEs under the host's Wine on DXVK's own 32-bit `d3d9.dll` / `d3d8.dll` (built into `build/dxvk-win32`), in a headless sway when sway is installed: what DXVK itself fails, `reference/winetest/dxvk-wine.txt` (`WT_SAVE=`, `WT_TESTS=`; the DXVK built is our patched one, and it runs with `DXVK_SHADER_CACHE=0` so a patch under test is never hidden by a cached shader). It is also the edit-test loop for `patches/dxvk/` (25 s for d3d9 visual). A guest run compared against it (`winetest-summary.py --baseline`) leaves the failures that are the driver's or the executor's (M16) |
-| `D3DPT_DP2_TRACE=<flag file>` | QEMU env: one whole DP2 frame per `touch`: states, tokens, first vertices, bound textures' texel means, every level and the target after each draw as `.ppm` (count pixels per `draw-<n>.ppm` to name the draw that paints an artefact). `D3DPT_DDI_REREAD=1` tells a stale host texture from VRAM never written, `D3DPT_DDI_NOFOG=1` rules fog out |
+| `D3DPT_DP2_TRACE=<flag file>` | QEMU env: one whole DP2 frame per `touch`: states, tokens, first vertices, bound textures' texel means, every level and the target after each draw as `.ppm` (count pixels per `draw-<n>.ppm` to name the draw that paints an artefact). Also each DX9 shader as created (`vs\|ps-<ctx>-<handle>.bin`), each traced draw's vertices (`draw-<n>.vtx`) and a target texture's VRAM (`tex-<h>-vram.ppm`). `D3DPT_WATCH=<w>x<h>[,<x>,<y>]` logs the record / DP2 token that changes every surface of that size (or one texel of each). `D3DPT_DDI_REREAD=1` tells a stale host texture from VRAM never written, `D3DPT_DDI_NOFOG=1` rules fog out |
+| `tools/wddm-probe.cpp` (x64 MSVC, build line in its header) | on x64 Windows 11 with the WDDM driver (M20): adapter 0's D3DCAPS9 fields d3d10level9 tests, then per adapter the Direct3D 11 device a WinUI 3 compositor makes: its feature level (9_3 since driver 0.3.17; WinUI 3 apps such as File Explorer's header and Notepad drop a 9_1 device and draw nothing), each format the 9_2 table wants with the support bits it lacks, shared / keyed-mutex textures, Direct2D, DirectComposition, a composition swap chain. Run it in the logged-on session: a scheduled task with `New-ScheduledTaskPrincipal -UserId <user> -LogonType Interactive`, output to `C:\2KSBOX` |
 | `tools/xp-game-test.sh <image> "<dir>" <exe> [name]` | a game on the display driver headless (the image has the driver installed): `CDS=a.iso:b.iso`, `KEYS=8:ret,25:esc` (after the first Direct3D context), `SHOTS=n` (message boxes you cannot otherwise see, and the game's frames), `VGA=cirrus` (the control), `DRW_AFTER=s` (Dr. Watson: every thread's stack; `stacks <log>` prints them), `PAGEHEAP=1`, `CPU=pentium3`, `QEMU_EXTRA=`, `NO_ATTACH=1` (a run that expects no D3D device) |
 | `tools/macvm-wine-spike.sh`, `tools/macos-wine-spike-local.sh` | the Wine executor on a pre-26 macOS: in a UTM VM (no GL: Apple's paravirtual GPU is Metal-only) and on a second macOS volume on the same Mac; frames diffed against DXVK's |
 
@@ -468,7 +470,9 @@ file (the index survives, the PCR is reset), and a savevm / loadvm round
 trip (PCR and index come back, and a third QEMU reads the snapshot's
 index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
-`tpm-crb`.
+`tpm-crb`; on Windows on the MSVC build's `qemu-system-i386.exe`, the one
+with the TPM. It talks to QEMU over `qemuhost.py`'s addresses (loopback
+TCP on Windows).
 
 `tools/win11-boot-prompt-test.sh [iso]` (M20): a new Windows 11 on Arm
 machine starts setup from its disc with nobody at the keyboard. Makes
@@ -483,6 +487,7 @@ fill a QMP screendump within two minutes (`build/w11p/setup.png`).
 About 1.5 minutes. Needs Microsoft's Arm64 ISO (`$W11_ISO`, or
 `~/Downloads/Windows11_Client_arm64_*.iso`); Apple Silicon only for now.
 The guest stage's `win11-boot-prompt`, which skips without the ISO.
+
 
 `tools/win11-frames-test.py [machine-dir]` (M22): Windows 11 on Arm's
 desktop in whole frames at the guest's pace. An installed launcher

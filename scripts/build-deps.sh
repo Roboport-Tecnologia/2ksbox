@@ -94,7 +94,10 @@ mkdir -p "$SRC" "$PREFIX" "$WORK"
 TOOLS="meson ninja pkg-config cc"
 if [ "$OS" = Windows ]; then
   . "$ROOT/scripts/msvc-env.sh" || exit 1
-  TOOLS="meson ninja pkg-config clang-cl lld-link lib"
+  TOOLS="meson ninja pkg-config clang-cl lld-link lib nmake"
+  # OpenSSL's Configure for MSVC wants a Windows perl (MINGW64's,
+  # build-windows.sh --msys2-deps), not MSYS2's own
+  WINPERL="$(cygpath -u "${MSYSTEM_PREFIX:-/mingw64}")/bin/perl.exe"
   # MSYS2 has sha256sum, not Perl's shasum
   shasum() { shift 2; sha256sum "$@"; }
 fi
@@ -123,7 +126,7 @@ zstd 1.5.7 zstd-1.5.7.tar.gz eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24f
 case "$OS" in
   Darwin) PKGS=$(printf '%s\n' "$PKGS" | grep -Ev '^(zlib|libepoxy) ') ;;
   Linux) PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(pcre2|glib|libslirp|openssl|libtpms|spice-protocol) ') ;;
-  Windows) PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(zlib|pcre2|glib|pixman|libslirp|libepoxy) ') ;;
+  Windows) PKGS=$(printf '%s\n' "$PKGS" | grep -E '^(zlib|pcre2|glib|pixman|libslirp|openssl|libtpms|spice-protocol|libepoxy) ') ;;
 esac
 
 # Our patches on a package: patches/deps/<name>/*.patch (git-format
@@ -299,6 +302,64 @@ while read -r name ver tar sha url; do
         && run lib -nologo -out:"$PREFIX/lib/pcre2-8.lib" *.obj && rm -f *.obj \
         && cp pcre2.h "$PREFIX/include/" )
       write_pc libpcre2-8 "PCRE2 with 8 bit character support" -lpcre2-8 -DPCRE2_STATIC ;;
+    Windows-openssl)
+      # libcrypto for libtpms, as on the other hosts (track M20): static,
+      # no programs, engines or modules, and no assembler (it would want
+      # NASM). VC-WIN64A with clang-cl, built by nmake; a static OpenSSL
+      # takes the static C runtime itself (/MT). install_dev copies the
+      # .pdb MSVC's compiler writes beside the archive, which clang-cl
+      # does not: an empty one, deleted again. OpenSSL refuses MSYS2's own
+      # perl for a VC target (its paths are Unix ones): MINGW64's.
+      ( cd "$src" && run "$WINPERL" Configure VC-WIN64A no-asm --prefix="$PREFIX" --libdir=lib \
+          --openssldir="$PREFIX/ssl" no-shared no-tests no-docs no-apps no-engine no-module no-dso \
+          CC=clang-cl \
+          && run nmake -nologo build_libs \
+          && : > ossl_static.pdb && run nmake -nologo install_dev && rm -f "$PREFIX/lib/ossl_static.pdb" \
+          && run nmake -nologo distclean )
+      write_pc libcrypto "OpenSSL's libcrypto" "-llibcrypto -lws2_32 -lcrypt32 -ladvapi32 -luser32" "" ;;
+    Windows-libtpms)
+      # The TPM 2.0 behind `-tpmdev libtpms` (patch 88 builds QEMU's TPM
+      # on Windows with it). Its autotools cannot drive clang-cl, so its
+      # sources are compiled here as src/Makefile.am lists them, TPM 2.0
+      # only, with configure's answers for OpenSSL 3.5 and our
+      # patches/deps/libtpms/02-windows (src/win32: the clocks, unistd.h,
+      # config.h, regex.h). Object names carry the path: tpm2/ and
+      # crypto/openssl/ share file names.
+      #
+      # Its runtime profiles match JSON with POSIX regexes: PCRE2's POSIX
+      # wrapper (pcre2posix.c, the pcre2 recipe's sources), built here
+      # into the prefix when it is not there, so a set whose pcre2 was
+      # built before this needs no rebuild of it.
+      if [ ! -f "$PREFIX/lib/pcre2-posix.lib" ]; then
+        read -r _ pver ptar psha purl <<< "$(printf '%s\n' "$PKGS" | grep '^pcre2 ')"
+        psrc=$(fetch pcre2 "$ptar" "$psha" "$purl")
+        # (a relative -Fo: MSYS2 rewrites a C:/ path glued to the flag)
+        # (and the pcre2 recipe's generic config.h and flags)
+        ( cd "$psrc/src" && { [ -f pcre2.h ] || cp pcre2.h.generic pcre2.h; } \
+          && { [ -f config.h ] || cp config.h.generic config.h; } \
+          && run $CC $CRT $CFLAGS -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=8 -DPCRE2_STATIC \
+               -DSUPPORT_UNICODE -DHAVE_STDINT_H -DHAVE_INTTYPES_H -DHAVE_STRING_H \
+               -DHAVE_LIMITS_H -DHAVE_ASSERT_H -c pcre2posix.c -Fopcre2posix.obj \
+          && run lib -nologo -out:"$PREFIX/lib/pcre2-posix.lib" pcre2posix.obj \
+          && cp pcre2posix.h "$PREFIX/include/" && rm -f pcre2posix.obj )
+      fi
+      ( cd "$src/src" && rm -rf obj && mkdir obj \
+        && tpm2=$(awk '/^libtpms_tpm2_la_SOURCES *\+?=/ { on = 1 }
+                       on { for (i = 1; i <= NF; i++) if ($i ~ /\.c$/) print $i; if ($NF != "\\") on = 0 }' Makefile.am) \
+        && for f in disabled_interface.c tpm_debug.c tpm_library.c tpm_memory.c tpm_nvfile.c $tpm2; do
+             o=obj/$(printf '%s' "${f%.c}" | tr / _).obj
+             run $CC $CRT $CFLAGS -I. -Iwin32 -FIwin32/compat.h -FItpm_library_conf.h \
+               -I../include/libtpms -Itpm2 -Itpm2/crypto -Itpm2/crypto/openssl \
+               -DTPM_LIBTPMS_CALLBACKS -DTPM_NV_DISK -D_POSIX_ -DTPM_POSIX -DOPENSSL_SUPPRESS_DEPRECATED \
+               -DUSE_OPENSSL_FUNCTIONS_SYMMETRIC=1 -DUSE_OPENSSL_FUNCTIONS_EC=1 \
+               -DUSE_OPENSSL_FUNCTIONS_ECDSA=1 -DUSE_OPENSSL_FUNCTIONS_RSA=1 \
+               -DUSE_OPENSSL_FUNCTIONS_SSKDF=1 -DUSE_EC_POINT_GET_AFFINE_COORDINATES_API=1 \
+               -Wno-everything -c "$f" -Fo"$o"
+           done \
+        && mkdir -p "$PREFIX/include/libtpms" "$PREFIX/lib" \
+        && run lib -nologo -out:"$PREFIX/lib/tpms.lib" obj/*.obj && rm -rf obj \
+        && cp ../include/libtpms/*.h "$PREFIX/include/libtpms/" )
+      write_pc libtpms "libtpms, TPM 2.0" "-ltpms -lpcre2-posix -lpcre2-8" -DPCRE2_STATIC ;;
     Windows-libepoxy)
       # The GL dispatch QEMU's OpenGL code and the embed backend call
       # (WGL here). EGL's dispatch too, as MSYS2's has it: QEMU takes

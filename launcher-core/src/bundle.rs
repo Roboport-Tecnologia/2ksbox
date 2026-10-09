@@ -126,20 +126,26 @@ impl Arch {
     }
 
     /// EDK2's code for it in `pc-bios`: QEMU's secure build on x86_64
-    /// (unpacked there by `scripts/prepare-qemu.sh`); on aarch64 our own
-    /// build (`scripts/build-edk2.sh`), since QEMU's has no Secure Boot,
-    /// which Windows 11's setup requires, and no AHCI driver.
+    /// (unpacked there by `scripts/prepare-qemu.sh`), but on a Windows
+    /// host our own (`scripts/build-edk2.sh x86_64`), Secure Boot without
+    /// SMM, since QEMU's secure build needs SMM and WHPX has none ("System
+    /// Management Mode not supported by this hypervisor";
+    /// [`Machine::modern_args`]); on aarch64 our own build too, since
+    /// QEMU's has no Secure Boot, which Windows 11's setup requires, and
+    /// no AHCI driver.
     pub fn efi_code_file(self) -> &'static str {
         match self {
+            Arch::X86_64 if cfg!(target_os = "windows") => "2ksbox-x86_64-code.fd",
             Arch::X86_64 => "edk2-x86_64-secure-code.fd",
             Arch::Aarch64 => "2ksbox-aarch64-code.fd",
         }
     }
 
-    /// The empty variable store a machine's own is made from (the x86_64
-    /// firmware uses QEMU's i386 template; aarch64 our build's own).
+    /// The empty variable store a machine's own is made from: our builds'
+    /// own, and for QEMU's x86_64 firmware QEMU's i386 template.
     pub fn efi_vars_template(self) -> &'static str {
         match self {
+            Arch::X86_64 if cfg!(target_os = "windows") => "2ksbox-x86_64-vars.fd",
             Arch::X86_64 => "edk2-i386-vars.fd",
             Arch::Aarch64 => "2ksbox-aarch64-vars.fd",
         }
@@ -328,11 +334,12 @@ pub fn video_choices(family: Family) -> &'static [Video] {
         // own adapter is not offered, since it has no DOS driver.
         Family::Dos => &[Video::Std, Video::Cirrus],
         // Windows 11's Basic Display Adapter drives the standard VGA's
-        // linear frame buffer; nothing of ours runs there (an XP-model
-        // driver does not load past Windows 7). Beside it every x64
-        // machine has a virtio-gpu (`modern_args`), whose screen follows
-        // the window once viogpudo is in.
-        Family::Win11 => &[Video::Std],
+        // linear frame buffer. Beside it every x64 machine has a
+        // virtio-gpu (`modern_args`), whose screen follows the window once
+        // viogpudo is in. Ours is the Windows 7 WDDM driver built for x64
+        // and test signed in the guest (track M20, `video_args`); Arm
+        // keeps its own screens whatever this says (`arm_args`).
+        Family::Win11 => &[Video::Std, Video::D3dpt],
     }
 }
 
@@ -1747,6 +1754,20 @@ impl Machine {
     fn video_args(&self) -> Vec<String> {
         const RETRACE: &str = ",retrace=precise";
         let mut args = vec!["-vga".to_string(), format!("none{RETRACE}")];
+        // x64 Windows 11 on ours: the standard VGA stays for the firmware,
+        // which has no driver for d3dpt-vga, and for Windows until the
+        // WDDM driver starts; ours comes after it, so the player follows
+        // it once the driver draws (`embed_live_console`). With its
+        // interrupt, as on Windows 7, and no fixed slot: the q35's xHCI
+        // may hold 2.
+        if self.family == Family::Win11 && self.effective_video() == Some(Video::D3dpt) {
+            let mut dev = "d3dpt-vga,irq=on".to_string();
+            if let Some(which) = self.d3d9_arg() {
+                dev.push_str(",d3d9=");
+                dev.push_str(which);
+            }
+            return vec!["-vga".into(), format!("std{RETRACE}"), "-device".into(), dev];
+        }
         if let Some(video) = self.effective_video() {
             let [flag, value] = video.args();
             // `-vga <name>` replaces the `none` above rather than adding
@@ -2167,7 +2188,14 @@ impl Machine {
             return self.arm_args(pc_bios_dir, shelf);
         }
         let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
-        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), "q35,smm=on".into()];
+        // A Windows host (track M20 step 5): WHPX has no SMM, so no SMM
+        // and no secure flash, and our EDK2 build with Secure Boot that
+        // does not need it (`Arch::efi_code_file`). The TPM is the same
+        // libtpms one (QEMU patch 88), and a guest's own reset works under
+        // WHPX since patch 87.
+        let windows_host = cfg!(target_os = "windows");
+        let machine = if windows_host { "q35" } else { "q35,smm=on" };
+        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine.into()];
         args.extend(self.accel_args());
         args.extend([
             "-m".into(),
@@ -2176,8 +2204,11 @@ impl Machine {
             default_cpus(self.family).to_string(),
             "-cpu".into(),
             format!("max{}", self.optimization_props(Knob::Cpu)),
-            "-global".into(),
-            "driver=cfi.pflash01,property=secure,value=on".into(),
+        ]);
+        if !windows_host {
+            args.extend(["-global".into(), "driver=cfi.pflash01,property=secure,value=on".into()]);
+        }
+        args.extend([
             "-drive".into(),
             format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(Arch::X86_64.efi_code_file())),
             "-drive".into(),
@@ -2215,8 +2246,11 @@ impl Machine {
         }
         args.extend(self.clipboard_args());
         // After the cards an installed machine already had, so none of
-        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm.
-        args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
+        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm. Not beside
+        // our adapter: viogpudo would make Windows a third screen.
+        if self.effective_video() != Some(Video::D3dpt) {
+            args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
+        }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
         args.extend(boot_prompt_args());

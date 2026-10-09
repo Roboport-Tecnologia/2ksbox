@@ -31,8 +31,7 @@
 #           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
 #           build/win/qemu-msvc: the QEMU the package ships, importing
 #           only Windows' own DLLs; with libqemu-embed-x86_64.dll, the
-#           Windows 11 player's (track M20; no Windows 11 runs on it
-#           until QEMU has a TPM on Windows)
+#           Windows 11 player's (track M20; under WHPX, with no TPM)
 #   rust   the winit player (test.sh's), cargo --target
 #           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
 #           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
@@ -73,6 +72,14 @@
 #           or is skipped with a note. --publish then uploads the build
 #           for Linux and macOS ISOs. The guest stage puts the result on
 #           the ISO, in WDDM\.
+#   edk2    build-edk2.sh x86_64: Windows 11's firmware (track M20),
+#           OvmfPkgX64 with Secure Boot and no SMM, which WHPX lacks, into
+#           qemu/pc-bios/2ksbox-x86_64-{code,vars}.fd. Visual Studio's C++
+#           tools, MINGW64's nasm, MSYS2's bison and flex (iasl's build) and
+#           the Python launcher's 3.12. Its own stamp; the first run fetches
+#           EDK2 (~400 MB) and ACPICA.
+#   virtio  build-virtio-win.sh x64: Windows 11's drivers disc, as on
+#           Linux. Its own stamps; the first run downloads virtio-win's ISO.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
 #           a default run rebuilds it when its sources move, by
@@ -104,7 +111,9 @@ esac
 # (make, which, xxd from vim, shasum from perl, nasm), plus
 # xorriso. The third is scripts/test.sh's (docs/testing.md "On Windows"):
 # mtools for the guests' scratch disks, bsdtar, and ImageMagick for the
-# icon check. Not here: Rust, which is rustup's own installer with the GNU
+# icon check. The fourth is Windows 11's: MINGW64's perl for OpenSSL's
+# Configure for MSVC (build-deps.sh; it refuses MSYS2's own), and nasm,
+# bison and flex for its firmware (build-edk2.sh). Not here: Rust, which is rustup's own installer with the GNU
 # host, and Open Watcom, which is a snapshot to unpack (both in
 # docs/build-windows.md).
 MSYS2_PACKAGES=(git rsync diffutils patch
@@ -112,7 +121,8 @@ MSYS2_PACKAGES=(git rsync diffutils patch
   mingw-w64-x86_64-{glib2,pixman,zlib,libepoxy,libslirp}
   mingw-w64-x86_64-glslang
   mingw-w64-i686-gcc mingw-w64-x86_64-tools make which vim perl nasm xorriso zstd
-  mingw-w64-x86_64-{mtools,imagemagick} libarchive)
+  mingw-w64-x86_64-{mtools,imagemagick} libarchive
+  mingw-w64-x86_64-{perl,nasm} bison flex)
 
 JOBS=(); PACKAGE=""; PUBLISH=""; STAGES=(); EXPLICIT=""; FORCE=""
 while [ $# -gt 0 ]; do
@@ -126,11 +136,11 @@ while [ $# -gt 0 ]; do
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
     -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    qemu|qemu-msvc|rust|mitsuami|exec|wddm|guest) STAGES+=("$1"); shift ;;
+    qemu|qemu-msvc|rust|mitsuami|exec|wddm|edk2|virtio|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm edk2 virtio guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -273,7 +283,10 @@ if want qemu-msvc; then
     fi
     needs_configure=""
     [ -f $QM/build.ninja ] || needs_configure=1
-    for f in qemu/meson.build qemu/hw/mesa/meson.build scripts/configure-qemu.sh; do
+    # ... and when build-deps.sh added a library (spice-protocol's headers
+    # turn on qemu-vdagent, the clipboard's channel): its .pc directory
+    for f in qemu/meson.build qemu/hw/mesa/meson.build scripts/configure-qemu.sh \
+             build/deps/x86_64-msvc/lib/pkgconfig; do
       if [ -f $QM/build.ninja ] && [ "$f" -nt $QM/build.ninja ]; then
         needs_configure=1
       fi
@@ -434,6 +447,7 @@ if want guest; then
                         cdshelf/cdshelf_proto.h guest-tools/build-wrappers.sh \
                         guest-tools/build-driver.sh guest-tools/build-driver9x.sh \
                         build/wddm/x86/d3dptkmd.sys build/wddm/x86/d3dptumd.dll build/wddm/x86/d3dptkmd.inf \
+                        build/wddm/x64/d3dptkmd.sys build/wddm/x64/d3dptumd.dll build/wddm/x64/d3dptumd32.dll \
                         -type f 2>/dev/null | LC_ALL=C sort | tr '\n' '\0' | xargs -0 cat 2>/dev/null
                  } | sha256sum | cut -d' ' -f1)
   guest_current=""
@@ -450,6 +464,28 @@ if want guest; then
     guest-tools/build-wrappers.sh
     mkdir -p build && printf '%s\n' "$guest_stamp" > build/.stamp-guest-tools
     BUILT+=(guest)
+  fi
+fi
+
+# --- edk2 -------------------------------------------------------------
+if want edk2; then
+  if [ ! -x "${MINGW_PREFIX:-/mingw64}/bin/nasm.exe" ] || ! command -v bison >/dev/null || ! command -v flex >/dev/null; then
+    skip edk2 "no MINGW64 nasm, bison or flex (scripts/build-windows.sh --msys2-deps)" || true
+  else
+    say "edk2: build-edk2.sh x86_64"
+    scripts/build-edk2.sh x86_64
+    BUILT+=(edk2)
+  fi
+fi
+
+# --- virtio -----------------------------------------------------------
+if want virtio; then
+  if ! command -v xorriso >/dev/null; then
+    skip virtio "no xorriso (scripts/build-windows.sh --msys2-deps)" || true
+  else
+    say "virtio: build-virtio-win.sh x64"
+    scripts/build-virtio-win.sh x64
+    BUILT+=(virtio)
   fi
 fi
 

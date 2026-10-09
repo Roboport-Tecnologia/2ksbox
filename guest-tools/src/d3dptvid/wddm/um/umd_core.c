@@ -12,6 +12,7 @@
  */
 #include <windows.h>
 #include <ddraw.h>
+#include "../../../../../d3dpt/d3dpt_proto.h"
 #include "../../core/d3dpt_ddi.h"
 #include "../../core/d3dpt_core.h"
 #include "umd_core.h"
@@ -120,6 +121,15 @@ HRESULT umd_caps9(void *out, UINT size)
         umd_log("GetCaps(D3D9CAPS): the runtime's %u bytes, ours %u", size, (UINT)sizeof(c));
     }
     c.c8.Caps2 |= D3DCAPS2_CANSHARERESOURCE_;
+    /* what Direct3D 11 wants for feature level 9_2 beyond the XP driver's
+     * caps (the WDK's "Required Direct3D 9 capabilities"; the rest of 9_2
+     * and 9_3 the core already claims): separate alpha blending, which the
+     * host's d3d9 takes as render states 206..209, and 32-bit indices over
+     * a long range (DRAW8, protocol v24). Windows 11's WinUI 3 apps refuse
+     * a 9_1 device (track M20) */
+    c.c8.PrimitiveMiscCaps |= 0x00020000;          /* D3DPMISCCAPS_SEPARATEALPHABLEND */
+    c.c8.MaxPrimitiveCount = 0x000fffff;
+    c.c8.MaxVertexIndex = D3DPT_DRAW8_MAX_VERTS - 1;
     CopyMemory(out, &c, size < sizeof(c) ? size : sizeof(c));
     return S_OK;
 }
@@ -176,10 +186,13 @@ BOOL umd_format(UINT i, ULONG *fmt, ULONG *ops, ULONG *ms)
      * which composes through Direct3D 10.1 on it: R8_UNORM (L8) as a cube
      * and a volume, R8G8B8A8_SNORM (Q8W8V8U8) and BC2 / BC3 as cubes. It
      * takes BC2 and BC3 from DXT2 and DXT4, which decode as DXT3 and DXT5
-     * do, so those two get the DXT3 / DXT5 ops. The core keeps them 2D for
-     * the XP and 9x drivers (untried there); the host makes each in its own
-     * format whatever its shape */
-    if (*fmt == D3DFMT_L8_) {
+     * do, so those two get the DXT3 / DXT5 ops. Feature level 9_2 adds A8,
+     * L16, V16U16 (R16G16_SNORM) and Q16W16V16U16 as cubes and volumes
+     * (Windows 11's d3d10level9, MinCapsLevel2; the caps it wants
+     * umd_caps9 adds; Windows 11's WinUI 3 apps refuse 9_1, track M20). The core
+     * keeps them 2D for the XP and 9x drivers (untried there); the host
+     * makes each in its own format whatever its shape */
+    if (*fmt == D3DFMT_L8_ || *fmt == D3DFMT_A8_ || *fmt == D3DFMT_L16_ || *fmt == D3DFMT_V16U16_ || *fmt == D3DFMT_Q16W16V16U16_) {
         *ops |= (ddflags(&g_core) & DDF_NO_CUBE) ? 0 : D3DFORMAT_OP_CUBETEXTURE_;
         *ops |= (ddflags(&g_core) & DDF_NO_VOLUME) ? 0 : D3DFORMAT_OP_VOLUMETEXTURE_;
     } else if (*fmt == D3DFMT_Q8W8V8U8_) {

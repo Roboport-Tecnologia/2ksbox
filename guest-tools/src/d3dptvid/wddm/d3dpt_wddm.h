@@ -45,6 +45,17 @@ typedef struct D3DPT_UMD_INFO {
     ULONG reserved[8];
 } D3DPT_UMD_INFO;
 
+/* CreateContext's private data: the host context (CTX_CREATE's handle)
+ * the device's records will name. The kernel driver's DestroyContext
+ * destroys it on the host, which also covers a process that ends without
+ * the user-mode driver's DestroyDevice (a crash; Windows 11's DWM clients
+ * did so hundreds of times, track M20 step 5). */
+#define D3DPT_CTX_MAGIC 0x58544344u               /* "DCTX" */
+typedef struct D3DPT_CTX_PRIV {
+    ULONG magic;                                  /* D3DPT_CTX_MAGIC */
+    ULONG host_ctx;
+} D3DPT_CTX_PRIV;
+
 /* Escape: the user-mode driver's private data */
 #define D3DPT_ESC_MAGIC 0x43534544u               /* "DESC" */
 enum { D3DPT_ESC_LOG = 1 };

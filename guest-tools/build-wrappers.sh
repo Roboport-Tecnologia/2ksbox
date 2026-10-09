@@ -356,6 +356,17 @@ if [ -f "$WDDM_OUT/d3dptkmd.sys" ] && [ -f "$WDDM_OUT/d3dptumd.dll" ] && [ -f "$
 else
   echo "note: the Windows 7 WDDM driver is not on this ISO (built on Windows only: build-windows.sh wddm; elsewhere scripts/wddm-prebuilt.sh fetch)" >&2
 fi
+# The same driver for 64-bit Windows 11 (track M20), from build/wddm/x64,
+# as WDDM64\ with its installer, wddm-install.ps1, which test signs it in
+# the guest. Nothing installs it by itself.
+WDDM64_OUT="$ROOT/build/wddm/x64"
+if [ -f "$WDDM64_OUT/d3dptkmd.sys" ] && [ -f "$WDDM64_OUT/d3dptumd.dll" ]; then
+  mkdir -p "$OUT/iso/WDDM64"
+  cp "$WDDM64_OUT/d3dptkmd.sys" "$WDDM64_OUT/d3dptumd.dll" "$ROOT/guest-tools/src/d3dptvid/wddm/km/d3dptkmd.inf" \
+     "$ROOT/guest-tools/src/d3dptvid/wddm/wddm-install.ps1" "$OUT/iso/WDDM64/"
+  # the 32-bit user-mode driver, for 32-bit Direct3D programs (WoW64)
+  if [ -f "$WDDM64_OUT/d3dptumd32.dll" ]; then cp "$WDDM64_OUT/d3dptumd32.dll" "$OUT/iso/WDDM64/"; fi
+fi
 sed -e "s/@REV@/$REV/" "$ROOT/guest-tools/README-ISO.txt" \
   | crlf > "$OUT/iso/README.TXT"
 # 8.3-safe upper-case names for Win9x

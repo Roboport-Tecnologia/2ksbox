@@ -238,6 +238,9 @@ if [ -n "$NATIVE" ]; then
       exit 1
     fi
     CFG+=(--enable-whpx)
+    # The TPM 2.0 of a Windows 11 box: libtpms and its libcrypto from
+    # build-deps.sh, in this process (patches 75 and 88)
+    CFG+=(--enable-libtpms)
   elif [ "${WIN_QEMU_CC:-clang}" = clang ]; then
     command -v clang >/dev/null && command -v ld.lld >/dev/null || {
       echo "no clang/lld: pacman -S mingw-w64-x86_64-clang mingw-w64-x86_64-lld"; exit 1; }
@@ -308,8 +311,11 @@ fi
 # spice-protocol's headers, and nothing of SPICE's server: they are what
 # `qemu-vdagent` builds with, the chardev that carries the clipboard to a
 # guest agent (track M23, doc 24 §3). build-deps.sh puts them in the prefix
-# on macOS and Linux; Windows hosts come later (M23 step 7).
-if [ -n "$WINDOWS" ]; then
+# on macOS and Linux, and in the MSVC set on Windows: the package's QEMU
+# has the channel too, which a new Windows 11 machine always gets (its
+# clipboard is on by default), or it would not start. The mingw build
+# test.sh runs has no spice-protocol.
+if [ -n "$WINDOWS" ] && [ -z "$MSVC" ]; then
   CFG+=(--disable-spice-protocol)
 else
   CFG+=(--enable-spice-protocol)

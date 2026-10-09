@@ -24,6 +24,13 @@
  * v22 (M18): the DP2 stream's BLT (op 81) also copies between two colour
  * render targets, with its rectangles and filter (see v18 below).
  *
+ * v23 (M20): ... and between a plain texture and a colour render target,
+ * either way.
+ *
+ * v24 (M20): the DP2 stream's COLORFILL (op 82) on a colour render target;
+ * DRAW8's 32-bit indices and vertex ranges past 65536 (Direct3D 11's
+ * feature level 9_2).
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef D3DPT_PROTO_H
@@ -31,7 +38,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   22u
+#define D3DPT_PROTO_VERSION   24u
 
 #define D3DPT_SHM_SIZE        0x04000000u          /* 64 MiB */
 #define D3DPT_CMD_OFFSET      0x00001000u          /* records start after the header page */
@@ -220,6 +227,12 @@ typedef struct d3dpt_dp2 {
  * 0}. The host reads nverts * stride (nindices * 2) bytes from the buffer's
  * VRAM at that offset, checked against the buffer's size.
  *
+ * v24: with D3DPT_DRAW8_INDEX32 in flags the indices are 32-bit (4 bytes
+ * each, inline or in VRAM), and nverts / nindices may go to
+ * D3DPT_DRAW8_MAX_VERTS / D3DPT_DRAW8_MAX_INDICES: the WDDM driver reports
+ * the MaxVertexIndex and MaxPrimitiveCount Direct3D 11's feature level 9_2
+ * requires (Windows 11's WinUI 3 apps refuse 9_1, track M20).
+ *
  * v10: more than one vertex stream. Everything above is stream 0. With
  * D3DPT_DRAW8_STREAMS in flags, after the indices come a d3dpt_u32x2
  * {count, 0} and count streams, each a d3dpt_dp2_draw8_stream followed by
@@ -252,12 +265,30 @@ typedef struct d3dpt_dp2 {
  * whose contents only the host has. v22: also between two colour render
  * targets, its rectangles and filter (flags 1 point, 2 linear) as given,
  * for a surface the guest's CPU cannot map; every other BLT is the
+ * driver's. v23: also between a plain texture (level 0, no cube or
+ * volume) and a colour render target, either way: from the texture's VRAM
+ * (no palette / colour-key expansion), or the target read back into the
+ * texture's VRAM (one texel size). Windows 11's DWM fills its shared
+ * targets from textures, and an acrylic backdrop reads one back.
+ *
+ * v24: the runtime's COLORFILL (op 82, D3DHAL_DP2COLORFILL: surface,
+ * RECTL, A8R8G8B8 colour) travels in the DP2 stream for a colour render
+ * target's level 0, filled on the host (IDirect3DDevice9::ColorFill, the
+ * colour converted to the surface's format as d3d9 does): a shared target
+ * the guest's CPU cannot map (Windows 11's apps fill the small atlases
+ * DWM samples, a window's caption colour among them), and any other
+ * target without a readback and an upload. Every other COLORFILL is the
  * driver's. */
 #define D3DPT_DP2_DRAW8 200u
 #define D3DPT_DRAW8_VRAM_VB 0x1u
 #define D3DPT_DRAW8_VRAM_IB 0x2u
 #define D3DPT_DRAW8_STREAMS 0x4u
+#define D3DPT_DRAW8_INDEX32 0x8u
 #define D3DPT_DRAW8_MAX_STREAMS 16u
+/* v24: the most vertices one DRAW8 may span (nverts), and indices (before:
+ * 0x10000 and 0x100000) */
+#define D3DPT_DRAW8_MAX_VERTS 0x1000000u
+#define D3DPT_DRAW8_MAX_INDICES 0x400000u
 typedef struct d3dpt_dp2_draw8 {
     uint32_t prim_type, prim_count;     /* D3DPRIMITIVETYPE, primitives */
     uint32_t fvf, stride;               /* the vertices' format (an FVF or a vertex shader handle), stream 0's stride */

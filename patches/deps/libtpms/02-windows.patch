@@ -1,0 +1,248 @@
+What libtpms needs to build on Windows against MSVC's runtime, as the
+MSVC QEMU's TPM (track M20; scripts/build-deps.sh compiles it with
+clang-cl). Headers in src/win32, none used by libtpms's own
+build: compat.h, force-included, gives the POSIX code paths
+clock_gettime() for CLOCK_REALTIME (timespec_get) and CLOCK_MONOTONIC
+(the UCRT's clock()), and asprintf, dprintf, strndup and index;
+unistd.h is the C runtime's io.h and process.h;
+config.h is configure's two defines for TPM 2.0 on OpenSSL;
+netinet/in.h and endian.h are byte order conversions;
+regex.h is PCRE2's POSIX wrapper. And three Windows branches in the
+TPM 2.0 headers: little-endian, 64-bit Windows' OpenSSL word size
+(SIXTY_FOUR_BIT), and the simulator's headers without sockets.
+
+diff --git a/src/tpm2/TpmProfile_Common.h b/src/tpm2/TpmProfile_Common.h
+index 15fb8f6..cf36f1c 100644
+--- a/src/tpm2/TpmProfile_Common.h
++++ b/src/tpm2/TpmProfile_Common.h
+@@ -86,6 +86,7 @@
+ # include <sys/endian.h>
+ #elif defined __APPLE__
+ # include <libkern/OSByteOrder.h>
++#elif defined _WIN32   /* 2ksbox: Windows on x86 and Arm is little-endian */
+ #else
+ # include <endian.h>
+ #endif
+@@ -104,7 +105,7 @@
+  #if _BYTE_ORDER == _BIG_ENDIAN
+   #define  BIG_ENDIAN_TPM       YES
+  #endif
+-#elif defined __APPLE__
++#elif defined __APPLE__ || defined _WIN32
+  #define  BIG_ENDIAN_TPM       NO
+ #else
+  #error Unsupported OS
+diff --git a/src/tpm2/crypto/openssl/tpm_radix.h b/src/tpm2/crypto/openssl/tpm_radix.h
+index 047a13a..97303a7 100644
+--- a/src/tpm2/crypto/openssl/tpm_radix.h
++++ b/src/tpm2/crypto/openssl/tpm_radix.h
+@@ -70,6 +70,9 @@
+ # ifdef SIXTY_FOUR_BIT_LONG
+ #  define RADIX_BITS                     64
+ # endif
++# ifdef SIXTY_FOUR_BIT    /* 2ksbox: 64-bit Windows (LLP64), BN_ULONG is 64 bits */
++#  define RADIX_BITS                     64
++# endif
+ # ifndef RADIX_BITS
+ #  error Need to determine RADIX_BITS value
+ # endif
+diff --git a/src/tpm2/simulator_sysheaders.h b/src/tpm2/simulator_sysheaders.h
+index 1b2064c..73363ab 100644
+--- a/src/tpm2/simulator_sysheaders.h
++++ b/src/tpm2/simulator_sysheaders.h
+@@ -103,6 +103,13 @@ typedef int socklen_t;
+ #  define INT_PTR             intptr_t
+ typedef int SOCKET;
+ #  define _strcmpi            strcasecmp
++#elif defined(_WIN32)   // 2ksbox: no simulator here, so no sockets or threads;
++                        // only the names its prototypes use, and no <windows.h>
++#  include <stdint.h>
++#  include <string.h>
++#  define ZeroMemory(ptr, sz) (memset((ptr), 0, (sz)))
++#  define INT_PTR             intptr_t
++typedef int SOCKET;
+ #else
+ #  error "Unsupported platform."
+ #endif  // _MSC_VER
+diff --git a/src/win32/compat.h b/src/win32/compat.h
+new file mode 100644
+index 0000000..7bb61c8
+--- /dev/null
++++ b/src/win32/compat.h
+@@ -0,0 +1,100 @@
++/* What libtpms's POSIX code paths take from POSIX, on Windows with MSVC's
++ * runtime (2ksbox, scripts/build-deps.sh): the clocks, an attribute
++ * macro and the string and printing functions below. Force-included
++ * (clang-cl -FI) into every source. No <windows.h>: its macros (BOOL,
++ * TRUE, ERROR) are the TPM reference code's names too. */
++#ifndef LIBTPMS_WIN32_COMPAT_H
++#define LIBTPMS_WIN32_COMPAT_H
++
++#include <time.h>
++#include <process.h>
++
++/* src/compiler.h defines it for compilers that say they are GCC, which
++ * clang-cl does not */
++#define LIBTPMS_ATTR_UNUSED __attribute__((unused))
++
++typedef int clockid_t;
++#define CLOCK_REALTIME  0
++#define CLOCK_MONOTONIC 1
++
++static __inline int clock_gettime(clockid_t clk_id, struct timespec *ts)
++{
++    if (clk_id == CLOCK_MONOTONIC) {
++        /* the UCRT's clock() is the wall time since the process started,
++         * on the performance counter: monotonic, in milliseconds, which
++         * is the TPM clock's own unit */
++        clock_t now = clock();
++        ts->tv_sec = (time_t)(now / CLOCKS_PER_SEC);
++        ts->tv_nsec = (long)((now % CLOCKS_PER_SEC) * (1000000000 / CLOCKS_PER_SEC));
++        return 0;
++    }
++    return timespec_get(ts, TIME_UTC) == TIME_UTC ? 0 : -1;
++}
++
++/* glibc's and POSIX's string and printing functions the C runtime lacks:
++ * index(), strndup(), [v]asprintf() and [v]dprintf() */
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <io.h>
++
++#define index(s, c) strchr((s), (c))
++
++static __inline char *strndup(const char *s, size_t n)
++{
++    size_t len = strnlen(s, n);
++    char *d = malloc(len + 1);
++    if (d) {
++        memcpy(d, s, len);
++        d[len] = 0;
++    }
++    return d;
++}
++
++static __inline int vasprintf(char **out, const char *fmt, va_list ap)
++{
++    va_list copy;
++    int n;
++    va_copy(copy, ap);
++    n = vsnprintf(NULL, 0, fmt, copy);
++    va_end(copy);
++    *out = NULL;
++    if (n < 0 || !(*out = malloc((size_t)n + 1))) {
++        return -1;
++    }
++    return vsnprintf(*out, (size_t)n + 1, fmt, ap);
++}
++
++static __inline int asprintf(char **out, const char *fmt, ...)
++{
++    va_list ap;
++    int n;
++    va_start(ap, fmt);
++    n = vasprintf(out, fmt, ap);
++    va_end(ap);
++    return n;
++}
++
++static __inline int vdprintf(int fd, const char *fmt, va_list ap)
++{
++    char *s;
++    int n = vasprintf(&s, fmt, ap);
++    if (n > 0) {
++        n = _write(fd, s, (unsigned)n);
++    }
++    free(s);
++    return n;
++}
++
++static __inline int dprintf(int fd, const char *fmt, ...)
++{
++    va_list ap;
++    int n;
++    va_start(ap, fmt);
++    n = vdprintf(fd, fmt, ap);
++    va_end(ap);
++    return n;
++}
++
++#endif
+diff --git a/src/win32/config.h b/src/win32/config.h
+new file mode 100644
+index 0000000..4576c84
+--- /dev/null
++++ b/src/win32/config.h
+@@ -0,0 +1,4 @@
++/* configure's config.h for libtpms on Windows (win32/compat.h): TPM 2.0
++ * only, on OpenSSL. */
++#define WITH_TPM2 1
++#define USE_OPENSSL_CRYPTO_LIBRARY 1
+diff --git a/src/win32/endian.h b/src/win32/endian.h
+new file mode 100644
+index 0000000..34f3feb
+--- /dev/null
++++ b/src/win32/endian.h
+@@ -0,0 +1,19 @@
++/* <endian.h> for libtpms on Windows (win32/compat.h), which x86 and Arm
++ * Windows, both little-endian, do not have: the conversions glibc's
++ * gives, for the files that include it. */
++#ifndef LIBTPMS_WIN32_ENDIAN_H
++#define LIBTPMS_WIN32_ENDIAN_H
++#include <stdlib.h>
++#define htobe16(x) _byteswap_ushort(x)
++#define htobe32(x) _byteswap_ulong(x)
++#define htobe64(x) _byteswap_uint64(x)
++#define be16toh(x) _byteswap_ushort(x)
++#define be32toh(x) _byteswap_ulong(x)
++#define be64toh(x) _byteswap_uint64(x)
++#define htole16(x) (x)
++#define htole32(x) (x)
++#define htole64(x) (x)
++#define le16toh(x) (x)
++#define le32toh(x) (x)
++#define le64toh(x) (x)
++#endif
+diff --git a/src/win32/netinet/in.h b/src/win32/netinet/in.h
+new file mode 100644
+index 0000000..c158e27
+--- /dev/null
++++ b/src/win32/netinet/in.h
+@@ -0,0 +1,12 @@
++/* <netinet/in.h> for libtpms on Windows (win32/compat.h): only the byte
++ * order conversions tpm_types.h includes it for. Winsock has them, but
++ * <winsock2.h> brings <windows.h>, whose macros the TPM code redefines.
++ * x86 and Arm Windows are little-endian. */
++#ifndef LIBTPMS_WIN32_NETINET_IN_H
++#define LIBTPMS_WIN32_NETINET_IN_H
++#include <stdlib.h>
++#define htonl(x) _byteswap_ulong(x)
++#define ntohl(x) _byteswap_ulong(x)
++#define htons(x) _byteswap_ushort(x)
++#define ntohs(x) _byteswap_ushort(x)
++#endif
+diff --git a/src/win32/regex.h b/src/win32/regex.h
+new file mode 100644
+index 0000000..c38b28e
+--- /dev/null
++++ b/src/win32/regex.h
+@@ -0,0 +1,4 @@
++/* <regex.h> for libtpms on Windows (win32/compat.h): RuntimeProfile.c's
++ * regcomp/regexec/regfree are PCRE2's POSIX wrapper, which
++ * scripts/build-deps.sh builds beside pcre2-8 for this. */
++#include <pcre2posix.h>
+diff --git a/src/win32/unistd.h b/src/win32/unistd.h
+new file mode 100644
+index 0000000..15db114
+--- /dev/null
++++ b/src/win32/unistd.h
+@@ -0,0 +1,7 @@
++/* <unistd.h> for libtpms on Windows (win32/compat.h): getpid and
++ * friends are the C runtime's, and so are the standard descriptors. */
++#include <io.h>
++#include <process.h>
++#define STDIN_FILENO  0
++#define STDOUT_FILENO 1
++#define STDERR_FILENO 2

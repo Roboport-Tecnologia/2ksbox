@@ -57,7 +57,12 @@ filesystem driver or a virtual disk).
    (`player::share_args`), only with Networking on, which
    `player-core/src/share.rs` serves with `libsmb` and forwards to. The
    `sharing` host check, and `tools/clipboard-win11-test.sh` end to end.
-7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC.
+7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC. The
+   clipboard's channel came first, with M20 step 5 (2026-10-09): the
+   MSVC QEMU (the package's) builds `qemu-vdagent` with spice-protocol
+   from `build-deps.sh`'s MSVC set, since a new Windows 11 machine always
+   asks for it and did not start without it. Untested end to end there:
+   the test machine has no agent.
    (x64 Windows 11 on Linux, done 2026-10-04: its own drivers disc, below.)
 8. **Vintage** (to be scoped): SMB1 for Win98 / XP, and a C agent over a
    COM port (doc 24 §5).
@@ -268,8 +273,8 @@ takes the disc `build-virtio-win.sh` made on the host, as it takes the
 patched QEMU tree. `launcherx --paths` names it (`drivers`), and both
 packagers' checks require it inside the package. The macOS app carries
 the Arm disc, `2ksbox-drivers-arm64.iso`, since M20 step 5 (2026-10-04).
-The Windows package carries none: Windows hosts run no Windows 11 yet
-(no TPM there, M20).
+The Windows package carries it too since M20 step 5 (2026-10-09), when
+Windows hosts got Windows 11.
 
 ## Leases (2026-10-03)
 
