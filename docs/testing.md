@@ -308,7 +308,9 @@ another.
   writable before deleting it), and lists an ISO in extent order.
 - **Assert the value, not the line.** `d3dfeat9`'s occlusion query must
   answer `0x00000000` with a non-zero pixel count; grepping for the line
-  passed while the native oracle said `S_FALSE, 0 pixels`.
+  passed while the native oracle said `S_FALSE, 0 pixels`. The test
+  waits for it up to a 5 s deadline: a budget of 500 one-millisecond
+  polls ran out on a loaded Mac and read as a failure.
 
 ## CPU and TCG
 
