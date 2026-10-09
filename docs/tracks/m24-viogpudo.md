@@ -338,7 +338,9 @@ driver.
    back on DP-1 `the window is on DP-1` and `host screen at 59.996 Hz`
    again. A screen powered off by the compositor's idle has no lit CRTC
    either (`WAIT_VBLANK` refuses): the guest keeps its timer, and the
-   player took DP-1's blank up again when the user's screen woke. A
+   player took DP-1's blank up again when the user's screen woke. The
+   same through RandR, the player on X11 (`GDK_BACKEND=x11`, an Xwayland
+   window), where Xwayland names its outputs as the compositor does. A
    screen with variable refresh on blanks at the compositor's pace, not
    the mode's. On the user's
    `win11` machine (a copy in `build/w11m`: an overlay of its disk and
@@ -381,8 +383,9 @@ Windows 11 test here.
 ## Open
 
 - Linux with several screens: tried with a headless output beside the
-  one screen, not with two real ones, and X11's RandR path not at all.
-  A window that never draws again after a move is placed only at its
+  one screen (on Wayland and on Xwayland), not with two real ones nor
+  on a real X server, whose driver may name outputs its own way (the
+  EDID match is for that, unrun). A window that never draws again after a move is placed only at its
   next frame.
 - Windows 11 on Arm: the driver's timer bunching on a coarse tick under
   HVF (only the watchdog now, patch 91 above), and Basic Display on
