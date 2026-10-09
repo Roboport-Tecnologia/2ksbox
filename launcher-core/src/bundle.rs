@@ -127,23 +127,25 @@ impl Arch {
 
     /// EDK2's code for it in `pc-bios`: QEMU's secure build on x86_64
     /// (unpacked there by `scripts/prepare-qemu.sh`), but on a Windows
-    /// host its build without Secure Boot, since the secure one needs SMM
-    /// and WHPX has none ("System Management Mode not supported by this
-    /// hypervisor"; [`Machine::modern_args`]); on aarch64 our own build
-    /// (`scripts/build-edk2.sh`), since QEMU's has no Secure Boot, which
-    /// Windows 11's setup requires, and no AHCI driver.
+    /// host our own (`scripts/build-edk2.sh x86_64`), Secure Boot without
+    /// SMM, since QEMU's secure build needs SMM and WHPX has none ("System
+    /// Management Mode not supported by this hypervisor";
+    /// [`Machine::modern_args`]); on aarch64 our own build too, since
+    /// QEMU's has no Secure Boot, which Windows 11's setup requires, and
+    /// no AHCI driver.
     pub fn efi_code_file(self) -> &'static str {
         match self {
-            Arch::X86_64 if cfg!(target_os = "windows") => "edk2-x86_64-code.fd",
+            Arch::X86_64 if cfg!(target_os = "windows") => "2ksbox-x86_64-code.fd",
             Arch::X86_64 => "edk2-x86_64-secure-code.fd",
             Arch::Aarch64 => "2ksbox-aarch64-code.fd",
         }
     }
 
-    /// The empty variable store a machine's own is made from (the x86_64
-    /// firmware uses QEMU's i386 template; aarch64 our build's own).
+    /// The empty variable store a machine's own is made from: our builds'
+    /// own, and for QEMU's x86_64 firmware QEMU's i386 template.
     pub fn efi_vars_template(self) -> &'static str {
         match self {
+            Arch::X86_64 if cfg!(target_os = "windows") => "2ksbox-x86_64-vars.fd",
             Arch::X86_64 => "edk2-i386-vars.fd",
             Arch::Aarch64 => "2ksbox-aarch64-vars.fd",
         }
@@ -2186,12 +2188,11 @@ impl Machine {
             return self.arm_args(pc_bios_dir, shelf);
         }
         let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
-        // A Windows host (track M20 step 5): WHPX has no SMM, so no SMM,
-        // no secure flash and EDK2's build without Secure Boot
-        // (`Arch::efi_code_file`); QEMU builds no TPM on Windows, so none,
-        // and the drivers disc's answer file sets setup's `LabConfig`
-        // bypass keys for both (`scripts/build-virtio-win.sh`). A guest's
-        // own reset works there since QEMU patch 87.
+        // A Windows host (track M20 step 5): WHPX has no SMM, so no SMM
+        // and no secure flash, and our EDK2 build with Secure Boot that
+        // does not need it (`Arch::efi_code_file`). The TPM is the same
+        // libtpms one (QEMU patch 88), and a guest's own reset works under
+        // WHPX since patch 87.
         let windows_host = cfg!(target_os = "windows");
         let machine = if windows_host { "q35" } else { "q35,smm=on" };
         let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine.into()];
@@ -2215,16 +2216,10 @@ impl Machine {
                 "if=pflash,format=qcow2,unit=1,file={}",
                 opt_value(&self.effective_efi_vars().display().to_string())
             ),
-        ]);
-        if !windows_host {
-            args.extend([
-                "-tpmdev".into(),
-                format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
-                "-device".into(),
-                "tpm-crb,tpmdev=tpm0".into(),
-            ]);
-        }
-        args.extend([
+            "-tpmdev".into(),
+            format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
+            "-device".into(),
+            "tpm-crb,tpmdev=tpm0".into(),
             "-rtc".into(),
             "base=localtime".into(),
             "-drive".into(),

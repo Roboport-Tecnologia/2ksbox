@@ -809,7 +809,7 @@ state, and `loadvm` writes the snapshot's permanent state back to the
 file. libtpms and libcrypto come static and hidden from
 `scripts/build-deps.sh` on Linux and macOS (`QEMU_DEPS=system` leaves
 the feature on auto). Everything is behind `CONFIG_TPM`, which QEMU
-refuses on a Windows host (still in 11.1.2, `have_tpm`), so the Windows build has no TPM yet.
+refuses on a Windows host (still in 11.1.2, `have_tpm`); patch 88 allows it there with this backend.
 **Test:** `tools/tpm-qtest.py` (the `tpm-qtest` host check): a fresh
 TPM, a restart on the same file and a savevm / loadvm round trip
 through `tpm-crb`'s registers under qtest; `tools/win11-spike.py boot`
@@ -1028,6 +1028,36 @@ once per vCPU at a reset (upstream's, harmless). **Test:** the Windows
 (2026-10-09; `D:\vms\win11-test\run-87.sh`), and `test.sh`'s
 `whpx-i386` resets SeaBIOS over QMP and sees it reach the end of its
 boot order again. **Drop:** upstream resets the x86 partition.
+
+### 88-tpm-windows
+TPM support on a Windows host, with patch 75's libtpms backend (track
+M20 step 5). QEMU refuses `CONFIG_TPM` on Windows ("TPM emulation only
+available on POSIX systems") because both of upstream's backends need
+POSIX: the emulator talks to swtpm over a socket with passed descriptors,
+the passthrough opens a Linux device. Ours runs the TPM in this process
+and needs neither, so on Windows `have_tpm` holds when pkg-config finds
+libtpms (`build-deps.sh`'s MSVC set builds it, with libcrypto; the mingw
+QEMU `test.sh` runs has none, so no TPM). The emulator backend now
+depends on a new `POSIX` host symbol (`Kconfig.host`, set everywhere but
+Windows); the passthrough keeps its `LINUX` one. And `TPMLocality`'s
+`state`, a `TPMTISState` its vmstate saves with `VMSTATE_UINT32`, is a
+`uint32_t`: MSVC's ABI makes the enum an `int`, which the vmstate's type
+check refuses. **Test:** `test.sh`'s
+`tpm-qtest` on the MSVC QEMU on Windows; Windows 11 under WHPX sees its
+TPM 2.0 (`Get-Tpm`). **Drop:** upstream allows the TPM on Windows for an
+in-process backend.
+
+### 89-whpx-unaligned-section
+WHPX leaves a memory section that is not page aligned alone (track M20
+step 5), as patch 82 does for HVF. Such a section cannot be mapped as
+RAM, so `whpx_set_phys_mem()` turned it into `WHvUnmapGpaRange()` of a
+range it never mapped, which fails, and QEMU aborted ("WHPX: failed to
+unmap GPA range"). `tpm-crb`'s command buffer (RAM at `0xFED40080`) and
+its 1 KiB `tpm-ppi` region are such, so a Windows 11 machine with its TPM
+(patch 88) could not start under WHPX at all. Its accesses trap as MMIO,
+as before. **Test:** the launcher's Windows 11 machine under WHPX with
+its TPM, `Get-Tpm` in the guest. **Drop:** upstream skips unaligned
+sections in `whpx_set_phys_mem()`.
 
 ## Dropped in M21
 

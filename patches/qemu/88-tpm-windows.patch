@@ -1,0 +1,78 @@
+TPM support on a Windows host, with the libtpms backend (patch 75).
+QEMU refuses CONFIG_TPM on Windows ("TPM emulation only available on
+POSIX systems") because both of upstream's backends need POSIX: the
+emulator talks to swtpm over a socket with passed descriptors, and the
+passthrough opens a Linux device. Ours runs the TPM in this process and
+needs neither, so on Windows the TPM is built when libtpms is found by
+pkg-config (build-deps.sh's MSVC set has it). The emulator backend now
+depends on a new POSIX host symbol, set everywhere but Windows, and the
+passthrough keeps its LINUX one. And TPMLocality's state, a TPMTISState
+saved with VMSTATE_UINT32, is a uint32_t: MSVC's ABI makes the enum an
+int, and the vmstate's type check refuses it. Drop when upstream allows
+the TPM on Windows for an in-process backend.
+
+diff --git a/Kconfig.host b/Kconfig.host
+index 933425c..ede5e78 100644
+--- a/Kconfig.host
++++ b/Kconfig.host
+@@ -5,6 +5,9 @@
+ config LINUX
+     bool
+ 
++config POSIX
++    bool
++
+ config LIBCBOR
+     bool
+ 
+diff --git a/backends/tpm/Kconfig b/backends/tpm/Kconfig
+index 5d91eb8..4addc23 100644
+--- a/backends/tpm/Kconfig
++++ b/backends/tpm/Kconfig
+@@ -11,4 +11,4 @@ config TPM_PASSTHROUGH
+ config TPM_EMULATOR
+     bool
+     default y
+-    depends on TPM_BACKEND
++    depends on TPM_BACKEND && POSIX
+diff --git a/hw/tpm/tpm_tis.h b/hw/tpm/tpm_tis.h
+index 6ac9804..94d1662 100644
+--- a/hw/tpm/tpm_tis.h
++++ b/hw/tpm/tpm_tis.h
+@@ -45,7 +45,9 @@ typedef enum {
+ 
+ /* locality data  -- all fields are persisted */
+ typedef struct TPMLocality {
+-    TPMTISState state;
++    /* a TPMTISState; uint32_t, as its vmstate saves it: MSVC's ABI makes
++     * the enum an int, which VMSTATE_UINT32 refuses (patch 88) */
++    uint32_t state;
+     uint8_t access;
+     uint32_t sts;
+     uint32_t iface_id;
+diff --git a/meson.build b/meson.build
+index 356ee1a..fe9ba30 100644
+--- a/meson.build
++++ b/meson.build
+@@ -219,8 +219,12 @@ vfio_user_server_allowed = get_option('vfio_user_server') \
+   .require(host_os == 'linux', error_message: 'vfio-user server is supported only on Linux') \
+   .allowed()
+ 
++# On Windows only with libtpms: its backend runs in this process and
++# needs no POSIX, where the emulator and passthrough backends do
+ have_tpm = get_option('tpm') \
+-  .require(host_os != 'windows', error_message: 'TPM emulation only available on POSIX systems') \
++  .require(host_os != 'windows' or (not get_option('libtpms').disabled() and
++           dependency('libtpms', method: 'pkg-config', required: false).found()),
++           error_message: 'TPM emulation on Windows needs libtpms') \
+   .allowed()
+ 
+ # vhost
+@@ -3345,6 +3349,7 @@ host_kconfig = \
+   (have_vhost_kernel ? ['CONFIG_VHOST_KERNEL=y'] : []) + \
+   (have_virtfs ? ['CONFIG_VIRTFS=y'] : []) + \
+   (host_os == 'linux' ? ['CONFIG_LINUX=y'] : []) + \
++  (host_os != 'windows' ? ['CONFIG_POSIX=y'] : []) + \
+   (multiprocess_allowed ? ['CONFIG_MULTIPROCESS_ALLOWED=y'] : []) + \
+   (vfio_user_server_allowed ? ['CONFIG_VFIO_USER_SERVER_ALLOWED=y'] : []) + \
+   (hv_balloon ? ['CONFIG_HV_BALLOON_POSSIBLE=y'] : []) + \

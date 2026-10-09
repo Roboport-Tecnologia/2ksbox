@@ -2486,11 +2486,14 @@ host_stage() {
   # drives tpm-crb's registers, and a fresh TPM, a restart on the same
   # state file, and a savevm / loadvm round trip each have to hold. On
   # the i386 QEMU where there is no x86_64 one (a Mac): its q35 has the
-  # same tpm-crb and backend
+  # same tpm-crb and backend. On Windows the MSVC QEMU's (the package's;
+  # patch 88): the mingw one test.sh otherwise runs has no libtpms.
   tpm_qemu=$QDIR/qemu-system-x86_64
   [ -x "$tpm_qemu" ] || tpm_qemu=$QSYS
+  [ "$OS" != Windows ] || [ ! -x build/win/qemu-msvc/qemu-system-i386.exe ] \
+    || tpm_qemu=build/win/qemu-msvc/qemu-system-i386.exe
   if [ -x "$tpm_qemu" ] && ! $tpm_qemu -tpmdev help 2>&1 | grep -q libtpms; then
-    skip tpm-qtest "this QEMU has no libtpms backend (M20 step 5 brings it to Windows)"
+    skip tpm-qtest "this QEMU has no libtpms backend"
   elif [ -x "$tpm_qemu" ]; then
     run_check tpm-qtest tpm-qtest.log env OUT="$OUT/tpm-qtest" \
       tools/tpm-qtest.py "$tpm_qemu" || true

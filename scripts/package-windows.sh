@@ -50,9 +50,8 @@
 #   pc-bios\                    QEMU firmware
 #   soundfonts\                 the General MIDI bank (doc 20)
 #   guest-tools\                the guest-tools ISO
-#   drivers\                    Windows 11's drivers disc (x64), with the
-#                               answer file that skips setup's TPM and
-#                               Secure Boot checks (build-virtio-win.sh)
+#   drivers\                    Windows 11's drivers disc (x64; the
+#                               display and clipboard drivers, the agent)
 #   shaders\                    presets, with --with-shaders
 #   doc\                        COPYING, notices, README
 #   2ksbox.ico                  the application icon, for a shortcut
@@ -100,7 +99,8 @@ need "$LAUNCHER"                 "scripts/build-windows.sh mitsuami, on Windows"
 need "$PLAYER"                   "scripts/build-windows.sh mitsuami, on Windows"
 need "$PLAYER64"                 "scripts/build-windows.sh mitsuami, on Windows"
 need qemu/pc-bios                "scripts/prepare-qemu.sh"
-need qemu/pc-bios/edk2-x86_64-code.fd "scripts/prepare-qemu.sh"
+need qemu/pc-bios/2ksbox-x86_64-code.fd "scripts/build-windows.sh edk2"
+need qemu/pc-bios/2ksbox-x86_64-vars.fd "scripts/build-windows.sh edk2"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/doc"
@@ -140,14 +140,13 @@ fi
 mkdir -p "$STAGE/soundfonts"
 install -m644 soundfonts/TimGM6mb.sf2 "$STAGE/soundfonts/"
 
-# Windows 11's drivers disc (`disc_library::drivers_iso`): its answer file
-# lets setup past the TPM and Secure Boot checks a Windows host's machine
-# cannot pass, so a package without it installs no Windows 11.
+# Windows 11's drivers disc (`disc_library::drivers_iso`), as the Linux
+# package ships it.
 drivers=build/virtio-win/2ksbox-drivers-x64.iso
 if [ -f "$drivers" ]; then
   install -Dm644 "$drivers" "$STAGE/drivers/2ksbox-drivers-x64.iso"
 else
-  echo "package-windows.sh: no $drivers (scripts/build-windows.sh virtio); packaging without it, so Windows 11 setup stops at its TPM check"
+  echo "package-windows.sh: no $drivers (scripts/build-windows.sh virtio); packaging without it, so Windows 11 machines get no clipboard"
 fi
 
 iso=$(ls -t guest-tools/out/guest-tools-*.iso 2>/dev/null | head -1 || true)

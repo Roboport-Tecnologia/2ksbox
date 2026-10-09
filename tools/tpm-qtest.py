@@ -30,10 +30,14 @@ import hashlib, os, shutil, socket, struct, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import qmpc  # noqa: E402
+import qemuhost  # noqa: E402  (Unix sockets, or loopback TCP on Windows)
 
 QEMU = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
     "QEMU", os.path.join(ROOT, "build/qemu/qemu-system-x86_64"))
-OUT = os.environ.get("OUT", os.path.join(ROOT, "build/test/tpm-qtest"))
+# absolute: Windows starts no program from a relative path with forward
+# slashes (test.sh's build/win/qemu-msvc/...)
+QEMU = os.path.abspath(QEMU)
+OUT = os.path.abspath(os.environ.get("OUT", os.path.join(ROOT, "build/test/tpm-qtest")))
 STATE = os.path.join(OUT, "tpm.permall")
 
 CRB = 0xFED40000            # hw/acpi/tpm.h TPM_CRB_ADDR_BASE
@@ -61,11 +65,10 @@ def check(ok, what):
 class Qtest:
     """qtest's text protocol: one request line, one OK line."""
 
-    def __init__(self, path):
-        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    def __init__(self, addr):
         for _ in range(100):
             try:
-                self.s.connect(path)
+                self.s = qemuhost.connect(addr)
                 break
             except OSError:
                 time.sleep(0.05)
@@ -190,14 +193,15 @@ LIVE = []    # every QEMU started, killed on the way out whatever happened
 
 class Machine:
     def __init__(self, tpmdevs=1, name="run"):
-        for f in ("qtest.sock", "qmp.sock"):
-            p = os.path.join(OUT, f)
-            if os.path.exists(p):
-                os.unlink(p)
+        self.qtest_addr = qemuhost.addr(OUT, "qtest")
+        self.qmp_addr = qemuhost.addr(OUT, "qmp")
+        for a in (self.qtest_addr, self.qmp_addr):
+            if os.path.exists(a):
+                os.unlink(a)
         args = [QEMU, "-machine", "q35", "-accel", "qtest", "-nodefaults",
                 "-display", "none",
-                "-qtest", "unix:%s/qtest.sock,server=on,wait=off" % OUT,
-                "-qmp", "unix:%s/qmp.sock,server=on,wait=off" % OUT,
+                "-qtest", qemuhost.qemu_opt(self.qtest_addr),
+                "-qmp", qemuhost.qemu_opt(self.qmp_addr),
                 "-drive", "if=none,id=snap,format=qcow2,file=%s/snap.qcow2" % OUT]
         for i in range(tpmdevs):
             args += ["-tpmdev", "libtpms,id=tpm%d,state=%s" % (i, STATE)]
@@ -208,10 +212,10 @@ class Machine:
         self.qt = self.qmp = None
 
     def connect(self):
-        self.qt = Qtest(os.path.join(OUT, "qtest.sock"))
+        self.qt = Qtest(self.qtest_addr)
         for _ in range(100):
             try:
-                self.qmp = qmpc.connect(os.path.join(OUT, "qmp.sock"))
+                self.qmp = qmpc.connect(self.qmp_addr)
                 qmpc.cmd(self.qmp, "qmp_capabilities")
                 break
             except OSError:
@@ -237,7 +241,9 @@ def main():
         return 2
     shutil.rmtree(OUT, ignore_errors=True)
     os.makedirs(OUT)
-    subprocess.run([os.path.join(os.path.dirname(QEMU), "qemu-img"), "create", "-q",
+    # Windows resolves no qemu-img without its .exe here (the MSVC QEMU's)
+    img = "qemu-img.exe" if os.name == "nt" else "qemu-img"
+    subprocess.run([os.path.join(os.path.dirname(QEMU), img), "create", "-q",
                     "-f", "qcow2", os.path.join(OUT, "snap.qcow2"), "16M"], check=True)
     test_digest = b"test".ljust(32, b"\0")
     x = b"2ksbox-1"

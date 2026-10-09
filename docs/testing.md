@@ -131,8 +131,9 @@ What differs from Linux, so a failure there reads right:
   `package` (the zip is rolled and checked by `scripts/package-windows.sh`,
   not by this check), `atapi-read-error` (an LD_PRELOAD), `mode-sweep` and the
   `pad-guest` checks (they want a display test.sh does not set up here yet),
-  `player-mitsuami` (sway), `tpm-qtest` (QEMU builds no TPM on Windows yet,
-  track M20), `exec-wine`.
+  `player-mitsuami` (sway), `exec-wine`. `tpm-qtest` runs on the MSVC
+  QEMU there (`build/win/qemu-msvc/qemu-system-i386.exe`): only it has the
+  TPM (patch 88).
 
 ### Host-stage checks
 
@@ -469,7 +470,9 @@ file (the index survives, the PCR is reset), and a savevm / loadvm round
 trip (PCR and index come back, and a third QEMU reads the snapshot's
 index from the file). `OUT=`. On a Mac, which builds no x86_64 QEMU,
 `scripts/test.sh` runs it on `qemu-system-i386`, whose q35 has the same
-`tpm-crb`.
+`tpm-crb`; on Windows on the MSVC build's `qemu-system-i386.exe`, the one
+with the TPM. It talks to QEMU over `qemuhost.py`'s addresses (loopback
+TCP on Windows).
 
 `tools/win11-boot-prompt-test.sh [iso]` (M20): a new Windows 11 on Arm
 machine starts setup from its disc with nobody at the keyboard. Makes

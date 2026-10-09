@@ -200,11 +200,9 @@ done
 echo "==> unpacking the EDK2 firmware a Windows 11 machine boots (M20)"
 # QEMU keeps its EDK2 builds compressed in pc-bios/ and unpacks them only
 # into its own build tree, which neither the launcher's -L nor any
-# packager reads. The secure build's code, the build without Secure Boot
-# a Windows host boots (WHPX has no SMM; bundle::Arch::efi_code_file) and
-# the variable store's template (the x86_64 firmware uses the i386 one),
-# next to the BIOSes.
-for f in edk2-x86_64-secure-code.fd edk2-x86_64-code.fd edk2-i386-vars.fd; do
+# packager reads. The secure build's code and the variable store's
+# template (the x86_64 firmware uses the i386 one), next to the BIOSes.
+for f in edk2-x86_64-secure-code.fd edk2-i386-vars.fd; do
   if [ ! -f "$QEMU/pc-bios/$f" ] || [ "$QEMU/pc-bios/$f.bz2" -nt "$QEMU/pc-bios/$f" ]; then
     bunzip2 -kc "$QEMU/pc-bios/$f.bz2" > "$QEMU/pc-bios/$f.part" && mv "$QEMU/pc-bios/$f.part" "$QEMU/pc-bios/$f"
   fi
