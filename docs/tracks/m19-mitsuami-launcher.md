@@ -39,7 +39,7 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami `18f83ac` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami `0ad1aa0` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
@@ -73,7 +73,11 @@ views do, and `252c7f0` with `6602f81`, the same for lists and tables, and
 `f15e59f`, sidebar items with a subtitle, a context menu and activation
 (`children_with` for items that come and go), for the machine sidebar,
 and `18f83ac`, an icon-only button in an AppKit toolbar group as its
-image alone (its segment took the title too, cut to the icon's width).
+image alone (its segment took the title too, cut to the icon's width),
+and `222865c`, GTK's primary menu at the end of a sidebar's header bar
+(GNOME's place for it beside a sidebar) and a GTK window that follows a
+change to its sidebar's width, with `0ad1aa0`, a GTK capture that waits
+for that resize (Broadway draws it frames later).
 Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
@@ -114,8 +118,16 @@ Start (titled) and then Settings, Discs, Snapshots and Clone as one
 capsule of icons named by their tooltips, all on the chosen machine; the
 details lose their Start and More; New Machine, Disc Shelf and Shader
 Profiles are the File menu's (the Window menu has none of ours now).
-Windows and Linux keep New, Shelf, Shaders and the details' buttons.
-Checked on the Air by the user. On Windows its details are a shade darker there than the
+Checked on the Air by the user. GTK has the same since 2026-10-08
+(user): the sidebar (libadwaita's split view), 250 wide (the split
+view's `min-sidebar-width`, set when the list is mapped, which mitsuami
+grows the window by) with roomier rows than GNOME's (a 32 px icon, the
+name bold and a size up, more padding; CSS on the list), the same
+toolbar, and New, Shelf, Shaders and About in the primary menu, which
+mitsuami puts at the end of the sidebar's header bar; the content is
+560 × 610. `cfg(sidebar)` (`build.rs`) is macOS or GTK. Windows and
+Kirigami keep the list, New, Shelf, Shaders, the "i" and the details'
+buttons. On Windows its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a
 tweak on the details' `ScrollView`, user), and the machine form's
 sidebar is half WinUI's default width (160, user), open from an 800-wide

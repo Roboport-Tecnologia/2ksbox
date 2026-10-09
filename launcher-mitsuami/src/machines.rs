@@ -32,10 +32,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 /// The machine list's width, beside the details.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(sidebar))]
 const LIST_W: f32 = 260.0;
-/// The machine sidebar's on macOS.
-#[cfg(target_os = "macos")]
+/// The machine sidebar's on macOS and GTK.
+#[cfg(sidebar)]
 const SIDEBAR_W: f64 = 250.0;
 /// The details' label column.
 const LABEL_W: f32 = 150.0;
@@ -273,10 +273,10 @@ pub fn MachinesWindow() -> impl View {
             library.selected.set(shown);
         }
     });
-    // On macOS (user): Start, then the chosen machine's windows as one
-    // capsule of icons, each named by its tooltip; New and the two
-    // libraries are the File menu's (`command_menus`).
-    #[cfg(target_os = "macos")]
+    // On macOS (user) and GTK: Start, then the chosen machine's windows as
+    // one group of icons (a capsule on macOS), each named by its tooltip;
+    // New and the two libraries are the menus' (`command_menus`).
+    #[cfg(sidebar)]
     let toolbar_buttons = {
         let stores = Stores::get();
         let tool = move |command: Command, icon: &'static str| {
@@ -305,13 +305,13 @@ pub fn MachinesWindow() -> impl View {
             </Row>
         }
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(sidebar))]
     let shelf = move || {
         view! {
             <Button icon=icons::DISCS tooltip=Command::Shelf.tooltip() @click=move || discs.open_library(library)>"Shelf"</Button>
         }
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(sidebar))]
     let shaders_button = move || {
         view! {
             <Button icon=icons::SHADERS tooltip=Command::Shaders.tooltip() @click=move || shaders.open_list()>"Shaders"</Button>
@@ -319,26 +319,26 @@ pub fn MachinesWindow() -> impl View {
     };
     // Elsewhere New, Shelf and Shaders, two items the platform spaces as
     // its toolbars do.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(sidebar))]
     let toolbar_buttons = view! {
         <Button icon=icons::NEW tooltip=Command::New.tooltip() @click=move || wizard.open_fresh()>"New"</Button>
         {shelf()}
         {shaders_button()}
     };
-    // About, at the toolbar's end. Not on macOS (user): there it is the
-    // application menu's (`about::app_menu`).
-    let about_button = platform! {
-        macos => (),
-        _ => view! {
-            <Button icon=icons::ABOUT icon_only=true tooltip="About 2ksbox" @click=move || about.show()>
-                "About 2ksbox"
-            </Button>
-        },
+    // About, at the toolbar's end. Not on macOS (user) or GTK: there it is
+    // the application menu's or the primary menu's (`about::app_menu`).
+    #[cfg(sidebar)]
+    let about_button = ();
+    #[cfg(not(sidebar))]
+    let about_button = view! {
+        <Button icon=icons::ABOUT icon_only=true tooltip="About 2ksbox" @click=move || about.show()>
+            "About 2ksbox"
+        </Button>
     };
-    // Outside macOS the window takes the commands' keys itself: there is
-    // no menu bar to carry them (`command_menus`).
+    // On Windows and Kirigami the window takes the commands' keys itself:
+    // there are no menus to carry them (`command_menus`).
     let mut root = Column::new().grow(1.0).min_height(0);
-    if !cfg!(target_os = "macos") {
+    if !cfg!(sidebar) {
         for command in Command::ALL {
             root = root.on_key(command.shortcut(), move || command.run(stores, library.current().as_deref()));
         }
@@ -390,11 +390,11 @@ fn MachineLibrary() -> impl View {
     }
 }
 
-/// The machines on macOS: the window's sidebar (user), as UTM's, so it is
-/// the system's sidebar glass and the details run up under the toolbar,
-/// each machine its name, its family and state under it, the list's menu
-/// and a double-click to start it.
-#[cfg(target_os = "macos")]
+/// The machines on macOS and GTK: the window's sidebar (user), as UTM's,
+/// so on macOS it is the system's sidebar glass and the details run up
+/// under the toolbar, each machine its name, its family and state under
+/// it, the list's menu and a double-click to start it.
+#[cfg(sidebar)]
 #[component]
 fn MachineList() -> impl View {
     let library = use_store::<Library>();
@@ -432,16 +432,7 @@ fn MachineList() -> impl View {
                 })
                 .collect::<Vec<_>>()
         })
-        // 250, from AppKit's 140 (user), which the window grows by: the split
-        // view is the window's, reached from the sidebar's table.
-        .native(mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
-            use mitsuami::appkit::objc2_app_kit::NSSplitViewController;
-            let split = table.window().and_then(|w| w.contentViewController());
-            let split = split.and_then(|c| c.downcast::<NSSplitViewController>().ok());
-            if let Some(item) = split.and_then(|s| s.splitViewItems().firstObject()) {
-                item.setMinimumThickness(SIDEBAR_W);
-            }
-        }))
+        .native(sidebar_width())
         .on_activate(move |dir: Option<PathBuf>| {
             if let Some(dir) = dir.filter(|d| !library.is_running(d)) {
                 library.play(&dir);
@@ -449,8 +440,60 @@ fn MachineList() -> impl View {
         })
 }
 
+/// 250, from AppKit's 140 (user), which the window grows by: the split
+/// view is the window's, reached from the sidebar's table.
+#[cfg(target_os = "macos")]
+fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
+    mitsuami::appkit::tweak(|table: &mitsuami::appkit::objc2_app_kit::NSTableView| {
+        use mitsuami::appkit::objc2_app_kit::NSSplitViewController;
+        let split = table.window().and_then(|w| w.contentViewController());
+        let split = split.and_then(|c| c.downcast::<NSSplitViewController>().ok());
+        if let Some(item) = split.and_then(|s| s.splitViewItems().firstObject()) {
+            item.setMinimumThickness(SIDEBAR_W);
+        }
+    })
+}
+
+/// 250 wide as on macOS, from libadwaita's 180 (user), and rows as roomy as
+/// the list's elsewhere: a 32 px icon, the name a size up, more padding
+/// than GNOME Settings' rows. The split view is the window's, an ancestor
+/// of the list once it is shown.
+#[cfg(all(target_os = "linux", feature = "gtk", not(feature = "kde")))]
+fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
+    use mitsuami::gtk::gtk;
+    use mitsuami::gtk::gtk::prelude::*;
+    const CSS: &str = "
+        .machines > row { padding: 8px 10px; margin: 2px 6px; }
+        .machines > row image { -gtk-icon-size: 32px; }
+        .machines > row box > box > label:first-child { font-size: 1.1em; font-weight: bold; }
+        .machines > row box > box { margin-left: 2px; }
+    ";
+    mitsuami::gtk::tweak(|list: &gtk::ListBox| {
+        if list.has_css_class("machines") {
+            return;
+        }
+        list.add_css_class("machines");
+        // The tweak first runs before the window puts the sidebar in its
+        // split view; showing the list comes after.
+        list.connect_map(|list| {
+            let split = std::iter::successors(list.parent(), |w| w.parent())
+                .find(|w| w.type_().name() == "AdwNavigationSplitView");
+            if let Some(split) = split.filter(|s| s.property::<f64>("min-sidebar-width") != SIDEBAR_W) {
+                split.set_property("min-sidebar-width", SIDEBAR_W);
+            }
+        });
+        let provider = gtk::CssProvider::new();
+        provider.load_from_data(CSS);
+        gtk::style_context_add_provider_for_display(
+            &list.display(),
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    })
+}
+
 /// The machines elsewhere: a list beside the details, a line between.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(sidebar))]
 #[component]
 fn MachineList() -> impl View {
     let library = use_store::<Library>();
@@ -628,11 +671,12 @@ impl Command {
     }
 }
 
-/// The menu bar's commands on macOS, on the chosen machine: File's New
+/// The menus' commands on macOS and GTK, on the chosen machine: File's New
 /// Machine (AppKit's place for New) and the two libraries (user), and
-/// Machine's. Elsewhere `None`: the window takes the keys.
+/// Machine's; on GTK each menu is a section of the primary menu. Elsewhere
+/// `None`: the window takes the keys.
 fn command_menus(s: Stores) -> Option<MenuBar> {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(sidebar) {
         return None;
     }
     let current: Rc<dyn Fn() -> Option<PathBuf>> = Rc::new(move || s.library.current());
@@ -660,7 +704,7 @@ fn command_menus(s: Stores) -> Option<MenuBar> {
 
 /// One machine in the list: its name, and its family and state under it.
 /// A right click offers what the details' Start and More do.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(sidebar))]
 #[component]
 fn MachineRow(dir: PathBuf) -> impl View {
     let library = use_store::<Library>();
@@ -694,11 +738,12 @@ fn Details() -> impl View {
     let library = use_store::<Library>();
     let current = move || library.current().unwrap_or_default();
     let field = move |f: fn(&Machines, usize) -> Option<String>| move || library.field(&current(), f);
-    // Start and More beside the name; not on macOS, where they are the
-    // toolbar's (user).
-    let actions = platform! {
-        macos => (),
-        _ => {
+    // Start and More beside the name; not on macOS or GTK, where they are
+    // the toolbar's (user).
+    #[cfg(sidebar)]
+    let actions = ();
+    #[cfg(not(sidebar))]
+    let actions = {
             let running = move || library.is_running(&current());
             view! {
                 <Button
@@ -710,7 +755,6 @@ fn Details() -> impl View {
                 >{move || if running() { "Running" } else { "Start" }.to_owned()}</Button>
                 <MenuButton menu=machine_actions(Rc::new(current))>"More"</MenuButton>
             }
-        },
     };
     // On Windows the details are a shade darker than the list beside them
     // (user): Fluent's secondary background, which follows the theme as the
@@ -823,23 +867,24 @@ pub(crate) mod icons {
     pub const TRASH: &str = platform! {
         macos => "trash", gtk => "user-trash-symbolic", kde => "edit-delete", windows => "\u{E74D}",
     };
-    // The machine's Settings and Clone, the macOS toolbar's.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // The machine's Settings and Clone, the toolbar's on macOS and GTK.
+    #[cfg_attr(not(sidebar), allow(dead_code))]
     pub const SETTINGS: &str = platform! {
         macos => "gearshape", gtk => "emblem-system-symbolic", kde => "configure", windows => "\u{E713}",
     };
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(sidebar), allow(dead_code))]
     pub const CLONE: &str = platform! {
         macos => "plus.square.on.square", gtk => "edit-copy-symbolic", kde => "edit-copy", windows => "\u{E8C8}",
     };
-    // The Shaders toolbar button's; on macOS the File menu has them.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    // The Shaders toolbar button's; on macOS and GTK the File menu has them.
+    #[cfg_attr(sidebar, allow(dead_code))]
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
     };
     // An "i" everywhere (user): the toolkits' About icon, Segoe's Info on
-    // Windows. macOS has no toolbar button for it, so no symbol.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    // Windows. macOS and GTK have no toolbar button for it (the menus
+    // have About), so macOS has no symbol.
+    #[cfg_attr(sidebar, allow(dead_code))]
     pub const ABOUT: &str = platform! {
         macos => "", gtk => "help-about-symbolic", kde => "help-about", windows => "\u{E946}",
     };

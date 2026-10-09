@@ -75,14 +75,16 @@ fn main() {
         .name("2ksbox")
         .icon(AppIcon::bytes(icon.as_slice()))
         // The machine list and its details, with room for a long path; 50
-        // wider and taller on Windows and GTK (user). On macOS the list is
-        // the window's sidebar (250), which the window adds to the details'
-        // size.
+        // wider and taller on Windows and GTK (user). On macOS and GTK the
+        // list is the window's sidebar (250 on macOS), which the window adds
+        // to the details' size.
         .window(
             "2ksbox",
             if cfg!(target_os = "macos") {
                 Size::new(540.0, 560.0)
-            } else if cfg!(any(windows, all(target_os = "linux", feature = "gtk", not(feature = "kde")))) {
+            } else if cfg!(sidebar) {
+                Size::new(560.0, 610.0)
+            } else if cfg!(windows) {
                 Size::new(820.0, 610.0)
             } else {
                 Size::new(770.0, 560.0)

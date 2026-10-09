@@ -27,11 +27,12 @@ impl About {
 }
 
 /// The app's menus: `commands` (the main window's, `machines::command_menus`)
-/// and About. Only macOS has any: About there belongs in the application
-/// menu, and the role puts it there. Elsewhere the toolbar's "?" is the
-/// way in, and the window takes the commands' keys itself.
+/// and About. Only macOS and GTK have any: About belongs in macOS's
+/// application menu and at the end of GTK's primary menu, and the role puts
+/// it there. Elsewhere the toolbar's "i" is the way in, and the window
+/// takes the commands' keys itself.
 pub fn app_menu(about: About, commands: Option<MenuBar>) {
-    if let Some(bar) = commands.filter(|_| cfg!(target_os = "macos")) {
+    if let Some(bar) = commands.filter(|_| cfg!(sidebar)) {
         set_menu(bar.menu(
             Menu::new("Help").item(MenuItem::new("About 2ksbox").role(MenuRole::About).on_select(move || about.show())),
         ));

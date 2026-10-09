@@ -5409,15 +5409,15 @@
     },
     {
         "type": "inline",
-        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/roboport-tecnologia/mitsuami\"]\ngit = \"https://github.com/roboport-tecnologia/mitsuami\"\nreplace-with = \"vendored-sources\"\nrev = \"18f83ac65ba9eb93f33d3b62da7d8073488d08c7\"\n",
+        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/roboport-tecnologia/mitsuami\"]\ngit = \"https://github.com/roboport-tecnologia/mitsuami\"\nreplace-with = \"vendored-sources\"\nrev = \"0ad1aa0c06dfd55169ea707322a423c68fcba429\"\n",
         "dest": "cargo",
         "dest-filename": "config"
     },
     {
         "type": "git",
         "url": "https://github.com/roboport-tecnologia/mitsuami",
-        "commit": "18f83ac65ba9eb93f33d3b62da7d8073488d08c7",
-        "dest": "flatpak-cargo/git/mitsuami-18f83ac"
+        "commit": "0ad1aa0c06dfd55169ea707322a423c68fcba429",
+        "dest": "flatpak-cargo/git/mitsuami-0ad1aa0"
     },
     {
         "type": "archive",
@@ -6059,7 +6059,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami\" \"cargo/vendor/mitsuami\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami\" \"cargo/vendor/mitsuami\""
         ]
     },
     {
@@ -6077,7 +6077,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-appkit\" \"cargo/vendor/mitsuami-appkit\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-appkit\" \"cargo/vendor/mitsuami-appkit\""
         ]
     },
     {
@@ -6095,7 +6095,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-core\" \"cargo/vendor/mitsuami-core\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-core\" \"cargo/vendor/mitsuami-core\""
         ]
     },
     {
@@ -6113,7 +6113,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-gtk\" \"cargo/vendor/mitsuami-gtk\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-gtk\" \"cargo/vendor/mitsuami-gtk\""
         ]
     },
     {
@@ -6131,7 +6131,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-kirigami\" \"cargo/vendor/mitsuami-kirigami\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-kirigami\" \"cargo/vendor/mitsuami-kirigami\""
         ]
     },
     {
@@ -6149,7 +6149,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-linux\" \"cargo/vendor/mitsuami-linux\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-linux\" \"cargo/vendor/mitsuami-linux\""
         ]
     },
     {
@@ -6167,7 +6167,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-macros\" \"cargo/vendor/mitsuami-macros\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-macros\" \"cargo/vendor/mitsuami-macros\""
         ]
     },
     {
@@ -6185,7 +6185,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-reactive\" \"cargo/vendor/mitsuami-reactive\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-reactive\" \"cargo/vendor/mitsuami-reactive\""
         ]
     },
     {
@@ -6203,7 +6203,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-widgets\" \"cargo/vendor/mitsuami-widgets\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-widgets\" \"cargo/vendor/mitsuami-widgets\""
         ]
     },
     {
@@ -6221,7 +6221,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-18f83ac/crates/mitsuami-winui\" \"cargo/vendor/mitsuami-winui\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mitsuami-0ad1aa0/crates/mitsuami-winui\" \"cargo/vendor/mitsuami-winui\""
         ]
     },
     {
