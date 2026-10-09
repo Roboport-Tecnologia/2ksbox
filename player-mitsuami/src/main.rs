@@ -139,8 +139,9 @@ fn main() {
     // 2ksbox's desktop entry and icon by it. mitsuami makes no
     // single-instance application of it, so players run side by side.
     let icon = include_bytes!("../../packaging/icon/2ksbox-256.png");
-    // The menu bar in the title bar, after the title, rather than on a row
-    // of its own that the picture sits under (user, 2026-10-08).
+    // The menu bar in the title bar, rather than on a row of its own that
+    // the picture sits under (user, 2026-10-08), at its start, before the
+    // title (user, 2026-10-09).
     // ... and every machine's window opening in the middle of the screen,
     // not a step further down Windows' cascade each time; in full screen
     // the menus drop over the picture while the released pointer is at the
@@ -151,7 +152,7 @@ fn main() {
             FullScreenMenuBar, MenuBarPlace, WindowPlacement, set_full_screen_menu_bar, set_menu_bar_place,
             set_window_placement,
         };
-        set_menu_bar_place(MenuBarPlace::InTitleBar);
+        set_menu_bar_place(MenuBarPlace::InTitleBarStart);
         set_window_placement(WindowPlacement::Centred);
         set_full_screen_menu_bar(FullScreenMenuBar::AtTopEdge);
     }

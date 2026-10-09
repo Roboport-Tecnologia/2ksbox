@@ -95,11 +95,15 @@ embed library, as for the winit player, into a target dir of its own:
    them directly and stayed off until another signal moved, user
    2026-10-08); Save Screenshot, Save Screenshot as
    Shown), with the winit player's
-   chords as their shortcuts (on Windows in the title bar after the
-   title, not on a row of their own above the picture: user, 2026-10-08,
-   mitsuami `c885ca8`'s `set_menu_bar_place(MenuBarPlace::InTitleBar)`;
-   checked on the PC with the test pattern: the menus open, the title
-   and the room after the menus still drag the window; the title bar
+   chords as their shortcuts (on Windows in the title bar, not on a row
+   of their own above the picture: user, 2026-10-08, mitsuami
+   `c885ca8`'s `set_menu_bar_place(MenuBarPlace::InTitleBar)`, after
+   the title; since 2026-10-09 before it, mitsuami `46ee64e`'s
+   `MenuBarPlace::InTitleBarStart`, the `TitleBar`'s `LeftHeader`
+   (user: menus on the left; a centred title is not in WinUI's
+   template, so it stays after the menus); checked on the PC each
+   time: the menus open, the title and the room after it still drag
+   the window; the title bar
    went tall only after the window was sized, so a remembered size came
    back 16 epx short, a scale smaller with Largest That Fits, until
    mitsuami `a2a8f36`: 800x600 points reopen at exactly 1200x900 at
