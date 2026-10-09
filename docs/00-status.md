@@ -309,8 +309,8 @@ tracks, plus the items no track owns.
     Store's.
 9a. **M19, the launcher on mitsuami.** The flip is done (2026-10-02);
     mitsuami pinned at `46ee64e` since 2026-10-09 (1.0.0, `0e21f20`, since 2026-10-04); left:
-    regenerate `packaging/flatpak/cargo-sources.json` for that pin (on
-    the Mac: the PC has no `uv`), run
+    `packaging/flatpak/cargo-sources.json` is regenerated for that pin
+    (2026-10-09); left: run
     the Linux packager with it (the Windows, macOS and Flatpak ones
     have), and the macOS floor with an AppKit launcher
     (`tracks/m19-mitsuami-launcher.md`).
