@@ -26,6 +26,10 @@ The Sound Blaster's FM chip is a real OPL3 synthesizer, not a sample of
 one. A DOS game set to "Sound Blaster" or "AdLib" music sounds the way it
 did on the card.
 
+The OPL3 emulation comes from
+[Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3), a cycle-accurate
+emulation of Yamaha's chip. Thank you to its developers.
+
 ## MIDI music
 
 **Music (MIDI)** adds a MIDI port (an MPU-401) with a synthesizer behind
@@ -37,6 +41,11 @@ it, on Windows 98, XP, DOS and Other machines.
 or "MPU-401". 2ksbox includes a sound bank, so it works out of the box.
 Under **SoundFont (optional)**, you can pick a `.sf2` bank of your own,
 which changes how every instrument sounds.
+
+The General MIDI synthesizer is
+[RustySynth](https://github.com/sinshu/rustysynth), and the bank it
+plays out of the box is TimGM6mb, by Tim Brechbill with later work by
+David Bolton. Thank you to all of them.
 
 On Windows 98, Windows finds the port after you add "MPU-401 Compatible"
 in *Add New Hardware* and pick it under *Multimedia* in the Control
@@ -52,6 +61,10 @@ like General MIDI.
 The MT-32 needs your own ROM images. 2ksbox doesn't include anything of
 Roland's. Under **MT-32 ROMs**, pick the folder with your CM-32L control
 and PCM ROM files. The machine won't start without them.
+
+The MT-32 emulation is [moont](https://gitlab.gnome.org/geoffhill/moont),
+a Rust port of [Munt](https://github.com/munt/munt). Thank you to the
+developers of both.
 
 <Aside>
 A game set to General MIDI or Roland with **No MIDI port** finds nothing
