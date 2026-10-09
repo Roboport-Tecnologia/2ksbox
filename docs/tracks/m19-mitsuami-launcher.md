@@ -39,7 +39,7 @@ and bump `rev` to the pushed mitsuami commit before committing here.
 A dependency change, a new mitsuami `rev` included (it is a git
 dependency), means regenerating `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami `f080d19` since 2026-10-08: 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami `46ee64e` since 2026-10-09: 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
@@ -79,7 +79,9 @@ and `222865c`, GTK's primary menu at the end of a sidebar's header bar
 change to its sidebar's width, with `0ad1aa0`, a GTK capture that waits
 for that resize (Broadway draws it frames later), and `f080d19`, a
 window with a toolbar and no sidebar full size on AppKit too, so a table
-at its top runs under the bar (the snapshots window).
+at its top runs under the bar (the snapshots window), and `46ee64e`,
+`MenuBarPlace::InTitleBarStart`, a WinUI menu bar in the title bar
+before the title (the `TitleBar`'s `LeftHeader`), which the player uses.
 Both crates built with no change.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
