@@ -318,13 +318,27 @@ driver.
    `DRM_IOCTL_WAIT_VBLANK` on the card's primary node for the blank. The
    wait needs no DRM master, only the seat's access to `/dev/dri/card*`
    (logind's ACL; the render node does not take the call): 120 waits in
-   a plain process came 16.662 to 16.672 ms apart. Which screen a window
-   is on is the compositor's to say, and GTK's surface hides Wayland's
-   `enter` events from us, so with one screen lit that one is followed,
-   with several none (the guest keeps its timer) unless
-   `PLAYER_HOST_SCREEN` names the connector (`DP-1`, as the compositor
-   and `/sys/class/drm` name it). A screen with variable refresh on
-   blanks at the compositor's pace, not the mode's. On the user's
+   a plain process came 16.662 to 16.672 ms apart. Which screen the
+   window is on (the user: "take care of several screens on linux"):
+   on Wayland the compositor names the output each frame of the
+   picture's surface was shown on (`wp_presentation` feedback's
+   `sync_output`, with `wl_output` version 4's `name`), asked on the
+   toolkit's own connection with a queue of our own, one request in
+   flight; on X11 RandR's CRTC under the window's middle, its output's
+   name or EDID. The name is DRM's connector name on wlroots, KWin and
+   Mutter (`DP-1`); an X driver's own names (amdgpu's `DisplayPort-0`)
+   fall back to the EDID beside each connector in `/sys/class/drm`.
+   Until the window system has answered, the only lit screen is
+   followed, with several none; `PLAYER_HOST_SCREEN` still names one by
+   hand, and `PLAYER_SCREEN_LOG=1` logs the feedback's events. Tried on
+   sway with a headless second output (`swaymsg create_output`): the
+   player logged `the window is on DP-1`, then on the window's move
+   `the window is on HEADLESS-3` and `host screen's rate unknown` (no
+   CRTC drives a headless output, so the guest keeps its timer). A
+   screen powered off by the compositor's idle has no lit CRTC either
+   (`WAIT_VBLANK` refuses): the guest keeps its timer until it wakes. A
+   screen with variable refresh on blanks at the compositor's pace, not
+   the mode's. On the user's
    `win11` machine (a copy in `build/w11m`: an overlay of its disk and
    copies of its firmware variables and TPM state, under KVM in
    `player-mitsuami`), with our viogpudo installed by
@@ -364,10 +378,10 @@ Windows 11 test here.
 
 ## Open
 
-- Linux with several screens lit: the window's screen is not asked of
-  the compositor (`PLAYER_HOST_SCREEN` picks one by hand). Wayland's
-  `wp_presentation` feedback on the player's surface would name its
-  output (`sync_output`) and give the exact refresh; X11 has RandR.
+- Linux with several screens: the window's move back from the headless
+  output to DP-1 is not seen yet (the user's screen went to sleep
+  mid-test), nor two real screens, nor X11's RandR path. A window that
+  never draws again after a move is placed only at its next frame.
 - Windows 11 on Arm: the driver's timer bunching on a coarse tick under
   HVF (only the watchdog now, patch 91 above), and Basic Display on
   ramfb drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").

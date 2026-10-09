@@ -20,13 +20,20 @@
 use qemu_embed::Qemu;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use wgpu::rwh::HasWindowHandle;
+use wgpu::rwh::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+
+/// A window's raw handles: the window's, and its display connection's
+/// where it has one (Linux needs it to ask which screen the window is on).
+fn raw(window: &(impl HasWindowHandle + HasDisplayHandle)) -> Option<(RawWindowHandle, Option<RawDisplayHandle>)> {
+    let w = window.window_handle().ok()?.as_raw();
+    Some((w, window.display_handle().ok().map(|d| d.as_raw())))
+}
 
 /// The refresh rate, in mHz, of the screen the window is on, or `None`
 /// where it cannot be told.
-pub fn refresh_mhz(window: &impl HasWindowHandle) -> Option<u32> {
-    let raw = window.window_handle().ok()?.as_raw();
-    platform::refresh_mhz(raw)
+pub fn refresh_mhz(window: &(impl HasWindowHandle + HasDisplayHandle)) -> Option<u32> {
+    let (w, d) = raw(window)?;
+    platform::refresh_mhz(w, d)
 }
 
 /// How many host refreshes make a guest frame: the smallest whole number
@@ -89,8 +96,8 @@ impl HostVBlank {
 
     /// The screen the window is on, and every how many of its blanks a
     /// guest frame starts ([`divisor`]; `None` for no ticks).
-    pub fn follow(&self, window: &impl HasWindowHandle, every: Option<u32>) {
-        let screen = window.window_handle().ok().and_then(|h| platform::screen_name(h.as_raw()));
+    pub fn follow(&self, window: &(impl HasWindowHandle + HasDisplayHandle), every: Option<u32>) {
+        let screen = raw(window).and_then(|(w, d)| platform::screen_name(w, d));
         *self.shared.screen.lock().unwrap() = screen;
         self.shared.every.store(every.unwrap_or(0), Ordering::Relaxed);
     }
@@ -108,7 +115,7 @@ mod platform {
     use qemu_embed::Qemu;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use wgpu::rwh::RawWindowHandle;
+    use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
     use windows_sys::Wdk::Graphics::Direct3D::*;
     use windows_sys::Win32::Devices::Display::*;
     use windows_sys::Win32::Graphics::Gdi::*;
@@ -135,11 +142,11 @@ mod platform {
         &name[..name.iter().position(|&c| c == 0).unwrap_or(name.len())]
     }
 
-    pub fn screen_name(raw: RawWindowHandle) -> Option<Vec<u16>> {
+    pub fn screen_name(raw: RawWindowHandle, _display: Option<RawDisplayHandle>) -> Option<Vec<u16>> {
         monitor_device(raw).map(|d| d.to_vec())
     }
 
-    pub fn refresh_mhz(raw: RawWindowHandle) -> Option<u32> {
+    pub fn refresh_mhz(raw: RawWindowHandle, _display: Option<RawDisplayHandle>) -> Option<u32> {
         // the active display path whose source is the monitor's
         let device = monitor_device(raw)?;
         let (mut np, mut nm) = (0u32, 0u32);
@@ -245,7 +252,7 @@ mod platform {
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
-    use wgpu::rwh::RawWindowHandle;
+    use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 
     pub const HAS_VBLANK: bool = true;
 
@@ -280,7 +287,7 @@ mod platform {
     /// The number of the screen the window's view is on (its
     /// `deviceDescription`'s `NSScreenNumber`). On the main thread, as every
     /// caller of `follow` and `refresh_mhz` is.
-    pub fn screen_name(raw: RawWindowHandle) -> Option<u32> {
+    pub fn screen_name(raw: RawWindowHandle, _display: Option<RawDisplayHandle>) -> Option<u32> {
         let RawWindowHandle::AppKit(h) = raw else { return None };
         let view = h.ns_view.as_ptr() as *const AnyObject;
         objc2::rc::autoreleasepool(|_| unsafe {
@@ -311,8 +318,8 @@ mod platform {
 
     /// The screen's nominal refresh period as Core Video gives it (a
     /// rational, e.g. 1/60 s), turned into a rate.
-    pub fn refresh_mhz(raw: RawWindowHandle) -> Option<u32> {
-        let link = link(screen_name(raw)?)?;
+    pub fn refresh_mhz(raw: RawWindowHandle, display: Option<RawDisplayHandle>) -> Option<u32> {
+        let link = link(screen_name(raw, display)?)?;
         let t = unsafe { CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link) };
         unsafe { CVDisplayLinkRelease(link) };
         (t.flags & TIME_IS_INDEFINITE == 0 && t.time_value > 0 && t.time_scale > 0)
@@ -386,11 +393,14 @@ mod platform {
     //! DRM, under any compositor or X server: the CRTC that drives the
     //! screen, its mode's exact rate, and `DRM_IOCTL_WAIT_VBLANK` on the
     //! card's primary node, which needs no master (only the seat's access
-    //! to `/dev/dri/card*`, which logind gives). Which screen a window is on
-    //! is the compositor's to say and is not asked: with one screen lit that
-    //! one, with several none (the guest keeps its timer), unless
-    //! `PLAYER_HOST_SCREEN` names the connector (`DP-1`, as
-    //! `/sys/class/drm` and the compositor name it).
+    //! to `/dev/dri/card*`, which logind gives). Which screen the window is
+    //! on is the window system's to say ([`where_shown`]): on Wayland the
+    //! output a frame of the window's surface was last shown on, on X11 the
+    //! RandR output under the window's middle; matched to a CRTC by the
+    //! connector's name (`DP-1`, as `/sys/class/drm` and wlroots, KWin and
+    //! Mutter name it) or else its EDID. Until it has said, the only lit
+    //! screen is followed, with several none (the guest keeps its timer).
+    //! `PLAYER_HOST_SCREEN` names the connector by hand.
 
     use super::Shared;
     use qemu_embed::Qemu;
@@ -398,7 +408,7 @@ mod platform {
     use std::os::fd::AsRawFd;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use wgpu::rwh::RawWindowHandle;
+    use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 
     pub const HAS_VBLANK: bool = true;
 
@@ -614,9 +624,11 @@ mod platform {
         out
     }
 
-    /// The screen to follow: the one named by `PLAYER_HOST_SCREEN`, or the
-    /// only one lit on any card.
-    fn the_screen() -> Option<Screen> {
+    /// The screen to follow: the one named by `PLAYER_HOST_SCREEN`, the
+    /// one the window is on, or, while that is not known, the only one lit
+    /// on any card. A window on an output no CRTC drives (a nested
+    /// compositor's, a headless one) follows none.
+    fn the_screen(on: Option<Output>) -> Option<Screen> {
         let mut cards: Vec<String> = std::fs::read_dir("/dev/dri")
             .ok()?
             .filter_map(|e| e.ok()?.file_name().into_string().ok())
@@ -625,19 +637,314 @@ mod platform {
             .collect();
         cards.sort();
         let all: Vec<_> = cards.iter().flat_map(|c| lit(c)).collect();
-        match std::env::var("PLAYER_HOST_SCREEN") {
-            Ok(want) => all.into_iter().find(|(_, names)| names.contains(&want)).map(|(s, _)| s),
-            Err(_) if all.len() == 1 => all.into_iter().next().map(|(s, _)| s),
-            Err(_) => None,
+        let named = |want: &str| all.iter().find(|(_, names)| names.iter().any(|n| n == want)).map(|(s, _)| s.clone());
+        if let Ok(want) = std::env::var("PLAYER_HOST_SCREEN") {
+            return named(&want);
+        }
+        let Some(on) = on else {
+            return (all.len() == 1).then(|| all[0].0.clone());
+        };
+        if let Some(s) = on.name.as_deref().and_then(named) {
+            return Some(s);
+        }
+        // X drivers name outputs their own way (amdgpu's DisplayPort-0):
+        // the EDID, when only one connector has it
+        let edid = on.edid.filter(|e| !e.is_empty())?;
+        let mut same = all.iter().filter(|(s, names)| {
+            let card = s.card.trim_start_matches("/dev/dri/");
+            names.iter().any(|n| std::fs::read(format!("/sys/class/drm/{card}-{n}/edid")).is_ok_and(|e| e == edid))
+        });
+        match (same.next(), same.next()) {
+            (Some((s, _)), None) => Some(s.clone()),
+            _ => None,
         }
     }
 
-    pub fn screen_name(_raw: RawWindowHandle) -> Option<Screen> {
-        the_screen()
+    pub fn screen_name(raw: RawWindowHandle, display: Option<RawDisplayHandle>) -> Option<Screen> {
+        the_screen(where_shown(raw, display))
     }
 
-    pub fn refresh_mhz(_raw: RawWindowHandle) -> Option<u32> {
-        the_screen().map(|s| s.mhz)
+    pub fn refresh_mhz(raw: RawWindowHandle, display: Option<RawDisplayHandle>) -> Option<u32> {
+        the_screen(where_shown(raw, display)).map(|s| s.mhz)
+    }
+
+    /// An output as the window system names it.
+    #[derive(Clone, PartialEq, Debug, Default)]
+    struct Output {
+        name: Option<String>,
+        edid: Option<Vec<u8>>,
+    }
+
+    /// What answers for the window: kept from call to call (a Wayland
+    /// answer comes with a later frame), made again for another window.
+    enum Locator {
+        Wayland(usize, wl::Watch),
+        X11(x11::Watch),
+        None(usize),
+    }
+
+    static LOCATOR: std::sync::Mutex<Option<Locator>> = std::sync::Mutex::new(None);
+    static LAST: std::sync::Mutex<Option<Output>> = std::sync::Mutex::new(None);
+
+    /// The output the window is on, as far as the window system has said
+    /// (on Wayland the last frame shown, so a hidden window keeps its
+    /// screen); logged when it changes.
+    fn where_shown(raw: RawWindowHandle, display: Option<RawDisplayHandle>) -> Option<Output> {
+        let mut locator = LOCATOR.lock().unwrap();
+        let on = match (raw, display) {
+            (RawWindowHandle::Wayland(w), Some(RawDisplayHandle::Wayland(d))) => {
+                let key = w.surface.as_ptr() as usize;
+                if !matches!(&*locator, Some(Locator::Wayland(k, _) | Locator::None(k)) if *k == key) {
+                    // SAFETY: the window's live surface on its toolkit's
+                    // live display, which outlive the window's handle
+                    *locator = Some(match unsafe { wl::Watch::new(d.display.as_ptr(), w.surface.as_ptr()) } {
+                        Some(watch) => Locator::Wayland(key, watch),
+                        None => Locator::None(key),
+                    });
+                }
+                match &mut *locator {
+                    Some(Locator::Wayland(_, watch)) => watch.output(),
+                    _ => None,
+                }
+            }
+            (RawWindowHandle::Xcb(_) | RawWindowHandle::Xlib(_), _) => {
+                let window = match raw {
+                    RawWindowHandle::Xcb(h) => h.window.get(),
+                    RawWindowHandle::Xlib(h) => h.window as u32,
+                    _ => unreachable!(),
+                };
+                if !matches!(&*locator, Some(Locator::X11(_))) {
+                    *locator = x11::Watch::new().map(Locator::X11);
+                }
+                match &*locator {
+                    Some(Locator::X11(watch)) => watch.output(window),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let mut last = LAST.lock().unwrap();
+        if *last != on {
+            match on.as_ref().map(|o| o.name.as_deref().unwrap_or("an unnamed output")) {
+                Some(name) => eprintln!("[display] the window is on {name}"),
+                None => eprintln!("[display] the window's screen is not known"),
+            }
+            *last = on.clone();
+        }
+        on
+    }
+
+    /// Wayland: `wp_presentation` feedback on the window's surface, whose
+    /// `sync_output` names the output a frame was shown on (`wl_output`
+    /// version 4's `name`). One request in flight at a time; the compositor
+    /// answers with the surface's next frame, so a window dragged to
+    /// another screen is placed when it next draws there. Events are read
+    /// from the socket by the toolkit and filed under this queue.
+    mod wl {
+        use super::Output;
+        use wayland_backend::client::{Backend, ObjectId};
+        use wayland_client::globals::{GlobalListContents, registry_queue_init};
+        use wayland_client::protocol::{wl_output, wl_registry, wl_surface};
+        use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
+        use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
+
+        pub struct Watch {
+            conn: Connection,
+            queue: EventQueue<State>,
+            state: State,
+            presentation: wp_presentation::WpPresentation,
+            surface: wl_surface::WlSurface,
+        }
+
+        #[derive(Default)]
+        struct State {
+            /// Our bindings of the outputs: global name, proxy, its name.
+            outputs: Vec<(u32, wl_output::WlOutput, Option<String>)>,
+            asked: bool,
+            /// The output named by the frame being answered for.
+            synced: Option<String>,
+            on: Option<String>,
+        }
+
+        impl Watch {
+            /// # Safety
+            ///
+            /// `display` is the toolkit's live `wl_display`, `surface` a live
+            /// `wl_surface` on it.
+            pub unsafe fn new(display: *mut std::ffi::c_void, surface: *mut std::ffi::c_void) -> Option<Watch> {
+                // SAFETY: the caller's.
+                let conn = Connection::from_backend(unsafe { Backend::from_foreign_display(display.cast()) });
+                let id = unsafe { ObjectId::from_ptr(wl_surface::WlSurface::interface(), surface.cast()) }.ok()?;
+                let surface = wl_surface::WlSurface::from_id(&conn, id).ok()?;
+                let (globals, mut queue) = registry_queue_init::<State>(&conn).ok()?;
+                let qh = queue.handle();
+                let presentation = globals.bind(&qh, 1..=1, ()).ok()?;
+                let mut state = State::default();
+                for g in globals.contents().clone_list() {
+                    if g.interface == "wl_output" && g.version >= 4 {
+                        state.outputs.push((g.name, globals.registry().bind(g.name, 4, &qh, g.name), None));
+                    }
+                }
+                let _ = queue.roundtrip(&mut state);
+                Some(Watch { conn, queue, state, presentation, surface })
+            }
+
+            /// The output the window's last answered frame was shown on.
+            pub fn output(&mut self) -> Option<Output> {
+                if let Err(e) = self.queue.dispatch_pending(&mut self.state) {
+                    debug(format_args!("dispatch: {e}"));
+                }
+                if !self.state.asked {
+                    debug(format_args!("asking"));
+                    self.presentation.feedback(&self.surface, &self.queue.handle(), ());
+                    self.state.asked = true;
+                    let _ = self.conn.flush();
+                }
+                self.state.on.clone().map(|name| Output { name: Some(name), edid: None })
+            }
+        }
+
+        impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
+            fn event(
+                state: &mut State,
+                registry: &wl_registry::WlRegistry,
+                event: wl_registry::Event,
+                _: &GlobalListContents,
+                _: &Connection,
+                qh: &QueueHandle<State>,
+            ) {
+                match event {
+                    wl_registry::Event::Global { name, interface, version } if interface == "wl_output" && version >= 4 => {
+                        state.outputs.push((name, registry.bind(name, 4, qh, name), None));
+                    }
+                    wl_registry::Event::GlobalRemove { name } => {
+                        if let Some(i) = state.outputs.iter().position(|(n, _, _)| *n == name) {
+                            let (_, output, gone) = state.outputs.remove(i);
+                            output.release();
+                            // the window's screen unplugged: not known
+                            // again until a frame is shown
+                            if gone.is_some() && gone == state.on {
+                                state.on = None;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        impl Dispatch<wl_output::WlOutput, u32> for State {
+            fn event(
+                state: &mut State,
+                output: &wl_output::WlOutput,
+                event: wl_output::Event,
+                _: &u32,
+                _: &Connection,
+                _: &QueueHandle<State>,
+            ) {
+                if let wl_output::Event::Name { name } = event {
+                    if let Some(o) = state.outputs.iter_mut().find(|(_, p, _)| p == output) {
+                        o.2 = Some(name);
+                    }
+                }
+            }
+        }
+
+        impl Dispatch<wp_presentation_feedback::WpPresentationFeedback, ()> for State {
+            fn event(
+                state: &mut State,
+                _: &wp_presentation_feedback::WpPresentationFeedback,
+                event: wp_presentation_feedback::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<State>,
+            ) {
+                debug(format_args!("{event:?}"));
+                match event {
+                    // once for each of the client's bindings of the output
+                    // (the toolkit's too): ours have names
+                    wp_presentation_feedback::Event::SyncOutput { output } => {
+                        if let Some((_, _, Some(name))) = state.outputs.iter().find(|(_, p, _)| *p == output) {
+                            state.synced = Some(name.clone());
+                        }
+                    }
+                    wp_presentation_feedback::Event::Presented { .. } => {
+                        state.on = state.synced.take().or(state.on.take());
+                        state.asked = false;
+                    }
+                    wp_presentation_feedback::Event::Discarded => {
+                        state.synced = None;
+                        state.asked = false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        delegate_noop!(State: ignore wp_presentation::WpPresentation);
+
+        /// `PLAYER_SCREEN_LOG=1`: the feedback's events.
+        fn debug(what: std::fmt::Arguments) {
+            if std::env::var_os("PLAYER_SCREEN_LOG").is_some() {
+                eprintln!("[screen] {what}");
+            }
+        }
+    }
+
+    /// X11: RandR's CRTC under the window's middle, its first output's name
+    /// and EDID, on a connection of our own.
+    mod x11 {
+        use super::Output;
+        use x11rb::connection::Connection;
+        use x11rb::protocol::randr::ConnectionExt as _;
+        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+        use x11rb::rust_connection::RustConnection;
+
+        pub struct Watch {
+            conn: RustConnection,
+            root: u32,
+            edid: u32,
+        }
+
+        impl Watch {
+            pub fn new() -> Option<Watch> {
+                let (conn, screen) = x11rb::connect(None).ok()?;
+                let root = conn.setup().roots.get(screen)?.root;
+                let edid = conn.intern_atom(false, b"EDID").ok()?.reply().ok()?.atom;
+                Some(Watch { conn, root, edid })
+            }
+
+            pub fn output(&self, window: u32) -> Option<Output> {
+                let c = &self.conn;
+                let geo = c.get_geometry(window).ok()?.reply().ok()?;
+                let at = c.translate_coordinates(window, self.root, 0, 0).ok()?.reply().ok()?;
+                let (mx, my) = (at.dst_x as i32 + geo.width as i32 / 2, at.dst_y as i32 + geo.height as i32 / 2);
+                let res = c.randr_get_screen_resources_current(self.root).ok()?.reply().ok()?;
+                for crtc in res.crtcs {
+                    let Some(info) = c.randr_get_crtc_info(crtc, res.config_timestamp).ok().and_then(|r| r.reply().ok())
+                    else {
+                        continue;
+                    };
+                    let (x, y, w, h) = (info.x as i32, info.y as i32, info.width as i32, info.height as i32);
+                    if info.mode == 0 || mx < x || my < y || mx >= x + w || my >= y + h {
+                        continue;
+                    }
+                    let out = *info.outputs.first()?;
+                    let name = c
+                        .randr_get_output_info(out, res.config_timestamp)
+                        .ok()
+                        .and_then(|r| r.reply().ok())
+                        .map(|o| String::from_utf8_lossy(&o.name).into_owned());
+                    let edid = c
+                        .randr_get_output_property(out, self.edid, AtomEnum::ANY, 0, 256, false, false)
+                        .ok()
+                        .and_then(|r| r.reply().ok())
+                        .map(|p| p.data);
+                    return Some(Output { name, edid });
+                }
+                None
+            }
+        }
     }
 
     /// The host-vblank thread: the screen's card, opened again when the
@@ -685,16 +992,16 @@ mod platform {
 mod platform {
     use super::Shared;
     use qemu_embed::Qemu;
-    use wgpu::rwh::RawWindowHandle;
+    use wgpu::rwh::{RawDisplayHandle, RawWindowHandle};
 
     pub const HAS_VBLANK: bool = false;
 
     pub type Screen = ();
 
-    pub fn refresh_mhz(_raw: RawWindowHandle) -> Option<u32> {
+    pub fn refresh_mhz(_raw: RawWindowHandle, _display: Option<RawDisplayHandle>) -> Option<u32> {
         None
     }
-    pub fn screen_name(_raw: RawWindowHandle) -> Option<()> {
+    pub fn screen_name(_raw: RawWindowHandle, _display: Option<RawDisplayHandle>) -> Option<()> {
         None
     }
     pub fn vblank_loop(_shared: &Shared, _vm: Qemu) {}
