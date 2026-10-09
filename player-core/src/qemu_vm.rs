@@ -469,6 +469,7 @@ unsafe extern "C" fn on_3d_frame(ud: *mut c_void, px: *const u8, w: c_int, h: c_
         s.front.width = w;
         s.front.height = h;
         s.front.pixels = vec![0; w * h];
+        s.front.pending = None;
     }
     for y in 0..h {
         let row = std::slice::from_raw_parts(px.add(y * stride) as *const u32, w);
@@ -646,6 +647,11 @@ unsafe extern "C" fn on_refresh_done(ud: *mut c_void) {
         s.front.pixels = vec![0; w * h];
         s.front_stale = false;
         region = Some(Rect::whole(w, h));
+        // what changed in a frame of another size is no region of this
+        // one: kept, a bigger frame's rect outran this one's pixels when
+        // the render thread had not taken it before the switch back
+        // (800x600 -> 2560x1676 -> 800x600 in Windows setup)
+        s.front.pending = None;
     }
     let Shared {
         back,
