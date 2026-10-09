@@ -652,6 +652,9 @@ static HRESULT APIENTRY umd_lock(HANDLE h, D3DDDIARG_LOCK *l)
         lk.Flags.ReadOnly = l->Flags.ReadOnly;
         lk.Flags.WriteOnly = l->Flags.WriteOnly;
         lk.Flags.DonotWait = l->Flags.DoNotWait;
+        /* no renaming: a DISCARD lock that the memory manager renamed left the
+         * host drawing the buffer's old place (D3DGAME9's grid vanished, its
+         * scene stood still), track M20 */
         hr = dev->cb.pfnLockCb(dev->rt, &lk);
         if (FAILED(hr)) {
             static ULONG failed;

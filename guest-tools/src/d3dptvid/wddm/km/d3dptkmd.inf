@@ -10,12 +10,13 @@ Signature="$WINDOWS NT$"
 Class=Display
 ClassGUID={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=10/09/2026,0.3.17.0
+DriverVer=10/09/2026,0.3.25.0
 CatalogFile.NTamd64=d3dptkmd.cat
 
 [DestinationDirs]
 DefaultDestDir=12
 d3dpt.UserMode=11
+d3dpt.UserModeWow=10,SysWOW64
 
 [SourceDisksNames]
 1=%DiskId%,,,
@@ -23,6 +24,7 @@ d3dpt.UserMode=11
 [SourceDisksFiles]
 d3dptkmd.sys=1
 d3dptumd.dll=1
+d3dptumd32.dll=1
 
 [Manufacturer]
 %Mfg%=d3dpt.Mfg,NTx86,NTamd64
@@ -31,7 +33,7 @@ d3dptumd.dll=1
 %d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
 
 [d3dpt.Mfg.NTamd64]
-%d3dpt.DeviceDesc%=d3dpt_Install, PCI\VEN_1234&DEV_3D00
+%d3dpt.DeviceDesc%=d3dpt_Install64, PCI\VEN_1234&DEV_3D00
 
 ; The install section's own AddReg: its HKR is the adapter's software key,
 ; where Direct3D looks up the user-mode driver (d3d9.dll loads it by this
@@ -45,6 +47,23 @@ d3dptumd.dll=1
 FeatureScore=F8
 CopyFiles=d3dpt.Miniport, d3dpt.UserMode
 AddReg=d3dpt_SoftwareDeviceSettings
+
+; x64: also the 32-bit user-mode driver, which d3d9.dll loads in a 32-bit
+; process (WoW64) by UserModeDriverNameWow from SysWOW64; without it a
+; 32-bit Direct3D program (most of the era's games) has no HAL device
+[d3dpt_Install64]
+FeatureScore=F8
+CopyFiles=d3dpt.Miniport, d3dpt.UserMode, d3dpt.UserModeWow
+AddReg=d3dpt_SoftwareDeviceSettings, d3dpt_SoftwareDeviceSettingsWow
+
+[d3dpt_Install64.Services]
+AddService=d3dptkmd, 0x00000002, d3dpt_Service_Inst
+
+[d3dpt.UserModeWow]
+d3dptumd32.dll
+
+[d3dpt_SoftwareDeviceSettingsWow]
+HKR,,UserModeDriverNameWow,%REG_MULTI_SZ%,d3dptumd32.dll
 
 [d3dpt.Miniport]
 d3dptkmd.sys

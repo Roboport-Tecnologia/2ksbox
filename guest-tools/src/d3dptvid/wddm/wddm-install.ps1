@@ -1,11 +1,12 @@
 # wddm-install.ps1: the WDDM display driver on 64-bit Windows 11, test
 # signed (track M20). 64-bit Windows loads no unsigned kernel driver, so
 # this turns test mode on, makes a code-signing certificate of this
-# machine's own, signs d3dptkmd.sys and d3dptumd.dll with it, writes the
+# machine's own, signs d3dptkmd.sys and both user-mode drivers (d3dptumd.dll,
+# and d3dptumd32.dll for 32-bit processes) with it, writes the
 # package's catalog and signs that, trusts the certificate, and installs
 # the package on d3dpt-vga. Test mode starts at the next boot, and so
 # does the driver. Run it elevated from the folder with the driver's
-# three files; it copies them to a work folder first (the disc is
+# four files; it copies them to a work folder first (the disc is
 # read-only). Secure Boot must be off (the default with no keys enrolled).
 #
 #   powershell -ep bypass -f wddm-install.ps1        then restart
@@ -16,7 +17,7 @@ $src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $work = Join-Path $env:SystemRoot "Temp\2ksbox-wddm"
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $work | Out-Null
-foreach ($f in "d3dptkmd.sys", "d3dptumd.dll", "d3dptkmd.inf") {
+foreach ($f in "d3dptkmd.sys", "d3dptumd.dll", "d3dptumd32.dll", "d3dptkmd.inf") {
     Copy-Item (Join-Path $src $f) $work
     # a disc's files come over read-only, and signing rewrites them
     (Get-Item (Join-Path $work $f)).IsReadOnly = $false
@@ -41,6 +42,7 @@ function Sign($path) {
 }
 Sign (Join-Path $work "d3dptkmd.sys")
 Sign (Join-Path $work "d3dptumd.dll")
+Sign (Join-Path $work "d3dptumd32.dll")
 New-FileCatalog -Path $work -CatalogFilePath (Join-Path $work "d3dptkmd.cat") -CatalogVersion 2.0 | Out-Null
 Sign (Join-Path $work "d3dptkmd.cat")
 

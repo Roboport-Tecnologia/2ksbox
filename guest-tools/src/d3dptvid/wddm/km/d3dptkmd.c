@@ -87,6 +87,18 @@ typedef struct D3DPT_ADAPTER {
     volatile LONG vsync_on;
     BOOLEAN vsync_ready;              /* the timer and its DPC initialized (StartDevice) */
     volatile ULONG scan_addr;         /* what the scanout shows (OFFSET), as the vsync reports it */
+    /* a flip with a flip interval waits for the vertical blank, as a GPU's
+     * flip has a built-in wait for it (FlipWithNoWait says when not): its
+     * address goes to the scanout there, and its fence, and every fence
+     * submitted after it, is reported done there too, in order. Without it
+     * a full-screen Direct3D program presented as fast as it could draw
+     * (D3DGAME9 at 600 frames a second, track M20). Changed only under the
+     * interrupt's synchronization */
+    BOOLEAN flip_defer;               /* the submission being run is such a flip (SubmitCommand) */
+    BOOLEAN flip_pending;             /* flip_addr waits for the vertical blank */
+    ULONG flip_addr;
+    BOOLEAN fence_held;               /* held_fence waits for the vertical blank */
+    LONG held_fence;
     /* Direct3D: the command window (d3dpt_proto.h) the user-mode driver's
      * records are copied into at submit time, the host's surface handles
      * this driver hands out, and the handles of D3D allocations destroyed
@@ -1776,7 +1788,9 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
             run_blt(a, (const PKT_BLT_T *)hd);
             break;
         case PKT_FLIP:
-            if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
+            if (((const PKT_FLIP_T *)hd)->src.seg == 1 && a->flip_defer) {
+                a->flip_addr = ((const PKT_FLIP_T *)hd)->src.addr;     /* SubmitCommand queues it */
+            } else if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
                 a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
                 a->scan_addr = ((const PKT_FLIP_T *)hd)->src.addr;
             }
@@ -1855,14 +1869,76 @@ static BOOLEAN notify_preempted(PVOID ctx)
     return TRUE;
 }
 
-static void complete_fence(D3DPT_ADAPTER *a, ULONG fence)
+/* a fence done, under the interrupt's synchronization: through the
+ * device's DMA interrupt (fence_irq: the FENCE register), else reported
+ * here as an interrupt would */
+static void fence_done_sync(D3DPT_ADAPTER *a, LONG fence)
 {
+    a->fence_done = fence;
+    if (a->fence_irq) {
+        a->regs[D3DPT_FB_REG_FENCE / 4] = (ULONG)fence;           /* IRQ_DMA: the ISR reports it */
+    } else {
+        a->fence_notify = fence;
+        notify_completed(a);
+    }
+}
+
+/* the held flip and fence, at the vertical blank (or when dxgkrnl stops
+ * it): the scanout takes the flip's address, then the fences are done */
+static volatile LONG g_flips_submitted;   /* the vertical blank's statistics: waiting flips submitted */
+
+static void release_flip_sync(D3DPT_ADAPTER *a)
+{
+    if (a->flip_pending) {
+        a->flip_pending = FALSE;
+        a->regs[D3DPT_FB_REG_OFFSET / 4] = a->flip_addr;
+        a->scan_addr = a->flip_addr;
+    }
+    if (a->fence_held) {
+        a->fence_held = FALSE;
+        fence_done_sync(a, a->held_fence);
+    }
+}
+
+static KSYNCHRONIZE_ROUTINE release_flip;
+static BOOLEAN release_flip(PVOID ctx)
+{
+    release_flip_sync((D3DPT_ADAPTER *)ctx);
+    return TRUE;
+}
+
+/* a submission run: its fence done now, or held behind a flip that waits
+ * for the vertical blank (this one, or an earlier one still waiting) */
+struct d3dpt_finish { D3DPT_ADAPTER *a; LONG fence; BOOLEAN flip; };
+static KSYNCHRONIZE_ROUTINE finish_submission;
+static BOOLEAN finish_submission(PVOID ctx)
+{
+    struct d3dpt_finish *f = (struct d3dpt_finish *)ctx;
+    D3DPT_ADAPTER *a = f->a;
+
+    if (f->flip && a->vsync_on) {
+        a->flip_pending = TRUE;
+        a->fence_held = TRUE;
+        a->held_fence = f->fence;
+    } else if (a->fence_held && a->vsync_on) {
+        a->held_fence = f->fence;
+    } else {
+        release_flip_sync(a);       /* the vertical blank went off meanwhile: nothing waits for it */
+        fence_done_sync(a, f->fence);
+    }
+    return TRUE;
+}
+
+static void complete_fence(D3DPT_ADAPTER *a, ULONG fence, BOOLEAN flip)
+{
+    struct d3dpt_finish f;
     BOOLEAN ret = FALSE;
     NTSTATUS st;
 
-    a->fence_done = (LONG)fence;
-    a->fence_notify = (LONG)fence;
-    st = a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_completed, a, 0, &ret);
+    f.a = a;
+    f.fence = (LONG)fence;
+    f.flip = flip;
+    st = a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, finish_submission, &f, 0, &ret);
     if (!NT_SUCCESS(st) || !ret) {
         dbg_hex("d3dptkmd: SynchronizeExecution ", (ULONG)st);
         dbg_hex(" ran ", (ULONG)ret);
@@ -2312,6 +2388,10 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
         dbg_hex(" bytes ", s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
         dbg_puts("\n");
     }
+    /* a flip with an interval waits for the vertical blank, while dxgkrnl
+     * has it on (it turns it on for the flips it schedules) */
+    a->flip_defer = s->Flags.Flip && !s->Flags.FlipWithNoWait && s->FlipInterval != D3DDDI_FLIPINTERVAL_IMMEDIATE &&
+                    a->vsync_on;
     if (s->DmaBufferSubmissionEndOffset > s->DmaBufferSubmissionStartOffset) {
         PHYSICAL_ADDRESS pa = s->DmaBufferPhysicalAddress;
         PUCHAR va;
@@ -2329,12 +2409,11 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
             dbg_puts("\n");
         }
     }
-    if (a->fence_irq) {
-        a->fence_done = (LONG)s->SubmissionFenceId;
-        a->regs[D3DPT_FB_REG_FENCE / 4] = s->SubmissionFenceId;   /* IRQ_DMA: the ISR reports it */
-    } else {
-        complete_fence(a, s->SubmissionFenceId);
+    if (a->flip_defer) {
+        InterlockedIncrement(&g_flips_submitted);
     }
+    complete_fence(a, s->SubmissionFenceId, a->flip_defer);
+    a->flip_defer = FALSE;
     return STATUS_SUCCESS;
 }
 
@@ -2821,6 +2900,21 @@ static BOOLEAN notify_vsync(PVOID ctx)
     D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
     DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
 
+    {
+        static ULONG blanks, flips, logs;
+
+        flips += a->flip_pending;
+        if (++blanks == 300 && logs < 8) {  /* the first few: how many of 300 vertical blanks showed a flip */
+            logs++;
+            dbg_hex("d3dptkmd: flips shown in 300 vertical blanks: ", flips);
+            dbg_hex(" submitted ", (ULONG)InterlockedExchange(&g_flips_submitted, 0));
+            dbg_puts("\n");
+        }
+        if (blanks == 300) {
+            blanks = flips = 0;
+        }
+    }
+    release_flip_sync(a);           /* a flip waiting for this vertical blank shows now */
     RtlZeroMemory(&n, sizeof(n));
     n.InterruptType = DXGK_INTERRUPT_CRTC_VSYNC;
     n.CrtcVsync.VidPnTargetId = 0;
@@ -2848,7 +2942,12 @@ static VOID vsync_tick(PKDPC dpc, PVOID ctx, PVOID a1, PVOID a2)
 
 static void vsync_stop(D3DPT_ADAPTER *a)
 {
+    BOOLEAN ret;
+
     InterlockedExchange(&a->vsync_on, 0);
+    if (a->regs) {                  /* nothing waits for a vertical blank that will not come */
+        a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, release_flip, a, 0, &ret);
+    }
     if (a->vsync_irq && a->regs) {
         a->irq_mask &= ~D3DPT_FB_IRQ_VBLANK;
         a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;   /* a pending vertical blank goes with it */
