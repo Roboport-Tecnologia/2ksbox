@@ -24,6 +24,9 @@
  * v22 (M18): the DP2 stream's BLT (op 81) also copies between two colour
  * render targets, with its rectangles and filter (see v18 below).
  *
+ * v23 (M20): ... and between a plain texture and a colour render target,
+ * either way.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef D3DPT_PROTO_H
@@ -31,7 +34,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   22u
+#define D3DPT_PROTO_VERSION   23u
 
 #define D3DPT_SHM_SIZE        0x04000000u          /* 64 MiB */
 #define D3DPT_CMD_OFFSET      0x00001000u          /* records start after the header page */
@@ -252,7 +255,11 @@ typedef struct d3dpt_dp2 {
  * whose contents only the host has. v22: also between two colour render
  * targets, its rectangles and filter (flags 1 point, 2 linear) as given,
  * for a surface the guest's CPU cannot map; every other BLT is the
- * driver's. */
+ * driver's. v23: also between a plain texture (level 0, no cube or
+ * volume) and a colour render target, either way: from the texture's VRAM
+ * (no palette / colour-key expansion), or the target read back into the
+ * texture's VRAM (one texel size). Windows 11's DWM fills its shared
+ * targets from textures, and an acrylic backdrop reads one back. */
 #define D3DPT_DP2_DRAW8 200u
 #define D3DPT_DRAW8_VRAM_VB 0x1u
 #define D3DPT_DRAW8_VRAM_IB 0x2u

@@ -46,24 +46,25 @@ static ULONG g_log_lines;
 
 #define UMD_LOG_MAX 4000          /* lines per process; a frame loop must not drown the QEMU log */
 
+static NTSTATUS umd_escape_log(D3DKMT_HANDLE adapter, D3DPT_ESC *m)
+{
+    D3DKMT_ESCAPE e;
+
+    ZeroMemory(&e, sizeof(e));
+    e.hAdapter = adapter;
+    e.Type = D3DKMT_ESCAPE_DRIVERPRIVATE;
+    e.pPrivateDriverData = m;
+    e.PrivateDriverDataSize = sizeof(*m);
+    return D3DKMTEscape(&e);
+}
+
 void umd_log(const char *fmt, ...)
 {
     D3DPT_ESC m;
-    D3DKMT_ESCAPE e;
     va_list ap;
 
     if (g_log_lines >= UMD_LOG_MAX) {
         return;
-    }
-    if (!g_kmt_adapter) {
-        D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME o;
-
-        ZeroMemory(&o, sizeof(o));
-        lstrcpyW(o.DeviceName, L"\\\\.\\DISPLAY1");
-        if (D3DKMTOpenAdapterFromGdiDisplayName(&o) != 0) {
-            return;
-        }
-        g_kmt_adapter = o.hAdapter;
     }
     g_log_lines++;
     ZeroMemory(&m, sizeof(m));
@@ -72,12 +73,29 @@ void umd_log(const char *fmt, ...)
     va_start(ap, fmt);
     _vsnprintf_s(m.text, sizeof(m.text), _TRUNCATE, fmt, ap);
     va_end(ap);
-    ZeroMemory(&e, sizeof(e));
-    e.hAdapter = g_kmt_adapter;
-    e.Type = D3DKMT_ESCAPE_DRIVERPRIVATE;
-    e.pPrivateDriverData = &m;
-    e.PrivateDriverDataSize = sizeof(m);
-    D3DKMTEscape(&e);
+    if (g_kmt_adapter) {
+        umd_escape_log(g_kmt_adapter, &m);
+        return;
+    }
+    /* Ours is the adapter that takes the escape: on Windows 11 the
+     * standard VGA's Basic Display is a display of its own, often the
+     * first, and refuses a private escape (track M20 step 5). */
+    for (int i = 1; i <= 16; i++) {
+        D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME o;
+        D3DKMT_CLOSEADAPTER ca;
+
+        ZeroMemory(&o, sizeof(o));
+        wsprintfW(o.DeviceName, L"\\\\.\\DISPLAY%d", i);
+        if (D3DKMTOpenAdapterFromGdiDisplayName(&o) != 0) {
+            continue;
+        }
+        if (umd_escape_log(o.hAdapter, &m) == 0) {
+            g_kmt_adapter = o.hAdapter;
+            return;
+        }
+        ca.hAdapter = o.hAdapter;
+        D3DKMTCloseAdapter(&ca);
+    }
 }
 
 /* -------------------------------------------------------------- adapter */
@@ -136,6 +154,7 @@ typedef struct UMD_DEV {
     ULONG next_decl, next_vs, next_ps;
     ULONG skipped;                                /* draws the host could not be given */
     struct UMD_RES *qres;                         /* the queries' result page (umd_result_res) */
+    struct UMD_RES *rbstage;                      /* a shared target read back for the CPU (umd_readback_stage) */
     ULONG next_query;
 } UMD_DEV;
 
@@ -150,8 +169,15 @@ HRESULT APIENTRY OpenAdapter(D3DDDIARG_OPENADAPTER *o)
     UMD_ADAPTER *a;
     D3DDDICB_QUERYADAPTERINFO q;
     HRESULT hr;
+    char exe[MAX_PATH], *name;
 
-    umd_log("OpenAdapter interface 0x%x version 0x%x", o->Interface, o->Version);
+    /* which process: several open the adapter at once on Windows 11 */
+    if (!GetModuleFileNameA(NULL, exe, sizeof(exe))) {
+        lstrcpyA(exe, "?");
+    }
+    name = strrchr(exe, '\\');
+    umd_log("OpenAdapter interface 0x%x version 0x%x, process %lu %s", o->Interface, o->Version,
+            GetCurrentProcessId(), name ? name + 1 : exe);
     a = (UMD_ADAPTER *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*a));
     if (!a) {
         return E_OUTOFMEMORY;
@@ -1518,6 +1544,30 @@ static HRESULT APIENTRY umd_tex_blt(HANDLE h, CONST D3DDDIARG_TEXBLT *a)
             }
         }
     }
+    {
+        static ULONG logged;
+
+        if (logged < 24) {
+            ULONG nz = 0;
+            UINT i;
+
+            logged++;
+            /* how much of the source's first row is not zero: an all-zero
+             * copy tells an empty source from a lost one */
+            if (sb && umd_row_bytes(fmt, 1) == 4) {
+                UINT yy;
+
+                for (yy = (UINT)a->SrcRect.top; yy < (UINT)a->SrcRect.bottom; yy++) {
+                    const ULONG *row = (const ULONG *)(sub_mem(src, sb, sface) + yy * src->sub[sface].pitch);
+
+                    for (i = (UINT)a->SrcRect.left; i < (UINT)a->SrcRect.right; i++) nz += row[i] != 0;
+                }
+            }
+            umd_log("TexBlt %ux%u (pool %u, alloc 0x%x) -> %ux%u (pool %u, alloc 0x%x) rect %d,%d..%d,%d at %d,%d, locks %u/%u, %u texels non-zero",
+                    src->d.w, src->d.h, src->cr.Pool, src->kmt, dst->d.w, dst->d.h, dst->cr.Pool, dst->kmt, a->SrcRect.left,
+                    a->SrcRect.top, a->SrcRect.right, a->SrcRect.bottom, a->DstPoint.x, a->DstPoint.y, sb != NULL, db != NULL, nz);
+        }
+    }
     if (db) unlock_res(d, dst);
     if (sb) unlock_res(d, src);
     vram_dirty(d, dst);
@@ -1595,6 +1645,39 @@ static HRESULT APIENTRY umd_color_fill(HANDLE h, CONST D3DDDIARG_COLORFILL *a)
     return S_OK;
 }
 
+static HRESULT APIENTRY umd_blt(HANDLE h, CONST D3DDDIARG_BLT *a);
+
+/* A lockable video-memory texture of the target's size and format, kept
+ * for the device: a shared target's pixels come to the CPU through it */
+static UMD_RES *umd_readback_stage(UMD_DEV *d, UINT w, UINT h, ULONG fmt)
+{
+    D3DDDIARG_CREATERESOURCE c;
+    D3DDDI_SURFACEINFO si;
+
+    if (d->rbstage && d->rbstage->d.w == w && d->rbstage->d.h == h && d->rbstage->d.format == fmt) {
+        return d->rbstage;
+    }
+    if (d->rbstage) {
+        umd_destroy_resource(d, d->rbstage);
+        d->rbstage = NULL;
+    }
+    ZeroMemory(&si, sizeof(si));
+    si.Width = w;
+    si.Height = h;
+    ZeroMemory(&c, sizeof(c));
+    c.Format = (D3DDDIFORMAT)fmt;
+    c.Pool = D3DDDIPOOL_VIDEOMEMORY;
+    c.MipLevels = 1;
+    c.pSurfList = &si;
+    c.SurfCount = 1;
+    c.Flags.Texture = 1;
+    if (FAILED(umd_create_resource(d, &c))) {
+        return NULL;
+    }
+    d->rbstage = (UMD_RES *)c.hResource;
+    return d->rbstage;
+}
+
 /* A Blt involving a shared resource, which the CPU cannot map (the kernel
  * driver's CreateAllocation): the host's StretchRect between the two
  * render targets (protocol v22's colour BLT, op 81). DWM's redirection
@@ -1612,9 +1695,43 @@ static HRESULT umd_host_blt(UMD_DEV *d, CONST D3DDDIARG_BLT *a, UMD_RES *src, UM
                 src->d.format, src->d.shared ? " shared" : "", dst, dst->d.w, dst->d.h, dst->d.format,
                 dst->d.shared ? " shared" : "", a->Flags.Value);
     }
-    if (!src->kmt || !dst->kmt || !(src->d.caps & colour) || !(dst->d.caps & colour) ||
+    /* v23: one side may be a plain texture, which the host reads from or
+     * writes into VRAM: Windows 11's DWM fills its shared targets from
+     * textures, and an acrylic backdrop reads a shared target back into one */
+    const ULONG plain = D3DPT_VS_TEXTURE, odd = D3DPT_VS_CUBE | D3DPT_VS_VOLUME | colour;
+    BOOL src_tex = (src->d.caps & plain) && !(src->d.caps & odd);
+    BOOL dst_tex = (dst->d.caps & plain) && !(dst->d.caps & odd);
+    BOOL pair_ok = ((src->d.caps & colour) || src_tex) && ((dst->d.caps & colour) || dst_tex) && !(src_tex && dst_tex);
+
+    /* a shared target into the application's memory (GetRenderTargetData;
+     * Windows 11's shell processes do it, track M20): the host
+     * copies the target into the readback stage's VRAM, then the CPU copies
+     * the stage, once the lock has waited for the host */
+    if (!dst->kmt && dst->sub[0].sysmem && src->kmt && (src->d.caps & colour) && !(src->d.caps & D3DPT_VS_ZBUFFER) &&
+        !a->SrcSubResourceIndex) {
+        UMD_RES *st = umd_readback_stage(d, src->d.w, src->d.h, src->d.format);
+        D3DDDIARG_BLT b2;
+
+        k = st ? (UINT *)dp2_tok(d, 81, 1, 52, 2) : NULL;
+        if (!k) {
+            umd_log("Blt from a shared target to system memory: no readback stage");
+            return S_OK;
+        }
+        cmd_patch(d, &k[0], src, D3DPT_PATCH_HANDLE, 0);
+        CopyMemory(&k[1], &a->SrcRect, sizeof(RECT));
+        k[5] = 0;
+        cmd_patch(d, &k[6], st, D3DPT_PATCH_HANDLE, 0);
+        CopyMemory(&k[7], &a->SrcRect, sizeof(RECT));
+        k[11] = 0;
+        k[12] = 1;
+        b2 = *a;
+        b2.hSrcResource = st;
+        return umd_blt(d, &b2);
+    }
+    if (!src->kmt || !dst->kmt || !pair_ok ||
         ((src->d.caps | dst->d.caps) & D3DPT_VS_ZBUFFER) || a->SrcSubResourceIndex || a->DstSubResourceIndex) {
-        umd_log("Blt with a shared resource refused: caps 0x%x -> 0x%x, subresources %u -> %u", src->d.caps, dst->d.caps,
+        umd_log("Blt with a shared resource refused: caps 0x%x -> 0x%x, allocations 0x%x -> 0x%x, pools %u -> %u, flags 0x%x -> 0x%x, subresources %u -> %u",
+                src->d.caps, dst->d.caps, src->kmt, dst->kmt, src->cr.Pool, dst->cr.Pool, src->cr.Flags.Value, dst->cr.Flags.Value,
                 a->SrcSubResourceIndex, a->DstSubResourceIndex);
         return S_OK;
     }
@@ -1718,6 +1835,28 @@ static HRESULT APIENTRY umd_blt(HANDLE h, CONST D3DDDIARG_BLT *a)
             for (x = 0; x < cw; x++) {
                 umd_px_copy(sfmt, dfmt, drow + x * dbpp, srow + (sr->left + ((2 * x + 1) * scw) / (2 * cw)) * bpp, bpp);
             }
+        }
+    }
+    {
+        static ULONG logged;
+
+        if (logged < 24) {
+            ULONG nz = 0;
+            UINT i;
+
+            logged++;
+            if (umd_row_bytes(sfmt, 1) == 4) {
+                UINT yy;
+
+                for (yy = (UINT)sr->top; yy < (UINT)sr->bottom; yy++) {
+                    const ULONG *row = (const ULONG *)(smem + yy * spitch);
+
+                    for (i = (UINT)sr->left; i < (UINT)sr->right; i++) nz += row[i] != 0;
+                }
+            }
+            umd_log("Blt on the CPU %ux%u (pool %u, alloc 0x%x) -> %ux%u (pool %u, alloc 0x%x) rect %d,%d..%d,%d -> %d,%d..%d,%d, %u texels non-zero",
+                    sw, sh, src->cr.Pool, src->kmt, dw, dh, dst->cr.Pool, dst->kmt, sr->left, sr->top, sr->right, sr->bottom,
+                    dr->left, dr->top, dr->right, dr->bottom, nz);
         }
     }
     if (db != sb) unlock_res(d, dst);
@@ -2092,6 +2231,10 @@ static HRESULT APIENTRY umd_destroy_device(HANDLE h)
         umd_destroy_resource(d, d->qres);
         d->qres = NULL;
     }
+    if (d->rbstage) {
+        umd_destroy_resource(d, d->rbstage);
+        d->rbstage = NULL;
+    }
     if (d->pre) {
         HeapFree(GetProcessHeap(), 0, d->pre);
     }
@@ -2111,6 +2254,7 @@ static HRESULT APIENTRY umd_create_device(HANDLE h, D3DDDIARG_CREATEDEVICE *c)
     UMD_ADAPTER *a = (UMD_ADAPTER *)h;
     D3DDDI_DEVICEFUNCS *f = c->pDeviceFuncs;
     D3DDDICB_CREATECONTEXT cc;
+    D3DPT_CTX_PRIV priv;
     UMD_DEV *d;
     HRESULT hr;
 
@@ -2126,6 +2270,12 @@ static HRESULT APIENTRY umd_create_device(HANDLE h, D3DDDIARG_CREATEDEVICE *c)
     ZeroMemory(&cc, sizeof(cc));
     cc.NodeOrdinal = 0;
     cc.EngineAffinity = 0;
+    /* the kernel driver destroys the host's context with this one, even
+     * when this process ends without DestroyDevice */
+    priv.magic = D3DPT_CTX_MAGIC;
+    priv.host_ctx = d->host_ctx;
+    cc.pPrivateDriverData = &priv;
+    cc.PrivateDriverDataSize = sizeof(priv);
     hr = d->cb.pfnCreateContextCb(d->rt, &cc);
     umd_log("CreateDevice interface 0x%x version 0x%x flags 0x%x: context -> 0x%08x, buffer %u bytes, lists %u / %u",
             c->Interface, c->Version, c->Flags.Value, hr, cc.CommandBufferSize, cc.AllocationListSize,

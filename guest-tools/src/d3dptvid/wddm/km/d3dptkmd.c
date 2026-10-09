@@ -100,6 +100,8 @@ typedef struct D3DPT_ADAPTER {
     KSPIN_LOCK rel_lock;
     ULONG rel_n;
     ULONG rel[256];
+    ULONG ctx_rel_n;                  /* host contexts to destroy at the next submission (rel_lock) */
+    ULONG ctx_rel[256];
 } D3DPT_ADAPTER;
 
 /* A device and a context are only names here: everything they would hold
@@ -111,6 +113,7 @@ typedef struct D3DPT_DEVICE {
 
 typedef struct D3DPT_CONTEXT {
     D3DPT_DEVICE *dev;
+    ULONG host_ctx;                   /* the user-mode driver's host context (D3DPT_CTX_PRIV), 0: none */
 } D3DPT_CONTEXT;
 
 /* An allocation (hAllocation): what its private driver data said
@@ -390,6 +393,7 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->d3d_errors = 0;
     a->next_handle = 0;
     a->rel_n = 0;
+    a->ctx_rel_n = 0;
     KeInitializeSpinLock(&a->rel_lock);
     dbg_hex("d3dptkmd: Direct3D window at ", a->d3d ? a->cmd_offset : 0);
     dbg_puts("\n");
@@ -1050,6 +1054,11 @@ static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_
         return STATUS_NO_MEMORY;
     }
     x->dev = (D3DPT_DEVICE *)h;
+    x->host_ctx = 0;
+    if (c->pPrivateDriverData && c->PrivateDriverDataSize >= sizeof(D3DPT_CTX_PRIV) &&
+        ((const D3DPT_CTX_PRIV *)c->pPrivateDriverData)->magic == D3DPT_CTX_MAGIC) {
+        x->host_ctx = ((const D3DPT_CTX_PRIV *)c->pPrivateDriverData)->host_ctx;
+    }
     c->hContext = x;
     c->ContextInfo.DmaBufferSize = D3DPT_DMA_SIZE;
     c->ContextInfo.DmaBufferSegmentSet = 0;
@@ -1065,7 +1074,22 @@ static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_
 static DXGKDDI_DESTROYCONTEXT d3dpt_destroy_context;
 static NTSTATUS APIENTRY d3dpt_destroy_context(IN_CONST_HANDLE h)
 {
-    ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
+    D3DPT_CONTEXT *x = (D3DPT_CONTEXT *)h;
+
+    /* the host's context goes at the next submission, as a release does:
+     * only a submission writes the window. A second destroy after the
+     * user-mode driver's own is a no-op there. */
+    if (x->host_ctx) {
+        D3DPT_ADAPTER *a = x->dev->a;
+        KIRQL irql;
+
+        KeAcquireSpinLock(&a->rel_lock, &irql);
+        if (a->ctx_rel_n < RTL_NUMBER_OF(a->ctx_rel)) {
+            a->ctx_rel[a->ctx_rel_n++] = x->host_ctx;
+        }
+        KeReleaseSpinLock(&a->rel_lock, irql);
+    }
+    ExFreePoolWithTag(x, D3DPT_TAG);
     return STATUS_SUCCESS;
 }
 
@@ -1595,6 +1619,15 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
     ULONG i;
 
     KeAcquireSpinLock(&a->rel_lock, &irql);
+    for (i = 0; i < a->ctx_rel_n; i++) {
+        d3dpt_handle *r = d3dpt_enc_cmd(&a->enc, D3DPT_OP_CTX_DESTROY, sizeof(*r), 0);
+
+        if (r) {
+            r->handle = a->ctx_rel[i];
+            r->pad = 0;
+        }
+    }
+    a->ctx_rel_n = 0;
     for (i = 0; i < a->rel_n; i++) {
         d3dpt_handle *r = d3dpt_enc_cmd(&a->enc, D3DPT_OP_VRAM_RELEASE, sizeof(*r), 0);
 

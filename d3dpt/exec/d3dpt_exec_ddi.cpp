@@ -267,7 +267,13 @@ struct Ddi {
      * its arguments; the file is removed when the frame ends */
     const char *trace_flag = env("D3DPT_DP2_TRACE");
     bool trace = false, trace_armed = false;
+    /* D3DPT_DP2_TRACE_FRAMES=n: the trace runs through n readbacks (a
+     * composited desktop's clients draw across several of DWM's frames) */
+    uint32_t trace_frames = env("D3DPT_DP2_TRACE_FRAMES") ? (uint32_t)atoi(env("D3DPT_DP2_TRACE_FRAMES")) : 1, trace_left = 0;
     uint32_t trace_draws = 0;               /* draw-<n>.ppm snapshots of the traced frame */
+    std::vector<uint32_t> trace_texs;       /* the textures the trace has dumped (tex-<handle>.ppm) */
+    uint32_t tex_blt_lines = 0;             /* texture BLTs logged with what the host read (v23) */
+    uint32_t moved_lines = 0;               /* rendered surfaces moved with their host pixels kept (v23) */
     /* the render / stage states seen so far (a snapshot at the start of a
      * traced frame: most are set once at scene start) */
     uint32_t rs_val[256] = {}, tss_val[8][33] = {};
@@ -1729,9 +1735,60 @@ struct Dp2 {
         snap();
         return true;
     }
+    /* trace: each plain 32-bit texture a draw samples on stages 0 and 1, once
+     * per trace, from VRAM (what the host uploads), as tex-<handle>.ppm and
+     * its alpha as tex-<handle>-a.ppm next to the flag file */
+    void snap_textures() {
+        const char *slash = strrchr(d.trace_flag, '/');
+        int dirlen = slash ? (int)(slash - d.trace_flag) : 1;
+        const char *dir = slash ? d.trace_flag : ".";
+        for (uint32_t i = 0; i < 2; i++) {
+            VramSurf *s = d.stage_tex[i] ? surf(x, d.stage_tex[i]) : nullptr;
+            if (!s || (s->d.caps & (D3DPT_VS_CUBE | D3DPT_VS_VOLUME)) ||
+                fmt_row_bytes(s->d.format, 1) != 4 || fmt_rows(s->d.format, 4) != 4) continue;
+            bool seen = false;
+            for (uint32_t h : d.trace_texs) if (h == s->d.handle) seen = true;
+            if (seen) continue;
+            d.trace_texs.push_back(s->d.handle);
+            /* a render-target texture's pixels are the host's: read back */
+            const uint8_t *base = x.vram + s->d.offset;
+            uint32_t pitch = s->d.pitch;
+            D3DLOCKED_RECT lr{};
+            bool locked = false;
+            if ((s->d.caps & D3DPT_VS_RENDER_TARGET) && s->rt) {
+                IDirect3DSurface9 *src = resolved(x, *s);
+                if (!src || !ensure_stage(x, d, s->d.width, s->d.height, (D3DFORMAT)s->d.format, false) ||
+                    FAILED(x.dev->GetRenderTargetData(src, d.stage)) || FAILED(d.stage->LockRect(&lr, nullptr, D3DLOCK_READONLY))) continue;
+                locked = true;
+                base = (const uint8_t *)lr.pBits;
+                pitch = (uint32_t)lr.Pitch;
+            }
+            for (int alpha = 0; alpha < 2; alpha++) {
+                char path[512];
+                snprintf(path, sizeof path, "%.*s/tex-%u%s.ppm", dirlen, dir, s->d.handle, alpha ? "-a" : "");
+                FILE *f = fopen(path, "wb");
+                if (!f) continue;
+                fprintf(f, "P6\n%u %u\n255\n", s->d.width, s->d.height);
+                for (uint32_t yy = 0; yy < s->d.height; yy++) {
+                    const uint8_t *row = base + (size_t)yy * pitch;
+                    for (uint32_t xx = 0; xx < s->d.width; xx++) {
+                        uint32_t v; memcpy(&v, row + xx * 4, 4);
+                        uint8_t px[3] = { (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
+                        if (alpha) px[0] = px[1] = px[2] = (uint8_t)(v >> 24);
+                        fwrite(px, 1, 3, f);
+                    }
+                }
+                fclose(f);
+            }
+            if (locked) d.stage->UnlockRect();
+            tr("  texture %u (%ux%u fmt %u%s) -> tex-%u.ppm", s->d.handle, s->d.width, s->d.height, s->d.format,
+               locked ? ", host target" : "", s->d.handle);
+        }
+    }
     /* trace: the render target after a draw, as draw-<n>.ppm next to the flag file */
     void snap() {
         if (!d.trace) return;
+        snap_textures();
         VramSurf *rt = surf(x, c.rt);
         if (!rt || !rt->rt) return;
         if (!ensure_stage(x, d, rt->d.width, rt->d.height, (D3DFORMAT)rt->d.format, false)) return;
@@ -2689,6 +2746,106 @@ struct Dp2 {
                         if (dst->d.caps & D3DPT_VS_AUTOGEN) dst->mips_stale = true;
                         continue;
                     }
+                    /* v23: a plain texture into a colour target (Windows 11's
+                     * DWM fills a shared target from textures this way, track
+                     * M20). The host texture is managed, which StretchRect
+                     * cannot read, so level 0 goes from VRAM, where a texture
+                     * nothing renders into is current, through the staging
+                     * pair upload_target uses. */
+                    const uint32_t odd = D3DPT_VS_ZBUFFER | D3DPT_VS_CUBE | D3DPT_VS_VOLUME | colour;
+                    if (src && dst && (src->d.caps & D3DPT_VS_TEXTURE) && !(src->d.caps & odd) && (dst->d.caps & colour) &&
+                        !(dst->d.caps & D3DPT_VS_ZBUFFER) && !needs_expand(*src)) {
+                        tr("texture blt %u (%d,%d,%d,%d) -> %u (%d,%d,%d,%d)", u32(e), (int)sr.left, (int)sr.top, (int)sr.right,
+                           (int)sr.bottom, u32(e + 24), (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom);
+                        D3DLOCKED_RECT lr;
+                        if (!ensure_object(x, *dst) || !dst->rt ||
+                            !ensure_stage(x, d, src->d.width, src->d.height, (D3DFORMAT)src->d.format, true) ||
+                            FAILED(d.stage->LockRect(&lr, nullptr, 0))) {
+                            if (d.warn_once(0xf0004)) x.log("ddi: dp2: texture BLT %u -> %u: no host target or staging, dropped", u32(e), u32(e + 24));
+                            continue;
+                        }
+                        copy_rows(lr.pBits, lr.Pitch, x.vram + src->d.offset, src->d.pitch, fmt_row_bytes(src->d.format, src->d.width),
+                                  fmt_rows(src->d.format, src->d.height));
+                        d.stage->UnlockRect();
+                        if (d.tex_blt_lines < 48 && fmt_row_bytes(src->d.format, 1) == 4 && sr.left >= 0 && sr.top >= 0 &&
+                            (uint32_t)sr.right <= src->d.width && (uint32_t)sr.bottom <= src->d.height) {
+                            /* what the host read: an all-zero source here and
+                             * texels in the guest's copy before it is a lost write */
+                            uint32_t nz = 0;
+                            for (int32_t yy = sr.top; yy < sr.bottom; yy++)
+                                for (int32_t xx = sr.left; xx < sr.right; xx++) {
+                                    uint32_t v; memcpy(&v, x.vram + src->d.offset + (size_t)yy * src->d.pitch + (size_t)xx * 4, 4);
+                                    nz += v != 0;
+                                }
+                            d.tex_blt_lines++;
+                            x.log("ddi: texture BLT %u (%ux%u at 0x%x) (%d,%d,%d,%d) -> %u (%d,%d): %u texels non-zero", u32(e), src->d.width,
+                                  src->d.height, src->d.offset, (int)sr.left, (int)sr.top, (int)sr.right, (int)sr.bottom, u32(e + 24),
+                                  (int)dr.left, (int)dr.top, nz);
+                        }
+                        bool whole = dr.left == 0 && dr.top == 0 && (uint32_t)dr.right == dst->d.width && (uint32_t)dr.bottom == dst->d.height;
+                        if (dst->dirty && !whole) upload_target(x, d, *dst);
+                        x.scene_end();
+                        HRESULT hr = x.dev->UpdateSurface(d.stage, nullptr, d.stage_def, nullptr);
+                        if (SUCCEEDED(hr)) hr = x.dev->StretchRect(d.stage_def, &sr, dst->rt, &dr, (u32(e + 48) & 2) ? D3DTEXF_LINEAR : D3DTEXF_NONE);
+                        if (FAILED(hr)) {
+                            if (d.warn_once(0xf0005)) x.log("ddi: dp2: texture StretchRect %u -> %u: 0x%08x", u32(e), u32(e + 24), (unsigned)hr);
+                            continue;
+                        }
+                        dst->dirty = false;
+                        dst->rendered = true;
+                        dst->checked = true;
+                        if (dst->d.caps & D3DPT_VS_AUTOGEN) dst->mips_stale = true;
+                        continue;
+                    }
+                    /* v23: ... and a colour target into a plain texture (an
+                     * acrylic backdrop read from DWM's shared target): the
+                     * target read back, the rectangle written into the
+                     * texture's VRAM, which the next use uploads. One texel
+                     * size; a scaled rectangle takes the nearest texel. */
+                    if (src && dst && (src->d.caps & colour) && !(src->d.caps & D3DPT_VS_ZBUFFER) && (dst->d.caps & D3DPT_VS_TEXTURE) &&
+                        !(dst->d.caps & odd) && fmt_row_bytes(src->d.format, 1) == fmt_row_bytes(dst->d.format, 1) &&
+                        fmt_rows(src->d.format, 4) == 4 && fmt_rows(dst->d.format, 4) == 4) {
+                        /* rectangles inside their surfaces (each surface was
+                         * checked inside VRAM when it was registered) */
+                        auto inside = [](const RECT &r, const VramSurf &s) {
+                            return r.left >= 0 && r.top >= 0 && r.left < r.right && r.top < r.bottom &&
+                                   (uint32_t)r.right <= s.d.width && (uint32_t)r.bottom <= s.d.height;
+                        };
+                        if (!inside(sr, *src) || !inside(dr, *dst)) {
+                            if (d.warn_once(0xf0008)) x.log("ddi: dp2: BLT %u -> texture %u: a rectangle outside its surface, dropped", u32(e), u32(e + 24));
+                            continue;
+                        }
+                        tr("blt to texture %u (%d,%d,%d,%d) -> %u (%d,%d,%d,%d)", u32(e), (int)sr.left, (int)sr.top, (int)sr.right,
+                           (int)sr.bottom, u32(e + 24), (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom);
+                        if (!ensure_object(x, *src) || !src->rt) {
+                            if (d.warn_once(0xf0006)) x.log("ddi: dp2: BLT %u -> texture %u: no host target, dropped", u32(e), u32(e + 24));
+                            continue;
+                        }
+                        if (src->dirty) upload_target(x, d, *src);
+                        IDirect3DSurface9 *rs = resolved(x, *src);
+                        D3DLOCKED_RECT lr;
+                        HRESULT hr = rs && ensure_stage(x, d, src->d.width, src->d.height, (D3DFORMAT)src->d.format, false)
+                                     ? x.dev->GetRenderTargetData(rs, d.stage) : E_FAIL;
+                        if (SUCCEEDED(hr)) hr = d.stage->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+                        if (FAILED(hr)) {
+                            if (d.warn_once(0xf0007)) x.log("ddi: dp2: BLT %u -> texture %u: readback 0x%08x", u32(e), u32(e + 24), (unsigned)hr);
+                            continue;
+                        }
+                        uint32_t bpp = fmt_row_bytes(src->d.format, 1);
+                        uint32_t sw = (uint32_t)(sr.right - sr.left), sh = (uint32_t)(sr.bottom - sr.top);
+                        uint32_t dw = (uint32_t)(dr.right - dr.left), dh = (uint32_t)(dr.bottom - dr.top);
+                        for (uint32_t y = 0; y < dh; y++) {
+                            const uint8_t *srow = (const uint8_t *)lr.pBits + (size_t)(sr.top + (2 * y + 1) * sh / (2 * dh)) * lr.Pitch;
+                            uint8_t *drow = x.vram + dst->d.offset + (size_t)(dr.top + y) * dst->d.pitch + (size_t)dr.left * bpp;
+                            if (sw == dw) memcpy(drow, srow + (size_t)sr.left * bpp, (size_t)dw * bpp);
+                            else
+                                for (uint32_t i2 = 0; i2 < dw; i2++)
+                                    memcpy(drow + (size_t)i2 * bpp, srow + (size_t)(sr.left + (2 * i2 + 1) * sw / (2 * dw)) * bpp, bpp);
+                        }
+                        d.stage->UnlockRect();
+                        dst->dirty = true;
+                        continue;
+                    }
                     tr("depth blt %u -> %u", u32(e), u32(e + 24));
                     if (!src || !dst || !(src->d.caps & D3DPT_VS_ZBUFFER) || !(dst->d.caps & D3DPT_VS_ZBUFFER) ||
                         !ensure_object(x, *src) || !ensure_object(x, *dst) || !src->rt || !dst->rt ||
@@ -2924,7 +3081,19 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
         /* moved (a runtime that swaps two flip buffers' memory, doc 15): what the shadow
          * remembers of the old memory says nothing about the new, or the next readback
          * would keep every differing pixel as the guest's */
-        if (s.d.offset != nd.offset || s.d.pitch != nd.pitch) { s.dirty = true; s.shadow.clear(); }
+        /* v23: a render target the host drew into keeps its host pixels when
+         * it moves: WDDM's memory manager moves allocations, and the copy it
+         * moves along is VRAM's, older than the host's (Windows 11's DWM
+         * atlases lost their icons so, track M20). A primary keeps the rule
+         * above: there the memory is what the guest drew. */
+        bool moved = s.d.offset != nd.offset || s.d.pitch != nd.pitch;
+        bool keep = moved && s.rendered && s.rt && !(nd.caps & D3DPT_VS_PRIMARY) && s.d.pitch == nd.pitch;
+        if (moved && keep && d.moved_lines < 16) {
+            d.moved_lines++;
+            x.log("ddi: surface %u (%ux%u) moved 0x%x -> 0x%x: the host's pixels kept", a->handle, nd.width, nd.height, s.d.offset, nd.offset);
+        }
+        if (moved && !keep) { s.dirty = true; s.shadow.clear(); }
+        if (keep) s.shadow.clear();
         if (!s.tex && !s.rt && !s.cube && !s.vol) s.dirty = true;
         s.d = nd;
         s.levels.assign(lv, lv + nlv);
@@ -3201,6 +3370,9 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
             /* a readback with no draw before it (Crimson Skies reads its target back
              * after every render-target switch): not the frame that was asked for */
             x.log("ddi: trace: readback of %u with no draw, the frame goes on", a->handle);
+        } else if (x.ddi->trace && had && x.ddi->trace_left > 1) {
+            x.ddi->trace_left--;
+            x.log("ddi: trace: readback of %u, %u more", a->handle, x.ddi->trace_left - 1);
         } else if (x.ddi->trace && had) {
             x.ddi->trace = false;
             unlink(x.ddi->trace_flag);
@@ -3210,6 +3382,8 @@ bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
             d.trace_armed = false;
             d.trace = true;
             d.trace_draws = 0;
+            d.trace_texs.clear();
+            d.trace_left = d.trace_frames ? d.trace_frames : 1;
             x.log("ddi: trace: frame starts after dp2 call %u; the states set so far:", d.dp2_calls);
             char line[400]; size_t n = 0;
             for (uint32_t i = 0; i < 256; i++) if (d.rs_set[i]) {
