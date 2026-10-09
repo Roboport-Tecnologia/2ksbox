@@ -125,7 +125,7 @@ grows the window by) with roomier rows than GNOME's (a 32 px icon, the
 name bold and a size up, more padding; CSS on the list), the same
 toolbar, and New, Shelf, Shaders and About in the primary menu, which
 mitsuami puts at the end of the sidebar's header bar; the content is
-560 × 610. `cfg(sidebar)` (`build.rs`) is macOS or GTK. Windows and
+620 × 610 (user). `cfg(sidebar)` (`build.rs`) is macOS or GTK. Windows and
 Kirigami keep the list, New, Shelf, Shaders, the "i" and the details'
 buttons. On Windows its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a

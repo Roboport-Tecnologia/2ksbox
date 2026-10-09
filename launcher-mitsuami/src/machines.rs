@@ -463,7 +463,7 @@ fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
     use mitsuami::gtk::gtk;
     use mitsuami::gtk::gtk::prelude::*;
     const CSS: &str = "
-        .machines > row { padding: 8px 10px; margin: 2px 6px; }
+        .machines > row { padding: 12px 12px; margin: 3px 6px; }
         .machines > row image { -gtk-icon-size: 32px; }
         .machines > row box > box > label:first-child { font-size: 1.1em; font-weight: bold; }
         .machines > row box > box { margin-left: 2px; }
