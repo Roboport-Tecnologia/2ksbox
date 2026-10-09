@@ -50,8 +50,11 @@ measurement says whether it is worth it.
   signing, upstream's viogpudo out of the store, ours in.
 - This doc; the `build-windows.md` section "Our viogpudo".
 
-Not here: QEMU, the player, the launcher, the drivers disc
-(`build-virtio-win.sh` keeps shipping upstream's signed driver).
+Not here: the launcher. Step 4 needs small pieces of QEMU (a
+virtio-gpu patch), the embed API and the player, and the resolution
+service touched the drivers disc's `install.ps1` (M23's); each is named
+in its commit. `build-virtio-win.sh` keeps shipping upstream's signed
+driver.
 
 ## Steps
 
@@ -149,14 +152,76 @@ Not here: QEMU, the player, the launcher, the drivers disc
    ones built with ours. Not yet run in a guest (the user: "don't start
    any new guests for now").
 
-4. **The host's own vertical blank (if step 3 helps).** A free-running
-   60 Hz guest still drifts against the host screen's 60 Hz, a skipped
-   or doubled frame every few seconds. The real fix is the player's
-   display link (CVDisplayLink, the swapchain's present timing) driving
-   the guest's blank: a virtio-gpu extension in QEMU (an interrupt or an
-   event per host refresh, negotiated by a feature bit) that this driver
-   takes instead of its timer when present, and `VSyncHz` following a
-   120 Hz ProMotion screen. Needs its own design here first.
+4. **The host's own vertical blank (design, 2026-10-09; step 3 helped).**
+   Step 3 showed two things a fixed `VSyncHz` cannot give: the rate
+   should divide the host screen's (72 on the PC's 144 Hz was "very
+   smooth", 60 there alternates two and three refreshes a frame), and a
+   guest timer, however exact, free-runs against the screen's real rate
+   (a "144 Hz" screen is 143.9x Hz), so its frames slide across the
+   host's vertical blank and one lands a refresh late every so often. Two
+   phases, each worth having alone:
+
+   **A. The rate follows the screen.** No new device interface: QEMU's
+   `QemuUIInfo` already has `refresh_rate` (mHz), and virtio-gpu already
+   writes it into the EDID it gives the guest (the preferred timing's
+   pixel clock; 75 Hz when unset).
+   - The player learns its window's screen's refresh, exactly (the
+     rational the system reports, not a rounded integer): Windows
+     `QueryDisplayConfig`'s `vSyncFreq` for the window's monitor (or
+     `DwmGetCompositionTimingInfo`'s `rateRefresh`), macOS the
+     `CVDisplayLink`'s nominal period (`NSScreen.maximumFramesPerSecond`
+     for ProMotion), GTK `gdk_monitor_get_refresh_rate`; again when the
+     window moves to another screen. It picks the guest's rate as the
+     screen's divided by the smallest whole number that brings it to at
+     most a cap (90 Hz: 144 → 72, 120 → 60, 165 → 82.5, 60 → 60, 240 →
+     80; `PLAYER_GUEST_HZ_MAX` overrides).
+   - Embed API v15: `qemu_embed_set_refresh_rate(e, mhz)`, carried to the
+     console's UI info by the same bottom half as v9's window size, so the
+     device raises its display event with a new EDID.
+   - viogpudo, patch 02: with no `VSyncHz` in the registry, the blank's
+     rate is the EDID's preferred timing's (pixel clock over the total
+     size), read at start and on each display event; the timer's schedule
+     restarts at the new rate, and the modes report it. `VSyncHz` stays
+     the override (and 0 still upstream's behaviour).
+
+   **B. The phase follows the screen.** The host's vertical blank raises
+   the guest's, so a frame never slides across it:
+   - The player calls `qemu_embed_vblank(e)` (v15) on each host refresh
+     that starts a guest frame (every Nth of A's divisor), from wherever
+     its toolkit hears the blank (Windows `IDXGIOutput::WaitForVBlank` on a
+     thread of its own, or `DCompositionWaitForCompositorClock`; macOS the
+     `CVDisplayLink` callback; GTK the frame clock's `update`). Any thread;
+     the library schedules a bottom half.
+   - QEMU, a new patch on virtio-gpu: a feature bit of ours,
+     `VIRTIO_GPU_F_HOST_VBLANK` (a high device-specific bit, documented as
+     2ksbox's and dropped if upstream ever takes the number), and an event
+     bit in `events_read` (`VIRTIO_GPU_EVENT_VBLANK`). With the feature
+     negotiated and the guest's interrupt on, each `qemu_embed_vblank`
+     sets the bit and raises the config interrupt. The guest turns the
+     ticks on and off with a control command of ours
+     (`VIRTIO_GPU_CMD_SET_VBLANK`, in a range upstream does not use),
+     sent when dxgkrnl turns the interrupt on or off (from
+     `DxgkDdiControlInterrupt`, or through the driver's worker thread
+     if that is called above `PASSIVE_LEVEL`, where the control queue
+     cannot be used), so an idle desktop costs the host nothing.
+   - viogpudo, patch 03: when the device offers the feature, the
+     config-change interrupt (MSI vector 0) with the vblank bit raises
+     `DXGK_INTERRUPT_DISPLAYONLY_VSYNC` from the interrupt routine itself
+     and clears the bit; the timer stays for a device without it, and as
+     a watchdog that fills in if the host stops ticking (a minimized
+     window gets no blanks; dxgkrnl's `TdrDodVSyncDelay` resets a driver
+     that misses them for two seconds).
+   - Latency: the guest composes right after the host's blank and its
+     frame is shown at the next one (or the one after on a divided
+     rate), a fixed delay instead of a drifting one.
+
+   Order: A, then B. Neither needs QEMU's 9.x-era `retrace` or anything
+   of the standard VGA. Files outside this track (the embed API, a QEMU
+   patch, `player-core`, the front ends' refresh hooks) are touched
+   minimally and named in each commit, per the tracks rule. Testing waits
+   on the user (no guests started meanwhile): the PC's 144 Hz screen,
+   `dwm-pace.ps1` for the guest's pace, QEMU's flush trace for the host's
+   cadence, and the user's eye.
 5. **Then the decision on shipping** (attestation signing, upstream, or
    both) with the numbers in hand.
 
