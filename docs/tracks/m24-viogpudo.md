@@ -98,8 +98,30 @@ Not here: QEMU, the player, the launcher, the drivers disc
    primary is DWM's clock; and Windows 11's
    `DwmGetCompositionTimingInfo` counters move once a second whatever DWM
    does (`DwmFlush` is the measure). Still to do: the Air (Windows 11 on
-   Arm), the host side (`tools/win11-frames-test.py`'s intervals) and the
-   user's eye, `VSyncHz` 60 against 0.
+   Arm), `tools/win11-frames-test.py`'s intervals there and the user's
+   eye, `VSyncHz` 60 against 0.
+
+   **The driver's own cost (the user: "see if it's not something slow in
+   the driver itself, like unnecessary copying").** Per present, viogpudo
+   copies each move and dirty rectangle from DWM's surface into the
+   framebuffer (`CopyBits32_32`, a `RtlCopyMemory` per row, the one copy
+   a display-only driver cannot avoid), then queues
+   `TRANSFER_TO_HOST_2D` and `RESOURCE_FLUSH` for the rectangles'
+   bounding box, without waiting on either (two notifies, which patch
+   86's `sync-ctrl` serves inside the exit). QEMU's
+   `virtio_gpu_cmd_res_xfer_toh_2d` and `virtio_gpu_cmd_res_flush` trace
+   events (`-msg timestamp=on -D <log>`, switched on over QMP with
+   `trace-event-set-state`; Windows' timestamps are ~1 ms coarse) over 18 s
+   of the probe: 628 presents, one every 16.66 ms (median, 5th to 95th
+   percentile 15.8 to 17.9), the host's transfer of a whole 1792x1344
+   screen ~1 ms and of the probe's 384x261 window under the clock's
+   resolution. The full-screen updates (112) come in bursts of a few
+   hundred milliseconds while windows open (Windows' animations redraw
+   most of the screen), not from the bounding box: once the window is up
+   every present is the window alone. Nothing in the driver is slow
+   enough to matter at 60 Hz; the bounding box (two rectangles at
+   opposite corners send the screen between them) is the one thing to
+   change if a workload shows it.
 4. **The host's own vertical blank (if step 3 helps).** A free-running
    60 Hz guest still drifts against the host screen's 60 Hz, a skipped
    or doubled frame every few seconds. The real fix is the player's
