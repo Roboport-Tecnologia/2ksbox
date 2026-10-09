@@ -28,7 +28,7 @@ turn a machine off.
 | Ctrl+Alt+0 | Scale: the largest that fits |
 | Ctrl+Alt+1 to 4 | Scale: 1x to 4x |
 | Ctrl+Alt+Shift+0 | Fit the window to the picture |
-| Ctrl+Alt+S | Save a screenshot of the machine's own picture |
+| Ctrl+Alt+S | Save a screenshot of the machine's raw display output |
 | Ctrl+Alt+Shift+S | Save a screenshot of what the window shows, CRT shader included |
 
 Screenshots go to your Pictures folder, in `2ksbox`, numbered
