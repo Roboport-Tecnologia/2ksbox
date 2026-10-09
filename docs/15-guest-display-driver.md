@@ -15,7 +15,7 @@ framebuffer driver, **M7b** the DirectDraw DDI, **M7c** the Direct3D DDI
 (a DirectX 7 HAL, grown into a DirectX 8 DDI with hardware T&L, and
 since M16 a DirectX 9 DDI with shader model 3.0). The
 register set is **v9** (`D3DPT_FB_VERSION`; v6 to v9 added only the
-WDDM driver's interrupt, fence, DMA append, CURSOR_FLAGS and VRAM fill,
+WDDM driver's interrupt, fence, DMA append, CURSOR_FLAGS and VRAM fill and copy,
 which this driver never touches) and the protocol **v24**
 (`D3DPT_PROTO_VERSION`). FIFA 2000, Max Payne, Diablo, Moto Racer 1997,
 GTA 2 and GTA Vice City run on it with no DLL in their folders.

@@ -89,6 +89,10 @@ struct D3dptVgaState {
                                    a newer one checks that installed drivers accept it */
     /* the VRAM fill (version 9): its registers and the last one's status */
     uint32_t fill_addr, fill_bytes, fill_pattern, fill_status;
+    /* the VRAM <-> guest pages copy (version 9) */
+    uint32_t copy_vram, copy_bytes, copy_list_off, copy_status;
+    uint32_t copy_rows, copy_vpitch, copy_ppitch, copy_src, copy_count;
+    uint64_t copy_list;
 
     /* the hardware cursor (version 4): the guest's registers, and what was
      * defined / shown so far for the log */
@@ -354,6 +358,69 @@ static uint32_t fb_fill(D3dptVgaState *s)
         }
     }
     memory_region_set_dirty(&s->vga.vram, s->fill_addr, s->fill_bytes);
+    return D3DPT_FB_FILL_OK;
+}
+
+/* A copy between VRAM and guest memory (version 9, COPY_GO): the pages
+ * are the list's, one 64-bit guest-physical address each, the first entered
+ * at LIST_OFF; the device reads and writes them itself, the vCPU's copy
+ * through the BAR being uncached under WHPX (the WDDM driver's paging
+ * transfers, track M20). */
+static uint32_t fb_copy(D3dptVgaState *s, uint32_t dir)
+{
+    uint8_t *vram = memory_region_get_ram_ptr(&s->vga.vram);
+    uint32_t rows = s->copy_rows ? s->copy_rows : 1, row;
+    uint64_t span = (uint64_t)(rows - 1) * s->copy_vpitch + s->copy_bytes;
+
+    if (dir < D3DPT_FB_COPY_TO_PAGES || dir > D3DPT_FB_COPY_VRAM_VRAM ||
+        (uint64_t)s->copy_vram + span > s->vga.vram_size || s->copy_list_off >= 4096) {
+        return D3DPT_FB_FILL_BAD;
+    }
+    if (dir == D3DPT_FB_COPY_VRAM_VRAM) {
+        if ((uint64_t)s->copy_src + (uint64_t)(rows - 1) * s->copy_ppitch + s->copy_bytes > s->vga.vram_size) {
+            return D3DPT_FB_FILL_BAD;
+        }
+        for (row = 0; row < rows; row++) {
+            memmove(vram + s->copy_vram + (uint64_t)row * s->copy_vpitch,
+                    vram + s->copy_src + (uint64_t)row * s->copy_ppitch, s->copy_bytes);
+        }
+    }
+    /* the pages: every row's bytes inside the list the guest filled, or
+     * nothing is copied (a list entry is a DMA address) */
+    if (dir != D3DPT_FB_COPY_VRAM_VRAM &&
+        ((uint64_t)s->copy_list_off + (uint64_t)(rows - 1) * s->copy_ppitch + s->copy_bytes + 4095) / 4096 >
+            s->copy_count) {
+        return D3DPT_FB_FILL_BAD;
+    }
+    for (row = 0; dir != D3DPT_FB_COPY_VRAM_VRAM && row < rows; row++) {
+        /* this row's place in the pages: list_off + row * page pitch */
+        uint64_t lin = s->copy_list_off + (uint64_t)row * s->copy_ppitch;
+        uint8_t *v = vram + s->copy_vram + (uint64_t)row * s->copy_vpitch;
+        uint32_t done = 0;
+
+        while (done < s->copy_bytes) {
+            uint64_t page, at = lin + done;
+            uint32_t off = at & 4095, n = MIN(4096 - off, s->copy_bytes - done);
+            MemTxResult r;
+
+            if (pci_dma_read(&s->dev, s->copy_list + 8ull * (at >> 12), &page, 8) != MEMTX_OK) {
+                return D3DPT_FB_FILL_BAD;
+            }
+            page = le64_to_cpu(page);
+            if (dir == D3DPT_FB_COPY_TO_VRAM) {
+                r = pci_dma_read(&s->dev, page + off, v + done, n);
+            } else {
+                r = pci_dma_write(&s->dev, page + off, v + done, n);
+            }
+            if (r != MEMTX_OK) {
+                return D3DPT_FB_FILL_BAD;
+            }
+            done += n;
+        }
+    }
+    if (dir != D3DPT_FB_COPY_TO_PAGES) {
+        memory_region_set_dirty(&s->vga.vram, s->copy_vram, span);
+    }
     return D3DPT_FB_FILL_OK;
 }
 
@@ -848,7 +915,7 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
     case D3DPT_FB_REG_CAPS:
         return D3DPT_FB_CAP_BPP8 | D3DPT_FB_CAP_BPP16 | D3DPT_FB_CAP_BPP32 |
                D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0) |
-               (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0) | D3DPT_FB_CAP_FILL;
+               (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0) | D3DPT_FB_CAP_FILL | D3DPT_FB_CAP_COPY;
     case D3DPT_FB_REG_IRQ_ENABLE:
         return s->irq_enable;
     case D3DPT_FB_REG_IRQ_STATUS:
@@ -889,6 +956,28 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return s->fill_pattern;
     case D3DPT_FB_REG_FILL_GO:
         return s->fill_status;
+    case D3DPT_FB_REG_COPY_VRAM:
+        return s->copy_vram;
+    case D3DPT_FB_REG_COPY_BYTES:
+        return s->copy_bytes;
+    case D3DPT_FB_REG_COPY_LIST_LO:
+        return (uint32_t)s->copy_list;
+    case D3DPT_FB_REG_COPY_LIST_HI:
+        return (uint32_t)(s->copy_list >> 32);
+    case D3DPT_FB_REG_COPY_LIST_OFF:
+        return s->copy_list_off;
+    case D3DPT_FB_REG_COPY_GO:
+        return s->copy_status;
+    case D3DPT_FB_REG_COPY_ROWS:
+        return s->copy_rows;
+    case D3DPT_FB_REG_COPY_VRAM_PITCH:
+        return s->copy_vpitch;
+    case D3DPT_FB_REG_COPY_PAGE_PITCH:
+        return s->copy_ppitch;
+    case D3DPT_FB_REG_COPY_SRC_VRAM:
+        return s->copy_src;
+    case D3DPT_FB_REG_COPY_LIST_COUNT:
+        return s->copy_count;
     case D3DPT_FB_REG_GAMMA_ENABLE:
         return s->gamma_on;
     case D3DPT_FB_REG_MODE_COUNT:
@@ -1102,6 +1191,39 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     case D3DPT_FB_REG_FILL_GO:
         s->fill_status = fb_fill(s);
+        break;
+    case D3DPT_FB_REG_COPY_VRAM:
+        s->copy_vram = val;
+        break;
+    case D3DPT_FB_REG_COPY_BYTES:
+        s->copy_bytes = val;
+        break;
+    case D3DPT_FB_REG_COPY_LIST_LO:
+        s->copy_list = (s->copy_list & ~0xffffffffull) | val;
+        break;
+    case D3DPT_FB_REG_COPY_LIST_HI:
+        s->copy_list = (s->copy_list & 0xffffffffull) | ((uint64_t)val << 32);
+        break;
+    case D3DPT_FB_REG_COPY_LIST_OFF:
+        s->copy_list_off = val;
+        break;
+    case D3DPT_FB_REG_COPY_GO:
+        s->copy_status = fb_copy(s, val);
+        break;
+    case D3DPT_FB_REG_COPY_ROWS:
+        s->copy_rows = val;
+        break;
+    case D3DPT_FB_REG_COPY_VRAM_PITCH:
+        s->copy_vpitch = val;
+        break;
+    case D3DPT_FB_REG_COPY_PAGE_PITCH:
+        s->copy_ppitch = val;
+        break;
+    case D3DPT_FB_REG_COPY_SRC_VRAM:
+        s->copy_src = val;
+        break;
+    case D3DPT_FB_REG_COPY_LIST_COUNT:
+        s->copy_count = val;
         break;
     case D3DPT_FB_REG_FENCE:
         s->fence_done = val;

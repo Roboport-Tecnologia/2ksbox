@@ -45,6 +45,7 @@
  * address reaches, which keeps the two apart in a trace. */
 #define D3DPT_AP_BASE 0x80000000u
 #define D3DPT_AP_PAGES ((64u * 1024 * 1024) / PAGE_SIZE)
+#define D3DPT_COPY_PAGES 65536u   /* the copy list: a transfer of up to 256 MiB the device makes (CAP_COPY) */
 
 /* One adapter: the device has no multi-head and the INF installs one. */
 typedef struct D3DPT_ADAPTER {
@@ -80,6 +81,10 @@ typedef struct D3DPT_ADAPTER {
      * fence is the device's DMA interrupt (fence_irq, with CAP_IRQ) */
     BOOLEAN dma, fence_irq;
     BOOLEAN fill;                     /* register set v9 (CAP_FILL): the device fills VRAM */
+    /* register set v9 (CAP_COPY): the device copies between VRAM and guest
+     * pages, which a transfer lists here (contiguous, nonpaged) */
+    PULONGLONG copy_list;
+    PHYSICAL_ADDRESS copy_list_pa;
     PUCHAR sub_va;                    /* the DMA buffer of the submission being run: system VA */
     PHYSICAL_ADDRESS sub_pa;          /* and its physical address (contiguous) */
     ULONG dma_errors;                 /* appends the device refused, the first few logged */
@@ -426,6 +431,15 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->dma = a->d3d && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
     a->fence_irq = a->vsync_irq && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
     a->fill = version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_FILL);
+    if (version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_COPY) && !a->copy_list) {
+        PHYSICAL_ADDRESS hi;
+
+        hi.QuadPart = -1;
+        a->copy_list = (PULONGLONG)MmAllocateContiguousMemory(D3DPT_COPY_PAGES * sizeof(ULONGLONG), hi);
+        if (a->copy_list) {
+            a->copy_list_pa = MmGetPhysicalAddress(a->copy_list);
+        }
+    }
     a->dma_errors = 0;
     a->irq_mask = a->fence_irq ? D3DPT_FB_IRQ_DMA : 0;
     if (a->vsync_irq) {
@@ -470,6 +484,10 @@ static void unmap(D3DPT_ADAPTER *a)
     if (a->ap_va) {
         ExFreePoolWithTag(a->ap_va, D3DPT_TAG);
         a->ap_va = NULL;
+    }
+    if (a->copy_list) {
+        MmFreeContiguousMemory(a->copy_list);
+        a->copy_list = NULL;
     }
     if (a->vram) {
         MmUnmapIoSpace(a->vram, a->vram_map);
@@ -1492,10 +1510,160 @@ static void run_unmap(D3DPT_ADAPTER *a, const PKT_MAP_T *p)
     }
 }
 
+/* the pages of a transfer's system side, into the copy list: an MDL's
+ * from its PFN array, the aperture's from each page's mapping. FALSE when
+ * they do not fit or a page is not mapped (the CPU copies then). */
+static BOOLEAN copy_pages(D3DPT_ADAPTER *a, const PKT_MEM *m, ULONG bytes, PULONG off0)
+{
+    ULONG i, n, first, start;
+
+    if (m->seg == 0) {
+        PPFN_NUMBER pfn;
+
+        if (!m->mdl) {
+            return FALSE;
+        }
+        pfn = MmGetMdlPfnArray(m->mdl);
+        start = MmGetMdlByteOffset(m->mdl) + m->mdl_off;
+        first = start >> PAGE_SHIFT;
+        *off0 = start & (PAGE_SIZE - 1);
+        n = (*off0 + bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+        if (n > D3DPT_COPY_PAGES ||
+            first + n > ADDRESS_AND_SIZE_TO_SPAN_PAGES(MmGetMdlVirtualAddress(m->mdl), MmGetMdlByteCount(m->mdl))) {
+            return FALSE;
+        }
+        for (i = 0; i < n; i++) {
+            a->copy_list[i] = (ULONGLONG)pfn[first + i] << PAGE_SHIFT;
+        }
+        return TRUE;
+    }
+    if (m->seg == 2 && m->addr >= D3DPT_AP_BASE) {
+        ULONG off = m->addr - D3DPT_AP_BASE;
+
+        if (off >= D3DPT_AP_PAGES * PAGE_SIZE || bytes > D3DPT_AP_PAGES * PAGE_SIZE - off) {
+            return FALSE;
+        }
+        first = off >> PAGE_SHIFT;
+        *off0 = off & (PAGE_SIZE - 1);
+        n = (*off0 + bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+        if (n > D3DPT_COPY_PAGES) {
+            return FALSE;
+        }
+        for (i = 0; i < n; i++) {
+            if (!a->ap_va[first + i]) {
+                return FALSE;
+            }
+            a->copy_list[i] = (ULONGLONG)MmGetPhysicalAddress(a->ap_va[first + i]).QuadPart & ~(ULONGLONG)(PAGE_SIZE - 1);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* A transfer between VRAM and system memory or the aperture, by the device
+ * (register set v9, CAP_COPY): the vCPU's copy through the BAR is uncached
+ * under WHPX (1.3 s of every 5 while a game ran, track M20). */
+static BOOLEAN host_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
+{
+    const PKT_MEM *sys = p->src.seg == 1 ? &p->dst : &p->src;
+    ULONG vram = p->src.seg == 1 ? p->src.addr : p->dst.addr, off0 = 0;
+
+    if (!a->copy_list || !p->bytes || (p->src.seg == 1) == (p->dst.seg == 1) ||
+        vram > a->seg_size || p->bytes > a->seg_size - vram || !copy_pages(a, sys, p->bytes, &off0)) {
+        return FALSE;
+    }
+    a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = vram;
+    a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = p->bytes;
+    a->regs[D3DPT_FB_REG_COPY_LIST_LO / 4] = a->copy_list_pa.LowPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_HI / 4] = (ULONG)a->copy_list_pa.HighPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_OFF / 4] = off0;
+    a->regs[D3DPT_FB_REG_COPY_LIST_COUNT / 4] = (off0 + p->bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = 1;
+    a->regs[D3DPT_FB_REG_COPY_GO / 4] = p->src.seg == 1 ? D3DPT_FB_COPY_TO_PAGES : D3DPT_FB_COPY_TO_VRAM;
+    return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+}
+
+/* A blit's rectangle by the device (CAP_COPY): VRAM to VRAM, or between
+ * VRAM and the aperture, row by row at each side's pitch. FALSE leaves it
+ * to the CPU. */
+static BOOLEAN host_blt_rect(D3DPT_ADAPTER *a, const PKT_BLT_T *p, const PKT_RECT *r)
+{
+    /* every extent in 64 bits: the rectangles and pitches are the
+     * runtime's, and a wrapped one would send the device past the list */
+    ULONGLONG w = (ULONGLONG)(r->r - r->l), hgt = (ULONGLONG)(r->b - r->t), row64 = w * p->dst.bpp;
+    ULONGLONG doff64 = p->dst.addr + (ULONGLONG)r->t * p->dst.pitch + (ULONGLONG)r->l * p->dst.bpp;
+    ULONGLONG soff64 = p->src.addr + (ULONGLONG)r->sy * p->src.pitch + (ULONGLONG)r->sx * p->src.bpp;
+    ULONGLONG span64;
+    const PKT_SURF *vs, *ps;
+    ULONG voff, poff, i, first, n, off0, row, doff, soff;
+
+    if (!a->copy_list || p->h.op != PKT_BLT || !hgt || !w || p->src.bpp != p->dst.bpp || row64 > MAXULONG ||
+        doff64 > MAXULONG || soff64 > MAXULONG || hgt > MAXULONG) {
+        return FALSE;
+    }
+    row = (ULONG)row64;
+    doff = (ULONG)doff64;
+    soff = (ULONG)soff64;
+    if (p->src.seg == 1 && p->dst.seg == 1) {
+        if ((ULONGLONG)doff + (ULONGLONG)(hgt - 1) * p->dst.pitch + row > a->seg_size ||
+            (ULONGLONG)soff + (ULONGLONG)(hgt - 1) * p->src.pitch + row > a->seg_size) {
+            return FALSE;
+        }
+        a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = doff;
+        a->regs[D3DPT_FB_REG_COPY_SRC_VRAM / 4] = soff;
+        a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = row;
+        a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = (ULONG)hgt;
+        a->regs[D3DPT_FB_REG_COPY_VRAM_PITCH / 4] = p->dst.pitch;
+        a->regs[D3DPT_FB_REG_COPY_PAGE_PITCH / 4] = p->src.pitch;
+        a->regs[D3DPT_FB_REG_COPY_GO / 4] = D3DPT_FB_COPY_VRAM_VRAM;
+        return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+    }
+    if (!((p->src.seg == 1 && p->dst.seg == 2) || (p->src.seg == 2 && p->dst.seg == 1))) {
+        return FALSE;
+    }
+    vs = p->dst.seg == 1 ? &p->dst : &p->src;
+    ps = p->dst.seg == 1 ? &p->src : &p->dst;
+    voff = p->dst.seg == 1 ? doff : soff;
+    poff = p->dst.seg == 1 ? soff : doff;
+    span64 = (hgt - 1) * ps->pitch + row64;
+    if ((ULONGLONG)voff + (hgt - 1) * vs->pitch + row64 > a->seg_size || poff < D3DPT_AP_BASE ||
+        poff - D3DPT_AP_BASE >= D3DPT_AP_PAGES * PAGE_SIZE ||
+        span64 > (ULONGLONG)D3DPT_AP_PAGES * PAGE_SIZE - (poff - D3DPT_AP_BASE)) {
+        return FALSE;
+    }
+    first = (poff - D3DPT_AP_BASE) >> PAGE_SHIFT;
+    off0 = (poff - D3DPT_AP_BASE) & (PAGE_SIZE - 1);
+    n = (ULONG)((off0 + span64 + PAGE_SIZE - 1) >> PAGE_SHIFT);
+    if (n > D3DPT_COPY_PAGES) {
+        return FALSE;
+    }
+    for (i = 0; i < n; i++) {
+        if (!a->ap_va[first + i]) {
+            return FALSE;
+        }
+        a->copy_list[i] = (ULONGLONG)MmGetPhysicalAddress(a->ap_va[first + i]).QuadPart & ~(ULONGLONG)(PAGE_SIZE - 1);
+    }
+    a->regs[D3DPT_FB_REG_COPY_VRAM / 4] = voff;
+    a->regs[D3DPT_FB_REG_COPY_BYTES / 4] = row;
+    a->regs[D3DPT_FB_REG_COPY_LIST_LO / 4] = a->copy_list_pa.LowPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_HI / 4] = (ULONG)a->copy_list_pa.HighPart;
+    a->regs[D3DPT_FB_REG_COPY_LIST_OFF / 4] = off0;
+    a->regs[D3DPT_FB_REG_COPY_LIST_COUNT / 4] = n;
+    a->regs[D3DPT_FB_REG_COPY_ROWS / 4] = (ULONG)hgt;
+    a->regs[D3DPT_FB_REG_COPY_VRAM_PITCH / 4] = vs->pitch;
+    a->regs[D3DPT_FB_REG_COPY_PAGE_PITCH / 4] = ps->pitch;
+    a->regs[D3DPT_FB_REG_COPY_GO / 4] = p->dst.seg == 1 ? D3DPT_FB_COPY_TO_VRAM : D3DPT_FB_COPY_TO_PAGES;
+    return a->regs[D3DPT_FB_REG_COPY_GO / 4] == D3DPT_FB_FILL_OK;
+}
+
 static void run_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
 {
     PUCHAR src, dst, sm = NULL, dm = NULL;
     BOOLEAN smine = FALSE, dmine = FALSE;
+
+    if (host_transfer(a, p)) {
+        return;
+    }
 
     if (p->src.seg == 0) {
         sm = mdl_map(p->src.mdl, MmWriteCombined, &smine);
@@ -1563,6 +1731,9 @@ static void run_blt(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
 
         if (r->r <= r->l || r->b <= r->t || r->l < 0 || r->t < 0 ||
             (p->h.op == PKT_BLT && (r->sx < 0 || r->sy < 0))) {
+            continue;
+        }
+        if (host_blt_rect(a, p, r)) {   /* the device, from the host's side of the BAR */
             continue;
         }
         for (y = 0; y < hgt; y++) {

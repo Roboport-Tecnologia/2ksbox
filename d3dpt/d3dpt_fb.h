@@ -85,7 +85,11 @@
  * FILL_GO, a VRAM fill the host makes on its own mapping, at once. The
  * WDDM driver's paging fills (every new allocation is cleared) took ~130 ms
  * each from the vCPU under WHPX, where the guest's stores into the BAR
- * are uncached: 40% of a guest CPU while a game ran on Windows 11.
+ * are uncached: 40% of a guest CPU while a game ran on Windows 11. And
+ * (CAP_COPY) COPY_*: bytes between VRAM and guest memory given as a list
+ * of guest-physical page addresses, the paging transfers' other half,
+ * in rows when COPY_ROWS says so (a present blit's rectangle), or VRAM to
+ * VRAM.
  *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
@@ -185,6 +189,22 @@
                                           * R: D3DPT_FB_FILL_* of the last one */
 #define D3DPT_FB_FILL_OK         0u
 #define D3DPT_FB_FILL_BAD        1u      /* outside VRAM or not dword aligned: nothing written */
+#define D3DPT_FB_REG_COPY_VRAM   0xecu   /* RW (version 9, CAP_COPY): byte offset in VRAM */
+#define D3DPT_FB_REG_COPY_BYTES  0xf0u   /* RW: bytes */
+#define D3DPT_FB_REG_COPY_LIST_LO 0xf4u  /* RW: guest-physical address of the page list: 64-bit page addresses */
+#define D3DPT_FB_REG_COPY_LIST_HI 0xf8u
+#define D3DPT_FB_REG_COPY_LIST_OFF 0xfcu /* RW: byte offset into the list's first page (below 4096) */
+#define D3DPT_FB_REG_COPY_GO     0x100u  /* W: D3DPT_FB_COPY_TO_* (before the write returns);
+                                          * R: D3DPT_FB_FILL_* of the last one */
+#define D3DPT_FB_COPY_TO_PAGES   1u      /* VRAM -> the pages */
+#define D3DPT_FB_COPY_TO_VRAM    2u      /* the pages -> VRAM */
+#define D3DPT_FB_COPY_VRAM_VRAM  3u      /* COPY_SRC_VRAM -> COPY_VRAM (rows may overlap: moved) */
+#define D3DPT_FB_REG_COPY_ROWS   0x104u  /* RW: rows of COPY_BYTES each (0 = 1) */
+#define D3DPT_FB_REG_COPY_VRAM_PITCH 0x108u /* RW: VRAM bytes from a row to the next */
+#define D3DPT_FB_REG_COPY_PAGE_PITCH 0x10cu /* RW: bytes from a row to the next in the pages (VRAM_VRAM: the source's) */
+#define D3DPT_FB_REG_COPY_SRC_VRAM 0x110u /* RW: VRAM_VRAM: the source's byte offset in VRAM */
+#define D3DPT_FB_REG_COPY_LIST_COUNT 0x114u /* RW: entries in the page list: a copy that would read
+                                          * past them is refused (nothing copied) */
 #define D3DPT_FB_DMA_OK          0u
 #define D3DPT_FB_DMA_NO_ROOM     1u      /* the batch has no room for them: ring the doorbell first */
 #define D3DPT_FB_DMA_BAD         2u      /* no window, a size not a multiple of 8, or memory the device cannot read */
@@ -207,5 +227,6 @@
 #define D3DPT_FB_CAP_IRQ         0x40u   /* version 6: an interrupt pin and the IRQ registers (irq=on) */
 #define D3DPT_FB_CAP_DMA         0x80u   /* version 7: DMA_* and FENCE (with a command window) */
 #define D3DPT_FB_CAP_FILL        0x100u  /* version 9: the FILL registers */
+#define D3DPT_FB_CAP_COPY        0x200u  /* version 9: the COPY registers */
 
 #endif
