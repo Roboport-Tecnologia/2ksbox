@@ -37,16 +37,18 @@ case "$OS" in MINGW64_NT*) OS=Windows;; MINGW*|MSYS*|CYGWIN*)
   echo "test.sh: run it from MSYS2's MINGW64 shell" >&2; exit 2;; esac
 QDIR=build/qemu; RREL=target/release; CARGO_TGT=()
 # The tools (launcherx, discx, synthx) and how to build them: on Windows
-# MSVC (scripts/cargo-msvc.sh, target/x86_64-pc-windows-msvc), while the
-# winit player and launcher-capi's check stay on QEMU's mingw target
+# MSVC (scripts/cargo-msvc.sh, target/x86_64-pc-windows-msvc), while
+# launcher-capi's check stays on the mingw target
 TREL=target/release; TOOL_CARGO=(cargo)
 case "$OS" in
   Darwin) SO=dylib;;
   Windows)
-    # WIN_QEMU_CC=msvc tests the QEMU built against MSVC's runtime
-    # (configure-qemu.sh, docs/build-windows.md "QEMU under MSVC")
-    SO=dll; QDIR=build/win/qemu; RREL=target/x86_64-pc-windows-gnu/release
-    [ "${WIN_QEMU_CC:-}" = msvc ] && QDIR=build/win/qemu-msvc
+    # The QEMU and player the package ships: MSVC (configure-qemu.sh,
+    # docs/build-windows.md "QEMU under MSVC") and player-mitsuami.
+    # WIN_QEMU_CC=mingw tests the deprecated mingw QEMU and winit player
+    # instead, together: both players load a DLL of the same name.
+    SO=dll; QDIR=build/win/qemu-msvc; RREL=target/x86_64-pc-windows-gnu/release
+    case "${WIN_QEMU_CC:-msvc}" in msvc) ;; *) QDIR=build/win/qemu;; esac
     CARGO_TGT=(--target x86_64-pc-windows-gnu)
     TREL=target/x86_64-pc-windows-msvc/release; TOOL_CARGO=(scripts/cargo-msvc.sh)
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-gcc}"
@@ -72,6 +74,7 @@ DP2=build/d3dpt-dp2-test; [ "$OS" = Windows ] && DP2=build/win/d3dpt-dp2-test
 [ "$OS" = Windows ] && OUT="$(cygpath -m "$OUT")"
 [ "$OS" = Windows ] && QSYS_PIPE="python3 tools/qmp-pipe.py $QSYS"
 LAUNCHERX=$TREL/launcherx; DISCX=$TREL/discx; SYNTHX=$TREL/synthx; PLAYER=$RREL/player
+[ "$QDIR" = build/win/qemu-msvc ] && PLAYER=player-mitsuami/target/release/player-mitsuami
 # Paths in one spelling. On Windows the launcher writes them its way
 # (C:/given/dir\joined\part, JSON's doubled backslashes) and bash its own
 # (/c/...): `normp` turns every backslash of a text into '/', `np` writes
@@ -2667,7 +2670,8 @@ host_stage() {
   # stage and the CRT preset over every mode in the table (doc 03, M2)
   local preset=third_party/slang-shaders/crt/crt-guest-advanced.slangp
   if have_display && [ -f "$preset" ]; then
-    if cargo build "${CARGO_TGT[@]}" --release -p player -q 2>"$OUT/player-build.log"; then
+    # (Windows' player-mitsuami is build-windows.sh's mitsuami stage)
+    if [ "$PLAYER" != "$RREL/player" ] || cargo build "${CARGO_TGT[@]}" --release -p player -q 2>"$OUT/player-build.log"; then
       run_check mode-sweep mode-sweep.log \
         $PLAYER --shader "$preset" --mode-sweep "$OUT/mode-sweep" || true
       # The chain's border sampling, from the run that just happened: the

@@ -65,16 +65,21 @@ Everything Windows is done natively on Windows (user decision,
 `scripts/build-windows.sh` built, with no Linux box involved.
 
 ```sh
-scripts/build-windows.sh                  # qemu qemu-msvc rust mitsuami exec wddm guest, as usual
+scripts/build-windows.sh                  # qemu-msvc rust mitsuami exec wddm edk2 virtio guest, as usual
 scripts/test.sh all                       # in the MINGW64 shell
-WIN_QEMU_CC=msvc scripts/test.sh all      # the same, on QEMU built against MSVC's runtime
+WIN_QEMU_CC=mingw scripts/test.sh all     # the deprecated mingw QEMU and winit player (build-windows.sh qemu rust)
 ```
 
-`WIN_QEMU_CC=msvc` points the host checks and the guest tools
-(`tools/guestwait.sh`, `tools/qemuhost.py`) at `build/win/qemu-msvc`
-(`docs/build-windows.md` "QEMU under MSVC"); everything else is the
-usual build. On 2026-10-04 both runs passed the same checks (47, with
-`sharing` failing on both).
+The suite tests what the package ships (user, 2026-10-09): the QEMU
+built against MSVC's runtime (`build/win/qemu-msvc`, `docs/build-windows.md`
+"QEMU under MSVC") for the host checks and the guest tools
+(`tools/guestwait.sh`, `tools/qemuhost.py`), and `player-mitsuami` where
+a check runs the player. `WIN_QEMU_CC=mingw` takes the mingw pair
+instead, together, since both players load a DLL of the same name. On
+2026-10-09 the MSVC run passed 65 checks with `sharing` failing on a
+harness bug (its QMP piped into `-qmp stdio`, which Windows' QEMU reads
+wrongly; it goes through `tools/qmp-pipe.py` now and passes); the mingw
+run fails `sharing` for good, having no `qemu-vdagent`.
 
 Beyond `--msys2-deps`, the guest stage wants `mingw-w64-x86_64-mtools`
 (the scratch disks; MSYS2 has no dosfstools, and `mformat` builds them),

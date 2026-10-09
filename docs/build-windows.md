@@ -622,7 +622,7 @@ finds converted.
 Then, as often as needed:
 
 ```sh
-scripts/build-windows.sh                  # qemu qemu-msvc rust mitsuami exec wddm, and the ISO when its sources moved
+scripts/build-windows.sh                  # qemu-msvc rust mitsuami exec wddm edk2 virtio, and the ISO when its sources moved (the mingw `qemu` only when named)
 scripts/build-windows.sh rust             # one stage
 scripts/build-windows.sh guest            # the ISO again, whatever the stamp says
 scripts/win-run.sh launcher               # the launcher, out of the checkout

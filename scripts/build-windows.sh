@@ -23,20 +23,21 @@
 #
 # Stages, in the order they must run:
 #
-#   qemu    configure-qemu.sh --windows -> ninja: qemu-system-i386.exe,
-#           qemu-img.exe, qemu-io.exe, libqemu-embed-i386.dll, into
-#           build/win/qemu (with libdisc built for windows-gnu first): the
-#           mingw build test.sh and the winit player run
+#   qemu    (deprecated, only when named) configure-qemu.sh --windows ->
+#           ninja: qemu-system-i386.exe, qemu-img.exe, qemu-io.exe,
+#           libqemu-embed-i386.dll, into build/win/qemu (with libdisc built
+#           for windows-gnu first): the mingw build, which nothing ships;
+#           the winit player's, and test.sh's with WIN_QEMU_CC=mingw
 #   qemu-msvc the same tree against MSVC's runtime (build-deps.sh's
 #           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
-#           build/win/qemu-msvc: the QEMU the package ships, importing
+#           build/win/qemu-msvc: the QEMU the package ships and test.sh
+#           and win-run.sh run, importing
 #           only Windows' own DLLs; with libqemu-embed-x86_64.dll, the
 #           Windows 11 player's (track M20; under WHPX, with no TPM)
-#   rust   the winit player (test.sh's), cargo --target
-#           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
-#           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
-#           target/x86_64-pc-windows-msvc). Runs after `qemu`, because
-#           the player links the embed DLL from build/win/qemu.
+#   rust   the tools launcherx, discx and synthx with MSVC
+#           (scripts/cargo-msvc.sh, into target/x86_64-pc-windows-msvc);
+#           and, only with `qemu` named, the deprecated winit player, cargo
+#           --target x86_64-pc-windows-gnu, which links that QEMU's DLL.
 #   mitsuami (Windows only) cargo build --release in launcher-mitsuami/
 #           (its own workspace): the launcher every package ships
 #           (ADR-023), on WinUI 3, then player-mitsuami/ the same way
@@ -140,7 +141,7 @@ while [ $# -gt 0 ]; do
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm edk2 virtio guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu-msvc rust mitsuami exec wddm edk2 virtio guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -199,8 +200,8 @@ done
 # interrupted build is the failure that costs an hour, so the stamp is
 # removed before prepare starts and written only once it has finished:
 # the skip is taken only over a tree a prepare completed. -f prepares
-# regardless.
-if want qemu; then
+# regardless. Either QEMU stage prepares it: the MSVC one is the default.
+if want qemu || want qemu-msvc; then
   qemu_stamp=$( { for g in qemu third_party/qemu-3dfx; do git -C "$g" rev-parse HEAD 2>/dev/null || echo none; done
                   find patches/qemu embed d3dpt/hw d3dpt/d3dpt_proto.h \
                        d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h libdisc/qemu libdisc/libdisc.h \
@@ -217,7 +218,12 @@ if want qemu; then
     scripts/prepare-qemu.sh
     mkdir -p build && printf '%s\n' "$qemu_stamp" > build/.stamp-qemu-prepare
   fi
+fi
 
+# The mingw QEMU (deprecated on Windows, user 2026-10-09: "those are not
+# shipping anymore, there's no reason to test them and not the shipping
+# ones"): built only when the stage is named, for the winit player.
+if want qemu; then
   # meson will not switch a build directory's compiler (patch 68 moved the
   # Windows QEMU from GCC to clang), so a different one configures afresh
   want_cc="${WIN_QEMU_CC:-clang}"
@@ -271,7 +277,7 @@ fi
 # never has or its inputs moved; its regeneration needs no msvc-env.sh.
 if want qemu-msvc; then
   if [ ! -f qemu/VERSION ] || [ ! -f build/.stamp-qemu-prepare ]; then
-    skip qemu-msvc "QEMU's tree is not prepared (run the qemu stage first)" || true
+    skip qemu-msvc "QEMU's tree is not prepared (its prepare failed above)" || true
   else
     say "qemu-msvc: build-deps.sh (QEMU's libraries for MSVC)"
     scripts/build-deps.sh
@@ -307,11 +313,13 @@ if want qemu-msvc; then
 fi
 
 if want rust; then
-  # The winit player stays on QEMU's mingw ABI: it is test.sh's player,
-  # not the package's (ADR-026's second amendment). libdisc and libsynth
-  # are linked into QEMU by its own stage.
-  say "rust: cargo build --release --target x86_64-pc-windows-gnu -p player"
-  cargo build --release --target x86_64-pc-windows-gnu ${JOBS[@]+"${JOBS[@]}"} -p player
+  # The winit player (deprecated) is on QEMU's mingw ABI and links the
+  # mingw QEMU's embed DLL, so it is built only beside that QEMU (the
+  # `qemu` stage named); test.sh and win-run.sh run player-mitsuami.
+  if want qemu; then
+    say "rust: cargo build --release --target x86_64-pc-windows-gnu -p player (the winit player, deprecated)"
+    cargo build --release --target x86_64-pc-windows-gnu ${JOBS[@]+"${JOBS[@]}"} -p player
+  fi
   # The tools are MSVC, as everything that does not link into QEMU
   # (scripts/cargo-msvc.sh, target/x86_64-pc-windows-msvc).
   if ! rustup run stable-x86_64-pc-windows-msvc rustc -V >/dev/null 2>&1; then

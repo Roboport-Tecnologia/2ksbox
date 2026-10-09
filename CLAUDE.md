@@ -228,11 +228,13 @@ ADR-026's amendments; `scripts/msvc-env.sh`), and the tools
 (`launcherx`, `discx`, `synthx` through `scripts/cargo-msvc.sh`,
 `wgl-probe`), and so is the package's QEMU (`build-windows.sh
 qemu-msvc` into `build/win/qemu-msvc`, ADR-026's third amendment): the
-package is all MSVC and ships no runtime DLL. The mingw clang QEMU
-under MSYS2 (`build/win/qemu`, with `libdisc`/`libsynth` inside it)
-stays for `test.sh` and the winit player (test only, GNU target), and
-the 9x/XP guest code is i686 mingw. The mingw QEMU is built with **clang**, not mingw GCC (GCC's
-emulated TLS made every device access 2.3x slower). The
+package is all MSVC and ships no runtime DLL, and **`test.sh` and
+`win-run.sh` run what ships** (user, 2026-10-09: "there's no reason to
+test them and not the shipping ones"): the MSVC QEMU and
+`player-mitsuami`. The mingw clang QEMU under MSYS2 (`build/win/qemu`)
+and the winit player are deprecated on Windows: built only when the
+`qemu` stage is named, tested with `WIN_QEMU_CC=mingw`. The 9x/XP guest
+code is i686 mingw. The
 executor runs on DXVK there too (`dxvk_d3d9.dll`, never the system's
 d3d9 under that name); `build/win/d3dpt-dp2-test.exe` is the oracle and
 must pass on both `D3DPT_D3D9=dxvk` and `system` (the suite's

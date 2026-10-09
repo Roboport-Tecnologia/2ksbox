@@ -2,8 +2,9 @@
 """This host's QEMU for the guest tests: which binary, and where it listens.
 
 The binary is this checkout's build: build/qemu on Linux and macOS,
-build/win/qemu on Windows (scripts/build-windows.sh; build/win/qemu-msvc with
-WIN_QEMU_CC=msvc, the build against MSVC's runtime), or $QEMU_BIN.
+build/win/qemu-msvc on Windows (scripts/build-windows.sh, the build against
+MSVC's runtime the package ships; build/win/qemu, the deprecated mingw one,
+with WIN_QEMU_CC=mingw), or $QEMU_BIN.
 
 For QMP (and qtest), Linux and macOS use a Unix socket in the run's folder. Windows has AF_UNIX,
 but Python on Windows does not expose it, so there QEMU listens on a free
@@ -39,7 +40,8 @@ def qemu(root, name="qemu-system-i386"):
     if name == "qemu-system-i386" and os.environ.get("QEMU_BIN"):
         return os.environ["QEMU_BIN"]
     if WINDOWS:
-        qdir = "qemu-msvc" if os.environ.get("WIN_QEMU_CC") == "msvc" else "qemu"
+        # the package's QEMU (MSVC); WIN_QEMU_CC=mingw the deprecated one
+        qdir = "qemu-msvc" if os.environ.get("WIN_QEMU_CC", "msvc") == "msvc" else "qemu"
         return os.path.join(root, "build", "win", qdir, name + ".exe")
     return os.path.join(root, "build", "qemu", name)
 
