@@ -169,7 +169,9 @@ live in its track doc; fixed things leave this list.
 
 - **Known failures on the Linux box** (M21's run on 11.1, 2026-10-02):
   `pit-guest` (the 15.6 ms-wait cases run the guest clock at 13 %, the
-  same on a QEMU built without patch 56) and `exec-no-device`. (`package`
+  same on a QEMU built without patch 56). (`exec-no-device` failed until
+  DXVK patch 16 on 2026-10-09: DXVK's exception crossed into the executor
+  and aborted in the unwinder. `package`
   failed there too, on `build/` being a symlink, until `package-linux.sh`
   took its stage's real path on 2026-10-04; `companions-env` and
   `mode-sweep` on `NoCompositor`, until `mitsuami_check` stopped leaking its

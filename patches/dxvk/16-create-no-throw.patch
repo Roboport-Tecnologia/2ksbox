@@ -1,0 +1,26 @@
+diff --git a/src/d3d9/d3d9_main.cpp b/src/d3d9/d3d9_main.cpp
+index 3fe778a3..7ae7eacf 100644
+--- a/src/d3d9/d3d9_main.cpp
++++ b/src/d3d9/d3d9_main.cpp
+@@ -20,7 +20,20 @@ namespace dxvk {
+     if (!ppDirect3D9Ex)
+       return D3DERR_INVALIDCALL;
+ 
+-    *ppDirect3D9Ex = ref(new D3D9InterfaceEx(Extended, pOverrideList, OverrideCount));
++    // Every export calls this, and none may let a C++ exception out: the
++    // caller's runtime is not ours (a native build links libstdc++
++    // statically with its symbols hidden, so a caller's catch aborts in
++    // the unwinder). DxvkInstance throws when there is no usable device.
++    try {
++      *ppDirect3D9Ex = ref(new D3D9InterfaceEx(Extended, pOverrideList, OverrideCount));
++    } catch (const DxvkError& e) {
++      Logger::err(e.message());
++      *ppDirect3D9Ex = nullptr;
++      return D3DERR_NOTAVAILABLE;
++    } catch (...) {
++      *ppDirect3D9Ex = nullptr;
++      return D3DERR_NOTAVAILABLE;
++    }
+     return D3D_OK;
+   }
+ }

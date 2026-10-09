@@ -192,7 +192,7 @@ What differs from Linux, so a failure there reads right:
 | `d3dpt-dp2` | `tools/d3dpt-dp2-test.cpp` |
 | `d3dpt-dp2-system` | Windows only: the same test with `D3DPT_D3D9=system`, the executor on Windows' own `d3d9.dll` (a host below the Vulkan floor) |
 | `exec-wine` | the same test through the Wine executor; its frame must equal the in-process one. An autogen texture's 1x1 level may be either average of its halves: Wine's d3d9 on Apple's OpenGL mixes in linear light (0xbc where DXVK gives 0x7f; D3D9 leaves the filter to the driver) |
-| `exec-no-device` | the dp2 test with both Vulkan loader variables at a missing file, so DXVK's constructor throws out of `Direct3DCreate9`; it must end in the test's own exit 77, never a signal (DXVK patch 09, the executor's once-per-library rule) |
+| `exec-no-device` | the dp2 test with both Vulkan loader variables at a missing file, so DXVK's constructor throws out of `Direct3DCreate9`; it must end in the test's own exit 77, never a signal (DXVK patches 09 and 16, the executor's once-per-library rule) |
 | `crtcal` | `build/crtcal-render`: every calibration pattern's circle round on its tube |
 | `mode-sweep` | `player --mode-sweep`: the display path without a guest |
 | `mode-sweep-border` | from the same run: the player's log must not say `clamp-to-border sampling: off although` the adapter has it (our device descriptor dropped `ADDRESS_MODE_CLAMP_TO_BORDER`, and curved presets smear the tube's edge) |

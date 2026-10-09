@@ -243,11 +243,14 @@ static bool open_d3d9(Exec *x, const char *path, bool dxvk)
      * found" and then calls through a null pointer (seen on the Air with
      * DYLD_LIBRARY_PATH unset: a segfault, in the host test and in QEMU's
      * realize alike). A host with the loader and no working device is
-     * DXVK's to refuse, and it does, by a C++ exception out of
-     * Direct3DCreate9 (its DxvkInstance constructor throws when the ICD
-     * gives no GPU: vkEnumeratePhysicalDevices failing, or no ICD at all),
-     * which the catch below takes; see the once-per-library rule after
-     * the dlopen for what that exception leaves behind. */
+     * DXVK's to refuse: its DxvkInstance constructor throws when the ICD
+     * gives no GPU (vkEnumeratePhysicalDevices failing, or no ICD at all),
+     * and our DXVK patch 16 catches that inside Direct3DCreate9, which
+     * returns null. Unpatched, the exception leaves DXVK, and on Linux,
+     * where DXVK carries its own hidden libstdc++, the catch below can
+     * never take it: the unwinder aborts. The catch stays for other
+     * d3d9s. See the once-per-library rule after the dlopen for what the
+     * throw leaves behind. */
     if (dxvk) {
         static void *loader;
         if (!loader) {
