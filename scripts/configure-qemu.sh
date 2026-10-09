@@ -225,6 +225,12 @@ if [ -n "$NATIVE" ]; then
     for d in "${dirs[@]}"; do [ -z "$d" ] || MSVC_CFLAGS="$MSVC_CFLAGS -idirafter $(msvc_short "$d")" || exit 1; done
     IFS=';' read -ra dirs <<< "$LIB"
     for d in "${dirs[@]}"; do [ -z "$d" ] || MSVC_LDFLAGS="$MSVC_LDFLAGS -Wl,-libpath:$(msvc_short "$d")" || exit 1; done
+    # GLib's headers as system headers: they test `#if __GNUC__`, which
+    # this target leaves undefined, and QEMU's -Wundef printed four
+    # warnings for every file that includes glib.h. Clang drops the -I
+    # pkg-config gives for the same directory, so -Wundef still covers
+    # QEMU's own code.
+    MSVC_CFLAGS="$MSVC_CFLAGS -isystem $DEPS/include/glib-2.0 -isystem $DEPS/lib/glib-2.0/include"
     EXTRA_CFLAGS="$EXTRA_CFLAGS$MSVC_CFLAGS"
     CFG+=(--extra-cxxflags="${MSVC_CFLAGS# }" --extra-ldflags="${MSVC_LDFLAGS# }")
     echo "==> MSVC runtime, libraries: $DEPS (static)"

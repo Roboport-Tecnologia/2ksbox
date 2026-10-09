@@ -270,7 +270,11 @@ directory as meson's `pkg_config_libdir`, so a regeneration under a
 plain `ninja` does not take MSYS2's mingw glib. A build directory
 configured before 2026-10-04's fix wants `msvc-env.sh` sourced first
 (`fatal error: 'sys/types.h' file not found` otherwise), or configuring
-again.
+again. GLib's two include directories also go in as `-isystem`: its
+headers test `#if __GNUC__`, which this target leaves undefined, and
+QEMU's `-Wundef` otherwise prints four warnings for every file that
+includes `glib.h`. Clang drops pkg-config's `-I` for the same
+directory, so QEMU's own code keeps the warning.
 
 - **The compiler** is MSYS2's clang targeting `x86_64-pc-windows-msvc`
   (its GNU driver, since QEMU's flags are GCC's; Visual Studio ships no
