@@ -104,9 +104,13 @@ struct Window_ {
     want_grab: Signal<bool>,
     cursor: Signal<Cursor>,
     paused: Signal<bool>,
-    /// View > Scale: the picture held at a whole scale, in points per
-    /// scanline (`physical_scale`), or `None` for the largest that fits
+    /// View > Scale: the picture held at a whole scale, in the screen's
+    /// real pixels per scanline (every scale the largest fit can land on),
+    /// or `None` for the largest that fits
     scale: Signal<Option<u32>>,
+    /// the surface's pixels per point: the Scale menu lists as many real
+    /// scales as 4 points per scanline takes (8 on a Retina screen)
+    backing: Signal<f32>,
     /// there is a picture to fit the window to: a GPU, and a guest that
     /// doesn't take the window's size; kept by `draw`, since neither is a
     /// signal the menu could follow
@@ -189,6 +193,7 @@ fn player_window(guest: bool) -> Window {
         cursor: signal(Cursor::Default),
         paused: signal(false),
         scale: signal(None),
+        backing: signal(1.0),
         fits: signal(false),
     };
     let title = move || {
@@ -259,6 +264,7 @@ fn content(w: Window_) -> impl View {
         let started = with(|p| {
             p.input = Input::new(p.args.pad_mode);
             p.scale = if size.scale > 0.0 { size.scale } else { 1.0 };
+            w.backing.set(p.scale);
             let session = Session::start(&p.args, &mut gpu, Some(wake.notifier()));
             let animates = session.animates();
             let offscreen = session.offscreen();
@@ -287,14 +293,15 @@ fn content(w: Window_) -> impl View {
         if std::env::var_os("PLAYER_SURFACE_LOG").is_some() {
             eprintln!("[surface] {}x{} at {}x", size.width, size.height, size.scale);
         }
-        let held = w.scale.get_untracked();
+        let backing = if size.scale > 0.0 { size.scale } else { 1.0 };
+        if w.backing.get_untracked() != backing {
+            w.backing.set(backing);
+        }
         let full = w.full.get_untracked();
         with(|p| {
-            p.scale = if size.scale > 0.0 { size.scale } else { 1.0 };
+            p.scale = backing;
             remember_size(p, (size.width as f32 / p.scale, size.height as f32 / p.scale), full);
             if let (Some(gpu), Some(session)) = (p.gpu.as_mut(), p.session.as_ref()) {
-                // a held scale is in points: another screen, other pixels
-                gpu.set_fixed_scale(held.map(|n| physical_scale(n, p.scale)));
                 gpu.resize(size.width, size.height);
                 session.tell_window_size(gpu, (size.width, size.height), p.scale as f64);
             }
@@ -353,28 +360,32 @@ fn menus(w: Window_) -> MenuBar {
     // Nothing to fit while the guest takes the window's size (the
     // picture is the window), nor in full screen.
     let sized = move || !w.full.get() && w.fits.get();
-    let mut scale = Menu::new("Scale").item(
-        MenuItem::new("Largest That Fits")
-            .radio((w.scale, None))
-            .shortcut(primary_alt('0')),
-    );
-    for n in 1..=4u32 {
-        let key = char::from_digit(n, 10).unwrap_or('1');
-        scale = scale.item(
-            MenuItem::new(format!("{n}x"))
-                .radio((w.scale, Some(n)))
-                .shortcut(primary_alt(key)),
-        );
-    }
+    // Every whole scale in the screen's real pixels, the ones the largest
+    // fit lands on: 1x is one pixel per scanline on any screen, and a
+    // Retina screen lists up to 8x (4 points per scanline).
+    let scale = Menu::new("Scale")
+        .item(
+            MenuItem::new("Largest That Fits")
+                .radio((w.scale, None))
+                .shortcut(primary_alt('0')),
+        )
+        .children_with(move || {
+            let backing = w.backing.get();
+            (1..=((4.0 * backing).round() as u32).max(4))
+                .map(|n| {
+                    let key = char::from_digit(n, 10).filter(|_| n <= 4);
+                    MenuItem::new(format!("{n}x"))
+                        .radio((w.scale, Some(n)))
+                        .shortcut(key.map(primary_alt))
+                })
+                .collect::<Vec<_>>()
+        });
     // A scale chosen is the picture's, whatever the window's size: what
     // overflows the window is cropped. Fit Window to Picture is the way
     // to the window around it.
     effect(move || {
         let held = w.scale.get();
-        with(|p| {
-            let backing = p.scale;
-            p.gpu.as_mut().map(|g| g.set_fixed_scale(held.map(|n| physical_scale(n, backing))))
-        });
+        with(|p| p.gpu.as_mut().map(|g| g.set_fixed_scale(held)));
         draw(w);
     });
     view = view
@@ -603,13 +614,6 @@ fn draw(w: Window_) {
         };
         w.min.set(size);
     }
-}
-
-/// A scale in points as the surface's whole physical one: a Retina
-/// screen's 1x is two pixels per scanline, and a fractional screen scale
-/// rounds to the nearest whole one, never below 1x.
-fn physical_scale(points: u32, backing: f32) -> u32 {
-    ((points as f32 * backing).round() as u32).max(1)
 }
 
 /// Size the window's content to the picture with no bars around it: at

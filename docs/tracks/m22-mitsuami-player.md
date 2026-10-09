@@ -89,7 +89,9 @@ embed library, as for the winit player, into a target dir of its own:
    Power Button, Close as the platform's Quit) and View (Full Screen, left
    out on macOS for AppKit's own Enter Full Screen, which `w.full`
    follows; Scale, a submenu of Largest That Fits and 1x to 4x, and Fit
-   Window to Picture, both 2026-10-07 and both `Gpu`'s geometry
+   Window to Picture, both 2026-10-07; the scales are real pixels per
+   scanline since 2026-10-09, up to 4 points' worth, so 1x to 8x on a
+   Retina screen and every scale the fit lands on is named (user) and both `Gpu`'s geometry
    (`set_fixed_scale`, `picture_px`; Fit is enabled by a `fits` signal
    `draw` keeps, as the GPU and `follows_window` are no signals: it read
    them directly and stayed off until another signal moved, user

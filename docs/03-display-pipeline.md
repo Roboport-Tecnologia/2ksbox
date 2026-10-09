@@ -97,9 +97,11 @@ picture crawls during a drag. Rounding costs at most half a pixel of
 aspect, far inside the sweep's 0.5 %.
 
 The user can hold the scale instead (`Gpu::set_fixed_scale`, the
-mitsuami player's View > Scale, 1x to 4x). It is in points per scanline,
-so a Retina screen's 1x is 2 physical pixels per scanline, rounded to a
-whole physical scale on a fractional screen. A held scale stands when the
+mitsuami player's View > Scale). It is in the screen's real pixels per
+scanline, the same steps the largest fit takes, so 1x is the guest's own
+resolution even on a Retina screen and every scale the fit lands on has
+a name; the menu lists as many as 4 points per scanline takes (1x to 4x,
+1x to 8x on Retina; user, 2026-10-09). A held scale stands when the
 window is smaller than the picture: the picture stays centred and what
 overflows is cropped (a WebGPU viewport may lie past its target; only its
 size is bounded, by the largest texture, which caps the scale too). It is
