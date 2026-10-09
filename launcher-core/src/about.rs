@@ -68,8 +68,11 @@ pub const GROUPS: &[Group] = &[
         title: "Sound",
         credits: &[
             c("Nuked-OPL3", "The OPL3 FM chip", "LGPL-2.1", "https://github.com/nukeykt/Nuked-OPL3"),
-            c("Munt and moont", "The Roland MT-32", "LGPL-2.1", "https://github.com/munt/munt"),
+            c("nuked-opl3-rs", "Nuked-OPL3 in Rust", "LGPL-2.1", "https://github.com/tgies/nuked-opl3-rs"),
+            c("moont", "The Roland MT-32", "LGPL-2.1", "https://gitlab.gnome.org/geoffhill/moont"),
+            c("Munt", "The MT-32 emulator moont ports", "LGPL-2.1", "https://github.com/munt/munt"),
             c("RustySynth", "SoundFont music", "MIT", "https://github.com/sinshu/rustysynth"),
+            c("TimGM6mb", "The General MIDI sound bank", "GPL-2.0", "https://packages.debian.org/sid/timgm6mb-soundfont"),
             c("cpal", "Audio output", "Apache-2.0", "https://github.com/RustAudio/cpal"),
         ],
     },
