@@ -379,8 +379,9 @@ The fields, and why each is what it is:
   2026-10-03), Windows 11 only (M23, doc 24). The clipboard is on for a
   new Windows 11 machine: it adds QEMU's `qemu-vdagent` on a
   virtio-serial port (`Machine::clipboard_args`), which the player joins,
-  and does nothing until the guest has the agent (`2ksbox\install.cmd`
-  on the drivers disc, as `clipboard_notes` says). The shared folder is
+  and does nothing until the guest has the agent, which Windows installs
+  from the drivers disc at the first sign-in (its `autounattend.xml`,
+  doc 24; `clipboard_notes` says so). The shared folder is
   the player's `--share <dir>` (`player::share_args`), and only with
   Networking on, which the guest reaches it through (`share_folder`,
   `shared_folder_notes`). An absent field means off and none.

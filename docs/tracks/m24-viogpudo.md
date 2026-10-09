@@ -398,9 +398,20 @@ Windows 11 test here.
   drivers disc's `2ksbox\install.cmd` (no `C:\2KSBOX\agent.log`); with it
   run, left on Extend and restarted, the agent made the virtio-gpu's
   screen the only one a few seconds after logon, and the desktop was
-  smooth (2026-10-09). The gap: nothing runs `install.cmd` on a machine
-  whose owner did not, and that machine also has no clipboard and no
-  shared folder (M23).
+  smooth (2026-10-09). The gap was that nothing ran `install.cmd` on a
+  machine whose owner did not (no clipboard, no shared folder either). Now
+  closed for new machines (the user: "no need to cover old machines"):
+  the drivers disc carries `autounattend.xml` (`guest-agent/`), and
+  Windows runs `2ksbox\install.ps1` at the first logon. Setup took a
+  first version for nothing: it adopts a file it finds on a disc only if
+  the file has settings for the pass it is in, the first (windowsPE), so
+  the file holds one there at its default (`UseConfigurationSet` false).
+  It also hides setup's Microsoft account screens (the user: "add it";
+  Windows 11 Home offers no local account otherwise). Fresh install of
+  26300 on the Air with the launcher (2026-10-09): every setup page as
+  before but the account, which asked for a local one; the agent
+  installed at the first logon; the clipboard shared. x64's disc carries
+  the same file (amd64), not yet installed with.
 - `viogpudo-install.ps1` (2026-10-09, after the Air): it now reads the
   running kernel's code integrity options before touching the installed
   driver. Without `TESTSIGN` it only turns test mode on and stops, naming

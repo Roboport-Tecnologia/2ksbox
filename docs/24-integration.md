@@ -166,7 +166,16 @@ in the user's session it shares that session's clipboard. Red Hat's
 agent solves the same with a SYSTEM service plus a per-session process;
 ours is one process, started at logon by a task set to run with highest
 privileges, so the user must be an administrator (Windows 11's first
-user is). `2ksbox\install.cmd` on the drivers disc installs it
+user is). The drivers disc's `autounattend.xml` (`guest-agent/`, only
+the oobeSystem pass) has Windows run `2ksbox\install.ps1` at the first
+logon of a machine installed with the disc in, and hides setup's
+Microsoft account screens, so setup asks for a local account (Windows
+11 Home offers none otherwise; the user: "add it"); setup adopts a
+disc's answer file only if it has settings for its first pass, so the
+file holds one there at its default (track M24, 2026-10-09:
+a machine without the agent kept ramfb's screen beside ours, and a
+choppy desktop); on one installed without it, `2ksbox\install.cmd`
+installs it by hand
 (`install.ps1`: the drivers, the agent in `C:\Program Files\2ksbox`,
 and its logon tasks; and, track M24, viogpudo's resolution service from
 the disc's `$WinPEDriver$\viogpudo` in `C:\Program Files\2ksbox\viogpu`,

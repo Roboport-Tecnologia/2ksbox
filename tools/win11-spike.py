@@ -48,7 +48,9 @@ Environment:
                        the drivers disc; x86_64: e1000e) on QEMU's user network
   DRIVERS=<iso>        the drivers disc in a CD drive of its own (default
                        build/virtio-win/2ksbox-drivers-<arm64|x64>.iso when
-                       it exists; DRIVERS= for none)
+                       it exists; DRIVERS= for none), as a copy in OUT
+                       without its autounattend.xml, so setup takes this
+                       run's answer file
   SB_BYPASS=1          install: setup's LabConfig BypassSecureBootCheck
                        (needed on FW_ARM=edk2 only)
   LANG_ISO=en-US       the ISO's language, when 7z is not there to read it
@@ -309,6 +311,17 @@ class Serial(threading.Thread):
                     self.lines.put((t, text))
 
 
+def drivers_disc():
+    """The drivers disc without its autounattend.xml (a new machine's first
+    logon runs the guest tools from it): setup takes the first answer file
+    it finds on a disc, and this run's own is on another."""
+    copy = os.path.join(OUT, "drivers.iso")
+    subprocess.run(["xorriso", "-indev", DRIVERS, "-outdev", copy, "-boot_image", "any", "keep",
+                    "-rm", "/autounattend.xml", "--", "-commit"],
+                   check=True, capture_output=True)
+    return copy
+
+
 def run_qemu(cds):
     for name in ("qmp.sock", "qmp2.sock", "com1.sock"):
         p = os.path.join(OUT, name)
@@ -338,7 +351,7 @@ def run_qemu(cds):
             args += ["-device", "ide-cd,drive=cd%d,bus=ide.%d%s" % (i, i + (ARM and OURS), boot)]
     if DRIVERS and os.path.exists(DRIVERS):
         n = len(cds) + (ARM and OURS)
-        args += ["-drive", "if=none,id=drv,media=cdrom,readonly=on,file=" + DRIVERS,
+        args += ["-drive", "if=none,id=drv,media=cdrom,readonly=on,file=" + drivers_disc(),
                  "-device", "ide-cd,drive=drv,bus=ide.%d" % n]
     if NET:
         nic = "virtio-net-pci" if ARM else "e1000e"

@@ -852,7 +852,7 @@ impl Form {
         if self.clipboard {
             &[
                 "Text copied on either side can be pasted on the other.",
-                "Needs the 2ksbox agent in Windows: run 2ksbox\\install.cmd from the drivers disc once.",
+                "Uses the 2ksbox agent, which Windows installs from the drivers disc at the first sign-in.",
             ]
         } else {
             &["Copy and paste stay inside the machine."]

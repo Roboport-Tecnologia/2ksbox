@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2ksbox's drivers disc (scripts/build-virtio-win.sh fills in @ARCH@):
+     Windows Setup finds this file at the disc's root, and at the first
+     logon of the account it makes runs 2ksbox\install.ps1 with that
+     account's administrator rights, so a new machine has the agent (the
+     clipboard, the shared folder, the virtio-gpu's screen as the only one)
+     with no step of the user's. And it hides setup's Microsoft account
+     screens, so setup asks for a local account (Windows 11 Home offers no
+     local account otherwise; the user, 2026-10-09: "add it"). Only the
+     oobeSystem pass: every other page of setup stays the user's.
+     install.cmd is not called: it ends in a pause, which would hold the
+     logon.
+     The windowsPE pass holds one setting, at its default, and only so the
+     file is used at all: setup takes a file it finds on a disc only if it
+     has settings for the pass it is in ("does not meet criteria to be used
+     for this unattend pass" in setupact.log, Windows 11 26300 on Arm). -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-Setup" processorArchitecture="@ARCH@" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UseConfigurationSet>false</UseConfigurationSet>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="@ARCH@" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+      </OOBE>
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>cmd /c for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\2ksbox\install.ps1 powershell -NoProfile -ExecutionPolicy Bypass -File %d:\2ksbox\install.ps1</CommandLine>
+          <Description>2ksbox: the guest agent and the virtio drivers</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>
