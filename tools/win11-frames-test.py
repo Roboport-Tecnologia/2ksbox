@@ -28,7 +28,7 @@ account with none), OUT=build/w11f (short: a socket lives there),
 PLAYER (default player-mitsuami's aarch64 build). A Mac on
 Apple Silicon; about 4 minutes. Ends with the ACPI power button.
 """
-import os, re, shutil, signal, socket, subprocess, sys, time
+import os, platform, re, shutil, signal, socket, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -165,7 +165,7 @@ def left_edges(w, h, raw):
 
 
 def main():
-    if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
+    if platform.system() != "Darwin" or platform.machine() != "arm64":   # os.uname() is POSIX only
         skip("Windows 11 on Arm under HVF only, for now")
     machine = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.path.expanduser("~/Library/Application Support/2ksbox"), "machines", "win11")

@@ -450,8 +450,8 @@ inside QEMU, whose knobs are:
 
 Diagnostics:
 
-- `D3DPT_DP2_TRACE`, `D3DPT_DDI_REREAD`, `D3DPT_DDI_NOFOG` trace the
-  display driver's DP2 stream (doc 15; `docs/testing.md`).
+- `D3DPT_DP2_TRACE`, `D3DPT_WATCH`, `D3DPT_DDI_REREAD`, `D3DPT_DDI_NOFOG`
+  trace the display driver's DP2 stream (doc 15; `docs/testing.md`).
 - `D3DPT_DDI_FLUSH_DRAWS=n` sets the executor's flush hint (16 draws; 0
   turns it off, doc 15), and `D3DPT_DDI_FLUSH_AB=n` alternates it with n,
   one 5 s rate line each, for an A/B inside one run (`tools/ddi-rate.py`).

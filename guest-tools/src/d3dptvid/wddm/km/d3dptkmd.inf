@@ -10,7 +10,7 @@ Signature="$WINDOWS NT$"
 Class=Display
 ClassGUID={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=10/08/2026,0.3.10.0
+DriverVer=10/09/2026,0.3.17.0
 CatalogFile.NTamd64=d3dptkmd.cat
 
 [DestinationDirs]
