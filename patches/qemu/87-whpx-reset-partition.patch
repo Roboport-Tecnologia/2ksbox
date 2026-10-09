@@ -1,0 +1,68 @@
+WHPX resets the partition on a machine reset. x86 WHPX wrote the reset
+registers and nothing else, so what the hypervisor keeps for the guest
+beyond them stayed: the Hyper-V enlightenments' hypercall and reference
+TSC pages, the SynIC and its timers. After Windows 11 restarted itself,
+the firmware's run died at once ("WHPX: Unexpected VP exit code 4", an
+unrecoverable exception) while a cold start of the same disk booted.
+A reset handler registered at accel init (so before the board's CPU
+handlers) calls WHvResetPartition on every reset after power-on, as the
+Arm side does on its reset exit. Drop when upstream resets the x86
+partition.
+
+diff --git a/target/i386/whpx/whpx-all.c b/target/i386/whpx/whpx-all.c
+index 113f79a..87b1da5 100644
+--- a/target/i386/whpx/whpx-all.c
++++ b/target/i386/whpx/whpx-all.c
+@@ -20,6 +20,7 @@
+ #include "system/whpx.h"
+ #include "system/cpus.h"
+ #include "system/runstate.h"
++#include "system/reset.h"
+ #include "qemu/main-loop.h"
+ #include "qemu/memalign.h"
+ #include "hw/core/boards.h"
+@@ -3027,6 +3028,36 @@ void whpx_arch_accel_class_init(ObjectClass *oc)
+         "Separate security domain");
+ }
+ 
++/*
++ * A reset of the machine after power-on: the partition's own state too.
++ * Writing the reset registers leaves what the hypervisor keeps for the
++ * guest beyond them, the Hyper-V enlightenments' hypercall and reference
++ * TSC pages, the SynIC and its timers, and with them the firmware's next
++ * run died at once ("Unexpected VP exit code 4", an unrecoverable
++ * exception) after Windows 11 restarted. Runs before the CPUs' own reset
++ * handlers (registered later, by the board), so the registers, the APIC
++ * state and the TSC are written after it. The Arm side does the same on
++ * its reset exit.
++ */
++static void whpx_reset_partition(void *opaque)
++{
++    static bool powered_on;
++    struct whpx_state *whpx = &whpx_global;
++    HRESULT hr;
++
++    if (!powered_on) {
++        powered_on = true;  /* the first reset is power-on's: a new partition */
++        return;
++    }
++    if (!whp_dispatch.WHvResetPartition) {
++        return;
++    }
++    hr = whp_dispatch.WHvResetPartition(whpx->partition);
++    if (FAILED(hr)) {
++        warn_report("WHPX: failed to reset the partition, hr=%08lx", hr);
++    }
++}
++
+ int whpx_accel_init(AccelState *as, MachineState *ms)
+ {
+     struct whpx_state *whpx;
+@@ -3356,6 +3387,7 @@ int whpx_accel_init(AccelState *as, MachineState *ms)
+ 
+     whpx_memory_init();
+     whpx_init_emu();
++    qemu_register_reset(whpx_reset_partition, NULL);
+ 
+     as->gdbstub.sstep_flags = SSTEP_ENABLE;
+ 

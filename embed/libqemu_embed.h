@@ -90,12 +90,6 @@ QEMU_EMBED_API qemu_embed_t *qemu_embed_new(int argc, char **argv,
  * or qemu_embed_vm_shutdown() was requested. */
 QEMU_EMBED_API int qemu_embed_run(qemu_embed_t *e);
 
-/* After qemu_embed_run() returned (v13): true when the loop ended on a
- * reset, the guest's own or the host's (qemu_embed_vm_reset, QMP
- * system_reset), because QEMU runs with -no-reboot; false for a power-off,
- * a quit or any other end. */
-QEMU_EMBED_API bool qemu_embed_stopped_by_reset(qemu_embed_t *e);
-
 /* Tear down. QEMU cleanup is incomplete upstream: one VM per process. */
 QEMU_EMBED_API void qemu_embed_destroy(qemu_embed_t *e, int status);
 
@@ -204,7 +198,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 13
+#define QEMU_EMBED_API_VERSION 14
 
 #ifdef __cplusplus
 }

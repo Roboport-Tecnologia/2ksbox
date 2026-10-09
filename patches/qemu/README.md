@@ -1011,6 +1011,24 @@ found no torn frame and the same publish rate with it on or off (0 of
 **Drop:** viogpudo waits for its transfer (a fence), or upstream
 processes the queue synchronously.
 
+### 87-whpx-reset-partition
+WHPX resets the partition on a machine reset (track M20 step 5). x86
+WHPX wrote the reset registers and nothing else, so what the hypervisor
+keeps for a guest beyond them survived the reset: the Hyper-V
+enlightenments' hypercall and reference TSC pages, the SynIC and its
+timers. After Windows 11 restarted itself the firmware's run died at
+once ("WHPX: Unexpected VP exit code 4", an unrecoverable exception, the
+vCPUs spinning), while a cold start of the same disk booted. A reset
+handler registered at accel init, so before the board's CPU handlers,
+calls `WHvResetPartition` on every reset after power-on, as upstream's
+Arm WHPX does on its reset exit; the registers, the APIC and the TSC are
+written after it as before. `failed to get xsave state` still prints
+once per vCPU at a reset (upstream's, harmless). **Test:** the Windows
+11 test machine restarted itself twice under WHPX in one QEMU process
+(2026-10-09; `D:\vms\win11-test\run-87.sh`), and `test.sh`'s
+`whpx-i386` resets SeaBIOS over QMP and sees it reach the end of its
+boot order again. **Drop:** upstream resets the x86 partition.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

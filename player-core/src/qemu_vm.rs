@@ -207,9 +207,6 @@ struct Shared {
     dmabufs: Vec<DmaBuf>,
     // QEMU's main loop has returned; the handle must not be used any more
     stopped: bool,
-    // ... on a reset, under -no-reboot (the Windows-host Windows 11
-    // machine, whose WHPX cannot reset a running guest)
-    reset: bool,
     // the UI thread promises no further calls; qemu_embed_destroy may run
     released: bool,
     // the guest's hardware cursor (the d3dpt-vga driver, doc 15): its shape
@@ -242,10 +239,6 @@ impl Display {
     /// True once QEMU's main loop has returned (guest power-off, `quit`).
     pub fn stopped(&self) -> bool {
         self.0.lock().unwrap().stopped
-    }
-    /// Once stopped: a reset ended the loop (`-no-reboot`).
-    pub fn stopped_by_reset(&self) -> bool {
-        self.0.lock().unwrap().reset
     }
     /// Promise that no thread but the QEMU thread will touch the VM handle
     /// from now on; lets the QEMU thread proceed to `qemu_embed_destroy`.
@@ -841,7 +834,6 @@ pub fn start(
         zero_copy,
         dmabufs: Vec::new(),
         stopped: false,
-        reset: false,
         released: false,
         cursor: None,
         cursor_seq: 0,
@@ -894,7 +886,6 @@ pub fn start(
             let waker = {
                 let mut s = shared_q.lock().unwrap();
                 s.stopped = true;
-                s.reset = owner.stopped_by_reset();
                 s.vm = None;
                 s.waker.clone()
             };

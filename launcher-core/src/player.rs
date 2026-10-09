@@ -332,12 +332,6 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     }
 }
 
-/// The player's exit status that asks for the machine to be started
-/// again (`player_core::EXIT_RESTART`, the same number): the guest of a
-/// machine run with `-no-reboot` reset itself and the user chose Restart
-/// (`bundle::Machine::restarts_cold`). `Machines::reap` answers it.
-pub const EXIT_RESTART: i32 = 75;
-
 /// Why `machine` cannot start on this host, in the sentence a front end
 /// shows, or `None` when it can. Windows 11 alone has limits: on a Mac only
 /// Windows 11 on Arm, never x64 (user decision 2026-10-01: the Mac build has

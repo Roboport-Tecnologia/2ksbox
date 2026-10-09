@@ -139,13 +139,6 @@ impl Session {
         }
     }
 
-    /// QEMU's loop ended on a reset under `-no-reboot`: the front end
-    /// starts the machine again, or offers [`crate::RESET_QUESTION`] when
-    /// the guest reset itself, rather than leaving.
-    pub fn stopped_by_reset(&self) -> bool {
-        matches!(&self.source, Source::Qemu { display, .. } if display.stopped() && display.stopped_by_reset())
-    }
-
     /// The guest's display, while there is a guest.
     pub fn display(&self) -> Option<&qemu_vm::Display> {
         match &self.source {

@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 13;
+pub const API_VERSION: u32 = 14;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -80,7 +80,6 @@ extern "C" {
         ud: *mut c_void,
     ) -> *mut qemu_embed_t;
     fn qemu_embed_run(e: *mut qemu_embed_t) -> c_int;
-    fn qemu_embed_stopped_by_reset(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_destroy(e: *mut qemu_embed_t, status: c_int);
     fn qemu_embed_vm_start(e: *mut qemu_embed_t);
     fn qemu_embed_vm_pause(e: *mut qemu_embed_t);
@@ -304,11 +303,6 @@ impl Owner {
     /// Run the main loop on this thread; returns QEMU's exit status.
     pub fn run(&self) -> i32 {
         unsafe { qemu_embed_run(self.0 .0) }
-    }
-    /// After [`Owner::run`] returned (v13): the loop ended on a reset (the
-    /// guest's or the host's) under `-no-reboot`, not a power-off.
-    pub fn stopped_by_reset(&self) -> bool {
-        unsafe { qemu_embed_stopped_by_reset(self.0 .0) }
     }
     /// Tear down (one VM per process lifetime, QEMU cleanup is partial).
     pub fn destroy(self, status: i32) {

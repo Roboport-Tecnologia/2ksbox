@@ -180,21 +180,10 @@ impl Machines {
     /// Reap any player that has exited, returning the rows whose running
     /// state just changed (a front end with a row-based view has to say
     /// which ones moved; one that redraws everything can ignore it).
-    ///
-    /// A player that exits with [`player::EXIT_RESTART`] (the user chose
-    /// Restart after the guest reset a machine that cannot reset in place,
-    /// a Windows 11 machine on a Windows host) is started again here, and
-    /// its row never stops running.
     pub fn reap(&mut self) -> Vec<usize> {
         let mut ended: Vec<PathBuf> = Vec::new();
-        let mut restart: Vec<PathBuf> = Vec::new();
         self.running.retain(|dir, child| match child.try_wait() {
             Ok(None) => true,
-            Ok(Some(status)) if status.code() == Some(player::EXIT_RESTART) => {
-                eprintln!("[launcher] {} asked to be started again", dir.display());
-                restart.push(dir.clone());
-                false
-            }
             Ok(Some(status)) => {
                 eprintln!("[launcher] {} exited: {status}", dir.display());
                 ended.push(dir.clone());
@@ -206,16 +195,6 @@ impl Machines {
                 false
             }
         });
-        for dir in restart {
-            let started = match self.entries.iter().position(|e| e.dir == dir) {
-                Some(row) => self.play(row),
-                None => Err(format!("{}: no longer in the library", dir.display())),
-            };
-            if let Err(e) = started {
-                eprintln!("[launcher] starting it again: {e}");
-                ended.push(dir);
-            }
-        }
         ended
             .iter()
             .filter_map(|dir| self.entries.iter().position(|e| &e.dir == dir))

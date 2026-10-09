@@ -39,21 +39,6 @@ pub use wgpu;
 pub const CLOSE_QUESTION: &str = "Close the player?";
 pub const CLOSE_DETAIL: &str = "The machine turns off at once and any unsaved work in it is lost.";
 
-/// What the player says when a machine run with `-no-reboot` reset itself:
-/// a Windows 11 machine on a Windows host, where a guest's own reset stops
-/// QEMU under WHPX ("Unexpected VP exit code 4"; track M20), so the
-/// launcher runs it that way and a cold start stands in for the reset.
-pub const RESET_QUESTION: &str = "The machine restarted";
-pub const RESET_DETAIL: &str = "Windows asked to restart, and on a Windows computer the machine can't restart while it runs, \
-     so it was turned off. Restart turns it on again: nothing on its disk is lost. \
-     Windows Setup restarts several times while it installs.";
-
-/// The player's exit status after the user chose Restart on
-/// [`RESET_QUESTION`]: the launcher starts the machine again
-/// (`launcher_core::player::EXIT_RESTART`, the same number). A new process,
-/// since QEMU runs once per process.
-pub const EXIT_RESTART: i32 = 75;
-
 /// Whether a run starts with the host's shortcuts going to the guest
 /// (`PLAYER_KEYBOARD_CAPTURE=0` starts it with them the host's).
 pub fn keyboard_capture_at_start() -> bool {

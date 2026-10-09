@@ -55,12 +55,6 @@ struct Player {
     motion_rest: (f32, f32),
     /// The close question is up.
     asking: bool,
-    /// The user chose Restart after a reset ended the run (`offer_restart`),
-    /// or chose Reset: the process exits with `EXIT_RESTART`.
-    restart: bool,
-    /// Machine > Reset was chosen: on a machine run with `-no-reboot` that
-    /// ends the run, and it starts again with no question.
-    reset_asked: bool,
     /// The window, for sizing it to the picture (`fit_window`).
     window: Option<(Ui, NodeId)>,
     /// The content size in points the window opened at or last
@@ -136,8 +130,6 @@ fn main() {
             raw_motion: false,
             motion_rest: (0.0, 0.0),
             asking: false,
-            restart: false,
-            reset_asked: false,
             window: None,
             remembered: None,
             opened_at: None,
@@ -179,7 +171,7 @@ fn main() {
         .map(|mut p| {
             let status = p.session.as_mut().map(Session::join).unwrap_or(0);
             std::mem::forget(p.gpu.take());
-            if p.restart { player_core::EXIT_RESTART } else { status }
+            status
         })
         .unwrap_or(0);
     // QEMU's atexit handlers run here, after its thread has completed
@@ -423,7 +415,6 @@ fn menus(w: Window_) -> MenuBar {
                 )
                 .item(MenuItem::new("Reset").on_select(|| {
                     if let Some(vm) = vm() {
-                        with(|p| p.reset_asked = true);
                         vm.vm_reset();
                     }
                 }))
@@ -565,58 +556,11 @@ fn on_wake(w: Window_) {
     })
     .unwrap_or(false);
     if stopped {
-        let reset = with(|p| p.session.as_ref().is_some_and(Session::stopped_by_reset)).unwrap_or(false);
-        let asked = with(|p| p.reset_asked).unwrap_or(false);
-        if reset && asked {
-            eprintln!("[player] reset: starting the machine again");
-            with(|p| p.restart = true);
-            w.open.set(false);
-        } else if reset {
-            // the window stays for the question: let QEMU's thread clean
-            // up now rather than after its 5 s wait for `join`
-            with(|p| p.session.as_ref().and_then(Session::display).map(|d| d.release()));
-            offer_restart(w);
-        } else {
-            w.open.set(false);
-        }
+        w.open.set(false);
         return;
     }
     update_guest_cursor(w);
     draw(w);
-}
-
-/// A reset the user did not choose from the menu (the guest's own) and
-/// QEMU, run with `-no-reboot`, stopped (a Windows 11 machine on a Windows
-/// host): say so over the last picture,
-/// and either close or exit for the launcher to start the machine again.
-/// `PLAYER_RESET_ANSWER=close|restart` answers it without the alert, for
-/// a scripted run (`tools/restart-cold-test.sh`).
-fn offer_restart(w: Window_) {
-    w.locked.set(false);
-    w.grabbed.set(false);
-    let scripted = std::env::var("PLAYER_RESET_ANSWER").ok();
-    let window = with(|p| p.window.clone()).flatten();
-    let (Some((ui, window)), None) = (window, scripted.as_deref()) else {
-        let restart = scripted.as_deref() == Some("restart");
-        eprintln!("[player] the machine reset; {}", if restart { "restarting" } else { "closing" });
-        with(|p| p.restart = restart);
-        w.open.set(false);
-        return;
-    };
-    let alert = Alert::new(player_core::RESET_QUESTION)
-        .message(player_core::RESET_DETAIL)
-        .style(AlertStyle::Info)
-        // the first button is the default: during Windows Setup, Restart
-        // is the answer every time
-        .button("Restart")
-        .button("Close");
-    let asker = ui.clone();
-    ui.spawn_local(async move {
-        let answer = asker.alert(Some(window), alert).await;
-        eprintln!("[player] the machine reset; {}", if answer == 0 { "restarting" } else { "closing" });
-        with(|p| p.restart = answer == 0);
-        w.open.set(false);
-    });
 }
 
 /// Milliseconds since the first call, for the input log.

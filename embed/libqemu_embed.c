@@ -101,8 +101,6 @@ struct qemu_embed {
     char *clip_text;        /* the host text the guest was last offered */
     size_t clip_text_len;
     const void *clip_seen;  /* the guest data last handed to clip_fn */
-    Notifier shutdown;      /* records why the main loop is ending */
-    bool reset;             /* ... a reset, under -no-reboot */
 };
 
 /* one VM per process: the 3D backend reports through this instance */
@@ -517,24 +515,6 @@ bool qemu_embed_setenv(const char *name, const char *value)
     return name && value && g_setenv(name, value, TRUE);
 }
 
-/* QEMU's shutdown notifiers run on the main loop's way out, with the
- * cause. Under -no-reboot (reboot action "shutdown") a reset is a shutdown
- * of the reset's cause: the guest's own, or the host's (QMP system_reset,
- * qemu_embed_vm_reset). The player tells it from a power-off by it (the
- * Windows-host Windows 11 machine, track M20). */
-static void embed_shutdown_notify(Notifier *n, void *data)
-{
-    qemu_embed_t *e = container_of(n, qemu_embed_t, shutdown);
-    ShutdownCause cause = *(ShutdownCause *)data;
-    e->reset = cause == SHUTDOWN_CAUSE_GUEST_RESET ||
-               cause == SHUTDOWN_CAUSE_HOST_QMP_SYSTEM_RESET;
-}
-
-bool qemu_embed_stopped_by_reset(qemu_embed_t *e)
-{
-    return e->reset;
-}
-
 qemu_embed_t *qemu_embed_new(int argc, char **argv,
                              const qemu_embed_display_cb *cb, void *ud)
 {
@@ -561,9 +541,6 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
 
     /* Takes the BQL on this thread; exits the process on fatal errors. */
     qemu_init(e->argc, e->argv);
-
-    e->shutdown.notify = embed_shutdown_notify;
-    qemu_register_shutdown_notifier(&e->shutdown);
 
     e->con = qemu_console_lookup_default();
     /* Fires on_switch/on_update/on_cursor synchronously before returning. */

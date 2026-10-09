@@ -2190,9 +2190,8 @@ impl Machine {
         // no secure flash and EDK2's build without Secure Boot
         // (`Arch::efi_code_file`); QEMU builds no TPM on Windows, so none,
         // and the drivers disc's answer file sets setup's `LabConfig`
-        // bypass keys for both (`scripts/build-virtio-win.sh`). The guest's
-        // own reset stops QEMU there, so `-no-reboot` and a cold start
-        // ([`Machine::restarts_cold`]).
+        // bypass keys for both (`scripts/build-virtio-win.sh`). A guest's
+        // own reset works there since QEMU patch 87.
         let windows_host = cfg!(target_os = "windows");
         let machine = if windows_host { "q35" } else { "q35,smm=on" };
         let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine.into()];
@@ -2261,20 +2260,8 @@ impl Machine {
         args.extend(self.cdrom_args(shelf));
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(Arch::X86_64));
-        if self.restarts_cold() {
-            args.push("-no-reboot".into());
-        }
         args.extend(self.extra_qemu_args.iter().cloned());
         args
-    }
-
-    /// Whether the guest's own reset ends the run, for the player to offer
-    /// a cold start instead (`player_core::RESET_QUESTION`, answered by
-    /// `Machines::reap`): x64 Windows 11 on a Windows host, where a reset
-    /// under WHPX stops the VM ("WHPX: Unexpected VP exit code 4", then
-    /// "failed to get xsave state") while a cold start boots.
-    pub fn restarts_cold(&self) -> bool {
-        cfg!(target_os = "windows") && self.family == Family::Win11 && self.effective_arch() == Arch::X86_64
     }
 
     /// Windows 11 on Arm's machine (M20 step 4): QEMU's `virt` board, the

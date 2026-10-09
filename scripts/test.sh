@@ -2072,31 +2072,41 @@ bios_date_check() { # the legacy BIOS date, as a guest reads it out of a real QE
   return $rc
 }
 
-whpx_i386_check() { # an era machine under WHPX gets through SeaBIOS (patch 84)
+whpx_i386_check() { # an era machine under WHPX gets through SeaBIOS (patch 84), and again after a reset (patch 87)
   # QEMU 11.1 builds WHPX into x86_64 only, and its WHPX emulates MMIO
   # with an x86 emulator whose 64-bit registers overran the i386 target's
   # 32-bit ones: a diskless machine died in SeaBIOS ("WHPX: Unexpected VP
   # exit code 4"). SeaBIOS's own log, on the debug port, must reach the
-  # end of its boot order.
+  # end of its boot order; then a QMP system_reset, which resets the
+  # partition too (patch 87), must bring it there a second time.
   [ "$OS" = Windows ] || { echo "WHPX is a Windows host's"; return 77; }
-  local log="$OUT/whpx-seabios.log" qlog="$OUT/whpx-qemu.log" p
+  local log="$OUT/whpx-seabios.log" qlog="$OUT/whpx-qemu.log" p n qmp=tcp:127.0.0.1:44733
   rm -f "$log"
   $QSYS -L qemu/pc-bios -accel whpx -cpu pentium3 -machine pc -m 64 -display none -net none \
-    -monitor none -chardev "file,id=dbg,path=$log" -device isa-debugcon,iobase=0x402,chardev=dbg \
+    -monitor none -qmp "$qmp,server=on,wait=off" \
+    -chardev "file,id=dbg,path=$log" -device isa-debugcon,iobase=0x402,chardev=dbg \
     >"$qlog" 2>&1 & p=$!
-  for _ in $(seq 60); do
-    grep -q "No bootable device" "$log" 2>/dev/null && break
-    kill -0 $p 2>/dev/null || break
-    sleep 0.5
+  for want in 1 2; do
+    for _ in $(seq 60); do
+      n=$(grep -c "No bootable device" "$log" 2>/dev/null)
+      [ "${n:-0}" -ge $want ] && break
+      kill -0 $p 2>/dev/null || break
+      sleep 0.5
+    done
+    [ "${n:-0}" -ge 1 ] && [ $want = 1 ] && python3 tools/qmpc.py "$qmp" json '{"execute":"system_reset"}' >/dev/null 2>&1
   done
   kill $p 2>/dev/null; wait $p 2>/dev/null
   if grep -qi "no accelerator found\|WHPX: No\|could not initialize\|not supported" "$qlog"; then
     echo "WHPX is not on: $(head -1 "$qlog")"; return 77
   fi
-  if grep -q "No bootable device" "$log" 2>/dev/null; then
-    echo "SeaBIOS under WHPX reached the end of its boot order"; return 0
+  if [ "${n:-0}" -ge 2 ] && ! grep -q "Unexpected VP exit" "$qlog"; then
+    echo "SeaBIOS under WHPX reached the end of its boot order, and again after a reset"; return 0
   fi
-  echo "SeaBIOS under WHPX never reached the end of its boot order"
+  if [ "${n:-0}" = 1 ]; then
+    echo "SeaBIOS under WHPX did not come back after a reset"
+  else
+    echo "SeaBIOS under WHPX never reached the end of its boot order"
+  fi
   tail -5 "$qlog"; tail -3 "$log" 2>/dev/null
   return 1
 }
@@ -2789,11 +2799,6 @@ guest_stage() {
   # prompt. Skips itself without the Arm64 ISO or off Apple Silicon.
   # Before the XP half's Linux/Windows return: both checks are the Mac's.
   run_check win11-boot-prompt win11-boot-prompt.log tools/win11-boot-prompt-test.sh || true
-  # A machine run with -no-reboot starts again cold after a reset (M20
-  # step 5, Windows 11 on a Windows host): the launcher's arguments for
-  # this host, and the x64 player's exit status for Restart and Close.
-  run_check restart-cold restart-cold.log env LAUNCHERX="$LAUNCHERX" QIMG="$QIMG" OUT="$OUT/restart-cold" \
-    tools/restart-cold-test.sh || true
   # Windows 11 on Arm's desktop in whole frames at the guest's pace (M22):
   # no torn frame while a window moves, and the player publishing on the
   # guest's flush (embed v12) rather than the refresh tick. On a copy of
