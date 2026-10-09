@@ -857,7 +857,10 @@ shaderdefaults_check() { # the first-run shader offer and its starter profiles (
   [ "$($LAUNCHERX --default-shader-profile)" = "(none)" ] || { echo "a deleted default profile is still the default"; rc=1; }
   return $rc
 }
-mitsuami_check() { # the launcher's window, driven through its probes (doc 07, track M19)
+# A subshell, not a group, like exec_wine_check: its XDG_RUNTIME_DIR (the
+# private Broadway display) once stayed set, and every winit player after it
+# found no Wayland socket (`NoCompositor`: companions-env, mode-sweep).
+mitsuami_check() ( # the launcher's window, driven through its probes (doc 07, track M19)
   local rc=0 dir="$OUT/mitsuami" bin="$LAUNCHER_BIN" o broadway=""
   rm -rf "$dir"; mkdir -p "$dir/library" "$dir/profiles" "$dir/empty"
   export LAUNCHER_LIBRARY_DIR="$dir/library" LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
@@ -900,7 +903,7 @@ mitsuami_check() { # the launcher's window, driven through its probes (doc 07, t
 
   if [ -n "$broadway" ]; then kill "$broadway" 2>/dev/null; wait "$broadway" 2>/dev/null; fi
   return $rc
-}
+)
 
 dirshelf_check() { # a shared folder as a disc, from the shelf to a real QEMU (M5g)
   local rc=0 dir="$OUT/dirshelf" bundle args o spaced comma plain shelf_file

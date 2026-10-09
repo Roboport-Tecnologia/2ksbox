@@ -58,6 +58,11 @@ A check that reads a file its program writes deletes the old one first,
 or a crash passes on the last run's file (`d3dgame9-nat` did, until
 2026-10-04).
 
+`run_check` calls a check in the suite's own shell, so a check that
+exports anything is a subshell function (`name() ( ... )`): an exported
+`XDG_RUNTIME_DIR` or executor library otherwise reaches every check after
+it (`exec_wine_check`, `mitsuami_check`).
+
 ### On Windows
 
 Everything Windows is done natively on Windows (user decision,

@@ -171,7 +171,9 @@ live in its track doc; fixed things leave this list.
   `pit-guest` (the 15.6 ms-wait cases run the guest clock at 13 %, the
   same on a QEMU built without patch 56) and `exec-no-device`. (`package`
   failed there too, on `build/` being a symlink, until `package-linux.sh`
-  took its stage's real path on 2026-10-04.) The Mac's host stage is green.
+  took its stage's real path on 2026-10-04; `companions-env` and
+  `mode-sweep` on `NoCompositor`, until `mitsuami_check` stopped leaking its
+  Broadway `XDG_RUNTIME_DIR` on 2026-10-09.) The Mac's host stage is green.
 
 - **The zero-copy ring's frozen slot has no known cause.** `zc_probe()`
   repairs it; doc 12 §4 has what was ruled out and the suspects left.
