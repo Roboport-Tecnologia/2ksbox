@@ -420,14 +420,15 @@ if want wddm; then
     done
   fi
   if [ -z "$ewdk" ] && [ -z "$PUBLISH" ] && scripts/windows-drivers.sh fetch wddm; then
-    echo "    no EWDK mounted; the published driver for these sources is in build/wddm/x86"
+    echo "    no EWDK mounted; the published driver for these sources is in build/wddm"
   elif [ -z "$ewdk" ]; then
     skip wddm "no EWDK 10.0.19041 mounted (mount it, or EWDK_ISO=<iso>; docs/build-windows.md \"The WDDM driver\")" || true
   else
     say "wddm: d3dptkmd.sys + d3dptumd.dll (MSVC, the EWDK)"
     cmd //c "$(cygpath -w guest-tools/build-wddm.cmd)"
     # the sources it was built from, which a publish checks
-    scripts/windows-drivers.sh key wddm > build/wddm/x86/.key
+    scripts/windows-drivers.sh key wddm > build/wddm/.key
+    rm -f build/wddm/x86/.key   # where it was before the x64 pair joined it
     BUILT+=(wddm)
     if [ -n "$PUBLISH" ]; then
       say "wddm: publish for Linux and macOS (scripts/windows-drivers.sh)"

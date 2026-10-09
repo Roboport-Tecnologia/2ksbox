@@ -5,10 +5,10 @@
 # fetch the one that matches their checkout. A source change is a new
 # name, so a fetch never gets a driver older than its checkout.
 #
-#   wddm      the Windows 7 WDDM display driver (track M18): d3dptkmd.sys,
-#             d3dptumd.dll, d3dptkmd.inf in build/wddm/x86, which the
-#             guest-tools ISO carries in WDDM\. Built by build-windows.sh's
-#             wddm stage (the EWDK 10.0.19041).
+#   wddm      the WDDM display driver: Windows 7's (track M18) in
+#             build/wddm/x86 and 64-bit Windows 11's (track M20) in
+#             build/wddm/x64, which the guest-tools ISO carries in WDDM#             and WDDM64\. Built by build-windows.sh's wddm stage (the
+#             EWDK 10.0.19041).
 #   viogpudo  our viogpudo for Windows 11 (track M24): ARM64 and x64
 #             viogpudo.{sys,inf} with the resolution service (vgpusrv,
 #             viogpuap) and viogpudo-install.ps1 in build/viogpudo, for
@@ -49,12 +49,18 @@ setup() {
   case "$1" in
     wddm)
       NAME="the WDDM driver"
-      OUT=build/wddm/x86
-      FILES=(d3dptkmd.sys d3dptumd.dll d3dptkmd.inf)
+      OUT=build/wddm
+      # Windows 7's pair, and 64-bit Windows 11's (track M20) with the
+      # 32-bit user-mode driver for WoW64; the ISO's WDDM64\ takes its
+      # .inf and installer from the source tree
+      FILES=(x86/d3dptkmd.sys x86/d3dptumd.dll x86/d3dptkmd.inf
+             x64/d3dptkmd.sys x64/d3dptumd.dll x64/d3dptumd32.dll)
       SOURCES=(guest-tools/src/d3dptvid/wddm guest-tools/src/d3dptvid/core
                d3dpt/d3dpt_fb.h d3dpt/d3dpt_enc.h d3dpt/d3dpt_proto.h
                guest-tools/build-wddm.cmd)
-      OLD_TAG=wddm-prebuilt
+      # (wddm-prebuilt, the release before this script, has the x86 files
+      # alone, flat: not a fallback for this layout)
+      OLD_TAG=
       BUILD=(scripts/build-windows.sh wddm) ;;
     viogpudo)
       NAME="our viogpudo"

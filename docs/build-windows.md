@@ -752,8 +752,10 @@ from. `publish` refuses sources with uncommitted changes, so a name
 always means committed sources, and builds a driver whose `.key` is not
 the checkout's (`build-windows.sh wddm`, `build-viogpudo.sh build`)
 before uploading it. `fetch` downloads the asset for its own hash (and
-removes one fetched for other sources); the WDDM driver is also looked
-for in the older `wddm-prebuilt` release. `WINDOWS_DRIVERS_PREBUILT=0`
+removes one fetched for other sources). The `wddm` asset holds both
+pairs, `x86/` (Windows 7) and `x64/` (Windows 11, track M20, with
+`d3dptumd32.dll`); the older `wddm-prebuilt` release, the x86 files alone,
+is no longer read. `WINDOWS_DRIVERS_PREBUILT=0`
 (or the old `WDDM_PREBUILT=0`) never fetches, and
 `WINDOWS_DRIVERS_REPO=owner/name` uses another repository.
 
@@ -772,7 +774,7 @@ guest-tools ISO, in `WDDM\`.
 2026-10-09 `wddm-prebuilt.sh`). The hash covers
 `guest-tools/src/d3dptvid/wddm/`, the shared `core/`, `d3dpt_fb.h`,
 `d3dpt_enc.h`, `d3dpt_proto.h` and `build-wddm.cmd` (`windows-drivers.sh
-key wddm`); the `wddm` stage writes it to `build/wddm/x86/.key`, and
+key wddm`); the `wddm` stage writes it to `build/wddm/.key`, and
 `build-windows.sh wddm --publish` uploads the build. `scripts/build.sh`'s
 `guest` stage on Linux or a Mac fetches first, so the ISO's stamp sees
 the driver. Nothing published for the hash means an ISO with no `WDDM\`

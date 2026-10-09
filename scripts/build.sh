@@ -574,7 +574,7 @@ GUEST_STALE=""
 if want guest; then
   # The Windows 7 WDDM driver builds only on Windows; the PC publishes it
   # by a hash of its sources, and the one for this checkout is fetched
-  # into build/wddm/x86 before the stamp reads it. Nothing published
+  # into build/wddm (x86, x64) before the stamp reads it. Nothing published
   # means an ISO without WDDM\, as before (WINDOWS_DRIVERS_PREBUILT=0
   # never asks). Our viogpudo (M24) comes along for Windows 11 tests.
   scripts/windows-drivers.sh fetch || true
