@@ -33,6 +33,19 @@ installed before the change, Windows finds the driver on the next start.
 If not, switch back, run `SETUP /ALL` from the guest tools disc, and
 switch again.
 
+## Windows 98 stays at 640×480 with 16 colours after installing the driver
+
+Windows 98 sometimes keeps its old standard VGA driver after SETUP. Make
+it look for the adapter again:
+
+1. Right-click *My Computer* on the desktop and choose *Properties*.
+2. Open the *Device Manager* tab.
+3. Expand *Display adapters* and select the adapter.
+4. Click *Remove*, then restart the machine.
+
+When Windows starts again, it finds the adapter and sets up the 2ksbox
+driver by itself.
+
 ## A game
 
 - **It seems frozen.** It's usually a message box hidden behind the
