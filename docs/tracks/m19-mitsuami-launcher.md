@@ -358,7 +358,10 @@ macOS and KDE (user, 2026-10-01; 1060, 920 and 820 wide before). The debug verbs
    the default, Cancel kept the file, Delete removed it; New and a clear
    icon, tooltip "No default", in the window's toolbar (user); the
    preset collection's download
-   row) and the editor
+   row; since 2026-10-09, user, the table is the window's top edge to
+   edge, `ListStyle::Plain`, scrolling under the macOS glass bar as the
+   snapshots table does, and the download row an inset footer under it
+   only while the presets aren't ready) and the editor
    (name, preset, the parameters as box + slider + description, the
    preview image). The preview is the core's render path
    (`launcher_core::preview`) and its frame goes into an `Image` as

@@ -248,6 +248,10 @@ fn PresetCollection() -> impl View {
 pub fn ShaderProfilesWindow() -> impl View {
     let shaders = use_store::<Shaders>();
     let library = use_store::<Library>();
+    // The table is the content's top, edge to edge, so on macOS it scrolls
+    // under the glass title bar and toolbar as Finder's does; the presets'
+    // note goes under it, inset, while there is one (user).
+    let presets_note = move || !matches!(shaders.preset_state(), PresetState::Ready(_));
     view! {
         <Window
             title="Shader profiles"
@@ -257,7 +261,7 @@ pub fn ShaderProfilesWindow() -> impl View {
             open=shaders.open
             @close_request=move || shaders.close_list(library)
         >
-            <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
+            <Column grow=1.0 min_height=0>
                 {crate::shot::arm(&["profiles", "saveprofile"])}
                 <Toolbar>
                     <Button icon=crate::machines::icons::NEW @click=move || shaders.open_editor(Editor::new_profile)>
@@ -284,7 +288,11 @@ pub fn ShaderProfilesWindow() -> impl View {
                         <Text>"No shader profiles yet."</Text>
                     </Column>
                 </Show>
-                <PresetCollection/>
+                <Show when=presets_note>
+                    <Column padding=Spacing::Lg shrink=0.0>
+                        <PresetCollection/>
+                    </Column>
+                </Show>
             </Column>
         </Window>
     }
@@ -395,7 +403,7 @@ fn ProfileTable() -> impl View {
             each=move || shaders.profiles.with(|p| p.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
             key=|p: &PathBuf| p.clone()
             columns=columns
-            list_style=ListStyle::Framed
+            list_style=ListStyle::Plain
             @activate=move |path: PathBuf| shaders.open_editor(|e| e.edit_path(path))
             grow=1.0
             min_height=0
