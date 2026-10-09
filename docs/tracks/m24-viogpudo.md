@@ -324,7 +324,12 @@ driver.
    with several none (the guest keeps its timer) unless
    `PLAYER_HOST_SCREEN` names the connector (`DP-1`, as the compositor
    and `/sys/class/drm` name it). A screen with variable refresh on
-   blanks at the compositor's pace, not the mode's.
+   blanks at the compositor's pace, not the mode's. On the user's
+   `win11` machine (a copy in `build/w11m`: an overlay of its disk and
+   copies of its firmware variables and TPM state, under KVM in
+   `player-mitsuami`), with our viogpudo installed by
+   `viogpudo-install.ps1` and the agent updated by the drivers disc's
+   `2ksbox\install.cmd`: the user, "it's very smooth" (2026-10-09).
 
    **The stall was lost interrupts: QEMU patch 91 (2026-10-09).** Once
    the guest froze (this time after the user had logged in: "it even
