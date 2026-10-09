@@ -334,9 +334,11 @@ driver.
    sway with a headless second output (`swaymsg create_output`): the
    player logged `the window is on DP-1`, then on the window's move
    `the window is on HEADLESS-3` and `host screen's rate unknown` (no
-   CRTC drives a headless output, so the guest keeps its timer). A
-   screen powered off by the compositor's idle has no lit CRTC either
-   (`WAIT_VBLANK` refuses): the guest keeps its timer until it wakes. A
+   CRTC drives a headless output, so the guest keeps its timer), and
+   back on DP-1 `the window is on DP-1` and `host screen at 59.996 Hz`
+   again. A screen powered off by the compositor's idle has no lit CRTC
+   either (`WAIT_VBLANK` refuses): the guest keeps its timer, and the
+   player took DP-1's blank up again when the user's screen woke. A
    screen with variable refresh on blanks at the compositor's pace, not
    the mode's. On the user's
    `win11` machine (a copy in `build/w11m`: an overlay of its disk and
@@ -378,10 +380,10 @@ Windows 11 test here.
 
 ## Open
 
-- Linux with several screens: the window's move back from the headless
-  output to DP-1 is not seen yet (the user's screen went to sleep
-  mid-test), nor two real screens, nor X11's RandR path. A window that
-  never draws again after a move is placed only at its next frame.
+- Linux with several screens: tried with a headless output beside the
+  one screen, not with two real ones, and X11's RandR path not at all.
+  A window that never draws again after a move is placed only at its
+  next frame.
 - Windows 11 on Arm: the driver's timer bunching on a coarse tick under
   HVF (only the watchdog now, patch 91 above), and Basic Display on
   ramfb drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").
