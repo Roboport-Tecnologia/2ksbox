@@ -61,7 +61,15 @@ fi
 # from guest-agent/ for x64 (Windows 11 on Arm runs it under emulation;
 # rustup's x86_64-pc-windows-gnu and mingw-w64 build it).
 AGENT=guest-agent/target/x86_64-pc-windows-gnu/release/2ksbox-agent.exe
-STAMP=$( { echo "$VERSION $SHA256"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.*; } \
+# viogpudo's resolution helpers (vgpusrv, viogpuap) are ours, from our
+# viogpudo's build (track M24, patch 03: upstream's viogpuap stops at the
+# first display device that is not virtio-gpu's, the standard VGA or ramfb
+# here, so the desktop never followed the window). The PC builds them; any
+# host fetches its build for these sources; without one the disc keeps
+# upstream's.
+scripts/windows-drivers.sh fetch viogpudo >/dev/null 2>&1 || true
+STAMP=$( { echo "$VERSION $SHA256"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.*
+           cat build/viogpudo/{arm64,x64}/{vgpusrv,viogpuap}.exe 2>/dev/null; } \
   | shasum -a 256 | cut -c1-16)
 
 TODO=()
@@ -128,7 +136,14 @@ disc() {
       [ -f "$tree/\$WinPEDriver\$/$f.$ext" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir $f.$ext" >&2; exit 1; }
     done
   done
-  # viogpudo's resolution service, which 2ksbox\install.ps1 installs (M24)
+  # viogpudo's resolution service, which 2ksbox\install.ps1 installs (M24):
+  # ours, with patch 03, over upstream's
+  if [ -f "build/viogpudo/$arch/viogpuap.exe" ] && [ -f "build/viogpudo/$arch/vgpusrv.exe" ]; then
+    cp "build/viogpudo/$arch/vgpusrv.exe" "build/viogpudo/$arch/viogpuap.exe" "$tree/\$WinPEDriver\$/viogpudo/"
+    echo "    viogpudo's resolution helpers: ours (build/viogpudo/$arch)"
+  else
+    echo "note: no viogpudo build of ours for $arch (scripts/windows-drivers.sh fetch viogpudo): upstream's resolution helpers, and a desktop that takes the window's size only at boot" >&2
+  fi
   for f in vgpusrv viogpuap; do
     [ -f "$tree/\$WinPEDriver\$/viogpudo/$f.exe" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir viogpudo/$f.exe" >&2; exit 1; }
   done

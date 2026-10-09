@@ -64,6 +64,10 @@ struct Player {
     /// When the surface first had a real size: the sizes of the next
     /// moments are the platform's opening, not the user's.
     opened_at: Option<std::time::Instant>,
+    /// The surface, for the refresh rate of the screen it is on
+    /// (`tell_refresh`), and the guest's rate last told (mHz).
+    surface: Option<SurfaceHandle>,
+    guest_mhz: u32,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -137,6 +141,8 @@ fn main() {
             window: None,
             remembered: None,
             opened_at: None,
+            surface: None,
+            guest_mhz: 0,
         })
     });
     // The launcher's identity: a compositor matches the player's window to
@@ -272,7 +278,18 @@ fn content(w: Window_) -> impl View {
             session.tell_window_size(&gpu, (size.width, size.height), p.scale as f64);
             p.session = Some(session);
             p.gpu = Some(gpu);
+            p.surface = Some(handle.clone());
+            tell_refresh(p);
             (animates, offscreen)
+        });
+        // The screen's rate again every two seconds: a window dragged to
+        // another screen is not resized
+        let checker = ui.clone();
+        ui.spawn_local(async move {
+            loop {
+                checker.sleep(Duration::from_secs(2)).await;
+                with(tell_refresh);
+            }
         });
         // The test pattern at 60 Hz; the sweep and the calibration as fast
         // as they go (each step exits the process when it is done).
@@ -306,6 +323,7 @@ fn content(w: Window_) -> impl View {
                 gpu.resize(size.width, size.height);
                 session.tell_window_size(gpu, (size.width, size.height), p.scale as f64);
             }
+            tell_refresh(p);
         });
         // at the new size at once, never the old frame stretched
         draw(w);
@@ -614,6 +632,23 @@ fn draw(w: Window_) {
             MinSize::Physical(width, height) => Size::new(width as f32 / scale, height as f32 / scale),
         };
         w.min.set(size);
+    }
+}
+
+/// The refresh rate of the screen the window is on, as the guest's
+/// vertical blank should keep it (track M24, `player_core::screen`): told
+/// to QEMU, and logged, when it changes.
+fn tell_refresh(p: &mut Player) {
+    let (Some(surface), Some(session)) = (p.surface.as_ref(), p.session.as_ref()) else { return };
+    let host = player_core::screen::refresh_mhz(surface);
+    if player_core::screen::guest_refresh_mhz(host) == p.guest_mhz {
+        return;
+    }
+    p.guest_mhz = session.tell_screen_refresh(host);
+    let hz = |m: u32| format!("{}.{:03}", m / 1000, m % 1000);
+    match host {
+        Some(h) => eprintln!("[display] host screen at {} Hz: the guest's blank at {} Hz", hz(h), hz(p.guest_mhz)),
+        None => eprintln!("[display] host screen's rate unknown: the guest's blank at {} Hz", hz(p.guest_mhz)),
     }
 }
 

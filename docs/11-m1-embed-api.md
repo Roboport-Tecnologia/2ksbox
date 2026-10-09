@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v14** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v15** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references were taken
@@ -57,6 +57,7 @@ not block. Everything else may come from any thread.
 | 12 | `on_flush`: the updates just delivered were pushed by the device outside a refresh tick (virtio-gpu's `RESOURCE_FLUSH`, the Voodoo 2's end of frame) and complete a frame (M22, below) |
 | 13 | `stopped_by_reset`: whether a reset under `-no-reboot` ended the loop, for the player's cold restart of a Windows 11 machine on a Windows host (M20 step 5) |
 | 14 | `stopped_by_reset` gone again: QEMU patch 87 made the reset itself work under WHPX, so nothing runs with `-no-reboot` |
+| 15 | `set_refresh_rate`: the guest screen's refresh rate in mHz, carried with v9's size into the EDID (M24, below) |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -91,8 +92,18 @@ Windows has no zero-copy slot; its 3D frames arrive through
   a console switch. Only an adapter with a `ui_info` hook hears it
   (virtio-gpu); `qemu_embed_display_follows_window` says whether the one
   on show does, and the player then lets the window go below the guest's
-  mode. What the guest makes of it is its driver's: Windows 11 on Arm's
-  viogpudo takes it when it starts, not live (track M20).
+  mode. What the guest makes of it is its driver's: viogpudo takes it
+  live once its resolution service runs in the guest (`vgpusrv`, which
+  the drivers disc's `2ksbox\install.ps1` installs since M24), and only
+  when it starts without it.
+- **The refresh rate** (v15, track M24). `qemu_embed_set_refresh_rate(mhz)`
+  rides in the same `QemuUIInfo` (`refresh_rate`), which virtio-gpu
+  writes into the EDID's preferred timing (75 Hz when none is given) and
+  announces with a display event. The player sends the rate that divides
+  its window's screen's refresh under 90 Hz (`player_core::screen`: 144
+  -> 72, 120 -> 60; 60 when the screen's rate is unknown, which is so on
+  macOS and Linux for now), and our viogpudo (patch 02) paces its
+  vertical blank at the EDID's rate.
   `dpy_gfx_check_format` accepts only `x8r8g8b8`, so QEMU shadows
   8/15/16/24 bpp into 32 bpp; 32 bpp modes are zero-copy (the surface
   points into VRAM, `hw/display/vga.c:1637`). All callbacks fire on the

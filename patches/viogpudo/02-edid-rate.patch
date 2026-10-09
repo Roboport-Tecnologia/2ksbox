@@ -1,0 +1,248 @@
+viogpudo: the vertical blank at the EDID's rate.
+
+On top of 01-vsync.  With no VSyncHz in the registry the blank's rate is
+the device's EDID's: its preferred timing (the first detailed timing
+descriptor, the pixel clock over the total size), which 2ksbox's player
+sets to a rate dividing the host screen's (embed API v15; 72 Hz on a
+144 Hz screen, 60 on a 60 or 120 Hz one).  It is read when the device
+starts and again on each display event, whose EDID the driver now fetches
+for it; a new rate restarts the timer's schedule at the next blank, and
+the modes report it as mHz over 1000.  60 Hz when the device gives no
+EDID.  VSyncHz in the registry still sets the rate (0: upstream's
+behaviour).  (QEMU's EDID says 75 Hz when no front end gives a rate.)
+
+diff --git a/viogpu/viogpudo/driver.cpp b/viogpu/viogpudo/driver.cpp
+index 1f2c940..58fd8c4 100644
+--- a/viogpu/viogpudo/driver.cpp
++++ b/viogpu/viogpudo/driver.cpp
+@@ -47,9 +47,12 @@ int bBreakAlways;
+ tDebugPrintFunc VirtioDebugPrintProc;
+ 
+ // The vertical blank's rate (2ksbox): VSyncHz under the service's
+-// Parameters key, 60 if absent, 0 for upstream's behaviour (no vertical
+-// blank of ours; dxgkrnl simulates one and the modes carry no rate).
++// Parameters key, 0 for upstream's behaviour (no vertical blank of ours;
++// dxgkrnl simulates one and the modes carry no rate). Absent, the rate is
++// the device's EDID's (its preferred timing, which 2ksbox's player sets to
++// divide the host screen's refresh), 60 when the device gives none.
+ ULONG g_VSyncHz = VIOGPU_VSYNC_DEFAULT_HZ;
++BOOLEAN g_VSyncHzSet = FALSE;
+ 
+ static VOID ReadVSyncHz(_In_ UNICODE_STRING *pRegistryPath)
+ {
+@@ -61,7 +64,8 @@ static VOID ReadVSyncHz(_In_ UNICODE_STRING *pRegistryPath)
+     RtlCopyMemory(Path, pRegistryPath->Buffer, pRegistryPath->Length);
+     Path[pRegistryPath->Length / sizeof(WCHAR)] = L'\0';
+ 
+-    ULONG Hz = g_VSyncHz;
++    // a value no DWORD in the key leaves in place: absent
++    ULONG Hz = MAXULONG;
+     RTL_QUERY_REGISTRY_TABLE Table[3] = {};
+     Table[0].Flags = RTL_QUERY_REGISTRY_SUBKEY;
+     Table[0].Name = (PWSTR)L"Parameters";
+@@ -69,9 +73,10 @@ static VOID ReadVSyncHz(_In_ UNICODE_STRING *pRegistryPath)
+     Table[1].Name = (PWSTR)L"VSyncHz";
+     Table[1].EntryContext = &Hz;
+     Table[1].DefaultType = (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_NONE;
+-    if (NT_SUCCESS(RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE, Path, Table, NULL, NULL)))
++    if (NT_SUCCESS(RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE, Path, Table, NULL, NULL)) && Hz != MAXULONG)
+     {
+         g_VSyncHz = min(Hz, VIOGPU_VSYNC_MAX_HZ);
++        g_VSyncHzSet = TRUE;
+     }
+ }
+ 
+diff --git a/viogpu/viogpudo/viogpudo.cpp b/viogpu/viogpudo/viogpudo.cpp
+index 4b2404b..e62406f 100644
+--- a/viogpu/viogpudo/viogpudo.cpp
++++ b/viogpu/viogpudo/viogpudo.cpp
+@@ -64,6 +64,8 @@ VioGpuDod::VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject)
+     m_QpcFrequency = 0;
+     m_VSyncBaseQpc = 0;
+     m_VSyncCount = 0;
++    m_VSyncMhz = 0;
++    m_VSyncRebase = 0;
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+ }
+ 
+@@ -906,6 +908,8 @@ VOID VioGpuDod::StartVSync(VOID)
+     LARGE_INTEGER Frequency;
+     KeQueryPerformanceCounter(&Frequency);
+     m_QpcFrequency = Frequency.QuadPart;
++    // VSyncHz, or the EDID's rate (patch 02), or 60
++    SetVSyncMhz(g_VSyncHzSet ? g_VSyncHz * 1000 : (m_pHWDevice ? m_pHWDevice->EdidRefreshMhz() : 0));
+     m_VSyncTimer = ExAllocateTimer(VSyncTimerCallback, this, EX_TIMER_HIGH_RESOLUTION);
+     m_VSyncKeeper = ExAllocateTimer(NULL, NULL, EX_TIMER_HIGH_RESOLUTION);
+     if (!m_VSyncTimer || !m_VSyncKeeper)
+@@ -933,6 +937,22 @@ VOID VioGpuDod::StopVSync(VOID)
+     }
+ }
+ 
++VOID VioGpuDod::SetVSyncMhz(ULONG Mhz)
++{
++    PAGED_CODE();
++
++    if (Mhz == 0)
++    {
++        Mhz = VIOGPU_VSYNC_DEFAULT_HZ * 1000;
++    }
++    Mhz = max(1000ul, min(Mhz, VIOGPU_VSYNC_MAX_HZ * 1000ul));
++    if ((ULONG)InterlockedExchange(&m_VSyncMhz, (LONG)Mhz) != Mhz)
++    {
++        DbgPrint(TRACE_LEVEL_FATAL, ("%s: %lu mHz\n", __FUNCTION__, Mhz));
++        InterlockedExchange(&m_VSyncRebase, 1);
++    }
++}
++
+ VOID VioGpuDod::BuildVideoSignalInfo(D3DKMDT_VIDEO_SIGNAL_INFO *pVideoSignalInfo, PVIDEO_MODE_INFORMATION pModeInfo)
+ {
+     PAGED_CODE();
+@@ -949,19 +969,20 @@ VOID VioGpuDod::BuildVideoSignalInfo(D3DKMDT_VIDEO_SIGNAL_INFO *pVideoSignalInfo
+     pVideoSignalInfo->ScanLineOrdering = D3DDDI_VSSLO_PROGRESSIVE;
+ 
+     // With a vertical blank of our own every rate must be given: a frame
+-    // of VSYNC_TOTAL lines (a 1/20 blank) at g_VSyncHz. The active size is
++    // of VSYNC_TOTAL lines (a 1/20 blank) at m_VSyncMhz. The active size is
+     // set here too (upstream copies the total before it is filled in).
+-    if (g_VSyncHz)
++    ULONG Mhz = (ULONG)m_VSyncMhz;
++    if (g_VSyncHz && Mhz)
+     {
+         pVideoSignalInfo->ActiveSize.cx = pModeInfo->VisScreenWidth;
+         pVideoSignalInfo->ActiveSize.cy = pModeInfo->VisScreenHeight;
+         pVideoSignalInfo->TotalSize.cy = VSYNC_TOTAL(pModeInfo->VisScreenHeight);
+-        pVideoSignalInfo->VSyncFreq.Numerator = g_VSyncHz;
+-        pVideoSignalInfo->VSyncFreq.Denominator = 1;
+-        pVideoSignalInfo->HSyncFreq.Numerator = g_VSyncHz * (UINT)pVideoSignalInfo->TotalSize.cy;
+-        pVideoSignalInfo->HSyncFreq.Denominator = 1;
+-        pVideoSignalInfo->PixelRate = (SIZE_T)g_VSyncHz * (UINT)pVideoSignalInfo->TotalSize.cx *
+-                                      (UINT)pVideoSignalInfo->TotalSize.cy;
++        pVideoSignalInfo->VSyncFreq.Numerator = Mhz;
++        pVideoSignalInfo->VSyncFreq.Denominator = 1000;
++        pVideoSignalInfo->HSyncFreq.Numerator = Mhz * (UINT)pVideoSignalInfo->TotalSize.cy;
++        pVideoSignalInfo->HSyncFreq.Denominator = 1000;
++        pVideoSignalInfo->PixelRate = (SIZE_T)((ULONGLONG)Mhz * (UINT)pVideoSignalInfo->TotalSize.cx *
++                                               (UINT)pVideoSignalInfo->TotalSize.cy / 1000);
+     }
+ }
+ 
+@@ -2016,7 +2037,7 @@ NTSTATUS VioGpuDod::GetScanLine(_Inout_ DXGKARG_GETSCANLINE *pGetScanLine)
+ {
+     UINT Height = m_CurrentMode.DispInfo.Height;
+     UINT Total = VSYNC_TOTAL(Height);
+-    LONGLONG Period = m_QpcFrequency / max(1ul, g_VSyncHz);
++    LONGLONG Period = m_QpcFrequency * 1000 / max(1l, (LONG)m_VSyncMhz);
+     LONGLONG Since = KeQueryPerformanceCounter(NULL).QuadPart - InterlockedCompareExchange64(&m_VSyncLastQpc, 0, 0);
+ 
+     if (Period <= 0 || Height == 0)
+@@ -2038,7 +2059,7 @@ NTSTATUS VioGpuDod::GetScanLine(_Inout_ DXGKARG_GETSCANLINE *pGetScanLine)
+ 
+ LONGLONG VioGpuDod::VSyncDue(ULONGLONG n) const
+ {
+-    return m_VSyncBaseQpc + (LONGLONG)(n * (ULONGLONG)m_QpcFrequency / max(1ul, g_VSyncHz));
++    return m_VSyncBaseQpc + (LONGLONG)(n * (ULONGLONG)m_QpcFrequency * 1000 / max(1ul, (ULONG)m_VSyncMhz));
+ }
+ 
+ // The timer, once, at the next blank on the schedule.
+@@ -2059,6 +2080,12 @@ VOID VioGpuDod::VSyncTimerCallback(_In_ PEX_TIMER Timer, _In_opt_ PVOID Context)
+         return;
+     }
+     LONGLONG Now = KeQueryPerformanceCounter(NULL).QuadPart;
++    // a new rate: the schedule starts again here
++    if (InterlockedExchange(&pVioGpuDod->m_VSyncRebase, 0))
++    {
++        pVioGpuDod->m_VSyncBaseQpc = Now;
++        pVioGpuDod->m_VSyncCount = 0;
++    }
+     // the blank that was due; a timer that fired more than a period late
+     // skips the ones it missed rather than raising them back to back
+     LONGLONG Due = pVioGpuDod->VSyncDue(pVioGpuDod->m_VSyncCount + 1);
+@@ -2703,6 +2730,28 @@ PBYTE VioGpuAdapter::GetEdidData()
+     return m_bEDID ? m_EDIDs : (PBYTE)(g_gpu_edid);
+ }
+ 
++// The refresh rate of the EDID's preferred timing (its first detailed
++// timing descriptor, at byte 54: the pixel clock in 10 kHz units over the
++// total size), in mHz; 0 with no EDID from the device or no timing.
++ULONG VioGpuAdapter::EdidRefreshMhz(void)
++{
++    PAGED_CODE();
++
++    if (!m_bEDID)
++    {
++        return 0;
++    }
++    PUCHAR d = m_EDIDs + 54;
++    ULONGLONG Clock = (ULONGLONG)(d[0] | (d[1] << 8)) * 10000;
++    ULONG HTotal = (d[2] | ((d[4] & 0xF0) << 4)) + (d[3] | ((d[4] & 0x0F) << 8));
++    ULONG VTotal = (d[5] | ((d[7] & 0xF0) << 4)) + (d[6] | ((d[7] & 0x0F) << 8));
++    if (!Clock || !HTotal || !VTotal)
++    {
++        return 0;
++    }
++    return (ULONG)(Clock * 1000 / ((ULONGLONG)HTotal * VTotal));
++}
++
+ PBYTE VioGpuAdapter::GetCTA861Data(void)
+ {
+     PAGED_CODE();
+@@ -3942,6 +3991,13 @@ void VioGpuAdapter::ConfigChanged(void)
+     if (events_read & VIRTIO_GPU_EVENT_DISPLAY)
+     {
+         GetDisplayInfo();
++        // the device's EDID again (patch 02): its preferred timing carries
++        // the rate the host wants the vertical blank at
++        if (m_bEDID && !g_VSyncHzSet && g_VSyncHz)
++        {
++            GetEdids();
++            m_pVioGpuDod->SetVSyncMhz(EdidRefreshMhz());
++        }
+         events_clear |= VIRTIO_GPU_EVENT_DISPLAY;
+         virtio_set_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_clear), &events_clear, sizeof(m_u32NumScanouts));
+         //        UpdateChildStatus(FALSE);
+diff --git a/viogpu/viogpudo/viogpudo.h b/viogpu/viogpudo/viogpudo.h
+index c4701c4..ec73f64 100644
+--- a/viogpu/viogpudo/viogpudo.h
++++ b/viogpu/viogpudo/viogpudo.h
+@@ -40,6 +40,8 @@
+ #define VIOGPU_VSYNC_DEFAULT_HZ 60
+ #define VIOGPU_VSYNC_MAX_HZ     240
+ extern ULONG g_VSyncHz;
++// VSyncHz is in the registry: its rate, not the EDID's
++extern BOOLEAN g_VSyncHzSet;
+ 
+ #pragma pack(push)
+ #pragma pack(1)
+@@ -160,6 +162,7 @@ class VioGpuAdapter : IVioGpuPCI
+     }
+     PBYTE GetEdidData(void);
+     PBYTE GetCTA861Data(void);
++    ULONG EdidRefreshMhz(void);
+ 
+   protected:
+   private:
+@@ -253,9 +256,14 @@ class VioGpuDod
+     volatile LONG64 m_VSyncLastQpc;
+     LONGLONG m_QpcFrequency;
+     // the blanks' schedule, on the QPC: blank n is due at
+-    // m_VSyncBaseQpc + n * m_QpcFrequency / g_VSyncHz (the timer callback's)
++    // m_VSyncBaseQpc + n * m_QpcFrequency * 1000 / m_VSyncMhz (the timer
++    // callback's)
+     LONGLONG m_VSyncBaseQpc;
+     ULONGLONG m_VSyncCount;
++    // the blank's rate in mHz (VSyncHz, or the EDID's), and a new one to
++    // start the schedule from at the next blank
++    volatile LONG m_VSyncMhz;
++    volatile LONG m_VSyncRebase;
+ 
+   public:
+     VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject);
+@@ -318,6 +326,8 @@ class VioGpuDod
+     {
+         m_PersistentDispMode0Width = res;
+     }
++    // the vertical blank at this rate (mHz), from the next blank on
++    VOID SetVSyncMhz(ULONG Mhz);
+     USHORT GetPersistentDispMode0Width()
+     {
+         return m_PersistentDispMode0Width;

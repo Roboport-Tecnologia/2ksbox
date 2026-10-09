@@ -75,6 +75,7 @@ struct qemu_embed {
     bool follow_pending;    /* bh_follow_console scheduled */
     bool in_refresh;        /* inside embed_dpy_refresh: updates are the tick's */
     uint32_t win_w, win_h, win_dpi;     /* qemu_embed_set_window_size, 0 = none */
+    uint32_t refresh_mhz;   /* qemu_embed_set_refresh_rate, 0 = none */
     bool win_seen;          /* the console was told a size at least once */
 
     QemuMutex in_lock;
@@ -266,6 +267,7 @@ static void embed_tell_window_size(qemu_embed_t *e, bool delay)
         info.width_mm = (uint16_t)MIN(w * 254u / (dpi * 10u), UINT16_MAX);
         info.height_mm = (uint16_t)MIN(h * 254u / (dpi * 10u), UINT16_MAX);
     }
+    info.refresh_rate = qatomic_read(&e->refresh_mhz);
     qemu_console_set_ui_info(e->con, &info, delay && e->win_seen);
     e->win_seen = true;
 }
@@ -281,6 +283,13 @@ void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w, uint32_t h, uint32_
     qatomic_set(&e->win_h, h);
     qatomic_set(&e->win_dpi, dpi);
     aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_window_size, e);
+}
+
+void qemu_embed_set_refresh_rate(qemu_embed_t *e, uint32_t mhz)
+{
+    if (qatomic_xchg(&e->refresh_mhz, mhz) != mhz) {
+        aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_window_size, e);
+    }
 }
 
 bool qemu_embed_display_follows_window(qemu_embed_t *e)

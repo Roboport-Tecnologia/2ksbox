@@ -150,8 +150,23 @@ driver.
    disc's `2ksbox\install.ps1` now installs it (for upstream's signed
    driver too), `build-virtio-win.sh` checks the two files are there, and
    `build-viogpudo.sh` and `viogpudo-install.ps1` carry and install the
-   ones built with ours. Not yet run in a guest (the user: "don't start
-   any new guests for now").
+   ones built with ours.
+
+   Run on the PC's test machine (2026-10-09, a fresh overlay of
+   `drv.qcow2`, the drivers disc's `2ksbox\install.cmd` as SYSTEM): the
+   service ran, `viogpuap` ran in the console session, and still the
+   desktop stayed at its size while the guest asked QEMU for the new one
+   (`virtio_gpu_cmd_get_display_info` traced). Upstream's `viogpuap`
+   finds virtio-gpu's display devices by walking `EnumDisplayDevices`,
+   and `FindDisplayDevice` returned FALSE at the first device that was
+   not virtio-gpu's, which ended the walk: with the standard VGA (or
+   ramfb) enumerated first it found nothing. **Patch 03** walks every
+   device; with it the desktop followed the window at once (1928x1266,
+   then 1778x1116 with our driver). `build-virtio-win.sh` now puts our
+   `vgpusrv` / `viogpuap` on the drivers disc over upstream's (from
+   `build/viogpudo`, built or fetched by `windows-drivers.sh`; upstream's
+   with a note when there is none), so upstream's signed driver gets the
+   fix too.
 
 4. **The host's own vertical blank (design, 2026-10-09; step 3 helped).**
    Step 3 showed two things a fixed `VSyncHz` cannot give: the rate
@@ -162,7 +177,14 @@ driver.
    host's vertical blank and one lands a refresh late every so often. Two
    phases, each worth having alone:
 
-   **A. The rate follows the screen.** No new device interface: QEMU's
+   **A. The rate follows the screen** (2026-10-09: done on the PC; embed
+   API v15, `player-core/src/screen.rs`, patch 02; the screen's rate is
+   read on Windows only so far, so macOS and Linux send 60 Hz). On the
+   PC's 144 Hz screen the player logs `[display] host screen at 144.000
+   Hz: the guest's blank at 72.000 Hz`, the driver takes 71.999 Hz from
+   the EDID (its pixel clock is in 10 kHz steps), and DWM composes every
+   13.885 to 13.888 ms (three runs of 300 `DwmFlush`es, 5th to 95th
+   percentile 13.46 to 14.33 ms, none doubled), also after a resize. No new device interface: QEMU's
    `QemuUIInfo` already has `refresh_rate` (mHz), and virtio-gpu already
    writes it into the EDID it gives the guest (the preferred timing's
    pixel clock; 75 Hz when unset).
@@ -183,7 +205,9 @@ driver.
      rate is the EDID's preferred timing's (pixel clock over the total
      size), read at start and on each display event; the timer's schedule
      restarts at the new rate, and the modes report it. `VSyncHz` stays
-     the override (and 0 still upstream's behaviour).
+     the override (and 0 still upstream's behaviour);
+     `viogpudo-install.ps1` without `-VSyncHz` now removes the value,
+     so an earlier A/B's does not pin the rate.
 
    **B. The phase follows the screen.** The host's vertical blank raises
    the guest's, so a frame never slides across it:
@@ -244,7 +268,9 @@ Windows 11 test here.
   for setup and recovery (the user: "the virtio guests always need two
   screens"), whose screen Windows makes the primary. The guest agent now
   makes the virtio-gpu's screen the only one once the desktop is up (doc
-  24 §4, job 3); not yet run in a guest.
+  24 §4, job 3): on the test machine it logged `display: the virtio-gpu's
+  screen made the only one (0)` right after the drivers disc's install
+  (upstream's driver), and `already the only one` after a restart.
 - Upstream's `AddSingleTargetMode` copies `TotalSize` into `ActiveSize`
   before `BuildVideoSignalInfo` fills it, so target modes have a zero
   active size; patch 01 sets it in its own mode only.

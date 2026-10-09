@@ -17,8 +17,9 @@
 #   powershell -ep bypass -f D:\viogpudo-install.ps1 [-VSyncHz <n>]    then restart
 #
 # -VSyncHz sets the vertical blank's rate (the service's Parameters key,
-# read when the driver starts; 60 when unset, 0 for upstream's behaviour,
-# the A/B without reinstalling). Upstream's driver comes back with
+# read when the driver starts; 0 for upstream's behaviour, the A/B without
+# reinstalling). Without it the value is removed and the rate is the one
+# the host gives in the device's EDID (patch 02; 60 when it gives none). Upstream's driver comes back with
 # `pnputil /add-driver <drivers disc>:\$WinPEDriver$\viogpudo\viogpudo.inf
 # /install` after `pnputil /delete-driver` of ours.
 #
@@ -88,11 +89,16 @@ if ($had) {
 }
 Write-Host "resolution service: $((Get-Service vgpusrv -ErrorAction SilentlyContinue).Status)"
 
+$key = "HKLM:\SYSTEM\CurrentControlSet\Services\VioGpuDod\Parameters"
 if ($VSyncHz -ge 0) {
-    $key = "HKLM:\SYSTEM\CurrentControlSet\Services\VioGpuDod\Parameters"
     # New-Item -Force would empty a key that exists
     if (-not (Test-Path $key)) { New-Item $key | Out-Null }
     Set-ItemProperty $key -Name VSyncHz -Type DWord -Value $VSyncHz
     Write-Host "VSyncHz = $VSyncHz"
+} else {
+    # none: the rate the host gives in the EDID (patch 02), not an earlier
+    # install's A/B
+    Remove-ItemProperty $key -Name VSyncHz -ErrorAction SilentlyContinue
+    Write-Host "VSyncHz: the EDID's rate"
 }
 Write-Host "viogpudo-install: done; restart Windows (test mode and the driver start then)"

@@ -393,6 +393,17 @@ impl Session {
         vm.set_window_size(size.0, size.1, dpi);
     }
 
+    /// The host screen's refresh rate (mHz, [`crate::screen::refresh_mhz`])
+    /// to the guest, as the rate its vertical blank keeps (v15, track M24):
+    /// [`crate::screen::guest_refresh_mhz`] of it, which this returns.
+    pub fn tell_screen_refresh(&self, host_mhz: Option<u32>) -> u32 {
+        let guest = crate::screen::guest_refresh_mhz(host_mhz);
+        if let Some(vm) = self.vm() {
+            vm.set_refresh_rate(guest);
+        }
+        guest
+    }
+
     /// Pull the plug: QEMU stops at once, and nothing calls the handle
     /// again. The front end then leaves its event loop and calls `join`.
     pub fn shut_down(&mut self) {

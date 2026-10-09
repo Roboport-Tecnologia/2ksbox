@@ -175,6 +175,12 @@ QEMU_EMBED_API bool qemu_embed_setenv(const char *name, const char *value);
  * 0.1.302 on Arm64 takes it only when it starts. Any thread. */
 QEMU_EMBED_API void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w,
                                                uint32_t h, uint32_t dpi);
+/* v15: the guest screen's refresh rate in mHz (track M24), as the
+ * monitor's own: it rides with v9's window size in the console's UI info,
+ * which virtio-gpu writes into the EDID's preferred timing (75 Hz when
+ * none is given) and announces with a display event. Our viogpudo paces
+ * its vertical blank at it. 0 forgets it. Any thread. */
+QEMU_EMBED_API void qemu_embed_set_refresh_rate(qemu_embed_t *e, uint32_t mhz);
 /* v9: whether the console on show takes the window's size, so the window
  * should not be held to the guest's mode. Any thread. */
 QEMU_EMBED_API bool qemu_embed_display_follows_window(qemu_embed_t *e);
@@ -198,7 +204,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 14
+#define QEMU_EMBED_API_VERSION 15
 
 #ifdef __cplusplus
 }

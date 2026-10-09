@@ -23,6 +23,7 @@ pub mod pad;
 pub mod pattern;
 pub mod qemu_vm;
 pub mod qmp;
+pub mod screen;
 pub mod session;
 pub mod share;
 pub mod sweep;

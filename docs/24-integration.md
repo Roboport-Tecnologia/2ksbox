@@ -172,7 +172,9 @@ and its logon tasks; and, track M24, viogpudo's resolution service from
 the disc's `$WinPEDriver$\viogpudo` in `C:\Program Files\2ksbox\viogpu`,
 without which the desktop takes the window's size only at boot:
 `vgpusrv` starts `viogpuap` in the console session, which applies each
-new size with `SetDisplayConfig`). It does three jobs:
+new size with `SetDisplayConfig`; both are ours on the disc, with M24's
+patch 03, since upstream's `viogpuap` found no virtio-gpu behind the
+other card). It does three jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
    the agent protocol subset QEMU's `vdagent.c` implements: it announces
