@@ -240,8 +240,10 @@ Windows 11 test here.
   judder 2-3-2-3 whatever the guest does; `VSyncHz=72` or 144 would
   divide it, and step 4 makes it follow the screen.
 - x64's two screens: the launcher's x64 machine keeps the standard VGA
-  for setup and recovery, whose screen Windows makes the primary; with
-  viogpudo in, the virtio-gpu's should be the only one.
+  for setup and recovery (the user: "the virtio guests always need two
+  screens"), whose screen Windows makes the primary. The guest agent now
+  makes the virtio-gpu's screen the only one once the desktop is up (doc
+  24 §4, job 3); not yet run in a guest.
 - Upstream's `AddSingleTargetMode` copies `TotalSize` into `ActiveSize`
   before `BuildVideoSignalInfo` fills it, so target modes have a zero
   active size; patch 01 sets it in its own mode only.

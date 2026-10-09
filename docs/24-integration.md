@@ -172,7 +172,7 @@ and its logon tasks; and, track M24, viogpudo's resolution service from
 the disc's `$WinPEDriver$\viogpudo` in `C:\Program Files\2ksbox\viogpu`,
 without which the desktop takes the window's size only at boot:
 `vgpusrv` starts `viogpuap` in the console session, which applies each
-new size with `SetDisplayConfig`). It does two jobs:
+new size with `SetDisplayConfig`). It does three jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
    the agent protocol subset QEMU's `vdagent.c` implements: it announces
@@ -188,6 +188,18 @@ new size with `SetDisplayConfig`). It does two jobs:
    minute it maps the share to the first free letter from Z: down
    (`WNetAddConnection2`, the fixed credentials) and exits. It shows no
    UI, and a machine without a shared folder simply has no drive.
+3. **The screen (track M24):** a Windows 11 machine keeps a second card
+   (the standard VGA on x64, ramfb on Arm) for setup, which has no virtio
+   driver, and for recovery, and Windows extends the desktop onto both
+   with the other card's screen as the primary, which is the one DWM
+   paces on, while the player shows the virtio-gpu's. Once Explorer's
+   taskbar exists, the agent makes the virtio-gpu's screen
+   (`VEN_1AF4&DEV_1050` in the adapter's path) the only one with
+   `SetDisplayConfig`, saved to Windows' display database; with no
+   working virtio-gpu screen it changes nothing. The database keeps a
+   layout per set of connected screens, so a recovery boot or a broken
+   driver gets the other card's screen back by itself. Logged as
+   `display:` lines.
 
 Its log goes to `C:\2KSBOX\agent.log`, the guest-output convention.
 

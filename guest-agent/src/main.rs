@@ -25,6 +25,9 @@
 //! is invisible to Explorer's, so `--map`, run by a second, unelevated
 //! logon task, maps the host's shared folder (`\\10.0.2.4\host`, served
 //! by the player when the machine has one) and exits.
+//!
+//! Once the desktop is up it also makes the virtio-gpu's screen the only
+//! one (track M24, `virtio_screen_only`).
 
 #![windows_subsystem = "windows"]
 
@@ -375,6 +378,114 @@ fn map_share() {
     }
 }
 
+/// The virtio-gpu's screen as the only one, once the desktop is up (track
+/// M24; the user, 2026-10-09). A Windows 11 machine keeps a second card,
+/// the standard VGA on x64 and ramfb on Arm, for setup (which has no
+/// virtio driver) and recovery, and Windows extends the desktop onto both,
+/// the other card's screen the primary: DWM paces on the primary, and the
+/// player shows the virtio-gpu's. So when the virtio-gpu has a screen
+/// Windows can drive (viogpudo working), every other screen goes, saved in
+/// Windows' display database. That database keeps a layout per set of
+/// connected screens: if the virtio-gpu's ever goes (a broken driver, a
+/// recovery boot), Windows shows the other card's again by itself.
+fn virtio_screen_only() {
+    use windows_sys::Win32::Devices::Display::*;
+    use windows_sys::Win32::Graphics::Gdi::{DISPLAYCONFIG_PATH_ACTIVE, DISPLAYCONFIG_PATH_MODE_IDX_INVALID};
+
+    // the desktop is up once Explorer's taskbar is; then give it a moment
+    let tray = wide("Shell_TrayWnd");
+    let up = (0..120).any(|_| {
+        let found = !unsafe { FindWindowW(tray.as_ptr(), std::ptr::null()) }.is_null();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        found
+    });
+    if !up {
+        log("display: no taskbar after two minutes; the screens are left as they are");
+        return;
+    }
+    std::thread::sleep(std::time::Duration::from_secs(3));
+
+    let query = |flags| -> Option<(Vec<DISPLAYCONFIG_PATH_INFO>, Vec<DISPLAYCONFIG_MODE_INFO>)> {
+        let (mut np, mut nm) = (0u32, 0u32);
+        if unsafe { GetDisplayConfigBufferSizes(flags, &mut np, &mut nm) } != 0 {
+            return None;
+        }
+        let mut paths = vec![unsafe { std::mem::zeroed::<DISPLAYCONFIG_PATH_INFO>() }; np as usize];
+        let mut modes = vec![unsafe { std::mem::zeroed::<DISPLAYCONFIG_MODE_INFO>() }; nm as usize];
+        let r = unsafe {
+            QueryDisplayConfig(flags, &mut np, paths.as_mut_ptr(), &mut nm, modes.as_mut_ptr(), std::ptr::null_mut())
+        };
+        if r != 0 {
+            return None;
+        }
+        paths.truncate(np as usize);
+        modes.truncate(nm as usize);
+        Some((paths, modes))
+    };
+    // virtio-gpu's PCI ID in the adapter's device path
+    let virtio = |p: &DISPLAYCONFIG_PATH_INFO| {
+        let mut name: DISPLAYCONFIG_ADAPTER_NAME = unsafe { std::mem::zeroed() };
+        name.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
+        name.header.size = std::mem::size_of::<DISPLAYCONFIG_ADAPTER_NAME>() as u32;
+        name.header.adapterId = p.targetInfo.adapterId;
+        if unsafe { DisplayConfigGetDeviceInfo(&mut name.header) } != 0 {
+            return false;
+        }
+        let len = name.adapterDevicePath.iter().position(|&c| c == 0).unwrap_or(128);
+        String::from_utf16_lossy(&name.adapterDevicePath[..len]).to_ascii_uppercase().contains("VEN_1AF4&DEV_1050")
+    };
+    let flags = SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES | SDC_SAVE_TO_DATABASE;
+
+    let Some((mut paths, mut modes)) = query(QDC_ONLY_ACTIVE_PATHS) else {
+        log("display: QueryDisplayConfig failed");
+        return;
+    };
+    if paths.iter().any(|p| virtio(p)) {
+        if paths.iter().all(|p| virtio(p)) {
+            log("display: the virtio-gpu's screen is already the only one");
+            return;
+        }
+        // only the virtio-gpu's paths and their modes, re-indexed (a path
+        // left out goes off); its screen moves to the origin, the primary's
+        // place
+        paths.retain(|p| virtio(p));
+        let mut keep = Vec::new();
+        for p in paths.iter_mut() {
+            for idx in [unsafe { &mut p.sourceInfo.Anonymous.modeInfoIdx }, unsafe { &mut p.targetInfo.Anonymous.modeInfoIdx }] {
+                if let Some(m) = modes.get(*idx as usize) {
+                    let mut m = *m;
+                    if m.infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE {
+                        m.Anonymous.sourceMode.position = POINTL { x: 0, y: 0 };
+                    }
+                    *idx = keep.len() as u32;
+                    keep.push(m);
+                }
+            }
+        }
+        modes = keep;
+        let r = unsafe { SetDisplayConfig(paths.len() as u32, paths.as_ptr(), modes.len() as u32, modes.as_ptr(), flags) };
+        log(&format!("display: the virtio-gpu's screen made the only one ({})", r));
+        return;
+    }
+    // not on yet: its first path to a screen Windows can drive, alone, the
+    // mode left to Windows (the driver's preferred one, the window's size)
+    let Some((all, _)) = query(QDC_ALL_PATHS) else {
+        log("display: QueryDisplayConfig failed");
+        return;
+    };
+    let Some(mut p) = all.into_iter().find(|p| p.targetInfo.targetAvailable != 0 && virtio(p)) else {
+        log("display: no virtio-gpu screen (viogpudo not working?); the screens are left as they are");
+        return;
+    };
+    p.flags = DISPLAYCONFIG_PATH_ACTIVE;
+    p.sourceInfo.Anonymous.modeInfoIdx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
+    p.targetInfo.Anonymous.modeInfoIdx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
+    let r = unsafe { SetDisplayConfig(1, &p, 0, std::ptr::null(), flags) };
+    log(&format!("display: the virtio-gpu's screen turned on as the only one ({})", r));
+}
+
 fn main() {
     let _ = std::fs::create_dir_all(r"C:\2KSBOX");
     *LOG.lock().unwrap() = std::fs::OpenOptions::new().create(true).append(true).open(r"C:\2KSBOX\agent.log").ok();
@@ -410,6 +521,7 @@ fn main() {
     }
     let hw = hwnd as usize;
     std::thread::spawn(move || reader(hw));
+    std::thread::spawn(virtio_screen_only);
     unsafe {
         let mut m: MSG = std::mem::zeroed();
         while GetMessageW(&mut m, std::ptr::null_mut(), 0, 0) > 0 {
