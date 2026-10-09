@@ -18,7 +18,7 @@ description = "Companion launcher, a native front end over launcher-core on mits
 default = ["gtk"]
 # The Linux toolkit (ADR-023): GTK 4 by default, Kirigami with `kde`.
 # Neither makes a difference on macOS or Windows.
-gtk = ["mitsuami/gtk"]
+gtk = ["mitsuami/gtk", "dep:adw"]
 kde = ["mitsuami/kde"]
 
 [dependencies]
@@ -31,4 +31,9 @@ mitsuami = { git = "https://github.com/Roboport-Tecnologia/mitsuami", rev = "0ad
 # The headless screenshot (`LAUNCHER_SHOT`), the one image encoding this
 # crate does itself.
 png = "0.18"
+
+# libadwaita, the one mitsuami's GTK backend builds on (the same version,
+# so no second copy): the machine window's breakpoint (`machines.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+adw = { package = "libadwaita", version = "0.9", features = ["v1_4"], optional = true }
 

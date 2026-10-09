@@ -37,6 +37,9 @@ const LIST_W: f32 = 260.0;
 /// The machine sidebar's on macOS and GTK.
 #[cfg(sidebar)]
 const SIDEBAR_W: f64 = 250.0;
+/// The details' width on GTK, beside the sidebar; narrower than half of
+/// it, the sidebar collapses (`sidebar_width`).
+pub const GTK_CONTENT_W: f32 = 620.0;
 /// The details' label column.
 const LABEL_W: f32 = 150.0;
 
@@ -457,11 +460,11 @@ fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
 /// 250 wide as on macOS, from libadwaita's 180 (user), and rows as roomy as
 /// the list's elsewhere: a 32 px icon, the name a size up, more padding
 /// than GNOME Settings' rows. The split view is the window's, an ancestor
-/// of the list once it is shown.
+/// of the list once it is shown, in the window's breakpoint bin.
 #[cfg(all(target_os = "linux", feature = "gtk", not(feature = "kde")))]
 fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
     use mitsuami::gtk::gtk;
-    use mitsuami::gtk::gtk::prelude::*;
+    use adw::prelude::*;
     const CSS: &str = "
         .machines > row { padding: 12px 12px; margin: 3px 6px; }
         .machines > row image { -gtk-icon-size: 32px; }
@@ -475,11 +478,20 @@ fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
         list.add_css_class("machines");
         // The tweak first runs before the window puts the sidebar in its
         // split view; showing the list comes after.
+        // The details narrower than half their first width collapse the
+        // split view into its two pages (user), before libadwaita's own
+        // 400sp: a breakpoint on the window's breakpoint bin.
         list.connect_map(|list| {
             let split = std::iter::successors(list.parent(), |w| w.parent())
-                .find(|w| w.type_().name() == "AdwNavigationSplitView");
-            if let Some(split) = split.filter(|s| s.property::<f64>("min-sidebar-width") != SIDEBAR_W) {
-                split.set_property("min-sidebar-width", SIDEBAR_W);
+                .find_map(|w| w.downcast::<adw::NavigationSplitView>().ok());
+            let Some(split) = split.filter(|s| s.min_sidebar_width() != SIDEBAR_W) else { return };
+            split.set_min_sidebar_width(SIDEBAR_W);
+            let bin = split.parent().and_then(|w| w.downcast::<adw::BreakpointBin>().ok());
+            let width = SIDEBAR_W + f64::from(GTK_CONTENT_W) / 2.0;
+            if let (Some(bin), Ok(condition)) = (bin, adw::BreakpointCondition::parse(&format!("max-width: {width}px"))) {
+                let breakpoint = adw::Breakpoint::new(condition);
+                breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
+                bin.add_breakpoint(breakpoint);
             }
         });
         let provider = gtk::CssProvider::new();

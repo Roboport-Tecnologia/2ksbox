@@ -1235,6 +1235,7 @@ name = "launcher-mitsuami"
 version = "1.0.0"
 dependencies = [
  "launcher-core",
+ "libadwaita",
  "mitsuami",
  "png",
 ]

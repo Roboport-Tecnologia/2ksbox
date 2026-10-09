@@ -83,7 +83,7 @@ fn main() {
             if cfg!(target_os = "macos") {
                 Size::new(540.0, 560.0)
             } else if cfg!(sidebar) {
-                Size::new(620.0, 610.0)
+                Size::new(machines::GTK_CONTENT_W, 610.0)
             } else if cfg!(windows) {
                 Size::new(820.0, 610.0)
             } else {
