@@ -342,13 +342,19 @@ Windows 11 test here.
 ## Open
 
 - Windows 11 on Arm: the driver's timer bunching on a coarse tick under
-  HVF (only the watchdog now, patch 91 above), ramfb's Basic Display left
-  extended beside ours (the user, switching with Win+P between Extend and
-  the virtio-gpu's screen alone, with patch 91 in: "the difference in
-  smoothness is very obvious"; DWM keeps the simulated 64 Hz blank while
-  ramfb's screen is on, so the guest agent's "only one screen" must work
-  on Arm too), and Basic Display on ramfb drawn at 800x600 into
-  a 1280x800 ramfb (step 4, "On the Air").
+  HVF (only the watchdog now, patch 91 above), and Basic Display on
+  ramfb drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").
+- ramfb's screen left extended on Arm was a machine without the guest
+  agent, not an Arm bug. The user, switching with Win+P between Extend
+  and the virtio-gpu's screen alone, with patch 91 in: "the difference in
+  smoothness is very obvious" (DWM keeps the simulated 64 Hz blank while
+  ramfb's screen is on). The Air's `win11` machine had never run the
+  drivers disc's `2ksbox\install.cmd` (no `C:\2KSBOX\agent.log`); with it
+  run, left on Extend and restarted, the agent made the virtio-gpu's
+  screen the only one a few seconds after logon, and the desktop was
+  smooth (2026-10-09). The gap: nothing runs `install.cmd` on a machine
+  whose owner did not, and that machine also has no clipboard and no
+  shared folder (M23).
 - `viogpudo-install.ps1` (2026-10-09, after the Air): it now reads the
   running kernel's code integrity options before touching the installed
   driver. Without `TESTSIGN` it only turns test mode on and stops, naming
