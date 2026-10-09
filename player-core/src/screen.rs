@@ -10,9 +10,10 @@
 //! The screen's rate and blank are read where the system gives them: on
 //! Windows the display path of the window's monitor (`QueryDisplayConfig`,
 //! a rational such as 143.981 Hz) and its adapter's vertical blank event
-//! (`D3DKMTWaitForVerticalBlankEvent`). Elsewhere neither is read yet: the
-//! guest gets 60 Hz, which a 60 Hz screen and a 120 Hz ProMotion one both
-//! divide, from its own timer.
+//! (`D3DKMTWaitForVerticalBlankEvent`); on macOS a `CVDisplayLink` for the
+//! window's `NSScreen`, its nominal period (a rational too) and its
+//! callback. Elsewhere neither is read yet: the guest gets 60 Hz, which a
+//! 60 Hz screen and a 120 Hz ProMotion one both divide, from its own timer.
 
 use qemu_embed::Qemu;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -60,8 +61,8 @@ pub struct HostVBlank {
 }
 
 struct Shared {
-    /// The screen to wait on (its system name), `None` for none.
-    screen: Mutex<Option<Vec<u16>>>,
+    /// The screen to wait on (its system name or number), `None` for none.
+    screen: Mutex<Option<platform::Screen>>,
     /// Host blanks per guest frame; 0 for no ticks.
     every: AtomicU32,
     stop: AtomicBool,
@@ -111,6 +112,9 @@ mod platform {
     use windows_sys::Win32::Graphics::Gdi::*;
 
     pub const HAS_VBLANK: bool = true;
+
+    /// The monitor's GDI name.
+    pub type Screen = Vec<u16>;
 
     /// The GDI name (\\.\DISPLAYn) of the window's monitor, as 32 UTF-16
     /// units with a terminating 0.
@@ -230,7 +234,152 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::Shared;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use qemu_embed::Qemu;
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+    use wgpu::rwh::RawWindowHandle;
+
+    pub const HAS_VBLANK: bool = true;
+
+    /// The screen's `CGDirectDisplayID`.
+    pub type Screen = u32;
+
+    type DisplayLink = *mut c_void;
+
+    #[repr(C)]
+    struct CVTime {
+        time_value: i64,
+        time_scale: i32,
+        flags: i32,
+    }
+
+    /// kCVTimeIsIndefinite
+    const TIME_IS_INDEFINITE: i32 = 1;
+
+    type OutputCallback =
+        extern "C" fn(DisplayLink, *const c_void, *const c_void, u64, *mut u64, *mut c_void) -> i32;
+
+    #[link(name = "CoreVideo", kind = "framework")]
+    extern "C" {
+        fn CVDisplayLinkCreateWithCGDisplay(display: u32, link: *mut DisplayLink) -> i32;
+        fn CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link: DisplayLink) -> CVTime;
+        fn CVDisplayLinkSetOutputCallback(link: DisplayLink, callback: OutputCallback, ctx: *mut c_void) -> i32;
+        fn CVDisplayLinkStart(link: DisplayLink) -> i32;
+        fn CVDisplayLinkStop(link: DisplayLink) -> i32;
+        fn CVDisplayLinkRelease(link: DisplayLink);
+    }
+
+    /// The number of the screen the window's view is on (its
+    /// `deviceDescription`'s `NSScreenNumber`). On the main thread, as every
+    /// caller of `follow` and `refresh_mhz` is.
+    pub fn screen_name(raw: RawWindowHandle) -> Option<u32> {
+        let RawWindowHandle::AppKit(h) = raw else { return None };
+        let view = h.ns_view.as_ptr() as *const AnyObject;
+        objc2::rc::autoreleasepool(|_| unsafe {
+            let window: *const AnyObject = msg_send![view, window];
+            if window.is_null() {
+                return None;
+            }
+            let screen: *const AnyObject = msg_send![window, screen];
+            if screen.is_null() {
+                return None;
+            }
+            let desc: *const AnyObject = msg_send![screen, deviceDescription];
+            let key: *const AnyObject =
+                msg_send![class!(NSString), stringWithUTF8String: c"NSScreenNumber".as_ptr()];
+            let number: *const AnyObject = msg_send![desc, objectForKey: key];
+            if number.is_null() {
+                return None;
+            }
+            let id: u32 = msg_send![number, unsignedIntValue];
+            Some(id)
+        })
+    }
+
+    fn link(display: u32) -> Option<DisplayLink> {
+        let mut link = std::ptr::null_mut();
+        (unsafe { CVDisplayLinkCreateWithCGDisplay(display, &mut link) } == 0 && !link.is_null()).then_some(link)
+    }
+
+    /// The screen's nominal refresh period as Core Video gives it (a
+    /// rational, e.g. 1/60 s), turned into a rate.
+    pub fn refresh_mhz(raw: RawWindowHandle) -> Option<u32> {
+        let link = link(screen_name(raw)?)?;
+        let t = unsafe { CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link) };
+        unsafe { CVDisplayLinkRelease(link) };
+        (t.flags & TIME_IS_INDEFINITE == 0 && t.time_value > 0 && t.time_scale > 0)
+            .then(|| (t.time_scale as i64 * 1000 / t.time_value) as u32)
+    }
+
+    /// What the display link's callback sees: on Core Video's thread, once
+    /// a refresh.
+    struct Ticks<'a> {
+        vm: Qemu,
+        shared: &'a Shared,
+        count: AtomicU32,
+    }
+
+    extern "C" fn on_refresh(
+        _link: DisplayLink,
+        _now: *const c_void,
+        _output: *const c_void,
+        _flags: u64,
+        _flags_out: *mut u64,
+        ctx: *mut c_void,
+    ) -> i32 {
+        let t = unsafe { &*(ctx as *const Ticks) };
+        let every = t.shared.every.load(Ordering::Relaxed);
+        if every > 0 && (t.count.fetch_add(1, Ordering::Relaxed) + 1) % every == 0 {
+            t.vm.vblank();
+        }
+        0
+    }
+
+    fn close(open: &mut Option<(u32, DisplayLink)>) {
+        if let Some((_, link)) = open.take() {
+            // returns once a callback under way has
+            unsafe {
+                CVDisplayLinkStop(link);
+                CVDisplayLinkRelease(link);
+            }
+        }
+    }
+
+    /// The host-vblank thread: a display link for the window's screen,
+    /// made again when the window moves to another; the ticks themselves
+    /// come on Core Video's own thread.
+    pub fn vblank_loop(shared: &Shared, vm: Qemu) {
+        let ticks = Ticks { vm, shared, count: AtomicU32::new(0) };
+        let mut open: Option<(u32, DisplayLink)> = None;
+        while !shared.stop.load(Ordering::Relaxed) {
+            let every = shared.every.load(Ordering::Relaxed);
+            let want = shared.screen.lock().unwrap().filter(|_| every > 0);
+            if open.map(|(d, _)| d) != want {
+                close(&mut open);
+                if let Some(link) = want.and_then(link) {
+                    let ctx = &ticks as *const Ticks as *mut c_void;
+                    if unsafe { CVDisplayLinkSetOutputCallback(link, on_refresh, ctx) } == 0
+                        && unsafe { CVDisplayLinkStart(link) } == 0
+                    {
+                        open = Some((want.unwrap(), link));
+                    } else {
+                        unsafe { CVDisplayLinkRelease(link) };
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        close(&mut open);
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use super::Shared;
     use qemu_embed::Qemu;
@@ -238,10 +387,12 @@ mod platform {
 
     pub const HAS_VBLANK: bool = false;
 
+    pub type Screen = ();
+
     pub fn refresh_mhz(_raw: RawWindowHandle) -> Option<u32> {
         None
     }
-    pub fn screen_name(_raw: RawWindowHandle) -> Option<Vec<u16>> {
+    pub fn screen_name(_raw: RawWindowHandle) -> Option<()> {
         None
     }
     pub fn vblank_loop(_shared: &Shared, _vm: Qemu) {}

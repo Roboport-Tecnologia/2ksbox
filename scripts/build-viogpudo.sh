@@ -13,9 +13,10 @@
 #                                        MSYS2, Visual Studio 2022 with the WDK
 #                                        component; the kit itself from NuGet)
 #   scripts/build-viogpudo.sh iso        build/viogpudo/viogpudo-test.iso: both
-#                                        drivers, the resolution service and the
-#                                        installer, for a guest's CD drive (needs
-#                                        xorriso)
+#                                        drivers, the resolution service, the
+#                                        installer and dwm-pace.ps1 (DWM's pace,
+#                                        the measure), for a guest's CD drive
+#                                        (needs xorriso)
 #
 # Hosts that cannot build it fetch the PC's build for their checkout,
 # which the PC publishes: scripts/windows-drivers.sh fetch|publish viogpudo.
@@ -153,6 +154,8 @@ iso() {
   cp "$OUT"/arm64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/arm64/"
   cp "$OUT"/x64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/x64/"
   cp "$OUT/viogpudo-install.ps1" "$tmp/"
+  # the measure, from this checkout (a guest script, not part of the build)
+  cp guest-tools/viogpudo/dwm-pace.ps1 "$tmp/"
   rm -f "$OUT/viogpudo-test.iso"
   xorriso -as mkisofs -quiet -J -R -V VIOGPUDO -o "$OUT/viogpudo-test.iso" "$tmp"
   rm -rf "$tmp"

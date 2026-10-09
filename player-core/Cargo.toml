@@ -47,5 +47,7 @@ libsmb = { path = "../libsmb" }
 windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Devices_Display", "Wdk_Graphics_Direct3D"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# the window's screen (screen.rs); its rate and blank are Core Video's
+objc2 = "0.6"
 objc2-metal = { version = "0.3", features = ["MTLDevice", "MTLTexture", "MTLPixelFormat", "objc2-io-surface"] }
 objc2-io-surface = { version = "0.3", features = ["IOSurfaceRef"] }

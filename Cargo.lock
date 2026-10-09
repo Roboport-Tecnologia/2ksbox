@@ -2475,6 +2475,7 @@ dependencies = [
  "gilrs",
  "libc",
  "libsmb",
+ "objc2 0.6.4",
  "objc2-io-surface",
  "objc2-metal 0.3.2",
  "png",

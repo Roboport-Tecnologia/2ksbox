@@ -179,7 +179,8 @@ driver.
 
    **A. The rate follows the screen** (2026-10-09: done on the PC; embed
    API v15, `player-core/src/screen.rs`, patch 02; the screen's rate is
-   read on Windows only so far, so macOS and Linux send 60 Hz). On the
+   read on Windows and macOS so far, so Linux sends 60 Hz; on the Air the
+   player logs `host screen at 60.002 Hz`, Core Video's nominal period). On the
    PC's 144 Hz screen the player logs `[display] host screen at 144.000
    Hz: the guest's blank at 72.000 Hz`, the driver takes 71.999 Hz from
    the EDID (its pixel clock is in 10 kHz steps), and DWM composes every
@@ -211,7 +212,9 @@ driver.
 
    **B. The phase follows the screen** (2026-10-09: done on the PC; QEMU
    patch 90, embed API v16, `screen::HostVBlank`, viogpudo patch 04; the
-   blank is waited on on Windows only so far). Measured on the test
+   blank is waited on on Windows and macOS so far, macOS through a
+   `CVDisplayLink` for the window's screen; on Windows 11 on Arm the
+   guest stalls with it, below). Measured on the test
    machine at the PC's 144 Hz screen: DWM composes every 13.884 to
    13.887 ms (three runs of 300 `DwmFlush`es, 5th to 95th percentile
    13.69 to 14.12 ms, against 13.46 to 14.33 from the timer alone). The
@@ -263,6 +266,47 @@ driver.
    on the user (no guests started meanwhile): the PC's 144 Hz screen,
    `dwm-pace.ps1` for the guest's pace, QEMU's flush trace for the host's
    cadence, and the user's eye.
+   **On the Air, Windows 11 on Arm (2026-10-09).** An overlay of the
+   launcher's `win11` machine (build 26100, Home), `viogpudo-test.iso` as
+   its first disc. Four findings:
+   - *Smart App Control blocks test signing.* The machine had it in
+     Evaluation (`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy`
+     `VerifiedAndReputablePolicyState` = 2): `bcdedit` read `testsigning
+     Yes`, Secure Boot was off, and still the kernel's code integrity
+     options (`NtQuerySystemInformation` class 103) were 0x5, no
+     `TESTSIGN` (0x2), and `pnputil` refused our package ("The publisher
+     of an Authenticode(tm) signed catalog was not established as
+     trusted"; setupapi.dev.log: "signer is not trusted by system, and
+     Code Integrity is enforced"). With the state set to 0 and a restart,
+     Test Mode came on and ours installed. Smart App Control cannot be
+     turned on again without reinstalling Windows, which weighs on step 5:
+     a test-signed driver asks that of every user who has it on.
+   - *`viogpudo-install.ps1` removed upstream's driver before ours was
+     accepted*, so the refusal left the virtio-gpu with no driver: a black
+     window (the player stayed on the virtio-gpu's console), then, after a
+     restart, Basic Display on ramfb drawn at the firmware's 800x600 into
+     a ramfb the player reads at 1280x800 (garbled).
+   - *The driver's timer alone is choppy on Arm* (the user: "it's
+     choppy"; `PLAYER_HOST_VBLANK=0`). With ramfb's Basic Display still
+     extended beside ours, DWM composed on dxgkrnl's simulated 64 Hz blank
+     (`rateRefresh` 24000000/375000; `DwmFlush` median 16.95 ms, 5th–95th
+     percentile 15.6–30.3 ms, 31 of 300 at 28–37 ms). With the
+     virtio-gpu's screen the only one (`DisplaySwitch /internal`; the
+     guest agent had not made it so on this machine) DWM took our 60.001
+     Hz, and the pace got worse: 146 intervals at 16–17 ms, ~110 at
+     30–35, 23 at 0–2. Blanks bunch on a coarse tick: the second
+     high-resolution timer that keeps x64's clock fine (step 1) does not
+     here, under HVF.
+   - *With the host's blank the guest's display stalls.* Our driver
+     takes the screen (the player follows the virtio-gpu at the window's
+     size) and the window stays black; Windows itself runs (the logon
+     sound, AHCI traffic), but QEMU's trace shows not one virtio-gpu
+     command, not even cursor updates, and one vCPU is busy in the guest
+     kernel (`hv_trap` in the player's samples). The host side is idle
+     (the `CVDisplayLink` thread waits for each refresh, QEMU's main loop
+     polls). MSI-X is on (the `virt` board's emulated ITS), so the
+     config interrupt is message 0 as on x64. Same driver and device code
+     as the PC's, where it works: under investigation.
 5. **Then the decision on shipping** (attestation signing, upstream, or
    both) with the numbers in hand.
 
@@ -277,6 +321,12 @@ Windows 11 test here.
 
 ## Open
 
+- Windows 11 on Arm: the host-vblank stall, the driver's timer bunching
+  on a coarse tick under HVF, ramfb's Basic Display left extended beside
+  ours, `viogpudo-install.ps1` removing upstream's driver before ours is
+  accepted (it should check the kernel's `TESTSIGN` first and name Smart
+  App Control when that is what blocks it), and Basic Display on ramfb
+  drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").
 - A 144 Hz host screen (the PC's): 60 guest frames on 144 refreshes
   judder 2-3-2-3 whatever the guest does; `VSyncHz=72` or 144 would
   divide it, and step 4 makes it follow the screen.
