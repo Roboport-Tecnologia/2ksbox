@@ -42,7 +42,10 @@ OUT=build/viogpudo
 SRC=$OUT/src
 REPO="${VIOGPUDO_PREBUILT_REPO:-Roboport-Tecnologia/2ksbox}"
 TAG=viogpudo-prebuilt
-FILES=(arm64/viogpudo.sys arm64/viogpudo.inf x64/viogpudo.sys x64/viogpudo.inf
+# with upstream's resolution service (vgpusrv, viogpuap), built from the
+# same tree, which applies the window's size to the desktop
+FILES=(arm64/viogpudo.sys arm64/viogpudo.inf arm64/vgpusrv.exe arm64/viogpuap.exe
+       x64/viogpudo.sys x64/viogpudo.inf x64/vgpusrv.exe x64/viogpuap.exe
        viogpudo-install.ps1)
 SOURCES=(patches/viogpudo guest-tools/viogpudo scripts/build-viogpudo.sh)
 WDK_VER=10.0.26100.6584
@@ -153,8 +156,8 @@ build() {
   for arch in arm64 x64; do
     case $arch in arm64) dir=ARM64 ;; x64) dir=amd64 ;; esac
     mkdir -p "$OUT/$arch"
-    cp "$SRC/viogpu/Install/Win11/$dir/viogpudo.sys" "$SRC/viogpu/Install/Win11/$dir/viogpudo.inf" \
-       "$SRC/viogpu/Install/Win11/$dir/viogpudo.pdb" "$OUT/$arch/"
+    cp "$SRC/viogpu/Install/Win11/$dir/"{viogpudo.sys,viogpudo.inf,viogpudo.pdb,vgpusrv.exe,viogpuap.exe} \
+       "$OUT/$arch/"
   done
   cp guest-tools/viogpudo/viogpudo-install.ps1 "$OUT/"
   key > "$OUT/.key"
@@ -217,8 +220,8 @@ iso() {
   local tmp
   tmp=$(mktemp -d)
   mkdir -p "$tmp/arm64" "$tmp/x64"
-  cp "$OUT"/arm64/viogpudo.{sys,inf} "$tmp/arm64/"
-  cp "$OUT"/x64/viogpudo.{sys,inf} "$tmp/x64/"
+  cp "$OUT"/arm64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/arm64/"
+  cp "$OUT"/x64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/x64/"
   cp "$OUT/viogpudo-install.ps1" "$tmp/"
   rm -f "$OUT/viogpudo-test.iso"
   xorriso -as mkisofs -quiet -J -R -V VIOGPUDO -o "$OUT/viogpudo-test.iso" "$tmp"

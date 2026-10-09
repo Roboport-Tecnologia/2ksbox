@@ -5,8 +5,9 @@
 # viogpudo.sys with it, writes the package's catalog and signs that,
 # trusts the certificate, takes upstream's viogpudo out of the driver
 # store (Windows ranks a Microsoft-signed driver above ours whatever the
-# version) and installs ours on the virtio-gpu. Test mode and the driver
-# start at the next boot. Secure Boot must be off (2ksbox's default: no
+# version), installs ours on the virtio-gpu, and installs the resolution
+# service built with it (vgpusrv, viogpuap) so the desktop follows the
+# window. Test mode and the driver start at the next boot. Secure Boot must be off (2ksbox's default: no
 # keys enrolled).
 #
 # Run it elevated from the disc (build-viogpudo.sh iso); it picks the
@@ -66,6 +67,26 @@ Get-WindowsDriver -Online | Where-Object { $_.OriginalFileName -like "*\viogpudo
 pnputil /add-driver (Join-Path $work "viogpudo.inf") /install | Out-Host
 # 3010: installed, a restart needed
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 3010) { throw "pnputil could not install the driver ($LASTEXITCODE)" }
+
+# The resolution service (vgpusrv starts viogpuap in the console session,
+# which applies the window's size to the desktop; without it the desktop
+# takes that size only at boot), from this build, in place of any other
+# copy: as guest-agent/install.ps1 does with upstream's.
+$gdst = Join-Path $env:ProgramFiles "2ksbox\viogpu"
+$srv = Join-Path $gdst "vgpusrv.exe"
+New-Item -ItemType Directory -Force $gdst | Out-Null
+$had = Get-Service vgpusrv -ErrorAction SilentlyContinue
+if ($had) { Stop-Service vgpusrv -Force -ErrorAction SilentlyContinue }
+Get-Process viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+foreach ($f in "vgpusrv.exe", "viogpuap.exe") { Copy-Item (Join-Path $src $f) $gdst -Force }
+if ($had) {
+    # one installed before, maybe elsewhere: pointed at this copy
+    sc.exe config vgpusrv binPath= "`"$srv`"" | Out-Host
+    Start-Service vgpusrv
+} else {
+    & $srv -i | Out-Host
+}
+Write-Host "resolution service: $((Get-Service vgpusrv -ErrorAction SilentlyContinue).Status)"
 
 if ($VSyncHz -ge 0) {
     $key = "HKLM:\SYSTEM\CurrentControlSet\Services\VioGpuDod\Parameters"

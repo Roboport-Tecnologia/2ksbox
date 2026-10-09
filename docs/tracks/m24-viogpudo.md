@@ -129,6 +129,26 @@ Not here: QEMU, the player, the launcher, the drivers disc
    enough to matter at 60 Hz; the bounding box (two rectangles at
    opposite corners send the screen between them) is the one thing to
    change if a workload shows it.
+   **The desktop following the window (the user, 2026-10-09: "automatic
+   resizing the windows guest when I resize the window is not working").**
+   Not the driver, which already does its half: the device's display
+   event makes it ask for the new size (`GET_DISPLAY_INFO`), put it in
+   its custom mode and signal `Global\VioGpuResolutionEvent<n>`. A kernel
+   display-only driver cannot change the desktop's mode; upstream's user
+   half does: `vgpusrv` (a service) starts `viogpuap` in the console
+   session, which waits on that event, asks the driver for the size
+   (`VIOGPU_GET_CUSTOM_RESOLUTION` escape) and applies it with
+   `SetDisplayConfig`. virtio-win ships both beside the driver, and our
+   drivers disc has carried them in `$WinPEDriver$\viogpudo` all along,
+   but nothing installed the service (Windows Setup installs only what
+   the INF names), so the desktop took the window's size at boot alone
+   (M22's "viogpudo 0.1.302 takes it only when it starts"). The drivers
+   disc's `2ksbox\install.ps1` now installs it (for upstream's signed
+   driver too), `build-virtio-win.sh` checks the two files are there, and
+   `build-viogpudo.sh` and `viogpudo-install.ps1` carry and install the
+   ones built with ours. Not yet run in a guest (the user: "don't start
+   any new guests for now").
+
 4. **The host's own vertical blank (if step 3 helps).** A free-running
    60 Hz guest still drifts against the host screen's 60 Hz, a skipped
    or doubled frame every few seconds. The real fix is the player's

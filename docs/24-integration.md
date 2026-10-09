@@ -168,7 +168,11 @@ ours is one process, started at logon by a task set to run with highest
 privileges, so the user must be an administrator (Windows 11's first
 user is). `2ksbox\install.cmd` on the drivers disc installs it
 (`install.ps1`: the drivers, the agent in `C:\Program Files\2ksbox`,
-and its logon tasks). It does two jobs:
+and its logon tasks; and, track M24, viogpudo's resolution service from
+the disc's `$WinPEDriver$\viogpudo` in `C:\Program Files\2ksbox\viogpu`,
+without which the desktop takes the window's size only at boot:
+`vgpusrv` starts `viogpuap` in the console session, which applies each
+new size with `SetDisplayConfig`). It does two jobs:
 
 1. **Clipboard:** it opens `\\.\Global\com.redhat.spice.0` and speaks
    the agent protocol subset QEMU's `vdagent.c` implements: it announces

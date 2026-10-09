@@ -128,6 +128,10 @@ disc() {
       [ -f "$tree/\$WinPEDriver\$/$f.$ext" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir $f.$ext" >&2; exit 1; }
     done
   done
+  # viogpudo's resolution service, which 2ksbox\install.ps1 installs (M24)
+  for f in vgpusrv viogpuap; do
+    [ -f "$tree/\$WinPEDriver\$/viogpudo/$f.exe" ] || { echo "build-virtio-win: virtio-win $VERSION has no $dir viogpudo/$f.exe" >&2; exit 1; }
+  done
   mkdir -p "$tree/2ksbox"
   cp "$AGENT" guest-agent/install.ps1 "$tree/2ksbox/"
   # cmd.exe misreads a batch file's parenthesized blocks with LF line ends
@@ -143,7 +147,9 @@ Windows Setup installs them by itself when this disc is in a drive.
 
 2ksbox\\install.cmd installs the drivers on an installed Windows, and
 2ksbox's agent: the clipboard shared with the host, and the host's
-shared folder on a drive letter when the machine has one. Run it once.
+shared folder on a drive letter when the machine has one. It also starts
+viogpudo's resolution service, so the desktop follows the window's size.
+Run it once.
 
 License: virtio-win_license.txt (BSD-3-Clause).
 EOF
