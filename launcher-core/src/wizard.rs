@@ -540,9 +540,14 @@ impl Form {
                  and an ES1370 sound card.\n\
                  No 3D: the display driver and the Direct3D and OpenGL pass-through are Windows-only.",
             ),
-            // Not on a Windows host yet: QEMU has no TPM there (track
-            // M20). On an Arm host, Windows 11 on Arm (step 4).
-            Family::Win11 if !cfg!(target_os = "windows") && self.arch() == bundle::Arch::Aarch64 => Some(
+            // On a Windows host, x64 with no TPM: QEMU builds none there
+            // (track M20 step 5). On an Arm host, Windows 11 on Arm (step 4).
+            Family::Win11 if cfg!(target_os = "windows") => Some(
+                "A current PC: UEFI, without a TPM or Secure Boot. \
+                 Install from Microsoft's Windows 11 ISO (x64): setup skips its TPM and Secure Boot checks.\n\
+                 Each time Windows restarts, the machine turns off and asks to be started again.",
+            ),
+            Family::Win11 if self.arch() == bundle::Arch::Aarch64 => Some(
                 "Windows 11 on Arm: UEFI and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO for Arm64.\n\
                  A second CD drive holds the network and display drivers, and setup installs them.\n\
@@ -556,7 +561,7 @@ impl Form {
                 "A current PC: UEFI with Secure Boot available, and a TPM 2.0. \
                  Install from Microsoft's Windows 11 ISO (x64).",
             ),
-            Family::Win11 => Some("Windows 11 machines don't run on this computer yet."),
+            Family::Win11 => Some("Windows 11 machines don't run on this computer."),
             _ => None,
         }
     }

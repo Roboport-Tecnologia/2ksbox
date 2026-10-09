@@ -52,7 +52,7 @@ media, licences and disc dumps.
 |---|---|
 | Linux | An x86-64 machine with GTK 4.10 or newer. KVM for near-native XP, Windows 7 and Windows 11 (optional; Windows 98 is emulated on purpose). A GPU with Vulkan 1.3 for the fast Direct3D path. Without it, Direct3D runs through Wine on the host if Wine is installed; with neither, the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
 | macOS | Apple Silicon, macOS 12 or newer (the App Store build: macOS 26 or newer). The era's guests are emulated (no x86 virtualization on these Macs) and still run faster than a period PC; Windows 11 on Arm runs under the Mac's hypervisor. The fast Direct3D path needs macOS 26; on older releases Direct3D runs through Wine if it is installed, and with no Wine the guest has no Direct3D (OpenGL and the Voodoo 2 still work). |
-| Windows | 64-bit Windows 10 or 11 with the Windows App Runtime 2.4 or later. WHPX (the Windows Hypervisor Platform) accelerates XP and Windows 7 when it is enabled (Windows 98 is emulated on purpose). Windows 11 machines don't run on a Windows host yet: QEMU has no TPM there. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
+| Windows | 64-bit Windows 10 or 11 with the Windows App Runtime 2.4 or later. WHPX (the Windows Hypervisor Platform) accelerates XP and Windows 7 when it is enabled (Windows 98 is emulated on purpose). Windows 11 machines run without a TPM or Secure Boot there (setup is told to skip both checks), and each restart of Windows turns the machine off and asks to start it again. Without Vulkan 1.3, Direct3D runs on Windows' own Direct3D 9. |
 
 You also need install media for the guest operating system (your own
 Windows 98 / XP CD image, a DOS floppy or CD) and, for games, dumps of

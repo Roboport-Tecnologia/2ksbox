@@ -217,6 +217,7 @@ scene that left no frame on the scratch disk fails as `guest-G9`,
 | `guest-cdimage`, `guest-dirdisc` | `tools/xp-cdimage-test.sh` on a converted cue and on the same tree as a folder |
 | `pad-guest-xp`, `pad-guest-98` | `tools/pad-guest-test.py xp` / `win98` (own boots) |
 | `win11-boot-prompt` | `tools/win11-boot-prompt-test.sh` (own machine; skips without the Arm64 ISO or off Apple Silicon) |
+| `restart-cold` | `tools/restart-cold-test.sh` (the Windows 11 machine's arguments for this host; the x64 mitsuami player's exit after a reset under `-no-reboot`, the window opening three times; the player part skips without that player) |
 | `win11-frames` | `tools/win11-frames-test.py` (a copy of an installed Windows 11 on Arm machine; skips without one, without `W11_PASSWORD` or off Apple Silicon) |
 | `win98-dx9` | Win98 on the display driver through Microsoft's runtimes (M16 step 5), one boot under TCG of `tools/win98-dx9-test.sh`: D3DGAME9/8 pixel-identical to the native frame outside the HUD, D3DFEAT9 byte-identical with its lines (the A16B16G16R16F readback expected to fail, finding 35), the DX8 probes, SHTEST, CKTEST, EBTEST, DDTEST's sysmem blits; one line each in the log |
 | `win98-winetest` | Wine's suites on Win98 (`tools/win98-winetest.sh`) against `reference/winetest/w98-driver.txt` |
@@ -484,6 +485,18 @@ fill a QMP screendump within two minutes (`build/w11p/setup.png`).
 About 1.5 minutes. Needs Microsoft's Arm64 ISO (`$W11_ISO`, or
 `~/Downloads/Windows11_Client_arm64_*.iso`); Apple Silicon only for now.
 The guest stage's `win11-boot-prompt`, which skips without the ISO.
+
+`tools/restart-cold-test.sh` (M20 step 5): a machine that cannot reset
+in place starts again cold. First the launcher's arguments for a new
+Windows 11 machine on this host (`LAUNCHERX`): on Windows `-no-reboot`,
+`edk2-x86_64-code.fd`, no TPM, no SMM; elsewhere the secure build, SMM
+and the libtpms TPM, no `-no-reboot`. Then the x64 mitsuami player on a
+bare q35 under TCG with `-no-reboot` and no disk, three times, each
+sent a QMP `system_reset` once it answers: with
+`PLAYER_RESET_ANSWER=restart` it must exit 75 (`EXIT_RESTART`, what the
+launcher's `Machines::reap` restarts), with `close` 0, and without
+`-no-reboot` it must still be running. About 30 s; the guest stage's
+`restart-cold`.
 
 `tools/win11-frames-test.py [machine-dir]` (M22): Windows 11 on Arm's
 desktop in whole frames at the guest's pace. An installed launcher

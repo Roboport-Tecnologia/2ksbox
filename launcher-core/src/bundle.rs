@@ -126,11 +126,15 @@ impl Arch {
     }
 
     /// EDK2's code for it in `pc-bios`: QEMU's secure build on x86_64
-    /// (unpacked there by `scripts/prepare-qemu.sh`); on aarch64 our own
-    /// build (`scripts/build-edk2.sh`), since QEMU's has no Secure Boot,
-    /// which Windows 11's setup requires, and no AHCI driver.
+    /// (unpacked there by `scripts/prepare-qemu.sh`), but on a Windows
+    /// host its build without Secure Boot, since the secure one needs SMM
+    /// and WHPX has none ("System Management Mode not supported by this
+    /// hypervisor"; [`Machine::modern_args`]); on aarch64 our own build
+    /// (`scripts/build-edk2.sh`), since QEMU's has no Secure Boot, which
+    /// Windows 11's setup requires, and no AHCI driver.
     pub fn efi_code_file(self) -> &'static str {
         match self {
+            Arch::X86_64 if cfg!(target_os = "windows") => "edk2-x86_64-code.fd",
             Arch::X86_64 => "edk2-x86_64-secure-code.fd",
             Arch::Aarch64 => "2ksbox-aarch64-code.fd",
         }
@@ -2182,7 +2186,16 @@ impl Machine {
             return self.arm_args(pc_bios_dir, shelf);
         }
         let bios = |name: &str| opt_value(&pc_bios_dir.join(name).display().to_string());
-        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), "q35,smm=on".into()];
+        // A Windows host (track M20 step 5): WHPX has no SMM, so no SMM,
+        // no secure flash and EDK2's build without Secure Boot
+        // (`Arch::efi_code_file`); QEMU builds no TPM on Windows, so none,
+        // and the drivers disc's answer file sets setup's `LabConfig`
+        // bypass keys for both (`scripts/build-virtio-win.sh`). The guest's
+        // own reset stops QEMU there, so `-no-reboot` and a cold start
+        // ([`Machine::restarts_cold`]).
+        let windows_host = cfg!(target_os = "windows");
+        let machine = if windows_host { "q35" } else { "q35,smm=on" };
+        let mut args = vec!["-L".into(), pc_bios_dir.display().to_string(), "-machine".into(), machine.into()];
         args.extend(self.accel_args());
         args.extend([
             "-m".into(),
@@ -2191,8 +2204,11 @@ impl Machine {
             default_cpus(self.family).to_string(),
             "-cpu".into(),
             format!("max{}", self.optimization_props(Knob::Cpu)),
-            "-global".into(),
-            "driver=cfi.pflash01,property=secure,value=on".into(),
+        ]);
+        if !windows_host {
+            args.extend(["-global".into(), "driver=cfi.pflash01,property=secure,value=on".into()]);
+        }
+        args.extend([
             "-drive".into(),
             format!("if=pflash,format=raw,unit=0,readonly=on,file={}", bios(Arch::X86_64.efi_code_file())),
             "-drive".into(),
@@ -2200,10 +2216,16 @@ impl Machine {
                 "if=pflash,format=qcow2,unit=1,file={}",
                 opt_value(&self.effective_efi_vars().display().to_string())
             ),
-            "-tpmdev".into(),
-            format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
-            "-device".into(),
-            "tpm-crb,tpmdev=tpm0".into(),
+        ]);
+        if !windows_host {
+            args.extend([
+                "-tpmdev".into(),
+                format!("libtpms,id=tpm0,state={}", opt_value(&self.effective_tpm_state().display().to_string())),
+                "-device".into(),
+                "tpm-crb,tpmdev=tpm0".into(),
+            ]);
+        }
+        args.extend([
             "-rtc".into(),
             "base=localtime".into(),
             "-drive".into(),
@@ -2239,8 +2261,20 @@ impl Machine {
         args.extend(self.cdrom_args(shelf));
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(Arch::X86_64));
+        if self.restarts_cold() {
+            args.push("-no-reboot".into());
+        }
         args.extend(self.extra_qemu_args.iter().cloned());
         args
+    }
+
+    /// Whether the guest's own reset ends the run, for the player to offer
+    /// a cold start instead (`player_core::RESET_QUESTION`, answered by
+    /// `Machines::reap`): x64 Windows 11 on a Windows host, where a reset
+    /// under WHPX stops the VM ("WHPX: Unexpected VP exit code 4", then
+    /// "failed to get xsave state") while a cold start boots.
+    pub fn restarts_cold(&self) -> bool {
+        cfg!(target_os = "windows") && self.family == Family::Win11 && self.effective_arch() == Arch::X86_64
     }
 
     /// Windows 11 on Arm's machine (M20 step 4): QEMU's `virt` board, the

@@ -2789,6 +2789,11 @@ guest_stage() {
   # prompt. Skips itself without the Arm64 ISO or off Apple Silicon.
   # Before the XP half's Linux/Windows return: both checks are the Mac's.
   run_check win11-boot-prompt win11-boot-prompt.log tools/win11-boot-prompt-test.sh || true
+  # A machine run with -no-reboot starts again cold after a reset (M20
+  # step 5, Windows 11 on a Windows host): the launcher's arguments for
+  # this host, and the x64 player's exit status for Restart and Close.
+  run_check restart-cold restart-cold.log env LAUNCHERX="$LAUNCHERX" QIMG="$QIMG" OUT="$OUT/restart-cold" \
+    tools/restart-cold-test.sh || true
   # Windows 11 on Arm's desktop in whole frames at the guest's pace (M22):
   # no torn frame while a window moves, and the player publishing on the
   # guest's flush (embed v12) rather than the refresh tick. On a copy of

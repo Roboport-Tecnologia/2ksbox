@@ -280,7 +280,10 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   options instead, which cover only Cmd+Tab and Cmd+H). `Ctrl+Alt+K` toggles
   them between host and guest (the title says when they are the
   host's). `PLAYER_KEYBOARD_CAPTURE=0` starts with them the host's;
-  `scripts/test.sh` sets it. `PLAYER_KEYBOARD_LOG=1` prints what the
+  `scripts/test.sh` sets it. `PLAYER_RESET_ANSWER=restart|close`
+  answers the mitsuami player's "The machine restarted" alert of a
+  machine run with `-no-reboot` (a Windows 11 machine on a Windows host)
+  without showing it, for a script. `PLAYER_KEYBOARD_LOG=1` prints what the
   Windows or macOS side did: whether the raw-input registration or the
   hot key mode was accepted, and what winit and the system each thought
   about focus at every change. A shortcut that still reaches the host is

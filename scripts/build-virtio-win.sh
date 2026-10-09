@@ -61,7 +61,12 @@ fi
 # from guest-agent/ for x64 (Windows 11 on Arm runs it under emulation;
 # rustup's x86_64-pc-windows-gnu and mingw-w64 build it).
 AGENT=guest-agent/target/x86_64-pc-windows-gnu/release/2ksbox-agent.exe
-STAMP=$( { echo "$VERSION $SHA256"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.*; } \
+# Built on Windows, the x64 disc also carries packaging/win11/autounattend.xml
+# at its root: setup's TPM and Secure Boot checks skipped, since a Windows
+# host's machine has neither (bundle::Machine::modern_args). The disc is
+# made on the host whose package carries it, so the host decides.
+case "$(uname -s)" in MINGW*|MSYS*) BYPASS=packaging/win11/autounattend.xml ;; *) BYPASS="" ;; esac
+STAMP=$( { echo "$VERSION $SHA256 ${BYPASS:-no-bypass}"; cat "$0"; cat guest-agent/Cargo.toml guest-agent/src/*.rs guest-agent/install.* $BYPASS; } \
   | shasum -a 256 | cut -c1-16)
 
 TODO=()
@@ -132,6 +137,12 @@ disc() {
   cp "$AGENT" guest-agent/install.ps1 "$tree/2ksbox/"
   # cmd.exe misreads a batch file's parenthesized blocks with LF line ends
   sed 's/$/\r/' guest-agent/install.cmd > "$tree/2ksbox/install.cmd"
+  if [ "$arch" = x64 ] && [ -n "$BYPASS" ]; then
+    cp "$BYPASS" "$tree/autounattend.xml"
+    readme="$readme
+  autounattend.xml          skips setup's TPM and Secure Boot checks (a
+                            Windows computer's machine has neither)"
+  fi
   cat > "$tree/README.txt" <<EOF
 2ksbox: drivers for $title
 

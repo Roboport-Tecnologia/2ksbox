@@ -31,8 +31,7 @@
 #           libraries, then configure-qemu.sh with WIN_QEMU_CC=msvc) into
 #           build/win/qemu-msvc: the QEMU the package ships, importing
 #           only Windows' own DLLs; with libqemu-embed-x86_64.dll, the
-#           Windows 11 player's (track M20; no Windows 11 runs on it
-#           until QEMU has a TPM on Windows)
+#           Windows 11 player's (track M20; under WHPX, with no TPM)
 #   rust   the winit player (test.sh's), cargo --target
 #           x86_64-pc-windows-gnu on QEMU's ABI, and the tools launcherx,
 #           discx and synthx with MSVC (scripts/cargo-msvc.sh, into
@@ -73,6 +72,10 @@
 #           or is skipped with a note. --publish then uploads the build
 #           for Linux and macOS ISOs. The guest stage puts the result on
 #           the ISO, in WDDM\.
+#   virtio  build-virtio-win.sh x64: Windows 11's drivers disc, with the
+#           answer file a Windows host's machine needs (setup's TPM and
+#           Secure Boot checks skipped; track M20). Its own stamps; the
+#           first run downloads virtio-win's ISO.
 #   guest   guest-tools/build-wrappers.sh: the guest-tools ISO. It is
 #           32-bit guest code, the same file the Linux package ships, so
 #           a default run rebuilds it when its sources move, by
@@ -126,11 +129,11 @@ while [ $# -gt 0 ]; do
       pacman -S --needed "${MSYS2_PACKAGES[@]}"
       exit ;;
     -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    qemu|qemu-msvc|rust|mitsuami|exec|wddm|guest) STAGES+=("$1"); shift ;;
+    qemu|qemu-msvc|rust|mitsuami|exec|wddm|virtio|guest) STAGES+=("$1"); shift ;;
     *) echo "build-windows.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm guest); else EXPLICIT=1; fi
+if [ ${#STAGES[@]} -eq 0 ]; then STAGES=(qemu qemu-msvc rust mitsuami exec wddm virtio guest); else EXPLICIT=1; fi
 
 BUILT=(); SKIPPED=(); T0=$SECONDS
 want() { local s; for s in "${STAGES[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
@@ -451,6 +454,17 @@ if want guest; then
     guest-tools/build-wrappers.sh
     mkdir -p build && printf '%s\n' "$guest_stamp" > build/.stamp-guest-tools
     BUILT+=(guest)
+  fi
+fi
+
+# --- virtio -----------------------------------------------------------
+if want virtio; then
+  if ! command -v xorriso >/dev/null; then
+    skip virtio "no xorriso (scripts/build-windows.sh --msys2-deps)" || true
+  else
+    say "virtio: build-virtio-win.sh x64"
+    scripts/build-virtio-win.sh x64
+    BUILT+=(virtio)
   fi
 fi
 
