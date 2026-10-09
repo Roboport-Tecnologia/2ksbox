@@ -126,9 +126,13 @@ name bold and a size up, more padding; CSS on the list), the same
 toolbar, and New, Shelf, Shaders and About in the primary menu, which
 mitsuami puts at the end of the sidebar's header bar; the content is
 620 × 610 (user), and narrower than half that the split view collapses
-into its two pages (user; a breakpoint at 560 px on the window's
-breakpoint bin, through the `adw` crate, the libadwaita mitsuami's GTK
-backend already links, before libadwaita's own 400sp). `cfg(sidebar)` (`build.rs`) is macOS or GTK. Windows and
+into its two pages (user; a breakpoint on the window's breakpoint bin,
+through the `adw` crate, the libadwaita mitsuami's GTK backend already
+links, before libadwaita's own 400sp). The breakpoint is never below what
+the split view needs, the sidebar and the details' minimum (602 px, the
+header bar's buttons), measured again as the window is resized: below
+that libadwaita warns "exceeds AdwBreakpointBin width" until it
+collapses (user). `cfg(sidebar)` (`build.rs`) is macOS or GTK. Windows and
 Kirigami keep the list, New, Shelf, Shaders, the "i" and the details'
 buttons. On Windows its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a

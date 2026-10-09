@@ -480,19 +480,46 @@ fn sidebar_width() -> Tweak<Sidebar<Option<PathBuf>>> {
         // split view; showing the list comes after.
         // The details narrower than half their first width collapse the
         // split view into its two pages (user), before libadwaita's own
-        // 400sp: a breakpoint on the window's breakpoint bin.
+        // 400sp: a breakpoint on the window's breakpoint bin. Never below
+        // what the split view needs (the sidebar and the details' minimum,
+        // which the header bar's buttons set), or libadwaita warns that it
+        // doesn't fit until the breakpoint: measured again as the window
+        // is resized.
         list.connect_map(|list| {
             let split = std::iter::successors(list.parent(), |w| w.parent())
                 .find_map(|w| w.downcast::<adw::NavigationSplitView>().ok());
             let Some(split) = split.filter(|s| s.min_sidebar_width() != SIDEBAR_W) else { return };
             split.set_min_sidebar_width(SIDEBAR_W);
             let bin = split.parent().and_then(|w| w.downcast::<adw::BreakpointBin>().ok());
-            let width = SIDEBAR_W + f64::from(GTK_CONTENT_W) / 2.0;
-            if let (Some(bin), Ok(condition)) = (bin, adw::BreakpointCondition::parse(&format!("max-width: {width}px"))) {
-                let breakpoint = adw::Breakpoint::new(condition);
-                breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
-                bin.add_breakpoint(breakpoint);
-            }
+            let (Some(bin), Some(window)) = (bin, split.root().and_then(|r| r.downcast::<gtk::Window>().ok()))
+            else {
+                return;
+            };
+            let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+                adw::BreakpointConditionLengthType::MaxWidth,
+                SIDEBAR_W + f64::from(GTK_CONTENT_W) / 2.0,
+                adw::LengthUnit::Px,
+            ));
+            breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
+            bin.add_breakpoint(breakpoint.clone());
+            let shown = std::rc::Rc::new(std::cell::Cell::new(0.0));
+            let fit = move || {
+                let Some(content) = split.content() else { return };
+                let sidebar = split.sidebar_width_unit().to_px(SIDEBAR_W, Some(&split.settings()));
+                let needed = sidebar + f64::from(content.measure(gtk::Orientation::Horizontal, -1).0);
+                let width = (SIDEBAR_W + f64::from(GTK_CONTENT_W) / 2.0).max(needed.ceil());
+                if shown.replace(width) != width {
+                    breakpoint.set_condition(Some(&adw::BreakpointCondition::new_length(
+                        adw::BreakpointConditionLengthType::MaxWidth,
+                        width,
+                        adw::LengthUnit::Px,
+                    )));
+                }
+            };
+            let fit = std::rc::Rc::new(fit);
+            let later = fit.clone();
+            gtk::glib::idle_add_local_once(move || later());
+            window.connect_default_width_notify(move |_| fit());
         });
         let provider = gtk::CssProvider::new();
         provider.load_from_data(CSS);
