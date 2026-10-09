@@ -38,7 +38,10 @@ if (Test-Path -LiteralPath (Join-Path $gpu 'vgpusrv.exe')) {
   $srv = Join-Path $gdst 'vgpusrv.exe'
   $had = Get-Service vgpusrv -ErrorAction SilentlyContinue
   if ($had) { Stop-Service vgpusrv -Force -ErrorAction SilentlyContinue }
-  Get-Process viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+  # Stop-Service returns before the service's process has gone, and the
+  # helper it started holds its file too: both gone before the copy
+  Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+  Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $gpu 'vgpusrv.exe'), (Join-Path $gpu 'viogpuap.exe') $gdst -Force
   if ($had) {
     # one installed before, maybe elsewhere: pointed at this copy

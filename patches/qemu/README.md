@@ -1059,6 +1059,22 @@ as before. **Test:** the launcher's Windows 11 machine under WHPX with
 its TPM, `Get-Tpm` in the guest. **Drop:** upstream skips unaligned
 sections in `whpx_set_phys_mem()`.
 
+### 90-virtio-gpu-host-vblank
+`virtio-gpu`'s `host-vblank` property (track M24 step 4 B): the host
+screen's vertical blank as the guest's. Our viogpudo times a vertical
+blank of its own (`patches/viogpudo/`), and a guest timer free-runs
+against the host screen, so its frames slide across the host's blank.
+With the property on, the device offers feature bit 23 (ours, high in
+the device's range); a guest that takes it turns the ticks on and off
+with command `0x0f00` (`VIRTIO_GPU_CMD_SET_HOST_VBLANK`), and each
+`qemu_host_vblank()` (a notifier list in `ui/console.c`, which the embed
+library's `qemu_embed_vblank` calls from a bottom half, embed API v16)
+sets bit 31 of `events_read` and raises the config interrupt. 2D device;
+off by default, the launcher's Windows 11 machines set it.
+**Test:** the M24 test machine, `dwm-pace.ps1` and QEMU's
+`virtio_gpu_cmd_res_flush` cadence against the host's 144 Hz.
+**Drop:** if upstream ever gives virtio-gpu a vertical blank event.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

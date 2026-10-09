@@ -659,8 +659,10 @@ sharing_check() { # Windows 11's clipboard and shared folder, from the form to t
   [ -x "$q" ] || q=$QSYS
   [ "$q" = "$QSYS" ] && board=q35
   [ -x "$q" ] || { echo "the launcher's side passes (no QEMU to run)"; return 0; }
+  # Windows' QEMU takes no monitor from a pipe ($QSYS_PIPE, tools/qmp-pipe.py)
+  local qrun=$q; [ "$OS" = Windows ] && qrun="python3 tools/qmp-pipe.py $q"
   # shellcheck disable=SC2046
-  printf '{"execute":"qmp_capabilities"}\n{"execute":"quit"}\n' | timeout 30 $q -machine $board -m 128 -display none -S \
+  printf '{"execute":"qmp_capabilities"}\n{"execute":"quit"}\n' | timeout 30 $qrun -machine $board -m 128 -display none -S \
     -qmp stdio -serial none $(printf '%s\n' $a | awk 'p && /^(qemu-vdagent|virtio-serial-pci|virtserialport)/ { print p; print } { p = ($0 == "-chardev" || $0 == "-device") ? $0 : "" }') \
     >"$dir/qemu.out" 2>&1 || { echo "QEMU refused the clipboard channel:"; tail -3 "$dir/qemu.out"; return 1; }
   grep -q '"return"' "$dir/qemu.out" || { echo "QEMU did not answer"; tail -3 "$dir/qemu.out"; return 1; }

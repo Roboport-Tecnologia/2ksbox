@@ -78,7 +78,10 @@ $srv = Join-Path $gdst "vgpusrv.exe"
 New-Item -ItemType Directory -Force $gdst | Out-Null
 $had = Get-Service vgpusrv -ErrorAction SilentlyContinue
 if ($had) { Stop-Service vgpusrv -Force -ErrorAction SilentlyContinue }
-Get-Process viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+# Stop-Service returns before the service's process has gone, and the
+# helper it started holds its file too: both gone before the copy
+Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process vgpusrv, viogpuap -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 foreach ($f in "vgpusrv.exe", "viogpuap.exe") { Copy-Item (Join-Path $src $f) $gdst -Force }
 if ($had) {
     # one installed before, maybe elsewhere: pointed at this copy

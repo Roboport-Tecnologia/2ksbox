@@ -181,6 +181,12 @@ QEMU_EMBED_API void qemu_embed_set_window_size(qemu_embed_t *e, uint32_t w,
  * none is given) and announces with a display event. Our viogpudo paces
  * its vertical blank at it. 0 forgets it. Any thread. */
 QEMU_EMBED_API void qemu_embed_set_refresh_rate(qemu_embed_t *e, uint32_t mhz);
+/* v16: a vertical blank of the host screen's that starts a guest frame
+ * (every Nth for a divided rate, track M24 step 4 B): QEMU's
+ * qemu_host_vblank() on the main loop, which a virtio-gpu with
+ * host-vblank=on (QEMU patch 90) passes to a guest that asked for it. Any
+ * thread, cheap: nothing listens, nothing happens. */
+QEMU_EMBED_API void qemu_embed_vblank(qemu_embed_t *e);
 /* v9: whether the console on show takes the window's size, so the window
  * should not be held to the guest's mode. Any thread. */
 QEMU_EMBED_API bool qemu_embed_display_follows_window(qemu_embed_t *e);
@@ -204,7 +210,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 15
+#define QEMU_EMBED_API_VERSION 16
 
 #ifdef __cplusplus
 }

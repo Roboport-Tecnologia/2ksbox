@@ -1,0 +1,335 @@
+viogpudo: the host screen's vertical blank as ours (host-vblank).
+
+On top of 01 to 03.  When the device offers 2ksbox's host-vblank feature
+(bit 23, QEMU patch 90) the driver takes it, and while dxgkrnl has the
+vertical blank interrupt on it asks the device for the host's blanks
+(command 0x0f00, sent from the worker thread, since the control queue
+needs PASSIVE_LEVEL and DxgkDdiControlInterrupt may come higher).  Each
+host blank arrives as the config interrupt with bit 31 of events_read: the
+interrupt routine clears it and raises DXGK_INTERRUPT_DISPLAYONLY_VSYNC at
+once, and runs the display-event path only when another event came with
+it, so a tick never makes viogpuap resync the resolution.  The timer of
+01 stays as the fallback: it raises the blank only when no host blank
+came for two periods and a half (a minimized player window, a host that
+stops), and alone on a device without the feature.  The worker thread now
+runs ConfigChanged only for a display event.
+
+diff --git a/viogpu/common/viogpu.h b/viogpu/common/viogpu.h
+index 750c596..3f22afd 100644
+--- a/viogpu/common/viogpu.h
++++ b/viogpu/common/viogpu.h
+@@ -170,6 +170,22 @@ typedef struct virtio_gpu_set_scanout
+ } GPU_SET_SCANOUT, *PGPU_SET_SCANOUT;
+ #pragma pack()
+ 
++/* host-vblank (2ksbox, QEMU patch 90): the host screen's vertical blank as
++ * ours. Feature bit 23; the guest turns the ticks on and off with command
++ * 0x0f00; each host blank sets bit 31 of events_read and raises the config
++ * interrupt. */
++#define VIRTIO_GPU_F_HOST_VBLANK       23
++#define VIRTIO_GPU_EVENT_HOST_VBLANK   (1u << 31)
++#define VIRTIO_GPU_CMD_SET_HOST_VBLANK 0x0f00
++#pragma pack(1)
++typedef struct virtio_gpu_set_host_vblank
++{
++    GPU_CTRL_HDR hdr;
++    ULONG enable;
++    ULONG padding;
++} GPU_SET_HOST_VBLANK, *PGPU_SET_HOST_VBLANK;
++#pragma pack()
++
+ /* VIRTIO_GPU_CMD_RESOURCE_FLUSH */
+ #pragma pack(1)
+ typedef struct virtio_gpu_resource_flush
+diff --git a/viogpu/common/viogpu_queue.cpp b/viogpu/common/viogpu_queue.cpp
+index d835f7f..35b266f 100644
+--- a/viogpu/common/viogpu_queue.cpp
++++ b/viogpu/common/viogpu_queue.cpp
+@@ -363,6 +363,24 @@ void CtrlQueue::ResFlush(UINT res_id, UINT width, UINT height, UINT x, UINT y)
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+ }
+ 
++void CtrlQueue::SetHostVBlank(BOOLEAN enable)
++{
++    PAGED_CODE();
++
++    DbgPrint(TRACE_LEVEL_VERBOSE, ("---> %s %d\n", __FUNCTION__, enable));
++    PGPU_SET_HOST_VBLANK cmd;
++    PGPU_VBUFFER vbuf;
++    cmd = (PGPU_SET_HOST_VBLANK)AllocCmd(&vbuf, sizeof(*cmd));
++    RtlZeroMemory(cmd, sizeof(*cmd));
++
++    cmd->hdr.type = VIRTIO_GPU_CMD_SET_HOST_VBLANK;
++    cmd->enable = enable ? 1 : 0;
++
++    QueueBuffer(vbuf);
++
++    DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
++}
++
+ void CtrlQueue::TransferToHost2D(UINT res_id, ULONG offset, UINT width, UINT height, UINT x, UINT y)
+ {
+     PAGED_CODE();
+diff --git a/viogpu/common/viogpu_queue.h b/viogpu/common/viogpu_queue.h
+index 37f18cd..422054d 100644
+--- a/viogpu/common/viogpu_queue.h
++++ b/viogpu/common/viogpu_queue.h
+@@ -240,6 +240,7 @@ class CtrlQueue : public VioGpuQueue
+     void DestroyResource(UINT id);
+     void SetScanout(UINT scan_id, UINT res_id, UINT width, UINT height, UINT x, UINT y);
+     void ResFlush(UINT res_id, UINT width, UINT height, UINT x, UINT y);
++    void SetHostVBlank(BOOLEAN enable);
+     void TransferToHost2D(UINT res_id, ULONG offset, UINT width, UINT height, UINT x, UINT y);
+     void AttachBacking(UINT res_id, PGPU_MEM_ENTRY ents, UINT nents);
+     void DetachBacking(UINT id);
+diff --git a/viogpu/viogpudo/viogpudo.cpp b/viogpu/viogpudo/viogpudo.cpp
+index e62406f..d61519e 100644
+--- a/viogpu/viogpudo/viogpudo.cpp
++++ b/viogpu/viogpudo/viogpudo.cpp
+@@ -66,6 +66,7 @@ VioGpuDod::VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject)
+     m_VSyncCount = 0;
+     m_VSyncMhz = 0;
+     m_VSyncRebase = 0;
++    m_VSyncHostQpc = 0;
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--- %s\n", __FUNCTION__));
+ }
+ 
+@@ -937,6 +938,20 @@ VOID VioGpuDod::StopVSync(VOID)
+     }
+ }
+ 
++// From the adapter's interrupt routine, at the device's IRQL: the host
++// screen's blank (every Nth, at the guest's rate) as ours.
++VOID VioGpuDod::HostVBlank(VOID)
++{
++    LONGLONG Now = KeQueryPerformanceCounter(NULL).QuadPart;
++    InterlockedExchange64(&m_VSyncHostQpc, Now);
++    if (!m_VSyncEnabled || !IsDriverActive())
++    {
++        return;
++    }
++    InterlockedExchange64(&m_VSyncLastQpc, Now);
++    VSyncNotify(this);
++}
++
+ VOID VioGpuDod::SetVSyncMhz(ULONG Mhz)
+ {
+     PAGED_CODE();
+@@ -2020,6 +2035,10 @@ NTSTATUS VioGpuDod::ControlInterrupt(_In_ CONST DXGK_INTERRUPT_TYPE InterruptTyp
+             // the schedule starts now; the callback arms each next blank
+             m_VSyncBaseQpc = KeQueryPerformanceCounter(NULL).QuadPart;
+             m_VSyncCount = 0;
++            if (m_pHWDevice)
++            {
++                m_pHWDevice->RequestHostVBlank(TRUE);
++            }
+             // every second, for ever: only its being set matters
+             ExSetTimer(m_VSyncKeeper, -10000000LL, 10000000LL, NULL);
+             ArmVSync(m_VSyncBaseQpc);
+@@ -2029,6 +2048,10 @@ NTSTATUS VioGpuDod::ControlInterrupt(_In_ CONST DXGK_INTERRUPT_TYPE InterruptTyp
+     {
+         ExCancelTimer(m_VSyncTimer, NULL);
+         ExCancelTimer(m_VSyncKeeper, NULL);
++        if (m_pHWDevice)
++        {
++            m_pHWDevice->RequestHostVBlank(FALSE);
++        }
+     }
+     return STATUS_SUCCESS;
+ }
+@@ -2095,7 +2118,6 @@ VOID VioGpuDod::VSyncTimerCallback(_In_ PEX_TIMER Timer, _In_opt_ PVOID Context)
+         Due = pVioGpuDod->VSyncDue(pVioGpuDod->m_VSyncCount + 1);
+     }
+     pVioGpuDod->m_VSyncCount++;
+-    InterlockedExchange64(&pVioGpuDod->m_VSyncLastQpc, Due <= Now ? Due : Now);
+     if (!pVioGpuDod->m_VSyncEnabled)
+     {
+         return;
+@@ -2107,6 +2129,14 @@ VOID VioGpuDod::VSyncTimerCallback(_In_ PEX_TIMER Timer, _In_opt_ PVOID Context)
+     {
+         return;
+     }
++    // the host's blanks come (patch 04): the timer only fills in when they
++    // stop for two periods and a half (a minimized window, a slow host)
++    LONGLONG Host = InterlockedCompareExchange64(&pVioGpuDod->m_VSyncHostQpc, 0, 0);
++    if (Host && (Now - Host) * 2 < (pVioGpuDod->VSyncDue(1) - pVioGpuDod->m_VSyncBaseQpc) * 5)
++    {
++        return;
++    }
++    InterlockedExchange64(&pVioGpuDod->m_VSyncLastQpc, Due <= Now ? Due : Now);
+     // DxgkCbNotifyInterrupt is called at the device's IRQL, as from an ISR
+     BOOLEAN Ret = FALSE;
+     pVioGpuDod->m_DxgkInterface.DxgkCbSynchronizeExecution(pVioGpuDod->m_DxgkInterface.DeviceHandle,
+@@ -2538,6 +2568,11 @@ VioGpuAdapter::VioGpuAdapter(_In_ VioGpuDod *pVioGpuDod)
+     m_u32NumScanouts = 0;
+ 
+     KeInitializeEvent(&m_ConfigUpdateEvent, SynchronizationEvent, FALSE);
++    m_ConfigPending = 0;
++    m_HostVBlankPending = 0;
++    m_HostVBlankWant = 0;
++    m_HostVBlankSent = -1;
++    m_bHostVBlank = FALSE;
+ }
+ 
+ VioGpuAdapter::~VioGpuAdapter(void)
+@@ -2621,6 +2656,7 @@ NTSTATUS VioGpuAdapter::VioGpuAdapterInit(DXGK_DISPLAY_INFORMATION *pDispInfo)
+         }
+ 
+         AckFeature(VIRTIO_F_ACCESS_PLATFORM);
++        m_bHostVBlank = AckFeature(VIRTIO_GPU_F_HOST_VBLANK);
+ 
+         status = virtio_set_features(&m_VioDev, m_u64GuestFeatures);
+         if (!NT_SUCCESS(status))
+@@ -2733,6 +2769,17 @@ PBYTE VioGpuAdapter::GetEdidData()
+ // The refresh rate of the EDID's preferred timing (its first detailed
+ // timing descriptor, at byte 54: the pixel clock in 10 kHz units over the
+ // total size), in mHz; 0 with no EDID from the device or no timing.
++VOID VioGpuAdapter::RequestHostVBlank(BOOLEAN on)
++{
++    if (!m_bHostVBlank)
++    {
++        return;
++    }
++    InterlockedExchange(&m_HostVBlankWant, on ? 1 : 0);
++    InterlockedExchange(&m_HostVBlankPending, 1);
++    KeSetEvent(&m_ConfigUpdateEvent, IO_NO_INCREMENT, FALSE);
++}
++
+ ULONG VioGpuAdapter::EdidRefreshMhz(void)
+ {
+     PAGED_CODE();
+@@ -3895,6 +3942,23 @@ void VioGpuAdapter::VioGpuAdapterClose()
+     DbgPrint(TRACE_LEVEL_FATAL, ("<--- %s\n", __FUNCTION__));
+ }
+ 
++BOOLEAN VioGpuAdapter::HostVBlankEvent(void)
++{
++    if (!m_bHostVBlank)
++    {
++        return FALSE;
++    }
++    UINT32 events_read = 0, events_clear = VIRTIO_GPU_EVENT_HOST_VBLANK;
++    virtio_get_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_read), &events_read, sizeof(events_read));
++    if (!(events_read & VIRTIO_GPU_EVENT_HOST_VBLANK))
++    {
++        return FALSE;
++    }
++    virtio_set_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_clear), &events_clear, sizeof(events_clear));
++    m_pVioGpuDod->HostVBlank();
++    return (events_read & ~VIRTIO_GPU_EVENT_HOST_VBLANK) == 0;
++}
++
+ BOOLEAN VioGpuAdapter::InterruptRoutine(_In_ PDXGKRNL_INTERFACE pDxgkInterface, _In_ ULONG MessageNumber)
+ {
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("---> %s MessageNumber = %d\n", __FUNCTION__, MessageNumber));
+@@ -3906,7 +3970,11 @@ BOOLEAN VioGpuAdapter::InterruptRoutine(_In_ PDXGKRNL_INTERFACE pDxgkInterface,
+         switch (MessageNumber)
+         {
+             case 0:
+-                intReason = ISR_REASON_CHANGE;
++                intReason = HostVBlankEvent() ? 0 : ISR_REASON_CHANGE;
++                if (!intReason)
++                {
++                    return TRUE;
++                }
+                 break;
+             case 1:
+                 intReason = ISR_REASON_DISPLAY;
+@@ -3931,7 +3999,11 @@ BOOLEAN VioGpuAdapter::InterruptRoutine(_In_ PDXGKRNL_INTERFACE pDxgkInterface,
+                 intReason = (ISR_REASON_DISPLAY | ISR_REASON_CURSOR);
+                 break;
+             case 3:
+-                intReason = ISR_REASON_CHANGE;
++                intReason = HostVBlankEvent() ? 0 : ISR_REASON_CHANGE;
++                if (!intReason)
++                {
++                    return TRUE;
++                }
+                 break;
+             default:
+                 serviced = FALSE;
+@@ -3978,8 +4050,21 @@ void VioGpuAdapter::ThreadWorkRoutine(void)
+             PsTerminateSystemThread(STATUS_SUCCESS);
+             break;
+         }
+-        ConfigChanged();
+-        NotifyResolutionEvent();
++        // the host's blanks on or off: a command, which needs PASSIVE_LEVEL
++        if (InterlockedExchange(&m_HostVBlankPending, 0))
++        {
++            LONG Want = InterlockedCompareExchange(&m_HostVBlankWant, 0, 0);
++            if (Want != m_HostVBlankSent)
++            {
++                m_CtrlQueue.SetHostVBlank(Want != 0);
++                m_HostVBlankSent = Want;
++            }
++        }
++        if (InterlockedExchange(&m_ConfigPending, 0))
++        {
++            ConfigChanged();
++            NotifyResolutionEvent();
++        }
+     }
+ }
+ 
+@@ -4060,6 +4145,7 @@ VOID VioGpuAdapter::DpcRoutine(_In_ PDXGKRNL_INTERFACE pDxgkInterface)
+         if (reason & ISR_REASON_CHANGE)
+         {
+             DbgPrint(TRACE_LEVEL_FATAL, ("---> %s ConfigChanged\n", __FUNCTION__));
++            InterlockedExchange(&m_ConfigPending, 1);
+             KeSetEvent(&m_ConfigUpdateEvent, IO_NO_INCREMENT, FALSE);
+         }
+     }
+diff --git a/viogpu/viogpudo/viogpudo.h b/viogpu/viogpudo/viogpudo.h
+index ec73f64..a8c5f2f 100644
+--- a/viogpu/viogpudo/viogpudo.h
++++ b/viogpu/viogpudo/viogpudo.h
+@@ -163,6 +163,16 @@ class VioGpuAdapter : IVioGpuPCI
+     PBYTE GetEdidData(void);
+     PBYTE GetCTA861Data(void);
+     ULONG EdidRefreshMhz(void);
++    // the device gives the host's vertical blank (patch 04)
++    BOOLEAN HasHostVBlank(void) const
++    {
++        return m_bHostVBlank;
++    }
++    // the host's blanks on or off, from any IRQL up to DISPATCH_LEVEL
++    VOID RequestHostVBlank(BOOLEAN on);
++    // the interrupt routine's: a host blank in events_read is taken (cleared
++    // and raised); TRUE when that was the config interrupt's only event
++    BOOLEAN HostVBlankEvent(void);
+ 
+   protected:
+   private:
+@@ -219,6 +229,13 @@ class VioGpuAdapter : IVioGpuPCI
+     VioGpuMemSegment m_FrameSegment;
+     volatile ULONG m_PendingWorks;
+     KEVENT m_ConfigUpdateEvent;
++    // the worker's jobs: a display event, and the host's blanks to turn on
++    // or off (patch 04), each only when asked
++    volatile LONG m_ConfigPending;
++    volatile LONG m_HostVBlankPending;
++    volatile LONG m_HostVBlankWant;
++    LONG m_HostVBlankSent;
++    BOOLEAN m_bHostVBlank;
+     PETHREAD m_pWorkThread;
+     BOOLEAN m_bStopWorkThread;
+     PKEVENT m_ResolutionEvent;
+@@ -264,6 +281,8 @@ class VioGpuDod
+     // start the schedule from at the next blank
+     volatile LONG m_VSyncMhz;
+     volatile LONG m_VSyncRebase;
++    // the last host blank (QPC); the timer stands in only while they stop
++    volatile LONG64 m_VSyncHostQpc;
+ 
+   public:
+     VioGpuDod(_In_ DEVICE_OBJECT *pPhysicalDeviceObject);
+@@ -328,6 +347,8 @@ class VioGpuDod
+     }
+     // the vertical blank at this rate (mHz), from the next blank on
+     VOID SetVSyncMhz(ULONG Mhz);
++    // a vertical blank of the host's, from the interrupt routine (patch 04)
++    VOID HostVBlank(VOID);
+     USHORT GetPersistentDispMode0Width()
+     {
+         return m_PersistentDispMode0Width;

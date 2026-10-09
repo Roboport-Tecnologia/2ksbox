@@ -2246,10 +2246,12 @@ impl Machine {
         }
         args.extend(self.clipboard_args());
         // After the cards an installed machine already had, so none of
-        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm. Not beside
-        // our adapter: viogpudo would make Windows a third screen.
+        // them moves. QEMU patch 86's `sync-ctrl`, as on Arm, and patch
+        // 90's `host-vblank` (the host screen's blank as the guest's, for
+        // our viogpudo, M24). Not beside our adapter: viogpudo would make
+        // Windows a third screen.
         if self.effective_video() != Some(Video::D3dpt) {
-            args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on".into()]);
+            args.extend(["-device".into(), "virtio-gpu-pci,sync-ctrl=on,host-vblank=on".into()]);
         }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
@@ -2326,11 +2328,13 @@ impl Machine {
             // through viogpudo from the drivers disc. ramfb first, so it
             // is the default console. `sync-ctrl` (QEMU patch 86) runs
             // virtio-gpu's queue inside the guest's notify, so each of
-            // viogpudo's presents is copied before it draws the next.
+            // viogpudo's presents is copied before it draws the next;
+            // `host-vblank` (patch 90) passes the host screen's blank to
+            // our viogpudo (M24).
             "-device".into(),
             "ramfb".into(),
             "-device".into(),
-            "virtio-gpu-pci,sync-ctrl=on".into(),
+            "virtio-gpu-pci,sync-ctrl=on,host-vblank=on".into(),
             "-device".into(),
             "qemu-xhci".into(),
             "-device".into(),

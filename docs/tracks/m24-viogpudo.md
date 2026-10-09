@@ -209,8 +209,22 @@ driver.
      `viogpudo-install.ps1` without `-VSyncHz` now removes the value,
      so an earlier A/B's does not pin the rate.
 
-   **B. The phase follows the screen.** The host's vertical blank raises
-   the guest's, so a frame never slides across it:
+   **B. The phase follows the screen** (2026-10-09: done on the PC; QEMU
+   patch 90, embed API v16, `screen::HostVBlank`, viogpudo patch 04; the
+   blank is waited on on Windows only so far). Measured on the test
+   machine at the PC's 144 Hz screen: DWM composes every 13.884 to
+   13.887 ms (three runs of 300 `DwmFlush`es, 5th to 95th percentile
+   13.69 to 14.12 ms, against 13.46 to 14.33 from the timer alone). The
+   proof that the host's blanks drive it: with the driver's own timer
+   held at 60 Hz (`VSyncHz=60`) every interval is still a whole number
+   of 13.89 ms (13.9 or 27.8; DWM composes on the host's ticks and skips
+   one now and then for its 60 Hz), where the timer would give 16.67.
+   Built as designed below, with one change: the ticks are turned on and
+   off by a control command from the driver's worker thread, which also
+   now runs `ConfigChanged` only for a real display event (a tick must
+   not make `viogpuap` resync the resolution). `PLAYER_HOST_VBLANK=0`
+   is the A/B. The host's blank raises the guest's, so a frame never
+   slides across it:
    - The player calls `qemu_embed_vblank(e)` (v15) on each host refresh
      that starts a guest frame (every Nth of A's divisor), from wherever
      its toolkit hears the blank (Windows `IDXGIOutput::WaitForVBlank` on a

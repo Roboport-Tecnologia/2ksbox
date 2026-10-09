@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 15;
+pub const API_VERSION: u32 = 16;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -106,6 +106,7 @@ extern "C" {
     fn qemu_embed_clipboard_set_text(e: *mut qemu_embed_t, utf8: *const c_char, len: usize);
     fn qemu_embed_display_follows_window(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_set_refresh_rate(e: *mut qemu_embed_t, mhz: u32);
+    fn qemu_embed_vblank(e: *mut qemu_embed_t);
     fn qemu_embed_set_audio_ring(
         base: *mut c_void,
         bytes: usize,
@@ -281,6 +282,12 @@ impl Qemu {
     /// blank at it. 0 forgets it.
     pub fn set_refresh_rate(&self, mhz: u32) {
         unsafe { qemu_embed_set_refresh_rate(self.0, mhz) }
+    }
+    /// A host vertical blank that starts a guest frame (v16, track M24):
+    /// virtio-gpu's `host-vblank` passes it to a guest that asked. Any
+    /// thread.
+    pub fn vblank(&self) {
+        unsafe { qemu_embed_vblank(self.0) }
     }
     /// Whether the adapter on show takes [`Self::set_window_size`], so
     /// the window should not be held to the guest's mode (v9).

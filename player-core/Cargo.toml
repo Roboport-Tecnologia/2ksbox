@@ -42,8 +42,9 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 libsmb = { path = "../libsmb" }
 
 [target.'cfg(windows)'.dependencies]
-# Win32_Graphics_Gdi and Win32_Devices_Display: the window's screen's refresh (screen.rs)
-windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Devices_Display"] }
+# Win32_Graphics_Gdi, Win32_Devices_Display and Wdk_Graphics_Direct3D: the
+# window's screen's refresh and vertical blank (screen.rs)
+windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Devices_Display", "Wdk_Graphics_Direct3D"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-metal = { version = "0.3", features = ["MTLDevice", "MTLTexture", "MTLPixelFormat", "objc2-io-surface"] }

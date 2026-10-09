@@ -292,6 +292,16 @@ void qemu_embed_set_refresh_rate(qemu_embed_t *e, uint32_t mhz)
     }
 }
 
+static void bh_vblank(void *opaque)
+{
+    qemu_host_vblank();
+}
+
+void qemu_embed_vblank(qemu_embed_t *e)
+{
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_vblank, e);
+}
+
 bool qemu_embed_display_follows_window(qemu_embed_t *e)
 {
     QemuConsole *con = qatomic_read(&e->con);

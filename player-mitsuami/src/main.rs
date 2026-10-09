@@ -68,6 +68,8 @@ struct Player {
     /// (`tell_refresh`), and the guest's rate last told (mHz).
     surface: Option<SurfaceHandle>,
     guest_mhz: u32,
+    /// The host screen's vertical blank, ticking the guest's (step 4 B).
+    vblank: Option<player_core::screen::HostVBlank>,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -143,6 +145,7 @@ fn main() {
             opened_at: None,
             surface: None,
             guest_mhz: 0,
+            vblank: None,
         })
     });
     // The launcher's identity: a compositor matches the player's window to
@@ -637,10 +640,18 @@ fn draw(w: Window_) {
 
 /// The refresh rate of the screen the window is on, as the guest's
 /// vertical blank should keep it (track M24, `player_core::screen`): told
-/// to QEMU, and logged, when it changes.
+/// to QEMU, and logged, when it changes. And that screen's own vertical
+/// blank, every Nth of which starts a guest frame (step 4 B;
+/// `PLAYER_HOST_VBLANK=0` leaves the guest its timer, the A/B).
 fn tell_refresh(p: &mut Player) {
     let (Some(surface), Some(session)) = (p.surface.as_ref(), p.session.as_ref()) else { return };
     let host = player_core::screen::refresh_mhz(surface);
+    if p.vblank.is_none() && std::env::var("PLAYER_HOST_VBLANK").as_deref() != Ok("0") {
+        p.vblank = session.vm().map(player_core::screen::HostVBlank::start);
+    }
+    if let Some(v) = &p.vblank {
+        v.follow(surface, player_core::screen::divisor(host));
+    }
     if player_core::screen::guest_refresh_mhz(host) == p.guest_mhz {
         return;
     }

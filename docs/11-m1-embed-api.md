@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v15** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v16** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references were taken
@@ -58,6 +58,7 @@ not block. Everything else may come from any thread.
 | 13 | `stopped_by_reset`: whether a reset under `-no-reboot` ended the loop, for the player's cold restart of a Windows 11 machine on a Windows host (M20 step 5) |
 | 14 | `stopped_by_reset` gone again: QEMU patch 87 made the reset itself work under WHPX, so nothing runs with `-no-reboot` |
 | 15 | `set_refresh_rate`: the guest screen's refresh rate in mHz, carried with v9's size into the EDID (M24, below) |
+| 16 | `vblank`: a host vertical blank that starts a guest frame, to virtio-gpu's `host-vblank` (QEMU patch 90; M24, below) |
 
 Windows has no zero-copy slot; its 3D frames arrive through
 `on_3d_frame` (a DXGI shared handle is open, M11).
@@ -104,6 +105,14 @@ Windows has no zero-copy slot; its 3D frames arrive through
   -> 72, 120 -> 60; 60 when the screen's rate is unknown, which is so on
   macOS and Linux for now), and our viogpudo (patch 02) paces its
   vertical blank at the EDID's rate.
+- **The host's vertical blank** (v16, track M24). `qemu_embed_vblank()`
+  schedules a bottom half that calls `qemu_host_vblank()`, a notifier
+  list in `ui/console.c` (QEMU patch 90), so the library needs no link to
+  virtio-gpu. A virtio-gpu with `host-vblank=on` whose guest asked for
+  the ticks (our viogpudo, patch 04) sets its event bit and raises the
+  config interrupt. The player calls it on every Nth blank of its
+  window's screen (`player_core::screen::HostVBlank`, a thread on
+  `D3DKMTWaitForVerticalBlankEvent`; Windows only for now).
   `dpy_gfx_check_format` accepts only `x8r8g8b8`, so QEMU shadows
   8/15/16/24 bpp into 32 bpp; 32 bpp modes are zero-copy (the surface
   points into VRAM, `hw/display/vga.c:1637`). All callbacks fire on the
