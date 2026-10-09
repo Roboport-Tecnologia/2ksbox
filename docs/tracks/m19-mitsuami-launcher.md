@@ -137,7 +137,8 @@ Kirigami keep the list, New, Shelf, Shaders, the "i" and the details'
 buttons. On KDE the About window's project names sit at the start of
 their column (user): Breeze gives a button an 80 px minimum and centres
 its label, and draws the label itself, so `about::hug` measures the name
-in the button's font (a `TextMetrics`) and makes the button that wide
+in the button's font (a `TextMetrics` in an invisible item: it has no
+parent of its own) and makes the button that wide
 plus a grid unit. On Windows its details are a shade darker there than the
 list beside them (Fluent's `SolidBackgroundFillColorSecondaryBrush`, a
 tweak on the details' `ScrollView`, user), and the machine form's

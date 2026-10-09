@@ -132,11 +132,22 @@ fn credit_groups() -> Vec<impl View + use<>> {
 /// button's font, and the button made that wide plus half a grid unit a
 /// side. Elsewhere the button already hugs its label.
 fn hug() -> Tweak<Button> {
+    // `TextMetrics` isn't an item, so it has no parent to take the font
+    // from: an invisible item holds it.
+    #[cfg(all(target_os = "linux", feature = "kde"))]
+    const HUG_METRICS: &str = r#"Item {
+    id: hug
+    objectName: "hugMetrics"
+    visible: false
+    property alias text: metrics.text
+    readonly property real advanceWidth: metrics.advanceWidth
+    TextMetrics { id: metrics; font: hug.parent ? hug.parent.font : Qt.application.font }
+}"#;
     platform! {
         kde => mitsuami::kirigami::tweak(|button: &mitsuami::kirigami::QmlObject| {
             use mitsuami::kirigami::QmlObject;
             let metrics = button.child("hugMetrics").unwrap_or_else(|| {
-                QmlObject::load_in("TextMetrics { objectName: \"hugMetrics\"; font: parent.font }", *button)
+                QmlObject::load_in(HUG_METRICS, *button)
             });
             metrics.set_str("text", &button.str("text"));
             let width = metrics.real("advanceWidth") + mitsuami::kirigami::grid_unit();
