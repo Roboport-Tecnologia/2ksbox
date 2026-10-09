@@ -87,6 +87,8 @@ struct D3dptVgaState {
                                    (in process), wine (another process, M15), none */
     uint32_t fb_version;        /* property: the VERSION register (D3DPT_FB_VERSION);
                                    a newer one checks that installed drivers accept it */
+    /* the VRAM fill (version 9): its registers and the last one's status */
+    uint32_t fill_addr, fill_bytes, fill_pattern, fill_status;
 
     /* the hardware cursor (version 4): the guest's registers, and what was
      * defined / shown so far for the log */
@@ -331,6 +333,28 @@ static uint32_t fb_vblank_count(D3dptVgaState *s)
     }
     return (uint32_t)((qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - s->vbl_ns) *
                       hz / NANOSECONDS_PER_SECOND);
+}
+
+/* A VRAM fill (version 9, FILL_GO): the host's memset of the range, which
+ * the vCPU makes at uncached speed through the BAR under WHPX (track M20). */
+static uint32_t fb_fill(D3dptVgaState *s)
+{
+    uint64_t end = (uint64_t)s->fill_addr + s->fill_bytes;
+    uint32_t *p, i, n = s->fill_bytes / 4;
+
+    if ((s->fill_addr | s->fill_bytes) & 3 || end > s->vga.vram_size) {
+        return D3DPT_FB_FILL_BAD;
+    }
+    p = (uint32_t *)(memory_region_get_ram_ptr(&s->vga.vram) + s->fill_addr);
+    if ((s->fill_pattern & 0xff) * 0x01010101u == s->fill_pattern) {
+        memset(p, s->fill_pattern & 0xff, s->fill_bytes);
+    } else {
+        for (i = 0; i < n; i++) {
+            p[i] = s->fill_pattern;
+        }
+    }
+    memory_region_set_dirty(&s->vga.vram, s->fill_addr, s->fill_bytes);
+    return D3DPT_FB_FILL_OK;
 }
 
 /* The interrupt line (register set v6): high while an enabled event is
@@ -824,7 +848,7 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
     case D3DPT_FB_REG_CAPS:
         return D3DPT_FB_CAP_BPP8 | D3DPT_FB_CAP_BPP16 | D3DPT_FB_CAP_BPP32 |
                D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0) |
-               (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0);
+               (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0) | D3DPT_FB_CAP_FILL;
     case D3DPT_FB_REG_IRQ_ENABLE:
         return s->irq_enable;
     case D3DPT_FB_REG_IRQ_STATUS:
@@ -857,6 +881,14 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return s->cur_on;
     case D3DPT_FB_REG_CURSOR_FLAGS:
         return s->cur_flags;
+    case D3DPT_FB_REG_FILL_ADDR:
+        return s->fill_addr;
+    case D3DPT_FB_REG_FILL_BYTES:
+        return s->fill_bytes;
+    case D3DPT_FB_REG_FILL_PATTERN:
+        return s->fill_pattern;
+    case D3DPT_FB_REG_FILL_GO:
+        return s->fill_status;
     case D3DPT_FB_REG_GAMMA_ENABLE:
         return s->gamma_on;
     case D3DPT_FB_REG_MODE_COUNT:
@@ -1058,6 +1090,18 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     case D3DPT_FB_REG_DMA_APPEND:
         s->dma_status = d3d_dma_append(s, val);
+        break;
+    case D3DPT_FB_REG_FILL_ADDR:
+        s->fill_addr = val;
+        break;
+    case D3DPT_FB_REG_FILL_BYTES:
+        s->fill_bytes = val;
+        break;
+    case D3DPT_FB_REG_FILL_PATTERN:
+        s->fill_pattern = val;
+        break;
+    case D3DPT_FB_REG_FILL_GO:
+        s->fill_status = fb_fill(s);
         break;
     case D3DPT_FB_REG_FENCE:
         s->fence_done = val;

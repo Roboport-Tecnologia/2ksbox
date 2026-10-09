@@ -79,6 +79,7 @@ typedef struct D3DPT_ADAPTER {
      * records to the window from the DMA buffer (dma), and a submission's
      * fence is the device's DMA interrupt (fence_irq, with CAP_IRQ) */
     BOOLEAN dma, fence_irq;
+    BOOLEAN fill;                     /* register set v9 (CAP_FILL): the device fills VRAM */
     PUCHAR sub_va;                    /* the DMA buffer of the submission being run: system VA */
     PHYSICAL_ADDRESS sub_pa;          /* and its physical address (contiguous) */
     ULONG dma_errors;                 /* appends the device refused, the first few logged */
@@ -424,6 +425,7 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->vsync_isr = 0;
     a->dma = a->d3d && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
     a->fence_irq = a->vsync_irq && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->fill = version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_FILL);
     a->dma_errors = 0;
     a->irq_mask = a->fence_irq ? D3DPT_FB_IRQ_DMA : 0;
     if (a->vsync_irq) {
@@ -1524,9 +1526,22 @@ static void run_transfer(D3DPT_ADAPTER *a, const PKT_TRANSFER_T *p)
 
 static void run_fill(D3DPT_ADAPTER *a, const PKT_FILL_T *p)
 {
-    PULONG d = (PULONG)seg_va(a, p->seg, p->addr, p->bytes);
+    PULONG d;
     ULONG i;
 
+    /* VRAM: the device fills it from the host (register set v9, CAP_FILL);
+     * the vCPU's stores into the BAR are uncached under WHPX (~130 ms for
+     * a 2304x800 texture, track M20) */
+    if (p->seg == 1 && a->fill && !((p->addr | p->bytes) & 3)) {
+        a->regs[D3DPT_FB_REG_FILL_ADDR / 4] = p->addr;
+        a->regs[D3DPT_FB_REG_FILL_BYTES / 4] = p->bytes;
+        a->regs[D3DPT_FB_REG_FILL_PATTERN / 4] = p->pattern;
+        a->regs[D3DPT_FB_REG_FILL_GO / 4] = 1;
+        if (a->regs[D3DPT_FB_REG_FILL_GO / 4] == D3DPT_FB_FILL_OK) {
+            return;
+        }
+    }
+    d = (PULONG)seg_va(a, p->seg, p->addr, p->bytes);
     if (!d) {
         return;
     }
@@ -1763,12 +1778,51 @@ static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 }
 
 /* Execute one submission: every packet from start to end, in order. */
+/* where the guest's CPU goes in the packets (track M20: the System
+ * process at 73% of a CPU while a game ran): per packet kind, the
+ * microseconds of the last 5 s, the first few periods logged */
+static LONGLONG g_pkt_us[16], g_pkt_t0;
+static ULONG g_pkt_n[16], g_pkt_logs;
+
+static void pkt_time(ULONG op, LARGE_INTEGER t0)
+{
+    LARGE_INTEGER f, t1 = KeQueryPerformanceCounter(&f);
+    ULONG i;
+
+    if (op < 16) {
+        g_pkt_us[op] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
+        g_pkt_n[op]++;
+    }
+    if (!g_pkt_t0) {
+        g_pkt_t0 = t1.QuadPart;
+    }
+    if (t1.QuadPart - g_pkt_t0 < 5 * f.QuadPart) {
+        return;
+    }
+    if (g_pkt_logs < 24) {
+        g_pkt_logs++;
+        dbg_puts("d3dptkmd: packets in 5 s, op count microseconds:");
+        for (i = 1; i < 16; i++) {
+            if (g_pkt_n[i]) {
+                dbg_hex(" op", i);
+                dbg_hex(" n", g_pkt_n[i]);
+                dbg_hex(" us", (ULONG)g_pkt_us[i]);
+            }
+        }
+        dbg_puts("\n");
+    }
+    RtlZeroMemory(g_pkt_us, sizeof(g_pkt_us));
+    RtlZeroMemory(g_pkt_n, sizeof(g_pkt_n));
+    g_pkt_t0 = t1.QuadPart;
+}
+
 static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
 {
     ULONG off = 0;
 
     while (off + sizeof(PKT_HDR) <= len) {
         const PKT_HDR *hd = (const PKT_HDR *)(p + off);
+        LARGE_INTEGER t0 = KeQueryPerformanceCounter(NULL);
 
         if (hd->magic != D3DPT_PKT_MAGIC || hd->size < sizeof(*hd) || hd->size > len - off) {
             dbg_hex("d3dptkmd: bad packet at ", off);
@@ -1825,10 +1879,14 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
             }
             break;
         }
+        pkt_time(hd->op, t0);
         off += hd->size;
     }
     if (a->d3d) {                   /* one doorbell per submission */
+        LARGE_INTEGER t0 = KeQueryPerformanceCounter(NULL);
+
         d3dpt_enc_flush(&a->enc);
+        pkt_time(15, t0);           /* the doorbell: the host runs the batch inside it */
     }
 }
 

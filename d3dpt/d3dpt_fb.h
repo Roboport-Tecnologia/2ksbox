@@ -81,6 +81,12 @@
  * desktop itself at every composed frame, so the pointer was gone while
  * anything moved (M18), and dxgkrnl's SetPointerPosition says when to hide.
  *
+ * Version 9 (CAP_FILL, M20): FILL_ADDR / FILL_BYTES / FILL_PATTERN and
+ * FILL_GO, a VRAM fill the host makes on its own mapping, at once. The
+ * WDDM driver's paging fills (every new allocation is cleared) took ~130 ms
+ * each from the vCPU under WHPX, where the guest's stores into the BAR
+ * are uncached: 40% of a guest CPU while a game ran on Windows 11.
+ *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
  * built with and refuses only an older one, because a newer register set is
@@ -101,7 +107,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_FB_VERSION      8u
+#define D3DPT_FB_VERSION      9u
 #define D3DPT_FB_MAGIC        0x42463344u          /* "D3FB" at REG_MAGIC */
 
 /* PCI identity: QEMU/Bochs pseudo vendor, our device id ("3D00"). The INF
@@ -172,6 +178,13 @@
 #define D3DPT_FB_REG_FENCE_DONE  0xd4u   /* R: the last FENCE written (0 after reset) */
 #define D3DPT_FB_REG_CURSOR_FLAGS 0xd8u  /* RW (version 8): D3DPT_FB_CURSOR_*; 0 at reset */
 #define D3DPT_FB_CURSOR_OWNED    0x1u    /* the driver alone shows and hides the sprite: no hiding on a page flip */
+#define D3DPT_FB_REG_FILL_ADDR   0xdcu   /* RW (version 9, CAP_FILL): byte offset in VRAM, a multiple of 4 */
+#define D3DPT_FB_REG_FILL_BYTES  0xe0u   /* RW: bytes, a multiple of 4 */
+#define D3DPT_FB_REG_FILL_PATTERN 0xe4u  /* RW: the 32-bit value every dword takes */
+#define D3DPT_FB_REG_FILL_GO     0xe8u   /* W: fill now (the host's memory, before the write returns);
+                                          * R: D3DPT_FB_FILL_* of the last one */
+#define D3DPT_FB_FILL_OK         0u
+#define D3DPT_FB_FILL_BAD        1u      /* outside VRAM or not dword aligned: nothing written */
 #define D3DPT_FB_DMA_OK          0u
 #define D3DPT_FB_DMA_NO_ROOM     1u      /* the batch has no room for them: ring the doorbell first */
 #define D3DPT_FB_DMA_BAD         2u      /* no window, a size not a multiple of 8, or memory the device cannot read */
@@ -193,5 +206,6 @@
 #define D3DPT_FB_CAP_GAMMA       0x20u   /* version 5: GAMMA_ENABLE and the GAMMA block */
 #define D3DPT_FB_CAP_IRQ         0x40u   /* version 6: an interrupt pin and the IRQ registers (irq=on) */
 #define D3DPT_FB_CAP_DMA         0x80u   /* version 7: DMA_* and FENCE (with a command window) */
+#define D3DPT_FB_CAP_FILL        0x100u  /* version 9: the FILL registers */
 
 #endif
