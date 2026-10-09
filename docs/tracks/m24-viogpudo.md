@@ -97,9 +97,16 @@ Not here: QEMU, the player, the launcher, the drivers disc
    Basic Display, 1280x800) and the virtio-gpu's the second, and only the
    primary is DWM's clock; and Windows 11's
    `DwmGetCompositionTimingInfo` counters move once a second whatever DWM
-   does (`DwmFlush` is the measure). Still to do: the Air (Windows 11 on
-   Arm), `tools/win11-frames-test.py`'s intervals there and the user's
-   eye, `VSyncHz` 60 against 0.
+   does (`DwmFlush` is the measure).
+
+   **The user's eye, on the PC's 144 Hz screen (2026-10-09):** 60 "much
+   better" than upstream; **72 "very smooth"** (each guest frame two host
+   refreshes, where 60 alternates two and three; DWM holds 13.88 ms, 13.46
+   to 14.30, once Windows has settled, 36 Hz in the first minute after
+   boot, "took a while to settle"); upstream (`VSyncHz=0`) again "is
+   choppier". So the blank's rate should divide the host screen's, which
+   step 4 makes automatic. Still to do: the Air (Windows 11 on Arm) and
+   `tools/win11-frames-test.py`'s intervals there.
 
    **The driver's own cost (the user: "see if it's not something slow in
    the driver itself, like unnecessary copying").** Per present, viogpudo
