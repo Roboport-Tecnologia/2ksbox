@@ -11,8 +11,9 @@
 #             EWDK 10.0.19041).
 #   viogpudo  our viogpudo for Windows 11 (track M24): ARM64 and x64
 #             viogpudo.{sys,inf} with the resolution service (vgpusrv,
-#             viogpuap) and viogpudo-install.ps1 in build/viogpudo, for
-#             build-viogpudo.sh iso. Built by build-viogpudo.sh build.
+#             viogpuap) in build/viogpudo, for build-viogpudo.sh iso, which
+#             takes the installer from the source tree. Built by
+#             build-viogpudo.sh build.
 #
 #   scripts/windows-drivers.sh key <driver>       the hash of its sources
 #   scripts/windows-drivers.sh fetch [driver...]  download the matching
@@ -66,10 +67,10 @@ setup() {
       NAME="our viogpudo"
       OUT=build/viogpudo
       FILES=(arm64/viogpudo.sys arm64/viogpudo.inf arm64/vgpusrv.exe arm64/viogpuap.exe
-             x64/viogpudo.sys x64/viogpudo.inf x64/vgpusrv.exe x64/viogpuap.exe
-             viogpudo-install.ps1)
-      # the script holds upstream's pin, so the pin is in the hash
-      SOURCES=(patches/viogpudo guest-tools/viogpudo scripts/build-viogpudo.sh)
+             x64/viogpudo.sys x64/viogpudo.inf x64/vgpusrv.exe x64/viogpuap.exe)
+      # the script holds upstream's pin, so the pin is in the hash; the
+      # guest scripts (guest-tools/viogpudo) go on the ISO from the tree
+      SOURCES=(patches/viogpudo scripts/build-viogpudo.sh)
       OLD_TAG=
       BUILD=(scripts/build-viogpudo.sh build) ;;
     *) echo "windows-drivers.sh: no driver '$1' (${DRIVERS[*]})" >&2; exit 2 ;;

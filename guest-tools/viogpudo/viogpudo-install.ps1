@@ -7,8 +7,16 @@
 # store (Windows ranks a Microsoft-signed driver above ours whatever the
 # version), installs ours on the virtio-gpu, and installs the resolution
 # service built with it (vgpusrv, viogpuap) so the desktop follows the
-# window. Test mode and the driver start at the next boot. Secure Boot must be off (2ksbox's default: no
+# window. The driver starts at the next boot. Secure Boot must be off (2ksbox's default: no
 # keys enrolled).
+#
+# Nothing is removed until Windows will take ours: test mode must already
+# be on in the running kernel (its code integrity options), so a first run
+# on a machine without it only turns it on and asks for a restart and a
+# second run. Smart App Control keeps test signing off even then (Windows
+# 11 on Arm had it evaluating; track M24): the script names it and stops.
+# If pnputil still refuses ours, upstream's is put back from the drivers
+# disc, so the virtio-gpu is never left without a driver (a black window).
 #
 # Run it elevated from the disc (build-viogpudo.sh iso); it picks the
 # processor's folder and copies it to a work folder first (the disc is
@@ -41,6 +49,32 @@ foreach ($f in "viogpudo.sys", "viogpudo.inf") {
 bcdedit /set testsigning on | Out-Host
 if ($LASTEXITCODE) { throw "bcdedit refused test mode (Secure Boot on?)" }
 
+# The running kernel's code integrity options (SYSTEM_CODEINTEGRITY_
+# INFORMATION, class 103): CODEINTEGRITY_OPTION_TESTSIGN is 0x2. The BCD
+# says what the next boot asks for; this says what Windows enforces now.
+Add-Type 'using System; using System.Runtime.InteropServices;
+public static class CodeIntegrity {
+    [DllImport("ntdll.dll")]
+    static extern int NtQuerySystemInformation(int c, int[] b, int l, out int r);
+    public static int Options() {
+        int[] b = { 8, 0 }; int r;
+        return NtQuerySystemInformation(103, b, 8, out r) == 0 ? b[1] : -1;
+    }
+}'
+$ci = [CodeIntegrity]::Options()
+if ($ci -lt 0 -or -not ($ci -band 2)) {
+    $sac = (Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
+    if ($sac -eq 1 -or $sac -eq 2) {
+        Write-Host ("Smart App Control is {0}, and it keeps test-signed drivers out even in test mode." -f $(if ($sac -eq 1) { "on" } else { "evaluating" }))
+        Write-Host "Turn it off (Windows Security > App & browser control > Smart App Control > Off;"
+        Write-Host "it cannot be turned on again without reinstalling Windows), restart, and run this again."
+    } else {
+        Write-Host "Test mode is set for the next boot. Restart Windows and run this again."
+    }
+    Write-Host "viogpudo-install: nothing installed; the current display driver is untouched"
+    exit 1
+}
+
 $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq "CN=2ksbox test signing" | Select-Object -First 1
 if (-not $cert) {
     $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=2ksbox test signing" `
@@ -67,7 +101,19 @@ Get-WindowsDriver -Online | Where-Object { $_.OriginalFileName -like "*\viogpudo
 
 pnputil /add-driver (Join-Path $work "viogpudo.inf") /install | Out-Host
 # 3010: installed, a restart needed
-if ($LASTEXITCODE -and $LASTEXITCODE -ne 3010) { throw "pnputil could not install the driver ($LASTEXITCODE)" }
+if ($LASTEXITCODE -and $LASTEXITCODE -ne 3010) {
+    $code = $LASTEXITCODE
+    # never a virtio-gpu without a driver: upstream's back from the drivers disc
+    $up = Get-Volume | Where-Object DriveLetter | ForEach-Object {
+        "$($_.DriveLetter):\`$WinPEDriver`$\viogpudo\viogpudo.inf" } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ($up) {
+        Write-Host "putting upstream's viogpudo back from $up"
+        pnputil /add-driver $up /install | Out-Host
+    } else {
+        Write-Host "no drivers disc in a drive: the virtio-gpu has no driver until one is installed"
+    }
+    throw "pnputil could not install our driver ($code; C:\Windows\INF\setupapi.dev.log says why)"
+}
 
 # The resolution service (vgpusrv starts viogpuap in the console session,
 # which applies the window's size to the desktop; without it the desktop

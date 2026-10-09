@@ -733,7 +733,10 @@ The first run fetches upstream's tree at the pin into
 `viogpudo` target, which links upstream's `VirtioLib`. The drivers are
 unsigned; the guest test signs them
 (`guest-tools/viogpudo/viogpudo-install.ps1`, which writes its own
-catalog; upstream's `inf2cat` step only has to not fail).
+catalog; upstream's `inf2cat` step only has to not fail). That
+installer and `dwm-pace.ps1` are not part of the build: `build-viogpudo.sh
+iso` takes them from the source tree, and the published build's hash
+leaves them out, so editing one needs no new build from this PC.
 
 ## Prebuilt drivers
 

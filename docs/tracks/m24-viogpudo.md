@@ -214,7 +214,7 @@ driver.
    patch 90, embed API v16, `screen::HostVBlank`, viogpudo patch 04; the
    blank is waited on on Windows and macOS so far, macOS through a
    `CVDisplayLink` for the window's screen; on Windows 11 on Arm the
-   guest stalls with it, below). Measured on the test
+   guest stalled with it until QEMU patch 91, below). Measured on the test
    machine at the PC's 144 Hz screen: DWM composes every 13.884 to
    13.887 ms (three runs of 300 `DwmFlush`es, 5th to 95th percentile
    13.69 to 14.12 ms, against 13.46 to 14.33 from the timer alone). The
@@ -306,7 +306,27 @@ driver.
      (the `CVDisplayLink` thread waits for each refresh, QEMU's main loop
      polls). MSI-X is on (the `virt` board's emulated ITS), so the
      config interrupt is message 0 as on x64. Same driver and device code
-     as the PC's, where it works: under investigation.
+     as the PC's, where it works.
+
+   **The stall was lost interrupts: QEMU patch 91 (2026-10-09).** Once
+   the guest froze (this time after the user had logged in: "it even
+   worked for a bit"), QMP hung in `run_on_cpu` and the player's samples
+   showed three vCPUs asleep in Hypervisor.framework's own
+   `wait_for_interrupt` for good. Under HVF with Apple's in-kernel VGIC
+   the `virt` board takes MSIs through GICv2m (not the ITS the PCI
+   capability suggested), which pulses an SPI: `hv_gic_set_spi(intid,
+   1)`, then `0` at once, and a pulse the VGIC does not sample is gone.
+   The host's blank adds an MSI 60 times a second, enough to lose one that
+   mattered within minutes. QEMU's own GIC (`-accel
+   hvf,kernel-irqchip=off`) was no A/B: Windows 11 boot-looped into
+   Recovery on it. Patch 91 latches each rising edge as pending
+   (`GICD_ISPENDR`, write one to set) beside the line. With it, the same
+   overlay, the host's blank on: the user, "man, now this is smooth,
+   it's awesome", and DWM composes every 16.661 ms (300 `DwmFlush`es,
+   median 16.661, 5th to 95th percentile 16.45 to 16.93, all between 15
+   and 18 ms), tighter than the PC's step 4 B. The coarse-tick bunching
+   of the timer alone stays, but with the host's blank the timer is only
+   the watchdog.
 5. **Then the decision on shipping** (attestation signing, upstream, or
    both) with the numbers in hand.
 
@@ -321,12 +341,25 @@ Windows 11 test here.
 
 ## Open
 
-- Windows 11 on Arm: the host-vblank stall, the driver's timer bunching
-  on a coarse tick under HVF, ramfb's Basic Display left extended beside
-  ours, `viogpudo-install.ps1` removing upstream's driver before ours is
-  accepted (it should check the kernel's `TESTSIGN` first and name Smart
-  App Control when that is what blocks it), and Basic Display on ramfb
-  drawn at 800x600 into a 1280x800 ramfb (step 4, "On the Air").
+- Windows 11 on Arm: the driver's timer bunching on a coarse tick under
+  HVF (only the watchdog now, patch 91 above), ramfb's Basic Display left
+  extended beside ours (the user, switching with Win+P between Extend and
+  the virtio-gpu's screen alone, with patch 91 in: "the difference in
+  smoothness is very obvious"; DWM keeps the simulated 64 Hz blank while
+  ramfb's screen is on, so the guest agent's "only one screen" must work
+  on Arm too), and Basic Display on ramfb drawn at 800x600 into
+  a 1280x800 ramfb (step 4, "On the Air").
+- `viogpudo-install.ps1` (2026-10-09, after the Air): it now reads the
+  running kernel's code integrity options before touching the installed
+  driver. Without `TESTSIGN` it only turns test mode on and stops, naming
+  Smart App Control when that is on or evaluating; if `pnputil` still
+  refuses ours, it puts upstream's back from the drivers disc
+  (`$WinPEDriver$\viogpudo`). Run on the Air's overlay with test mode on:
+  it reinstalled ours with no lasting black screen, and after a restart
+  the desktop came back as it was. The ISO takes it and `dwm-pace.ps1` from
+  the tree, and `windows-drivers.sh`'s hash for viogpudo no longer
+  covers `guest-tools/viogpudo`: the key moved, so the PC publishes once
+  more for this checkout.
 - A 144 Hz host screen (the PC's): 60 guest frames on 144 refreshes
   judder 2-3-2-3 whatever the guest does; `VSyncHz=72` or 144 would
   divide it, and step 4 makes it follow the screen.

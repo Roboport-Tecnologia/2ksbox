@@ -1,0 +1,40 @@
+hvf: latch an SPI's rising edge as pending in the kernel VGIC.
+
+Track M24.  Under HVF with Apple's VGIC (kernel-irqchip, the default on
+the virt board) MSIs go through GICv2m, which turns each into a pulse:
+hv_gic_set_spi(intid, 1) and at once (intid, 0).  A pulse that rises and
+falls before the VGIC samples the line is lost.  Windows 11 on Arm with
+viogpudo taking the host's vertical blank (patch 90, an MSI 60 times a
+second) froze within minutes: three vCPUs asleep in the VGIC's WFI for
+good.  Each rising edge now also sets the SPI's GICD_ISPENDR bit (write
+one to set), so the interrupt stays pending until the guest takes it; a
+level device is still asserted when the guest does.
+
+diff --git a/hw/intc/arm_gicv3_hvf.c b/hw/intc/arm_gicv3_hvf.c
+index ae88109..80e83d6 100644
+--- a/hw/intc/arm_gicv3_hvf.c
++++ b/hw/intc/arm_gicv3_hvf.c
+@@ -600,10 +600,22 @@ static void hvf_gicv3_get(GICv3State *s)
+ static void hvf_gicv3_set_irq(void *opaque, int irq, int level)
+ {
+     GICv3State *s = opaque;
++    uint32_t intid = GIC_INTERNAL + irq;
++
+     if (irq > s->num_irq) {
+         return;
+     }
+-    hv_gic_set_spi(GIC_INTERNAL + irq, !!level);
++    hv_gic_set_spi(intid, !!level);
++    if (level) {
++        /*
++         * Latch the rising edge as pending too: GICv2m turns each MSI into
++         * a pulse (raise, then lower at once), and a pulse that rises and
++         * falls before the kernel VGIC samples the line is lost.  A level
++         * device is still asserted when the guest takes it.
++         */
++        hv_gic_set_distributor_reg(HV_GIC_DISTRIBUTOR_REG_GICD_ISPENDR0 +
++                                   (intid / 32) * 4, 1u << (intid % 32));
++    }
+ }
+ 
+ static void hvf_gicv3_icc_reset(CPUARMState *env, const ARMCPRegInfo *ri)

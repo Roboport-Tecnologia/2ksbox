@@ -138,7 +138,6 @@ build() {
     cp "$SRC/viogpu/Install/Win11/$dir/"{viogpudo.sys,viogpudo.inf,viogpudo.pdb,vgpusrv.exe,viogpuap.exe} \
        "$OUT/$arch/"
   done
-  cp guest-tools/viogpudo/viogpudo-install.ps1 "$OUT/"
   # the sources it was built from (scripts/windows-drivers.sh publishes by them)
   scripts/windows-drivers.sh key viogpudo > "$OUT/.key"
   echo "==> $OUT/arm64, $OUT/x64 (sources $(cat "$OUT/.key"))"
@@ -153,9 +152,9 @@ iso() {
   mkdir -p "$tmp/arm64" "$tmp/x64"
   cp "$OUT"/arm64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/arm64/"
   cp "$OUT"/x64/{viogpudo.sys,viogpudo.inf,vgpusrv.exe,viogpuap.exe} "$tmp/x64/"
-  cp "$OUT/viogpudo-install.ps1" "$tmp/"
-  # the measure, from this checkout (a guest script, not part of the build)
-  cp guest-tools/viogpudo/dwm-pace.ps1 "$tmp/"
+  # the installer and the measure from this checkout: guest scripts, not
+  # the build, so editing one needs no new driver from the PC
+  cp guest-tools/viogpudo/viogpudo-install.ps1 guest-tools/viogpudo/dwm-pace.ps1 "$tmp/"
   rm -f "$OUT/viogpudo-test.iso"
   xorriso -as mkisofs -quiet -J -R -V VIOGPUDO -o "$OUT/viogpudo-test.iso" "$tmp"
   rm -rf "$tmp"
