@@ -85,6 +85,9 @@ impl Snaps {
 #[component]
 pub fn SnapshotsWindow() -> impl View {
     let snaps = use_store::<Snaps>();
+    // The table is the content's top, edge to edge, so on macOS it scrolls
+    // under the glass title bar and toolbar as Finder's does; what the
+    // window says goes under it, inset (user).
     view! {
         <Window
             title=move || snaps.read(|m| m.title())
@@ -94,7 +97,7 @@ pub fn SnapshotsWindow() -> impl View {
             open=move || snaps.read(|m| m.open)
             @close_request=move || snaps.close()
         >
-            <Column padding=Spacing::Lg gap=Spacing::Sm grow=1.0 min_height=0>
+            <Column grow=1.0 min_height=0>
                 {crate::shot::arm(&["snapshots"])}
                 <Toolbar>
                     <Button
@@ -103,11 +106,6 @@ pub fn SnapshotsWindow() -> impl View {
                         @click=move || snaps.naming.set(true)
                     >"Take snapshot"</Button>
                 </Toolbar>
-                <Show when=move || snaps.read(Snapshots::running)>
-                    <Text text_style=TextStyle::Caption>
-                        "The machine is running, so a snapshot also saves its RAM and CPU state."
-                    </Text>
-                </Show>
                 <Show
                     when=move || snaps.read(|m| m.snapshots().is_empty())
                     fallback=|| view! { <SnapshotTable/> }
@@ -116,19 +114,26 @@ pub fn SnapshotsWindow() -> impl View {
                         <Text>"No snapshots yet."</Text>
                     </Column>
                 </Show>
-                <Row gap=Spacing::Sm align=Align::Center shrink=0.0>
-                    <Show when=move || snaps.busy()>
-                        <Spinner label="Working"/>
+                <Column padding=Spacing::Lg gap=Spacing::Sm shrink=0.0>
+                    <Show when=move || snaps.read(Snapshots::running)>
+                        <Text text_style=TextStyle::Caption>
+                            "The machine is running, so a snapshot also saves its RAM and CPU state."
+                        </Text>
                     </Show>
-                    <Text text_style=TextStyle::Caption>
-                        {move || snaps.read(|m| m.status().unwrap_or_default().to_owned())}
-                    </Text>
-                </Row>
-                <Show when=move || snaps.read(|m| m.error().is_some())>
-                    <Text color=Color::Error>
-                        {move || snaps.read(|m| m.error().unwrap_or_default().to_owned())}
-                    </Text>
-                </Show>
+                    <Row gap=Spacing::Sm align=Align::Center shrink=0.0>
+                        <Show when=move || snaps.busy()>
+                            <Spinner label="Working"/>
+                        </Show>
+                        <Text text_style=TextStyle::Caption>
+                            {move || snaps.read(|m| m.status().unwrap_or_default().to_owned())}
+                        </Text>
+                    </Row>
+                    <Show when=move || snaps.read(|m| m.error().is_some())>
+                        <Text color=Color::Error>
+                            {move || snaps.read(|m| m.error().unwrap_or_default().to_owned())}
+                        </Text>
+                    </Show>
+                </Column>
                 <TakeSnapshotWindow/>
             </Column>
         </Window>
@@ -267,7 +272,7 @@ fn SnapshotTable() -> impl View {
             each=move || snaps.read(|m| m.snapshots().iter().map(|s| s.id.clone()).collect::<Vec<_>>())
             key=|id: &String| id.clone()
             columns=columns
-            list_style=ListStyle::Framed
+            list_style=ListStyle::Plain
             grow=1.0
             min_height=0
         />
