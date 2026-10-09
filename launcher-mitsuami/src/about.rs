@@ -27,16 +27,26 @@ impl About {
 }
 
 /// The app's menus: `commands` (the main window's, `machines::command_menus`)
-/// and About. Only macOS and GTK have any: About belongs in macOS's
-/// application menu and at the end of GTK's primary menu, and the role puts
-/// it there. Elsewhere the toolbar's "i" is the way in, and the window
-/// takes the commands' keys itself.
+/// and Help, with the user manual and About. Only macOS and GTK have any:
+/// About belongs in macOS's application menu and at the end of GTK's primary
+/// menu, and the role puts it there. Elsewhere the toolbar's "?" and "i" are
+/// the way in, and the window takes the commands' keys itself.
 pub fn app_menu(about: About, commands: Option<MenuBar>) {
     if let Some(bar) = commands.filter(|_| cfg!(sidebar)) {
-        set_menu(bar.menu(
-            Menu::new("Help").item(MenuItem::new("About 2ksbox").role(MenuRole::About).on_select(move || about.show())),
-        ));
+        set_menu(
+            bar.menu(
+                Menu::new("Help")
+                    .item(MenuItem::new(about::MANUAL).on_select(open_manual))
+                    .item(MenuItem::new("About 2ksbox").role(MenuRole::About).on_select(move || about.show())),
+            ),
+        );
     }
+}
+
+/// Opens the user manual in the browser: Help's item, and the toolbar's "?"
+/// where there are no menus.
+pub fn open_manual() {
+    open_url(about::MANUAL_URL);
 }
 
 /// The app's icon as pixels, decoded once here: `Image` takes a file or

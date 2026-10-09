@@ -328,12 +328,15 @@ pub fn MachinesWindow() -> impl View {
         {shelf()}
         {shaders_button()}
     };
-    // About, at the toolbar's end. Not on macOS (user) or GTK: there it is
-    // the application menu's or the primary menu's (`about::app_menu`).
+    // The user manual and About, at the toolbar's end. Not on macOS (user)
+    // or GTK: there they are Help's (`about::app_menu`).
     #[cfg(sidebar)]
     let about_button = ();
     #[cfg(not(sidebar))]
     let about_button = view! {
+        <Button icon=icons::MANUAL icon_only=true tooltip=launcher_core::about::MANUAL @click=move || crate::about::open_manual()>
+            {launcher_core::about::MANUAL}
+        </Button>
         <Button icon=icons::ABOUT icon_only=true tooltip="About 2ksbox" @click=move || about.show()>
             "About 2ksbox"
         </Button>
@@ -919,6 +922,11 @@ pub(crate) mod icons {
     #[cfg_attr(sidebar, allow(dead_code))]
     pub const SHADERS: &str = platform! {
         macos => "tv", gtk => "video-display-symbolic", kde => "video-display", windows => "\u{E7F4}",
+    };
+    // A "?": the user manual, beside About. macOS and GTK have it in Help.
+    #[cfg_attr(sidebar, allow(dead_code))]
+    pub const MANUAL: &str = platform! {
+        macos => "", gtk => "help-contents-symbolic", kde => "help-contents", windows => "\u{E897}",
     };
     // An "i" everywhere (user): the toolkits' About icon, Segoe's Info on
     // Windows. macOS and GTK have no toolbar button for it (the menus

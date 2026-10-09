@@ -28,6 +28,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TAGLINE: &str = "Run new and vintage OSes with a good looking CRT filter.";
 pub const LICENSE: &str = "Free software under the GNU GPL, version 2.";
 pub const URL: &str = "https://github.com/Roboport-Tecnologia/2ksbox";
+/// The user manual (`manual/`, published by `.github/workflows/manual.yml`)
+/// and the menu item that opens it.
+pub const MANUAL: &str = "User Manual";
+pub const MANUAL_URL: &str = "https://roboport-tecnologia.github.io/2ksbox/";
 pub const THANKS: &str = "Built on the work of these projects. Thank you.";
 
 const fn c(name: &'static str, what: &'static str, license: &'static str, url: &'static str) -> Credit {
@@ -82,7 +86,7 @@ pub const GROUPS: &[Group] = &[
 pub fn text() -> String {
     use std::fmt::Write;
     let mut s = String::new();
-    let _ = writeln!(s, "{NAME} {VERSION}\n{TAGLINE}\n{LICENSE}\n{URL}\n\n{THANKS}");
+    let _ = writeln!(s, "{NAME} {VERSION}\n{TAGLINE}\n{LICENSE}\n{URL}\n{MANUAL}: {MANUAL_URL}\n\n{THANKS}");
     for group in GROUPS {
         let _ = writeln!(s, "\n{}", group.title);
         for c in group.credits {

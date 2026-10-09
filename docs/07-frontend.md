@@ -66,7 +66,7 @@ player line runs a machine with nothing else.
   for). The details show only what the form shows for
   that family (no Direct3D row without our adapter), and a path shows
   its file name. On Windows and Kirigami the toolbar keeps what is not
-  about one machine: New, Shelf, Shaders and About; no button label
+  about one machine: New, Shelf, Shaders, the manual and About; no button label
   there ends in "…" (user). macOS and GTK put those in their menus.
 - **About 2ksbox** (2026-10-02) shows the version, the licence and
   the projects 2ksbox is built on, grouped by what they do for it, each
@@ -78,6 +78,10 @@ player line runs a machine with nothing else.
   application menu's or the primary menu's About item: the app's menus
   are set on those two only, with `MenuRole::About`, which AppKit moves
   into the application menu and GTK to the primary menu's end.
+- **User Manual** (2026-10-09) opens the manual site
+  (`launcher_core::about::MANUAL_URL`, `manual/`) in the browser: Help's
+  first item on macOS and GTK, and a "?" before the toolbar's "i" on
+  Windows and Kirigami. `launcherx --about` prints the address too.
   The `mitsuami` check grabs it (`LAUNCHER_SCREEN=about`).
 - **The main window's commands have keys** (2026-10-07,
   `machines::Command`): the platform's primary modifier (Cmd on macOS,
