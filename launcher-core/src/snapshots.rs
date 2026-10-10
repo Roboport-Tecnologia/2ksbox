@@ -310,7 +310,7 @@ fn qemu_img(args: &[&str], disk: &Path) -> std::io::Result<std::process::Output>
 /// Fail with `qemu-img`'s own stderr rather than a bare exit code. Its
 /// messages ("Could not find snapshot 'x'", "Permission denied") are
 /// what the window should show.
-fn check(what: &str, out: &std::process::Output) -> std::io::Result<()> {
+pub(crate) fn check(what: &str, out: &std::process::Output) -> std::io::Result<()> {
     if out.status.success() {
         return Ok(());
     }

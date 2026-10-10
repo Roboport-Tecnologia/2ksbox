@@ -14,6 +14,16 @@
 //!   call and a permanent black rectangle behind the player. [`command`]
 //!   is how this crate starts a subprocess, and it asks for no console.
 //!
+//! * A windowed program started from a console terminal still receives
+//!   that terminal's standard handle *values* in its start-up block,
+//!   though it never attaches to the console they belong to. In its own
+//!   process those numbers are stale, and once WinUI has opened its own
+//!   handles one of them can name an object Windows refuses to duplicate:
+//!   every child started with inherited standard handles then fails to
+//!   start with "The request is not supported" (os error 50; a new
+//!   machine's `qemu-img create`, 2026-10-09). [`command`] keeps such a
+//!   child from inheriting them.
+//!
 //! On every other platform `attach_parent` does nothing and `command` is
 //! `Command::new`.
 
@@ -25,7 +35,12 @@ use std::process::Command;
 /// Only when we have no console to lend it. Run the launcher from a
 /// terminal and its children inherit that terminal, which is where a
 /// developer wants the player's diagnostics. Run it from Explorer and
-/// nothing flashes.
+/// nothing flashes, and the child must inherit none of the launcher's
+/// standard handles (the module's third point). Its stdin is null here;
+/// stdout and stderr cannot be, because a stream set on the `Command`
+/// wins over the pipes `output()` would make, so a caller either uses
+/// `output()` or sets both itself (the player's log). Never `status()`
+/// or a bare `spawn()`, which inherit them.
 pub fn command(bin: &Path) -> Command {
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new(bin);
@@ -34,6 +49,7 @@ pub fn command(bin: &Path) -> Command {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.stdin(std::process::Stdio::null());
     }
     cmd
 }

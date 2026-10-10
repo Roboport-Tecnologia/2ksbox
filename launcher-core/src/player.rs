@@ -9,7 +9,7 @@ use crate::bundle::Machine;
 use crate::shader_library;
 use crate::shader_profile::ShaderProfile;
 use std::path::PathBuf;
-use std::process::Child;
+use std::process::{Child, Stdio};
 
 /// The `player` binary: `bin/2ksbox-player` in an installed tree
 /// (`paths.rs`). In a checkout, the mitsuami player (track M22, the
@@ -315,21 +315,13 @@ pub fn prepare(machine: &Machine) -> std::io::Result<()> {
     }
     let template = pc_bios_dir().join(machine.effective_arch().efi_vars_template());
     let bin = qemu_img_binary();
-    let status = crate::console::command(&bin)
+    let out = crate::console::command(&bin)
         .args(["convert", "-f", "raw", "-O", "qcow2"])
         .arg(&template)
         .arg(&vars)
-        .status()
+        .output()
         .map_err(|e| std::io::Error::other(format!("running {}: {e}", bin.display())))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "qemu-img could not make {} from {} ({status})",
-            vars.display(),
-            template.display()
-        )))
-    }
+    crate::snapshots::check("convert", &out)
 }
 
 /// Why `machine` cannot start on this host, in the sentence a front end
@@ -416,14 +408,13 @@ pub fn spawn(
             cmd.env("DXVK_LOG_PATH", dir);
         }
     }
+    // Never the windowless launcher's own handles, which may be stale
+    // (`console.rs`)
     if !crate::console::inherits_output() {
-        if let Some(log) = open_log(&machine.name, &line) {
-            let dup = log.try_clone();
-            cmd.stdout(log);
-            if let Ok(dup) = dup {
-                cmd.stderr(dup);
-            }
-        }
+        let log = open_log(&machine.name, &line);
+        let dup = log.as_ref().and_then(|f| f.try_clone().ok());
+        cmd.stdout(log.map_or_else(Stdio::null, Stdio::from));
+        cmd.stderr(dup.map_or_else(Stdio::null, Stdio::from));
     }
     cmd.spawn().map_err(|e| std::io::Error::other(format!("running {}: {e}", bin.display())))
 }
@@ -498,15 +489,11 @@ pub fn qemu_img_binary() -> PathBuf {
 /// Create a new qcow2 disk image for the wizard's "new disk" path.
 pub fn create_disk(path: &std::path::Path, size_gb: u32) -> std::io::Result<()> {
     let bin = qemu_img_binary();
-    let status = crate::console::command(&bin)
+    let out = crate::console::command(&bin)
         .args(["create", "-f", "qcow2"])
         .arg(path)
         .arg(format!("{size_gb}G"))
-        .status()
+        .output()
         .map_err(|e| std::io::Error::other(format!("running {}: {e}", bin.display())))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!("qemu-img create exited with {status}")))
-    }
+    crate::snapshots::check("create", &out)
 }

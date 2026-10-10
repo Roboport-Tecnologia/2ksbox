@@ -1688,6 +1688,17 @@ impl Form {
             return Ok(bundle_path);
         }
         let dir = library::reserve_dir(library_dir, &self.name)?;
+        // A new folder (`slug` never reuses a name), so a failure takes
+        // it back whole: left, it held no bundle, never listed, and the
+        // retry's name became "<name>-2".
+        let made = self.write_new(&dir);
+        if made.is_err() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        made
+    }
+
+    fn write_new(&self, dir: &Path) -> std::io::Result<PathBuf> {
         let bundle_path = dir.join(library::BUNDLE_FILE);
         let disk_path = if self.existing_disk {
             PathBuf::from(&self.disk_path)

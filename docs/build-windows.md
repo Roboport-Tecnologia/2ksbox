@@ -91,7 +91,13 @@ double-click opens a black terminal. So the package provides:
 
 - a console for the debug verbs: `launcher-core/src/console.rs`
   attaches the launching one and starts every child with
-  `CREATE_NO_WINDOW`;
+  `CREATE_NO_WINDOW` and none of the launcher's standard handles. A
+  windowed program started from a terminal (`win-run.sh launcher`) gets
+  that terminal's handle numbers without its console; with WinUI up they
+  can name objects Windows will not duplicate, and a child that inherits
+  them fails with "The request is not supported" (os error 50; a new
+  machine's `qemu-img create`, 2026-10-09). So no `status()` there:
+  `output()`, or the player's log;
 - a home for the player's output, `%APPDATA%\2ksbox\data\player.log`;
 - somewhere for a failure to go. `launcher-core/src/fatal.rs`, the
   launcher's first call, writes `launcher.log` beside `player.log` with a
