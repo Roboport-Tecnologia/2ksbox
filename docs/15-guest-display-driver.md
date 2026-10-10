@@ -1612,6 +1612,16 @@ own are `D9F_*` (doc 19).
   another process put there, the way Windows 11's taskbar lost the
   opaque texel of Explorer's atlas, or shows that nothing ever wrote a
   surface, as DWM's caption-button atlases (track M20).
+- **`D3DPT_SURF_LOG=<flag file>`**: while the file exists (looked for
+  every 100 ms), every surface event in order, one line each with the
+  context and the DP2 call: registered (and moved, with or without the
+  host's pixels), uploaded from VRAM, drawn into, bound to a stage,
+  blitted in or out, COLORFILL, CLEAR, read back, VRAM_DIRTY, released,
+  and whether VRAM or the host held the newer pixels (`ddi: surf N WxH
+  ... ctx C, call K: ...`). Nothing in it waits on the GPU, so a race the
+  frame trace hides (it reads every target back) stays: it found the
+  lost scissor behind Windows 11's half-drawn menus (track M20). Follow
+  one surface by its handle, then what the draws into it sampled.
 - **`D3DPT_DDI_REREAD=1`** re-reads every texture from VRAM at every bind
   (to tell a stale host copy from VRAM the guest never wrote).
   **`D3DPT_DDI_NOFOG=1`** forces fog off.

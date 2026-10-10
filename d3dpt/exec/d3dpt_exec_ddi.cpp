@@ -102,6 +102,7 @@ struct VramSurf {
      * writes") */
     std::vector<uint8_t> shadow;
     bool checked = false;               /* the untracked-write check ran since the last readback */
+    uint32_t slog_draw = ~0u, slog_samp = ~0u;  /* D3DPT_SURF_LOG: the dp2 call last logged drawing / sampling it */
     /* v8: a P8 texture's palette (SETPALETTE: the runtime's palette handle,
      * whether its entries carry alpha) and a source colour key
      * (VRAM_COLORKEY): both make the host texture an A8R8G8B8 expansion of
@@ -175,6 +176,16 @@ struct Ctx {
     uint32_t rt = 0, z = 0;
     uint32_t mrt[4] = {};               /* v17: targets 1..3 (SETRENDERTARGET2), 0 = none; mrt[0] unused */
     D3DVIEWPORT9 vp = { 0, 0, 0, 0, 0.0f, 1.0f };
+    /* the scissor rectangle the guest set since its target 0 last changed
+     * (scissor_on), re-applied with the viewport whenever the host binds
+     * target 0 again: SetRenderTarget(0) resets both to the whole target,
+     * and the host binds it again at moments the guest never chose (after
+     * another context drew, an upload, a blit). Lost there, a dirty
+     * rectangle's redraw covered its whole target: Windows 11's menus kept
+     * only the row last hovered, and DWM's window shadows darkened with
+     * every redraw (track M20) */
+    RECT scissor = {};
+    bool scissor_on = false;
     /* the DX8 shaders by the runtime's handle (per device = per context);
      * a DX9 declaration (CREATEVERTEXSHADERDECL) is one of these with no
      * function, in the same handle space */
@@ -276,6 +287,15 @@ struct Ddi {
     uint32_t tex_blt_lines = 0;             /* texture BLTs logged with what the host read (v23) */
     uint32_t moved_lines = 0;               /* rendered surfaces moved with their host pixels kept (v23) */
     uint32_t lost_lines = 0;                /* host pixels of a drawn target dropped (re-registered, moved, VRAM_DIRTY) */
+    /* D3DPT_SURF_LOG=<flag file>: while the file exists, every surface
+     * event in order (registered, moved, uploaded, drawn, sampled,
+     * blitted, filled, read back, dirtied, released), with the context
+     * and the surface's flags, and nothing that waits on the GPU, so a
+     * race the frame trace hides (it reads every target back) stays
+     * (track M20). The file is looked for every 100 ms. */
+    const char *slog_flag = env("D3DPT_SURF_LOG");
+    bool slog = false;
+    std::chrono::steady_clock::time_point slog_seen{};
     /* the render / stage states seen so far (a snapshot at the start of a
      * traced frame: most are set once at scene start) */
     uint32_t rs_val[256] = {}, tss_val[8][33] = {};
@@ -699,10 +719,34 @@ static bool ensure_stage(Exec &x, Ddi &d, uint32_t w, uint32_t h, D3DFORMAT fmt,
     return true;
 }
 
+/* D3DPT_SURF_LOG: whether the flag file is there (every 100 ms), and one
+ * event of a surface */
+static void slog_poll(Exec &x, Ddi &d) {
+    if (!d.slog_flag) return;
+    auto now = std::chrono::steady_clock::now();
+    if (now - d.slog_seen < std::chrono::milliseconds(100)) return;
+    d.slog_seen = now;
+    bool on = file_exists(d.slog_flag);
+    if (on != d.slog) x.log("ddi: surf log %s", on ? "on" : "off");
+    d.slog = on;
+}
+static void sev(Exec &x, const VramSurf &s, const char *fmt, ...) {
+    Ddi *d = x.ddi;
+    if (!d || !d->slog) return;
+    char what[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(what, sizeof what, fmt, ap);
+    va_end(ap);
+    x.log("ddi: surf %u %ux%u fmt %u caps 0x%x at 0x%x, ctx %u, call %u: %s%s%s", s.d.handle, s.d.width, s.d.height, s.d.format,
+          s.d.caps, s.d.offset, d->cur_ctx, d->dp2_calls, what, s.dirty ? " [vram newer]" : "", s.rendered ? " [host newer]" : "");
+}
+
 /* VRAM -> host texture (every level; a cube's every face, v11); a P8 or
  * colour-keyed texture is expanded texel by texel: the palette's colour,
  * alpha 0 for a keyed value */
 static void upload_texture(Exec &x, Ddi &d, VramSurf &s) {
+    sev(x, s, "texture uploaded from VRAM");
     D3DLOCKED_RECT lr;
     bool bump16 = s.host_fmt == D3DFMT_X8L8V8U8 && s.d.format == D3DFMT_L6V5U5;
     bool expand = needs_expand(s) && (s.host_fmt == D3DFMT_A8R8G8B8 || bump16);
@@ -795,6 +839,7 @@ static uint32_t shadow_diff(Exec &x, VramSurf &s) {
 
 /* VRAM -> host render target (the guest drew into the target with GDI / the HEL) */
 static void upload_target(Exec &x, Ddi &d, VramSurf &s) {
+    sev(x, s, "target uploaded from VRAM");
     /* the copies below are not made inside a scene: the frame the guest
      * is building closes here and opens again at its next draw */
     x.scene_end();
@@ -834,6 +879,7 @@ static IDirect3DSurface9 *resolved(Exec &x, VramSurf &s) {
  * was taken (untracked writes: GDI through GetDC, drawn after the scene
  * as a rule, like a title's text and panels) stay over the host's. */
 static HRESULT readback(Exec &x, Ddi &d, VramSurf &s) {
+    sev(x, s, "read back into VRAM");
     x.scene_end();
     if (!s.rt || (s.d.caps & D3DPT_VS_ZBUFFER)) return D3DERR_INVALIDCALL;
     if (!ensure_stage(x, d, s.d.width, s.d.height, (D3DFORMAT)s.d.format, false)) return E_FAIL;
@@ -920,6 +966,7 @@ static bool bind_ctx(Exec &x, Ddi &d, Ctx &c, Batch &b, bool for_draw) {
         x.dev->SetDepthStencilSurface(z ? z->rt : nullptr);
         d.bound_rt = c.rt; d.bound_z = c.z;
         if (c.vp.Width && c.vp.Height) x.dev->SetViewport(&c.vp);
+        if (c.scissor_on) x.dev->SetScissorRect(&c.scissor);
     }
     /* v17: targets 1..3, each where it still names a target (a context
      * switch leaves the other context's bound until this one says) */
@@ -933,6 +980,7 @@ static bool bind_ctx(Exec &x, Ddi &d, Ctx &c, Batch &b, bool for_draw) {
         }
         if (m && for_draw) {
             if (m->dirty) upload_target(x, d, *m);
+            if (m->slog_draw != d.dp2_calls) { m->slog_draw = d.dp2_calls; sev(x, *m, "drawn into (target %u)", i); }
             m->rendered = true;
             m->checked = true;
             if (m->d.caps & D3DPT_VS_AUTOGEN) m->mips_stale = true;
@@ -952,6 +1000,7 @@ static bool bind_ctx(Exec &x, Ddi &d, Ctx &c, Batch &b, bool for_draw) {
         }
         rt->checked = true;
         if (rt->dirty) upload_target(x, d, *rt);
+        if (rt->slog_draw != d.dp2_calls) { rt->slog_draw = d.dp2_calls; sev(x, *rt, "drawn into"); }
         rt->rendered = true;
         if (rt->d.caps & D3DPT_VS_AUTOGEN) rt->mips_stale = true;
     }
@@ -2075,6 +2124,7 @@ struct Dp2 {
             /* v15: an autogen target drawn into since: its levels again */
             if (s->mips_stale && s->tex) { s->tex->GenerateMipSubLevels(); s->mips_stale = false; }
         }
+        if (s && t && s->slog_samp != d.dp2_calls) { s->slog_samp = d.dp2_calls; sev(x, *s, "bound to stage %u", stage); }
         x.dev->SetTexture(stage, t);
         uint32_t slot = sampler_slot(stage);
         if (slot != ~0u) d.stage_tex[slot] = t ? handle : 0;
@@ -2299,7 +2349,13 @@ struct Dp2 {
         if (!surf(x, rt)) { if (d.warn_once(0x60000)) x.log("ddi: dp2: render target handle %u unknown", rt); return; }
         if (z && !surf(x, z)) z = 0;
         c.rt = rt; c.z = z;
-        bind_ctx(x, d, c, b, true);
+        /* Direct3D 9's rule: a new target 0 resets the scissor to the
+         * whole target, also when the host has it bound already */
+        c.scissor_on = false;
+        if (!bind_ctx(x, d, c, b, true)) return;
+        VramSurf *t = surf(x, rt);
+        RECT whole = { 0, 0, (LONG)t->d.width, (LONG)t->d.height };
+        x.dev->SetScissorRect(&whole);
     }
 
     void clear(uint32_t flags, uint32_t color, float z, uint32_t stencil, uint32_t nrects, const uint8_t *rects) {
@@ -2651,6 +2707,7 @@ struct Dp2 {
                 need = 16 + count * 16u;
                 if (need > left) return fail("truncated CLEAR");
                 float z; memcpy(&z, q + 8, 4);
+                if (d.slog) if (VramSurf *cs = surf(x, c.rt)) sev(x, *cs, "CLEAR flags 0x%x colour 0x%08x, %u rectangles", u32(q), u32(q + 4), count);
                 clear(u32(q), u32(q + 4), z, u32(q + 12), count, q + 16);
                 if (b.err) return false;
                 break;
@@ -2856,6 +2913,8 @@ struct Dp2 {
                             if (d.warn_once(0xf0002)) x.log("ddi: dp2: colour BLT %u -> %u: no host target, dropped", u32(e), u32(e + 24));
                             continue;
                         }
+                        sev(x, *src, "colour BLT source (%d,%d,%d,%d) -> %u", (int)sr.left, (int)sr.top, (int)sr.right, (int)sr.bottom, u32(e + 24));
+                        sev(x, *dst, "colour BLT destination (%d,%d,%d,%d) <- %u", (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom, u32(e));
                         if (src->dirty) upload_target(x, d, *src);
                         bool whole = dr.left == 0 && dr.top == 0 && (uint32_t)dr.right == dst->d.width && (uint32_t)dr.bottom == dst->d.height;
                         if (dst->dirty && !whole) upload_target(x, d, *dst);
@@ -2888,6 +2947,8 @@ struct Dp2 {
                          * after the source was staged, the first blit into a fresh
                          * target copied the target's own VRAM: Windows 11's taskbar
                          * lost the opaque texel its background samples, track M20) */
+                        sev(x, *src, "texture BLT source, from VRAM (%d,%d,%d,%d) -> %u", (int)sr.left, (int)sr.top, (int)sr.right, (int)sr.bottom, u32(e + 24));
+                        sev(x, *dst, "texture BLT destination (%d,%d,%d,%d) <- %u", (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom, u32(e));
                         bool whole = dr.left == 0 && dr.top == 0 && (uint32_t)dr.right == dst->d.width && (uint32_t)dr.bottom == dst->d.height;
                         if (ensure_object(x, *dst) && dst->rt && dst->dirty && !whole) upload_target(x, d, *dst);
                         if (!ensure_object(x, *dst) || !dst->rt ||
@@ -2951,6 +3012,8 @@ struct Dp2 {
                             if (d.warn_once(0xf0006)) x.log("ddi: dp2: BLT %u -> texture %u: no host target, dropped", u32(e), u32(e + 24));
                             continue;
                         }
+                        sev(x, *src, "BLT to texture source, read back (%d,%d,%d,%d) -> %u", (int)sr.left, (int)sr.top, (int)sr.right, (int)sr.bottom, u32(e + 24));
+                        sev(x, *dst, "BLT to texture destination, into VRAM (%d,%d,%d,%d) <- %u", (int)dr.left, (int)dr.top, (int)dr.right, (int)dr.bottom, u32(e));
                         if (src->dirty) upload_target(x, d, *src);
                         IDirect3DSurface9 *rs = resolved(x, *src);
                         D3DLOCKED_RECT lr;
@@ -3006,6 +3069,7 @@ struct Dp2 {
                         if (d.warn_once(0xf0010)) x.log("ddi: dp2: COLORFILL of %u: no colour target or a rectangle outside it, dropped", u32(e));
                         continue;
                     }
+                    sev(x, *s, "COLORFILL (%d,%d,%d,%d) 0x%08x", (int)r.left, (int)r.top, (int)r.right, (int)r.bottom, u32(e + 20));
                     bool whole = r.left == 0 && r.top == 0 && (uint32_t)r.right == s->d.width && (uint32_t)r.bottom == s->d.height;
                     if (s->dirty && !whole) upload_target(x, d, *s);
                     x.scene_end();
@@ -3068,7 +3132,11 @@ struct Dp2 {
                 if (count) {
                     RECT r; memcpy(&r, q + 16 * (count - 1), sizeof r);
                     tr("scissor %ld,%ld..%ld,%ld", (long)r.left, (long)r.top, (long)r.right, (long)r.bottom);
-                    if (r.left <= r.right && r.top <= r.bottom) x.dev->SetScissorRect(&r);
+                    if (r.left <= r.right && r.top <= r.bottom) {
+                        x.dev->SetScissorRect(&r);
+                        c.scissor = r;
+                        c.scissor_on = true;
+                    }
                 }
                 break;
             default:
@@ -3281,12 +3349,14 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         if (moved && !keep) { s.dirty = true; s.shadow.clear(); }
         if (keep) s.shadow.clear();
         if (!s.tex && !s.rt && !s.cube && !s.vol) s.dirty = true;
+        uint32_t old_off = s.d.offset;
         s.d = nd;
         s.levels.assign(lv, lv + nlv);
         s.depth = depth;
         s.slice = slice;
         s.cube_root = s.face = 0;
         if (!cube) memset(s.face_h, 0, sizeof s.face_h);
+        if (d.slog) sev(x, s, moved ? (keep ? "registered, moved from 0x%x, the host's pixels kept" : "registered, moved from 0x%x") : "registered", old_off);
         break;
     }
     case D3DPT_OP_VRAM_MIP_LEVEL: {
@@ -3358,6 +3428,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         if (!x.ddi) return true;
         auto it = x.ddi->surfs.find(a->handle);
         if (it == x.ddi->surfs.end()) return true;
+        sev(x, it->second, "released");
         if (x.ddi->bound_rt == a->handle || x.ddi->bound_z == a->handle) {
             /* the device may still reference it: unbind first */
             if (x.dev) { x.dev->SetDepthStencilSurface(nullptr); }
@@ -3396,6 +3467,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
     case D3DPT_OP_VRAM_DIRTY: {
         auto *a = body<d3dpt_handle>(c, 0, b); if (!a) return true;
         VramSurf *s = surf(x, a->handle);
+        if (s) sev(x, *s, "VRAM_DIRTY (the guest wrote its VRAM)");
         if (s && s->rendered && x.ddi->lost_lines < 32) {
             x.ddi->lost_lines++;
             x.log("ddi: VRAM_DIRTY of target %u (%ux%u) the host drew into since its last readback: the host's pixels dropped", a->handle,
@@ -3535,6 +3607,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         const uint8_t *cmds = tail(a);
         Dp2 p = { x, *x.ddi, it->second, b, cmds, cmds + a->command_bytes, cmds + cmd_aligned, stride, stride ? a->vertex_bytes / stride : 0, a->fvf };
         x.ddi->dp2_calls++;
+        slog_poll(x, *x.ddi);
         if (x.ddi->trace_flag && !x.ddi->trace && !x.ddi->trace_armed && file_exists(x.ddi->trace_flag)) {
             x.ddi->trace_armed = true;                 /* the trace starts with the next frame */
             x.log("ddi: trace: armed at dp2 call %u", x.ddi->dp2_calls);

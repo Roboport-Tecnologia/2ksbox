@@ -603,12 +603,18 @@ static HRESULT APIENTRY umd_destroy_resource(HANDLE h, HANDLE hres)
 }
 
 /* A render target the host drew into is read back into its VRAM before
- * the CPU or a present reads it. */
+ * the CPU or a present reads it. Whether the host drew into it is the
+ * executor's to know, per allocation: `rendered` is this device's view
+ * only, and another device or process may have drawn into the same
+ * allocation since (Explorer's XAML into a surface DWM then copies on the
+ * CPU: a hovered menu kept only its new row, window shadows darkened with
+ * each redraw, track M20). So every render target asks, and the executor
+ * answers S_FALSE, with no GPU work, when its VRAM is current. */
 static void umd_readback(UMD_DEV *d, UMD_RES *r)
 {
     d3dpt_sync *s;
 
-    if (!r->rendered || !r->kmt) {
+    if (!r->kmt || (!r->rendered && !(r->d.caps & (D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY)))) {
         return;
     }
     s = (d3dpt_sync *)cmd_rec(d, D3DPT_OP_READBACK, sizeof(*s), 0, 1);

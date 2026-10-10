@@ -70,6 +70,9 @@ typedef struct D3DPT_ADAPTER {
     volatile LONG fence_done;         /* the last submission fence executed */
     volatile LONG fence_notify;       /* the fence the next DPC reports */
     volatile LONG preempt_fence;      /* a preemption request to answer, 0 for none */
+    volatile LONG fence_submitted;    /* the last submission fence SubmitCommand ran (fence_dump) */
+    volatile ULONG preempts;          /* preemptions answered, and those that found a flip held */
+    volatile ULONG preempts_held;
     /* the vertical blank while dxgkrnl has it enabled (ControlInterrupt):
      * the device's interrupt (register set v6, CAP_IRQ), else a periodic
      * timer at the mode's refresh */
@@ -2083,12 +2086,26 @@ static BOOLEAN notify_completed(PVOID ctx)
     return TRUE;
 }
 
+static void release_flip_sync(D3DPT_ADAPTER *a);
+
+/* A preemption answers with every fence done: the work behind a flip held
+ * for the vertical blank has run already (the host ran it inside
+ * SubmitCommand), so the flip shows now and its fences are done. Answered
+ * with the last fence before the held ones, dxgkrnl took the held
+ * submissions for preempted and the vertical blank then completed a fence
+ * it no longer had in flight: the fences went out of step and the adapter
+ * timed out (TDR) as menus opened under memory pressure (track M20). */
 static KSYNCHRONIZE_ROUTINE notify_preempted;
 static BOOLEAN notify_preempted(PVOID ctx)
 {
     D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
     DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
 
+    a->preempts++;
+    if (a->fence_held || a->flip_pending) {
+        a->preempts_held++;
+        release_flip_sync(a);
+    }
     RtlZeroMemory(&n, sizeof(n));
     n.InterruptType = DXGK_INTERRUPT_DMA_PREEMPTED;
     n.DmaPreempted.PreemptionFenceId = (UINT)a->preempt_fence;
@@ -2641,13 +2658,15 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
     if (a->flip_defer) {
         InterlockedIncrement(&g_flips_submitted);
     }
+    a->fence_submitted = (LONG)s->SubmissionFenceId;
     complete_fence(a, s->SubmissionFenceId, a->flip_defer);
     a->flip_defer = FALSE;
     return STATUS_SUCCESS;
 }
 
-/* Nothing is ever in flight, so a preemption finds the queue empty: it is
- * answered at once with the last fence done. */
+/* Nothing is ever in flight but a flip held for the vertical blank, which
+ * notify_preempted releases: a preemption is answered at once with every
+ * fence done. */
 static DXGKDDI_PREEMPTCOMMAND d3dpt_preempt_command;
 static NTSTATUS APIENTRY d3dpt_preempt_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PREEMPTCOMMAND p)
 {
@@ -2666,11 +2685,37 @@ static NTSTATUS APIENTRY d3dpt_query_current_fence(IN_CONST_HANDLE h, INOUT_PDXG
     return STATUS_SUCCESS;
 }
 
+/* What the fences and the vertical blank were doing when dxgkrnl found
+ * the adapter hung (CollectDbgInfo, ResetFromTimeout): the QEMU log is
+ * the only place a TDR explains itself. */
+static void fence_dump(D3DPT_ADAPTER *a, const char *when)
+{
+    dbg_puts("d3dptkmd: ");
+    dbg_puts(when);
+    dbg_hex(": fences submitted ", (ULONG)a->fence_submitted);
+    dbg_hex(" done ", (ULONG)a->fence_done);
+    dbg_hex(" notified ", (ULONG)a->fence_notify);
+    dbg_hex(" held ", a->fence_held ? (ULONG)a->held_fence : 0);
+    dbg_hex(" flip ", (ULONG)a->flip_pending);
+    dbg_puts("\n");
+    dbg_hex("d3dptkmd:  vsync on ", (ULONG)a->vsync_on);
+    dbg_hex(" blanks ", a->vsync_isr);
+    dbg_hex(" irq mask ", a->irq_mask);
+    if (a->regs) {
+        dbg_hex(" device enable ", a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4]);
+        dbg_hex(" status ", a->regs[D3DPT_FB_REG_IRQ_STATUS / 4]);
+        dbg_hex(" fence done ", a->regs[D3DPT_FB_REG_FENCE_DONE / 4]);
+    }
+    dbg_hex(" preempts ", a->preempts);
+    dbg_hex(" with a flip held ", a->preempts_held);
+    dbg_puts("\n");
+}
+
 static DXGKDDI_RESETFROMTIMEOUT d3dpt_reset_from_timeout;
 static NTSTATUS APIENTRY d3dpt_reset_from_timeout(IN_CONST_HANDLE h)
 {
-    UNREFERENCED_PARAMETER(h);
     dbg_line("ResetFromTimeout");
+    fence_dump((D3DPT_ADAPTER *)h, "ResetFromTimeout");
     return STATUS_SUCCESS;
 }
 
@@ -2685,9 +2730,9 @@ static NTSTATUS APIENTRY d3dpt_restart_from_timeout(IN_CONST_HANDLE h)
 static DXGKDDI_COLLECTDBGINFO d3dpt_collect_dbg_info;
 static NTSTATUS APIENTRY d3dpt_collect_dbg_info(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_COLLECTDBGINFO c)
 {
-    UNREFERENCED_PARAMETER(h);
     UNREFERENCED_PARAMETER(c);
     dbg_line("CollectDbgInfo");
+    fence_dump((D3DPT_ADAPTER *)h, "CollectDbgInfo");
     return STATUS_SUCCESS;
 }
 /* ------------------------------------------------------------- VidPN */
