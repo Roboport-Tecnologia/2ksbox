@@ -171,7 +171,9 @@
 #define D3DPT_FB_REG_IRQ_ENABLE  0xb8u   /* RW (version 6, CAP_IRQ): D3DPT_FB_IRQ_* the device may raise; 0 at reset */
 #define D3DPT_FB_REG_IRQ_STATUS  0xbcu   /* R: D3DPT_FB_IRQ_* that happened while enabled; W: 1 bits acknowledge
                                           * (clear) them, and the line drops when none enabled is left */
-#define D3DPT_FB_IRQ_VBLANK      0x1u    /* each period of HZ (60 when unset) while enabled, off the guest's clock */
+#define D3DPT_FB_IRQ_VBLANK      0x1u    /* each period of HZ (60 when unset) while enabled, off the guest's clock;
+                                            with host-vblank (the default) each blank of the host
+                                            screen the player gives, the clock then a watchdog */
 #define D3DPT_FB_IRQ_DMA         0x2u    /* version 7: a FENCE write (the submission it names is done) */
 #define D3DPT_FB_REG_DMA_ADDR_LO 0xc0u   /* RW (version 7, CAP_DMA): guest-physical address of records to append */
 #define D3DPT_FB_REG_DMA_ADDR_HI 0xc4u

@@ -60,14 +60,19 @@ The sources are in `guest-tools/src/d3dptvid/`. The NT layer `nt/`
   takes one character per write, and the device prints whole lines to
   the QEMU log (`d3dpt-vga: guest: …`). It is the kernel code's only
   debugger, and enough.
-- **No copy inside QEMU.** While ENABLE is set, the device creates its
-  `DisplaySurface` over the VRAM bytes at the guest's offset and pitch
-  (`qemu_create_displaysurface_from`). Dirty lines come from the memory
-  dirty log (`DIRTY_MEMORY_VGA`, as in `bochs-display`), and the embed
-  listener hands that pointer plus the dirty rectangles to the player.
-  The listener takes one format, so 8 and 16 bpp modes (and a 32 bpp one
-  under a gamma ramp) are converted per dirty span into an x8r8g8b8
-  shadow. The player's upload of the dirty rectangle is the one copy
+- **One copy inside QEMU, made at the flip.** While ENABLE is set, the
+  device shows an x8r8g8b8 shadow of the VRAM bytes at the guest's
+  offset and pitch. Dirty lines come from the memory dirty log
+  (`DIRTY_MEMORY_VGA`, as in `bochs-display`) and are converted per
+  dirty span at the display's tick; a page flip (an OFFSET write)
+  copies the page it shows whole and pushes it to the embed listener at
+  once (`flip-push`, on by default since 2026-10-10, track M20), so the
+  player shows each flipped frame when it is made instead of at its
+  ~62.5 Hz poll, and never reads a page the guest draws into again
+  (Windows 11's DWM flipping at 72 Hz on a 144 Hz host was shown twice
+  or never; the shown page is the one nothing draws into until the next
+  flip). With `flip-push=off` a 32 bpp mode with no gamma ramp is shown
+  straight from VRAM (`qemu_create_displaysurface_from`), the old way. The player's upload of the dirty rectangle is the one copy
   left; zero-copy from guest RAM to the GPU is impossible with a
   host-visible-only import (M3's dma-buf ring is for host-rendered 3D).
   `-device d3dpt-vga,full-frames=on` converts the whole frame every
@@ -150,6 +155,8 @@ is checked.
 | `fb-version=N` | the register set version reported |
 | `full-frames=on` | whole-frame conversion every refresh |
 | `irq=on` | an interrupt pin (INTA) for Windows 7's WDDM driver (M18), which dxgkrnl will not start without one, and the IRQ registers behind it (register set v6, `CAP_IRQ`): the vertical blank at the refresh in `HZ`, on the guest's clock, while the driver enables it; off (the default) keeps the PCI config XP, 9x and snapshots know |
+| `host-vblank=off` | with `irq=on`, the vertical blank interrupt on the guest's clock alone. On (the default, 2026-10-10, track M20) it follows the host screen's blank, which the player sends (QEMU patch 90's `qemu_host_vblank`, at the rate it picked for the guest: 72 Hz on a 144 Hz screen, track M24), and the clock is only a watchdog two periods out; `FRAMES` (98 / XP) still counts on the clock |
+| `flip-push=off` | the console stands on VRAM and the display's tick polls it, as before 2026-10-10; on (the default) a flip copies the page it shows and pushes it at once (above) |
 
 The executor properties model hosts, not devices. The adapter only hands
 them to the loader (`d3dpt/hw/d3dpt_exec_load.c`).

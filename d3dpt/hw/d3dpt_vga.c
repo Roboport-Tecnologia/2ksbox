@@ -74,6 +74,10 @@ struct D3dptVgaState {
     uint32_t irq_status;        /* IRQ_STATUS: raised while enabled, not yet acknowledged */
     QEMUTimer *vbl_timer;       /* the vertical blank interrupt's, while IRQ_VBLANK is enabled */
     int64_t vbl_next_ns;        /* its next deadline (QEMU_CLOCK_VIRTUAL) */
+    bool host_vblank;           /* property: IRQ_VBLANK on the host screen's blank */
+    Notifier host_vbl;          /* qemu_host_vblank's, with host_vblank */
+    uint32_t host_vbls;         /* host blanks raised since IRQ_VBLANK went on */
+    uint32_t watchdog_vbls;     /* and the timer's, while host blanks had come */
     uint32_t dma_lo, dma_hi, dma_bytes, dma_status; /* DMA_* (register set v7) */
     uint32_t fence_done;        /* FENCE_DONE */
     uint64_t dma_appends, dma_appended; /* appends and their bytes, for the rate line */
@@ -112,6 +116,8 @@ struct D3dptVgaState {
     bool lin_on;
     bool full_update;
     bool full_frames;           /* property: every refresh a whole frame */
+    bool flip_push;             /* property: a flip copies the page it shows and pushes it */
+    uint32_t flip_pushes;       /* flips pushed so far, for the log */
     bool resurface;             /* invalidated: put our own surface on the console again */
     int64_t vga_grace_until;    /* hold the last frame after ENABLE 1->0 until then (ms) */
     uint8_t vga_sig[8];         /* the VGA core mode last reported */
@@ -258,31 +264,49 @@ static void fb_gamma_apply(D3dptVgaState *s)
     }
 }
 
+/* The VRAM view the shadow is converted from: the page at m->offset. */
+static void fb_make_src(D3dptVgaState *s, const D3dptLinearMode *m)
+{
+    uint8_t *ptr = memory_region_get_ram_ptr(&s->vga.vram) + m->offset;
+
+    if (s->src) {
+        qemu_pixman_image_unref(s->src);
+    }
+    if (m->bpp == 32) {
+        /* a gamma ramp on (version 5), or flip-push: a copy */
+        s->src = pixman_image_create_bits(PIXMAN_x8r8g8b8, m->w, m->h,
+                                          (uint32_t *)ptr, m->pitch);
+    } else if (m->bpp == 16) {
+        s->src = pixman_image_create_bits(PIXMAN_r5g6b5, m->w, m->h,
+                                          (uint32_t *)ptr, m->pitch);
+    } else {
+        /* indices through the palette: pixman's c8 fetcher looks each
+         * byte up in the indexed table the image points at */
+        s->src = pixman_image_create_bits(PIXMAN_c8, m->w, m->h,
+                                          (uint32_t *)ptr, m->pitch);
+        fb_apply_palette(s);
+        pixman_image_set_indexed(s->src, s->indexed);
+    }
+}
+
+/* A 32 bpp mode is shown straight from VRAM only with flip-push off and
+ * no gamma ramp; everything else goes through the shadow. */
+static bool fb_wants_shadow(D3dptVgaState *s, uint32_t bpp)
+{
+    return bpp != 32 || s->gamma_active || s->flip_push;
+}
+
 static void fb_switch(D3dptVgaState *s, const D3dptLinearMode *m)
 {
     uint8_t *ptr = memory_region_get_ram_ptr(&s->vga.vram) + m->offset;
     DisplaySurface *ds;
 
     fb_drop_shadow(s);
-    if (m->bpp == 32 && !s->gamma_active) {
+    if (!fb_wants_shadow(s, m->bpp)) {
         ds = qemu_create_displaysurface_from(m->w, m->h, PIXMAN_x8r8g8b8,
                                              m->pitch, ptr);
     } else {
-        if (m->bpp == 32) {
-            /* a gamma ramp on (version 5): a copy it can be applied to */
-            s->src = pixman_image_create_bits(PIXMAN_x8r8g8b8, m->w, m->h,
-                                              (uint32_t *)ptr, m->pitch);
-        } else if (m->bpp == 16) {
-            s->src = pixman_image_create_bits(PIXMAN_r5g6b5, m->w, m->h,
-                                              (uint32_t *)ptr, m->pitch);
-        } else {
-            /* indices through the palette: pixman's c8 fetcher looks each
-             * byte up in the indexed table the image points at */
-            s->src = pixman_image_create_bits(PIXMAN_c8, m->w, m->h,
-                                              (uint32_t *)ptr, m->pitch);
-            fb_apply_palette(s);
-            pixman_image_set_indexed(s->src, s->indexed);
-        }
+        fb_make_src(s, m);
         s->shadow = pixman_image_create_bits(PIXMAN_x8r8g8b8, m->w, m->h,
                                              NULL, 0);
         ds = qemu_create_displaysurface_pixman(s->shadow);
@@ -462,9 +486,38 @@ static void fb_vbl_tick(void *opaque)
     if (!(s->irq_enable & D3DPT_FB_IRQ_VBLANK)) {
         return;
     }
+    if (s->host_vbls) {
+        s->watchdog_vbls++;
+    }
     s->irq_status |= D3DPT_FB_IRQ_VBLANK;
     fb_irq_update(s);
     fb_vbl_arm(s);
+}
+
+/* The host screen's vertical blank (QEMU patch 90's qemu_host_vblank: the
+ * player calls it on each host refresh that starts a guest frame, at the
+ * rate it gave the guest, tracks M24 and M20). While they come, each one
+ * raises IRQ_VBLANK, so the guest composes in step with the screen the
+ * frame is shown on instead of sliding across it, and the timer above is
+ * only a watchdog: pushed two periods out at every host blank, it takes
+ * over when they stop (a minimized window, a headless run, a host screen
+ * with no blank to wait on), as dxgkrnl must not miss blanks for long. */
+static void fb_host_vblank(Notifier *n, void *data)
+{
+    D3dptVgaState *s = container_of(n, D3dptVgaState, host_vbl);
+    int64_t now;
+
+    if (!(s->irq_enable & D3DPT_FB_IRQ_VBLANK)) {
+        return;
+    }
+    if (!s->host_vbls++) {
+        info_report("d3dpt-vga: the vertical blank follows the host screen's");
+    }
+    s->irq_status |= D3DPT_FB_IRQ_VBLANK;
+    fb_irq_update(s);
+    now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->vbl_next_ns = now + 2 * (NANOSECONDS_PER_SECOND / fb_refresh_hz(s));
+    timer_mod(s->vbl_timer, s->vbl_next_ns);
 }
 
 static void fb_irq_enable(D3dptVgaState *s, uint32_t val)
@@ -478,6 +531,11 @@ static void fb_irq_enable(D3dptVgaState *s, uint32_t val)
         fb_vbl_arm(s);
     } else if (!(s->irq_enable & D3DPT_FB_IRQ_VBLANK)) {
         timer_del(s->vbl_timer);
+        if (was & D3DPT_FB_IRQ_VBLANK && s->host_vbls) {
+            info_report("d3dpt-vga: vertical blanks: %u the host's, %u the timer's",
+                        s->host_vbls, s->watchdog_vbls);
+        }
+        s->host_vbls = s->watchdog_vbls = 0;
     }
     fb_irq_update(s);
 }
@@ -575,9 +633,16 @@ static bool d3dpt_vga_gfx_update(void *opaque)
         /* a new ramp recolours every pixel; a 32 bpp mode moves between
          * VRAM itself and the shadow the ramp is applied in */
         s->gamma_dirty = false;
-        if (s->lin_on && m.bpp == 32 && (s->shadow != NULL) != s->gamma_active) {
+        if (s->lin_on && m.bpp == 32 && (s->shadow != NULL) != fb_wants_shadow(s, 32)) {
             s->lin_on = false;
         }
+        s->full_update = true;
+    }
+    if (s->lin_on && !s->resurface && s->shadow && m.offset != s->lin.offset &&
+        m.w == s->lin.w && m.h == s->lin.h && m.bpp == s->lin.bpp && m.pitch == s->lin.pitch) {
+        /* a page flip the push did not take: the same shadow, the new page */
+        fb_make_src(s, &m);
+        s->lin = m;
         s->full_update = true;
     }
     if (!s->lin_on || s->resurface || memcmp(&s->lin, &m, sizeof(m)) != 0) {
@@ -900,6 +965,38 @@ static void fb_cursor_move(D3dptVgaState *s)
     qemu_console_set_mouse(s->vga.con, s->cur_x, s->cur_y, on);
 }
 
+/* flip-push: the page a flip shows, copied into the console's shadow and
+ * pushed now, from the flip's register write (tracks M20, M24). Polled by
+ * the display's tick instead (PLAYER_REFRESH_MS, ~62.5 Hz), a guest that
+ * flips at another rate (72 Hz on a 144 Hz host screen) has frames shown
+ * twice or never, and a surface standing on VRAM is read whenever the
+ * player gets to it, while the guest may already draw into that page
+ * again. The page a flip shows is the one nothing draws into until the
+ * next flip, so the copy is a whole, finished frame; an update outside the
+ * tick is a flush to the embed library (v12 on_flush), shown at once. */
+static void fb_flip_push(D3dptVgaState *s)
+{
+    D3dptLinearMode m;
+
+    if (!s->flip_push || !s->lin_on || !s->shadow || s->resurface ||
+        !fb_get_mode(s, &m) || m.w != s->lin.w || m.h != s->lin.h ||
+        m.bpp != s->lin.bpp || m.pitch != s->lin.pitch) {
+        return;     /* a mode change: the tick switches surfaces */
+    }
+    if (s->pal_dirty && m.bpp == 8) {
+        fb_apply_palette(s);
+    }
+    fb_make_src(s, &m);
+    s->lin = m;
+    g_free(memory_region_snapshot_and_clear_dirty(&s->vga.vram, m.offset,
+                                                  (uint64_t)m.pitch * m.h,
+                                                  DIRTY_MEMORY_VGA));
+    fb_update_span(s, 0, m.h);
+    if (!s->flip_pushes++) {
+        info_report("d3dpt-vga: flips push their page (flip-push)");
+    }
+}
+
 static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
 {
     D3dptVgaState *s = opaque;
@@ -1095,7 +1192,10 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
                           qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + D3DPT_FB_FLIP_IDLE_MS);
             }
         }
-        s->r_offset = val;
+        if (val != s->r_offset) {
+            s->r_offset = val;
+            fb_flip_push(s);
+        }
         break;
     case D3DPT_FB_REG_HZ:
         s->r_hz = val;
@@ -1312,6 +1412,10 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
         dev->config[PCI_INTERRUPT_PIN] = 1;
     }
     s->vbl_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, fb_vbl_tick, s);
+    if (s->irq && s->host_vblank) {
+        s->host_vbl.notify = fb_host_vblank;
+        qemu_host_vblank_add_notifier(&s->host_vbl);
+    }
 
     /* the command window takes the top 64 MiB when at least as much is
      * left below it for the frame buffer and the DirectDraw heap */
@@ -1386,9 +1490,16 @@ static const Property d3dpt_vga_properties[] = {
      * 3DMark 99 loading screen on the PC). On means the pixels in VRAM are
      * right and this device's incremental path is what lost them. */
     DEFINE_PROP_BOOL("full-frames", D3dptVgaState, full_frames, false),
+    /* a page flip copies the page it shows into the console's own surface
+     * and pushes it to the display at once (fb_flip_push); off, the
+     * console stands on VRAM and the display's tick polls it, the A/B */
+    DEFINE_PROP_BOOL("flip-push", D3dptVgaState, flip_push, true),
     /* an interrupt pin for the WDDM driver (M18, Windows 7) and the IRQ
      * registers behind it (register set v6: the vertical blank) */
     DEFINE_PROP_BOOL("irq", D3dptVgaState, irq, false),
+    /* with irq: IRQ_VBLANK on the host screen's blank when the player gives
+     * one (fb_host_vblank); off, the guest's clock alone, the A/B */
+    DEFINE_PROP_BOOL("host-vblank", D3dptVgaState, host_vblank, true),
 };
 
 static void d3dpt_vga_class_init(ObjectClass *klass, const void *data)

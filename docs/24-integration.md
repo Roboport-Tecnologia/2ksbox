@@ -203,13 +203,16 @@ overwritten. It does three jobs:
    minute it maps the share to the first free letter from Z: down
    (`WNetAddConnection2`, the fixed credentials) and exits. It shows no
    UI, and a machine without a shared folder simply has no drive.
-3. **The screen (track M24):** a Windows 11 machine keeps a second card
-   (the standard VGA on x64, ramfb on Arm) for setup, which has no virtio
-   driver, and for recovery, and Windows extends the desktop onto both
-   with the other card's screen as the primary, which is the one DWM
-   paces on, while the player shows the virtio-gpu's. Once Explorer's
-   taskbar exists, the agent makes the virtio-gpu's screen
-   (`VEN_1AF4&DEV_1050` in the adapter's path) the only one with
+3. **The screen (tracks M24, M20):** a Windows 11 machine keeps a second
+   card (the standard VGA on x64, ramfb on Arm) for setup, which has no
+   driver for the paravirtual one, and for recovery, and Windows extends
+   the desktop onto both. While the other card's screen is on, DWM
+   composes on dxgkrnl's simulated 64 Hz blank, even with the
+   paravirtual card's screen the primary (M20, 2026-10-10), and the
+   player shows only the paravirtual card's. Once Explorer's taskbar
+   exists, the agent makes the paravirtual card's screen, the
+   virtio-gpu's (`VEN_1AF4&DEV_1050` in the adapter's path) or our
+   d3dpt-vga's (`VEN_1234&DEV_3D00`, the WDDM driver), the only one with
    `SetDisplayConfig`, saved to Windows' display database; with no
    working virtio-gpu screen it changes nothing. The database keeps a
    layout per set of connected screens, so a recovery boot or a broken

@@ -27,7 +27,7 @@
 //! by the player when the machine has one) and exits.
 //!
 //! Once the desktop is up it also makes the virtio-gpu's screen the only
-//! one (track M24, `virtio_screen_only`).
+//! one, or d3dpt-vga's (tracks M24 and M20, `card_screen_only`).
 
 #![windows_subsystem = "windows"]
 
@@ -378,17 +378,21 @@ fn map_share() {
     }
 }
 
-/// The virtio-gpu's screen as the only one, once the desktop is up (track
-/// M24; the user, 2026-10-09). A Windows 11 machine keeps a second card,
-/// the standard VGA on x64 and ramfb on Arm, for setup (which has no
-/// virtio driver) and recovery, and Windows extends the desktop onto both,
-/// the other card's screen the primary: DWM paces on the primary, and the
-/// player shows the virtio-gpu's. So when the virtio-gpu has a screen
-/// Windows can drive (viogpudo working), every other screen goes, saved in
-/// Windows' display database. That database keeps a layout per set of
-/// connected screens: if the virtio-gpu's ever goes (a broken driver, a
-/// recovery boot), Windows shows the other card's again by itself.
-fn virtio_screen_only() {
+/// The paravirtual card's screen as the only one, once the desktop is up
+/// (track M24; the user, 2026-10-09): the virtio-gpu's (viogpudo) or our
+/// own d3dpt-vga's (the WDDM driver, track M20 step 5). A Windows 11
+/// machine keeps a second card, the standard VGA on x64 and ramfb on Arm,
+/// for setup (which has no driver for either) and recovery, and Windows
+/// extends the desktop onto both: while the other card's screen is on,
+/// DWM composes on dxgkrnl's simulated 64 Hz blank, not the paravirtual
+/// card's, whichever screen is the primary (M20 step 5, 2026-10-09), and
+/// the player shows only the paravirtual card's. So when that card has a
+/// screen Windows can drive (its driver working), every other screen
+/// goes, saved in Windows' display database. That database keeps a
+/// layout per set of connected screens: if the card's ever goes (a broken
+/// driver, a recovery boot), Windows shows the other card's again by
+/// itself.
+fn card_screen_only() {
     use windows_sys::Win32::Devices::Display::*;
     use windows_sys::Win32::Graphics::Gdi::{DISPLAYCONFIG_PATH_ACTIVE, DISPLAYCONFIG_PATH_MODE_IDX_INVALID};
 
@@ -424,8 +428,8 @@ fn virtio_screen_only() {
         modes.truncate(nm as usize);
         Some((paths, modes))
     };
-    // virtio-gpu's PCI ID in the adapter's device path
-    let virtio = |p: &DISPLAYCONFIG_PATH_INFO| {
+    // the virtio-gpu's or d3dpt-vga's PCI ID in the adapter's device path
+    let ours = |p: &DISPLAYCONFIG_PATH_INFO| {
         let mut name: DISPLAYCONFIG_ADAPTER_NAME = unsafe { std::mem::zeroed() };
         name.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
         name.header.size = std::mem::size_of::<DISPLAYCONFIG_ADAPTER_NAME>() as u32;
@@ -434,7 +438,8 @@ fn virtio_screen_only() {
             return false;
         }
         let len = name.adapterDevicePath.iter().position(|&c| c == 0).unwrap_or(128);
-        String::from_utf16_lossy(&name.adapterDevicePath[..len]).to_ascii_uppercase().contains("VEN_1AF4&DEV_1050")
+        let path = String::from_utf16_lossy(&name.adapterDevicePath[..len]).to_ascii_uppercase();
+        path.contains("VEN_1AF4&DEV_1050") || path.contains("VEN_1234&DEV_3D00")
     };
     let flags = SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES | SDC_SAVE_TO_DATABASE;
 
@@ -442,15 +447,15 @@ fn virtio_screen_only() {
         log("display: QueryDisplayConfig failed");
         return;
     };
-    if paths.iter().any(|p| virtio(p)) {
-        if paths.iter().all(|p| virtio(p)) {
-            log("display: the virtio-gpu's screen is already the only one");
+    if paths.iter().any(|p| ours(p)) {
+        if paths.iter().all(|p| ours(p)) {
+            log("display: the paravirtual card's screen is already the only one");
             return;
         }
-        // only the virtio-gpu's paths and their modes, re-indexed (a path
+        // only the card's paths and their modes, re-indexed (a path
         // left out goes off); its screen moves to the origin, the primary's
         // place
-        paths.retain(|p| virtio(p));
+        paths.retain(|p| ours(p));
         let mut keep = Vec::new();
         for p in paths.iter_mut() {
             for idx in [unsafe { &mut p.sourceInfo.Anonymous.modeInfoIdx }, unsafe { &mut p.targetInfo.Anonymous.modeInfoIdx }] {
@@ -466,7 +471,7 @@ fn virtio_screen_only() {
         }
         modes = keep;
         let r = unsafe { SetDisplayConfig(paths.len() as u32, paths.as_ptr(), modes.len() as u32, modes.as_ptr(), flags) };
-        log(&format!("display: the virtio-gpu's screen made the only one ({})", r));
+        log(&format!("display: the paravirtual card's screen made the only one ({})", r));
         return;
     }
     // not on yet: its first path to a screen Windows can drive, alone, the
@@ -475,15 +480,15 @@ fn virtio_screen_only() {
         log("display: QueryDisplayConfig failed");
         return;
     };
-    let Some(mut p) = all.into_iter().find(|p| p.targetInfo.targetAvailable != 0 && virtio(p)) else {
-        log("display: no virtio-gpu screen (viogpudo not working?); the screens are left as they are");
+    let Some(mut p) = all.into_iter().find(|p| p.targetInfo.targetAvailable != 0 && ours(p)) else {
+        log("display: no paravirtual card's screen (viogpudo or d3dptkmd not working?); the screens are left as they are");
         return;
     };
     p.flags = DISPLAYCONFIG_PATH_ACTIVE;
     p.sourceInfo.Anonymous.modeInfoIdx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
     p.targetInfo.Anonymous.modeInfoIdx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
     let r = unsafe { SetDisplayConfig(1, &p, 0, std::ptr::null(), flags) };
-    log(&format!("display: the virtio-gpu's screen turned on as the only one ({})", r));
+    log(&format!("display: the paravirtual card's screen turned on as the only one ({})", r));
 }
 
 fn main() {
@@ -521,7 +526,7 @@ fn main() {
     }
     let hw = hwnd as usize;
     std::thread::spawn(move || reader(hw));
-    std::thread::spawn(virtio_screen_only);
+    std::thread::spawn(card_screen_only);
     unsafe {
         let mut m: MSG = std::mem::zeroed();
         while GetMessageW(&mut m, std::ptr::null_mut(), 0, 0) > 0 {
