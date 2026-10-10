@@ -445,9 +445,11 @@ fn menus(w: Window_) -> MenuBar {
                         .shortcut(primary_alt('p').shift())
                         .on_select(move || toggle_pause(w)),
                 )
-                .item(MenuItem::new("Reset").on_select(|| {
+                .item(MenuItem::new("Reset").on_select(move || {
                     if let Some(vm) = vm() {
+                        // the embed library runs a paused machine after its reset
                         vm.vm_reset();
+                        w.paused.set(false);
                     }
                 }))
                 .item(MenuItem::new("Power Button").on_select(|| {

@@ -633,10 +633,26 @@ void qemu_embed_vm_pause(qemu_embed_t *e)
     qemu_system_vmstop_request(RUN_STATE_PAUSED);
 }
 
+/* A running machine's reset is QEMU's own request. One that is not
+ * running (paused by the user or by an error, asleep in S3, stopped by a
+ * guest crash) QEMU's main loop leaves in prelaunch after the reset, for
+ * a QMP client's cont, so the player's Reset left a machine that never ran
+ * again (track M20, 2026-10-10): here it is reset and started. Main loop,
+ * the vCPUs already paused. */
+static void bh_vm_reset(void *opaque)
+{
+    (void)opaque;
+    if (runstate_is_running()) {
+        qemu_system_reset_request(SHUTDOWN_CAUSE_HOST_QMP_SYSTEM_RESET);
+        return;
+    }
+    qemu_system_reset(SHUTDOWN_CAUSE_HOST_QMP_SYSTEM_RESET);
+    vm_start();
+}
+
 void qemu_embed_vm_reset(qemu_embed_t *e)
 {
-    (void)e;
-    qemu_system_reset_request(SHUTDOWN_CAUSE_HOST_QMP_SYSTEM_RESET);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_vm_reset, e);
 }
 
 void qemu_embed_vm_powerdown(qemu_embed_t *e)

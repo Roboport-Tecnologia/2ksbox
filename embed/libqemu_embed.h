@@ -96,7 +96,7 @@ QEMU_EMBED_API void qemu_embed_destroy(qemu_embed_t *e, int status);
 /* --- VM control: async, any thread --- */
 QEMU_EMBED_API void qemu_embed_vm_start(qemu_embed_t *e);      /* resume / first start */
 QEMU_EMBED_API void qemu_embed_vm_pause(qemu_embed_t *e);
-QEMU_EMBED_API void qemu_embed_vm_reset(qemu_embed_t *e);
+QEMU_EMBED_API void qemu_embed_vm_reset(qemu_embed_t *e);      /* and runs it, paused or not */
 QEMU_EMBED_API void qemu_embed_vm_powerdown(qemu_embed_t *e);  /* ACPI power button */
 QEMU_EMBED_API void qemu_embed_vm_shutdown(qemu_embed_t *e);   /* hard stop of the loop */
 QEMU_EMBED_API bool qemu_embed_vm_running(qemu_embed_t *e);

@@ -1022,8 +1022,8 @@ vCPUs spinning), while a cold start of the same disk booted. A reset
 handler registered at accel init, so before the board's CPU handlers,
 calls `WHvResetPartition` on every reset after power-on, as upstream's
 Arm WHPX does on its reset exit; the registers, the APIC and the TSC are
-written after it as before. `failed to get xsave state` still prints
-once per vCPU at a reset (upstream's, harmless). **Test:** the Windows
+written after it as before. The `failed to get xsave state` it left
+printing once per vCPU at a reset was not harmless: patch 92. **Test:** the Windows
 11 test machine restarted itself twice under WHPX in one QEMU process
 (2026-10-09; `D:\vms\win11-test\run-87.sh`), and `test.sh`'s
 `whpx-i386` resets SeaBIOS over QMP and sees it reach the end of its
@@ -1090,6 +1090,25 @@ ITS, did not boot Windows 11 at all.) **Test:** the M24 run on the Air
 (`tracks/m24-viogpudo.md`, step 4 "On the Air"), `dwm-pace.ps1`.
 **Drop:** upstream latches GICv2m's pulses under HVF, or delivers MSIs
 some other way.
+
+### 92-whpx-xsave-size
+WHPX reads a vCPU's xsave state with a buffer the hypervisor sizes (track
+M20). `whpx_get_xsave_state()` passed CPUID(0xD, 0).ECX bytes, the
+standard area of the XCR0 components, while the hypervisor returns the
+compacted (XSAVES) area, which also holds the supervisor components the
+guest enabled in IA32_XSS (Windows 11 turns some on, CET), so the read
+failed at every reset of a running Windows 11, once per vCPU, under a
+meaningless message (`strerror(errno)`, which no Windows API sets). The
+state QEMU then wrote back was stale, and a machine reset while paused
+and continued ran with no firmware output again. On
+`WHV_E_INSUFFICIENT_BUFFER` the read is retried at the size the
+hypervisor wrote back; a failure reports the HRESULT and the sizes and
+frees the buffer; the set's failure no longer calls itself a get.
+**Test:** on the PC's Windows 11 test machine (2026-10-10,
+`D:\vms\win11-test\reset-loop.sh`), 7 restarts by Windows itself and 8
+host resets came back with no xsave line (without the patch: the four
+lines at every restart), and a paused machine reset and continued boots.
+**Drop:** upstream sizes the area from the hypervisor's answer.
 
 ## Dropped in M21
 
