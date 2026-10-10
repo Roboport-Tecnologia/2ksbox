@@ -238,8 +238,12 @@ scripts/package-macos.sh --app-store --provision <profile>  # the App Store uplo
 scripts/package-macos.sh --x86_64 --no-notarize # the Intel app, from scripts/build.sh --x86_64 (below)
 ```
 
-`--no-build`, `--no-notarize`, `--identity`, `--keychain-profile` and
-`--out` are in the script's header. On Apple Silicon the app also
+`--no-build`, `--no-notarize`, `--identity`, `--team`,
+`--keychain-profile` and `--out` are in the script's header. **The app
+is signed by David Rios Gomes Ltda, team `8JSATHUAL7`** (the company
+that owns the name, `TRADEMARKS.md`; since 2026-10-09). The keychain
+may also hold a personal team's identities; the script picks only that
+team's Developer ID Application, and `--team` names another. On Apple Silicon the app also
 carries Windows 11 on Arm (track M20): `MacOS/2ksbox-player-aarch64` on
 `lib/2ksbox/libqemu-embed-aarch64.dylib`, our EDK2 pair in `pc-bios/`
 and `share/2ksbox/drivers/2ksbox-drivers-arm64.iso`, from `build.sh`'s
@@ -248,7 +252,7 @@ package. The Intel app has no Windows 11. Notarization credentials, once:
 
 ```sh
 xcrun notarytool store-credentials 2ksbox-notary \
-    --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-password>
+    --apple-id <the company account's Apple ID> --team-id 8JSATHUAL7 --password <app-specific-password>
 ```
 
 **The bundle is the prefix.** `Contents` has doc 07's `lib` /
@@ -399,8 +403,8 @@ It needs, from the developer account (once):
   `com.2ksbox.2ksbox` (ADR-011), the file `--provision` names.
 
 The script reads the team and App ID out of the profile, refuses one
-made for another App ID or a development profile (one that lists
-devices), embeds it as `Contents/embedded.provisionprofile`, and picks
+made for another App ID or another team than `--team`'s, or a
+development profile (one that lists devices), embeds it as `Contents/embedded.provisionprofile`, and picks
 that team's identities from the keychain (`--identity` and
 `--installer-identity` override). `LSMinimumSystemVersion` becomes at
 least 26.0: the App Store build never gets a pre-26 version (ADR-019).

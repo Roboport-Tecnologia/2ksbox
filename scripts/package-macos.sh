@@ -9,7 +9,8 @@
 #   scripts/package-macos.sh --no-sign            # stage and check only (ad-hoc signed)
 #   scripts/package-macos.sh --no-notarize        # sign, but do not submit
 #   scripts/package-macos.sh --no-dmg             # leave the .app, no image
-#   scripts/package-macos.sh --identity NAME      # default: the one Developer ID Application
+#   scripts/package-macos.sh --identity NAME      # default: the team's Developer ID Application
+#   scripts/package-macos.sh --team ID            # default: 8JSATHUAL7, David Rios Gomes Ltda
 #   scripts/package-macos.sh --keychain-profile P # notarytool credentials (default: 2ksbox-notary)
 #   scripts/package-macos.sh --out DIR            # default build/macos
 #   scripts/package-macos.sh --community          # ADR-019's community build, which carries
@@ -36,7 +37,7 @@
 #
 # Notarization needs credentials, stored once by you:
 #   xcrun notarytool store-credentials 2ksbox-notary \
-#       --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-password>
+#       --apple-id <you@example.com> --team-id 8JSATHUAL7 --password <app-specific-password>
 #
 # How this differs from the Linux package (scripts/package-linux.sh), and
 # why it is a second script rather than a switch:
@@ -74,6 +75,10 @@ cd "$ROOT"
 BUILD=1 SIGN=1 NOTARIZE=1 DMG=1 OUT=""
 COMMUNITY=0 X86_64="" APP_STORE=0 PROVISION="" INSTALLER_IDENTITY=""
 IDENTITY="" PROFILE="2ksbox-notary"
+# The team that signs: David Rios Gomes Ltda, the company that owns the
+# name (TRADEMARKS.md). A keychain may hold other teams' identities too
+# (a personal account's), so every pick below is this team's.
+TEAM=8JSATHUAL7
 ARGS=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -83,13 +88,14 @@ while [ $# -gt 0 ]; do
     --no-dmg) DMG=0; shift ;;
     --identity) IDENTITY=$2; shift 2 ;;
     --keychain-profile) PROFILE=$2; shift 2 ;;
+    --team) TEAM=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     --community) COMMUNITY=1; shift ;;
     --x86_64) X86_64=1; shift ;;
     --app-store) APP_STORE=1; shift ;;
     --provision) PROVISION=$2; shift 2 ;;
     --installer-identity) INSTALLER_IDENTITY=$2; shift 2 ;;
-    -h|--help) sed -n '2,77p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set /{/^#/p;}' "$0"; exit 0 ;;
     *) echo "package-macos.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -695,7 +701,8 @@ if [ "$APP_STORE" = 1 ]; then
   prof=$(mktemp); security cms -D -i "$PROVISION" > "$prof" 2>/dev/null \
     || { echo "package-macos.sh: $PROVISION is not a provisioning profile" >&2; exit 1; }
   pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$prof" 2>/dev/null; }
-  TEAM=$(pb TeamIdentifier:0)
+  [ "$(pb TeamIdentifier:0)" = "$TEAM" ] \
+    || { echo "package-macos.sh: $PROVISION is team $(pb TeamIdentifier:0)'s, not $TEAM's; --team" >&2; exit 1; }
   APP_ID=$(pb Entitlements:com.apple.application-identifier)
   [ "$APP_ID" = "$TEAM.$BUNDLE_ID" ] \
     || { echo "package-macos.sh: $PROVISION is for $APP_ID, not $TEAM.$BUNDLE_ID" >&2; exit 1; }
@@ -705,7 +712,6 @@ if [ "$APP_STORE" = 1 ]; then
   cp "$PROVISION" "$C/embedded.provisionprofile"
   launcher_ents=$(mktemp)
   sed -e "s/@APP_ID@/$APP_ID/" -e "s/@TEAM@/$TEAM/" packaging/macos/app-store.entitlements > "$launcher_ents"
-  # Pick the team's own, when the keychain holds more than one team's.
   pick() { security find-identity -v -p "$1" | sed -n "s/.*\"\($2: .*($TEAM)\)\"/\1/p" | head -1; }
   [ -n "$IDENTITY" ] || IDENTITY=$(pick codesigning 'Apple Distribution')
   [ -n "$IDENTITY" ] || IDENTITY=$(pick codesigning '3rd Party Mac Developer Application')
@@ -732,8 +738,8 @@ signing_entitlements() {
 
 if [ "$SIGN" = 1 ]; then
   if [ -z "$IDENTITY" ]; then
-    IDENTITY=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
-    [ -n "$IDENTITY" ] || { echo "package-macos.sh: no Developer ID Application identity; --identity or --no-sign" >&2; exit 1; }
+    IDENTITY=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application: .*($TEAM)\)\"/\1/p" | head -1)
+    [ -n "$IDENTITY" ] || { echo "package-macos.sh: no Developer ID Application identity for team $TEAM; --identity, --team or --no-sign" >&2; exit 1; }
   fi
   echo "signing as $IDENTITY"
   # --options runtime is the hardened runtime notarization requires, and
