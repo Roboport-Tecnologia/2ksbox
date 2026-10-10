@@ -119,8 +119,13 @@ typedef struct D3DPT_ADAPTER {
     ULONG d3d_errors;                 /* batches the host refused, the first few logged */
     volatile LONG next_handle;
     KSPIN_LOCK rel_lock;
+    /* host handles of D3D allocations destroyed since the last submission
+     * (rel_lock); one that finds the queue full stays on the host for
+     * good, so the queue is sized for a window closing many at once and an
+     * overflow is logged (rel_lost) */
     ULONG rel_n;
-    ULONG rel[256];
+    ULONG rel[1024];
+    ULONG rel_lost;
     ULONG ctx_rel_n;                  /* host contexts to destroy at the next submission (rel_lock) */
     ULONG ctx_rel[256];
 } D3DPT_ADAPTER;
@@ -1309,8 +1314,15 @@ static NTSTATUS APIENTRY d3dpt_destroy_allocation(IN_CONST_HANDLE h, IN_CONST_PD
             KeAcquireSpinLock(&a->rel_lock, &irql);
             if (a->rel_n < RTL_NUMBER_OF(a->rel)) {
                 a->rel[a->rel_n++] = al->handle;
+            } else {
+                a->rel_lost++;
             }
             KeReleaseSpinLock(&a->rel_lock, irql);
+            if (a->rel_lost && a->rel_lost <= 4 && a->rel_n == RTL_NUMBER_OF(a->rel)) {
+                dbg_hex("d3dptkmd: release queue full: the host keeps handle ", al->handle);
+                dbg_hex(" (lost so far ", a->rel_lost);
+                dbg_puts(")\n");
+            }
         }
         ExFreePoolWithTag(al, D3DPT_TAG);
     }
