@@ -198,6 +198,7 @@ What differs from Linux, so a failure there reads right:
 | `mode-sweep-border` | from the same run: the player's log must not say `clamp-to-border sampling: off although` the adapter has it (our device descriptor dropped `ADDRESS_MODE_CLAMP_TO_BORDER`, and curved presets smear the tube's edge) |
 | `player-mitsuami` | `tools/player-mitsuami-test.sh`: the mitsuami player (M22) on a private headless sway, the mode sweep through it, its test pattern read back off the compositor, a key reaching its surface; skipped unless `player-mitsuami` is built and sway, grim and wtype are there |
 | `d3dgame9-nat`, `d3dfeat9-nat` | the reference scene / feature test natively on DXVK, against the rig golden; the guest stage's oracle. `d3dfeat9-nat` also needs the occlusion query resolved (`0x00000000` with pixels). A harness that does not build fails as `d3d-native` |
+| `dxvk-no-loader` | macOS only: the native reference scene with no Vulkan loader (`DYLD_LIBRARY_PATH` unset) gets a null `Direct3DCreate9`, not a crash (DXVK patch 17) |
 
 ### Guest-stage checks
 

@@ -1,0 +1,17 @@
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+index 6ffd874..e417b3e 100644
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -70,6 +70,12 @@ namespace dxvk::vk {
+   }
+ 
+   PFN_vkVoidFunction LibraryLoader::sym(VkInstance instance, const char* name) const {
++    // 2ksbox: with no loader found, LibraryFn's members still look
++    // themselves up as it is constructed; answer null, so that
++    // DxvkInstance's "Failed to load vulkan-1 library" is reached
++    // instead of a call through a null pointer.
++    if (!m_getInstanceProcAddr)
++      return nullptr;
+     return m_getInstanceProcAddr(instance, name);
+   }
+ 

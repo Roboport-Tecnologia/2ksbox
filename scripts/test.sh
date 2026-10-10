@@ -2752,10 +2752,25 @@ host_stage() {
         PASS+=(d3dfeat9-nat); echo "  PASS d3dfeat9-nat"
         grep "occlusion query\|getters" "$OUT/D3DFEAT9.LOG" | sed 's/^/       /'
       else FAIL+=(d3dfeat9-nat); echo "  FAIL d3dfeat9-nat — $OUT/d3dfeat9-native.log"; grep "occlusion query" "$OUT/D3DFEAT9.LOG" | sed 's/^/       /'; tail -3 "$OUT/d3dfeat9-native.log"; fi
+      # DXVK with no Vulkan loader at all refuses (Direct3DCreate9 null),
+      # never calls through a null vkGetInstanceProcAddr (DXVK patch 17).
+      # Only a Mac can take the loader away: this script hands it over in
+      # DYLD_LIBRARY_PATH, where Linux and Windows have one system-wide.
+      if [ "$OS" = Darwin ] && ! ls /usr/local/lib/libvulkan* >/dev/null 2>&1; then
+        local rc
+        ( cd "$OUT" && unset DYLD_LIBRARY_PATH && export BOXLOG="$OUT" "${wsi[@]}" \
+          && ../d3dgame9-native -frames 10 g9-no-loader.bmp ) >"$OUT/dxvk-no-loader.log" 2>&1; rc=$?
+        if [ $rc -lt 128 ] && grep -q "Direct3DCreate9 failed" "$OUT/dxvk-no-loader.log"; then
+          PASS+=(dxvk-no-loader); echo "  PASS dxvk-no-loader"
+        else FAIL+=(dxvk-no-loader); echo "  FAIL dxvk-no-loader (exit $rc) — $OUT/dxvk-no-loader.log"; tail -3 "$OUT/dxvk-no-loader.log" | sed 's/^/       /'; fi
+      else
+        skip dxvk-no-loader "macOS with no Vulkan loader in /usr/local/lib only"
+      fi
     else FAIL+=(d3d-native); echo "  FAIL d3d native harness (build)"; fi
   else
     skip d3dgame9-nat "needs build/dxvk"
     skip d3dfeat9-nat "needs build/dxvk"
+    skip dxvk-no-loader "needs build/dxvk"
   fi
 }
 
