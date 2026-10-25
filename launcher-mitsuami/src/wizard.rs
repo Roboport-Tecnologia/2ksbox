@@ -125,7 +125,7 @@ impl Wizard {
         self.edit(|f| {
             f.name = name.to_owned();
             f.existing_disk = true;
-            f.disk_path = "/dev/null".to_owned();
+            f.disk_path = if cfg!(windows) { "NUL" } else { "/dev/null" }.to_owned();
         });
         self.submit(library);
         let (saved, error) = self.read(|f| (f.saved_path().map(|p| p.display().to_string()), f.error.clone()));

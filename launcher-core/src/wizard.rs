@@ -1824,7 +1824,9 @@ impl Form {
         if (self.existing_disk || self.editing.is_some()) && self.disk_path.trim().is_empty() {
             return Err(std::io::Error::other("Choose a disk image."));
         }
-        if self.existing_disk && self.editing.is_none() && !Path::new(&self.disk_path).exists() {
+        // a device (Windows' NUL) has no metadata there, but opens
+        let disk = Path::new(&self.disk_path);
+        if self.existing_disk && self.editing.is_none() && !disk.exists() && std::fs::File::open(disk).is_err() {
             return Err(std::io::Error::other("That disk image doesn't exist."));
         }
         if let Some(edit) = &self.editing {

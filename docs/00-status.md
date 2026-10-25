@@ -272,10 +272,12 @@ Each track's own order is in its track doc. This is the order across
 tracks, plus the items no track owns.
 
 0. **The review pass's Windows half** (`tracks/review-fixes-windows.md`,
-   branch `track/review-fixes`): build and run on the PC what Linux
-   could not (the WDDM driver's fixes are unbuilt), the WDDM driver's
-   four open fixes, and the executor's GDI cache and limits checked in a
-   Windows 11 guest. Merge the branch after.
+   branch `track/review-fixes`): built and tested on the PC, the WDDM
+   driver's four fixes made and checked on Windows 11 x64 (2026-10-25).
+   Left: the driver on 32-bit Windows 7, `--publish`, the package, the
+   player and launcher by hand, the executor's GDI cache and limits in a
+   long Windows 11 session, and two open driver items (raw handles, host
+   contexts left by a crashed process). Merge the branch after.
 
 1. **M15, the Direct3D fallback on Wine** (ADR-018,
    `tracks/m15-wine-executor.md`). Steps 1–7 are done. Left: a game

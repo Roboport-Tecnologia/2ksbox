@@ -29,7 +29,18 @@ its design doc; the build that produces what the tools run is in
 scripts/test.sh            # host stage (~30 s): everything without a guest
 scripts/test.sh guest      # the DOS batteries, the XP guest, then Win98 on the driver
 scripts/test.sh all        # both (~2 min, ~7 min with the Win98 checks)
+scripts/test.sh capi mitsuami         # only these checks, from every stage
+scripts/test.sh guest 'guest-G9*'     # only these, from the guest stage (shell patterns)
 ```
+
+Single-check mode takes the names the summary prints. A check not asked
+for runs nothing (the XP boot runs only when one of its results is
+asked for), but the stage's builds before a check still run, and a check
+that reads another's output uses what the last run left (the guest
+frames compare against the host stage's native ones) or SKIPs saying so.
+A name that matches no check in the stage is a FAIL, so a typo cannot
+pass for green. It is for iterating on one failure; the rule below
+(`all` before a commit) is unchanged.
 
 It expects `build/qemu`, `build/dxvk` and `build/d3dpt/libd3dpt_exec.*`
 (`scripts/build.sh`) and compiles only the small tools in `tools/`.

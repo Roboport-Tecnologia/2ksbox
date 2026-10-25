@@ -4,6 +4,15 @@
 #   scripts/test.sh            host stage: every check that needs no guest
 #   scripts/test.sh guest      XP on the paravirtual Direct3D device, headless
 #   scripts/test.sh all        both
+#   scripts/test.sh [host|guest|all] <check>...
+#                              only the named checks (shell patterns, e.g.
+#                              'guest-G9*'; the names PASS/FAIL/SKIP print);
+#                              a check name first means every stage
+#
+# A single check still builds what its stage builds before it, and one that
+# reads another's output (the guest frames read the host stage's native
+# ones) uses what an earlier run left, or SKIPs saying so. A name that
+# matches no check fails the run.
 #
 # Builds nothing big: it expects build/qemu (qemu-system-i386 +
 # libqemu-embed), build/dxvk and build/d3dpt/libd3dpt_exec.* to exist (the
@@ -20,7 +29,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 OUT="$ROOT/build/test"; mkdir -p "$OUT"
-STAGE="${1:-host}"
+STAGE=host
+case "${1:-}" in
+  host|guest|all) STAGE="$1"; shift;;
+  "") ;;
+  -*) echo "usage: $0 [host|guest|all] [check...]"; exit 2;;
+  *) STAGE=all;;
+esac
+ONLY=("$@"); ONLY_HIT=()
 OS="$(uname -s)"; ARCH="$(uname -m)"
 # The launcher every package installs (ADR-023), its own cargo workspace.
 LAUNCHER_BIN=launcher-mitsuami/target/release/launcher-mitsuami
@@ -139,7 +155,29 @@ PASS=(); FAIL=(); SKIP=()
 # gets a prefix in the build tree, never the one under the user's data dir.
 export D3DPT_WINEPREFIX="${D3DPT_WINEPREFIX:-$PWD/build/wine-prefix}"
 log() { printf '\n==> %s\n' "$*"; }
-skip() { SKIP+=("$1: $2"); printf '  SKIP %s (%s)\n' "$1" "$2"; }
+# Single-check mode: true when any of the names was asked for (or nothing
+# was), noting which patterns matched so a misspelt one fails the run.
+want() {
+  [ ${#ONLY[@]} = 0 ] && return 0
+  local n i hit=1
+  for n in "$@"; do
+    for i in "${!ONLY[@]}"; do
+      # shellcheck disable=SC2254
+      case "$n" in ${ONLY[$i]}) ONLY_HIT[$i]=1; hit=0;; esac
+    done
+  done
+  return $hit
+}
+skip() { want "$1" || return 0; SKIP+=("$1: $2"); printf '  SKIP %s (%s)\n' "$1" "$2"; }
+# a result reported outside run_check (a build that failed, a frame missing)
+fail_note() { want "$1" || return 0; FAIL+=("$1"); printf '  FAIL %s\n' "$*"; }
+# the XP half of the guest stage could not start: a skip of every check in it
+skip_guest() {
+  want guest guest-cdimage guest-dirdisc guest-run guest-ddvm guest-G9 guest-G8 guest-F9 "guest-G9=native" \
+    "guest-G9~rig" "guest-G8=native" "guest-G8~rig" "guest-F9=native" "guest-F9-log=native" pad-guest-xp \
+    pad-guest-98 || return 0
+  SKIP+=("guest: $1"); printf '  SKIP guest (%s)\n' "$1"
+}
 # GNU coreutils' timeout(1) is not on a Mac (nor is gtimeout unless
 # someone installed coreutils), and a check that hangs is worse than one
 # that fails, so stand one in.
@@ -167,7 +205,8 @@ fi
 player_args() { # launcherx --print-player-args without --window-state and --machine, which every machine has (M22)
   $LAUNCHERX --print-player-args "$1" | sed -E 's/ ?--window-state .*window\.toml//; s/ ?--machine .*machine\.toml$//'
 }
-run_check() { # name, log file, command...
+run_check() { # name, log file, command...; a check not asked for runs nothing and returns 1
+  want "$1" || return 1
   local name="$1" lf="$OUT/$2"; shift 2
   "$@" >"$lf" 2>&1; local rc=$?
   if [ $rc = 0 ]; then PASS+=("$name"); printf '  PASS %s\n' "$name"; return 0; fi
@@ -2534,7 +2573,7 @@ host_stage() {
   if [ "$ARCH" = x86_64 ] || [ "$ARCH" = i686 ]; then
     cc -O2 -std=gnu11 -Iqemu/target/i386/tcg -o build/x87-fast-test tools/x87-fast-test.c -lm \
       && run_check x87-fast x87-fast.log build/x87-fast-test 2000000 \
-      || { [ -x build/x87-fast-test ] || { FAIL+=(x87-fast); echo "  FAIL x87-fast (build)"; }; }
+      || { [ -x build/x87-fast-test ] || { fail_note x87-fast "(build)"; }; }
   else
     skip x87-fast "x87 oracle needs an x86 host"
   fi
@@ -2542,7 +2581,7 @@ host_stage() {
   # the CD-ROM model (M5, doc 17): images written and read back by discx
   "${TOOL_CARGO[@]}" build --release -p libdisc -q 2>"$OUT/libdisc-build.log" \
     && run_check libdisc libdisc.log $DISCX selftest "$OUT/disc" \
-    || { [ -x $DISCX ] || { FAIL+=(libdisc); echo "  FAIL libdisc (build)"; }; }
+    || { [ -x $DISCX ] || { fail_note libdisc "(build)"; }; }
   if [ -x $QIMG ] && [ -f "$OUT/disc/mixed.cue" ]; then
     run_check cdimage cdimage.log cdimage_check || true
   else skip cdimage "needs $QIMG and the libdisc check's images"; fi
@@ -2606,7 +2645,7 @@ host_stage() {
   # names the loader and the bar it was judged against.
   "${TOOL_CARGO[@]}" build --release -p launcher-core --bin launcherx -q 2>"$OUT/host-check-build.log" \
     && run_check host-check host-check.log host_check_probe \
-    || { [ -x $LAUNCHERX ] || { FAIL+=(host-check); echo "  FAIL host-check (build)"; }; }
+    || { [ -x $LAUNCHERX ] || { fail_note host-check "(build)"; }; }
 
   # the wizard's emulation-optimization switches (patches/qemu/README.md):
   # that a machine nobody has touched still produces the command line it
@@ -2618,7 +2657,7 @@ host_stage() {
   # a checkbox.
   "${TOOL_CARGO[@]}" build --release -p launcher-core --bin launcherx -q 2>"$OUT/optimizations-build.log" \
     && run_check optimizations optimizations.log optimizations_check \
-    || { [ -x $LAUNCHERX ] || { FAIL+=(optimizations); echo "  FAIL optimizations (build)"; }; }
+    || { [ -x $LAUNCHERX ] || { fail_note optimizations "(build)"; }; }
 
   # the wizard's pointer switch: a new Windows machine gets the USB tablet
   # (absolute: the host pointer is the guest cursor and the window never
@@ -2799,7 +2838,8 @@ host_stage() {
   # check on the C front end, so a rename or a changed default in a model
   # shows up here as well as in the launcher.
   # A scratch library and shelf, never the user's own.
-  if "${CARGO[@]}" build "${CARGO_TGT[@]}" -p launcher-capi >"$OUT/capi-build.log" 2>&1; then
+  if ! want capi; then :
+  elif "${CARGO[@]}" build "${CARGO_TGT[@]}" -p launcher-capi >"$OUT/capi-build.log" 2>&1; then
     CAPI_LIB=""
     for cand in "${RREL%/release}/debug/liblauncher_capi.a" "$RREL/liblauncher_capi.a"; do
       [ -f "$cand" ] && CAPI_LIB="$cand" && break
@@ -2830,10 +2870,10 @@ host_stage() {
         LAUNCHER_SHADER_PROFILES_DIR="$OUT/capi/profiles" \
         build/capi-smoke "$OUT/capi/library" "$OUT/capi/disc.iso" || true
     else
-      FAIL+=(capi); echo "  FAIL capi (build)"
+      fail_note capi "(build)"
     fi
   else
-    FAIL+=(capi); echo "  FAIL capi (cargo build -p launcher-capi)"
+    fail_note capi "(cargo build -p launcher-capi)"
   fi
 
   # the embed library's Mesa backend, Linux (EGL) only, one VM per process
@@ -2841,7 +2881,7 @@ host_stage() {
     if cc -O1 -std=gnu11 -Iembed -Iqemu/hw/mesa -o build/embed-3d-test tools/embed-3d-test.c \
          -Lbuild/qemu -lqemu-embed-i386 -Wl,-rpath,"$ROOT/build/qemu" -lepoxy; then
       run_check embed-3d embed-3d.log build/embed-3d-test || true
-    else FAIL+=(embed-3d); echo "  FAIL embed-3d (build)"; fi
+    else fail_note embed-3d "(build)"; fi
   else
     skip embed-3d "Linux with build/qemu/libqemu-embed-i386.so only"
   fi
@@ -2875,7 +2915,7 @@ host_stage() {
       if [ "$OS" = Windows ] && [ -x build/win/d3dpt-gdi-test.exe ]; then
         run_check d3dpt-gdi d3dpt-gdi.log build/win/d3dpt-gdi-test.exe || true
       fi
-    else FAIL+=(d3dpt-dp2); echo "  FAIL d3dpt-dp2 (build)"; fi
+    else fail_note d3dpt-dp2 "(build)"; fi
   else
     skip d3dpt-dp2 "needs $D3DPT_EXEC_LIB and $D3DPT_DXVK_LIB"
   fi
@@ -2901,7 +2941,7 @@ host_stage() {
   if cc -O2 -w -o build/crtcal-render tools/crtcal-render.c -lm; then
     mkdir -p "$OUT/crtcal"
     run_check crtcal crtcal.log build/crtcal-render "$OUT/crtcal" || true
-  else FAIL+=(crtcal); echo "  FAIL crtcal (build)"; fi
+  else fail_note crtcal "(build)"; fi
 
   # the player's display path without a guest: mode analysis, the geometry
   # stage and the CRT preset over every mode in the table (doc 03, M2)
@@ -2915,7 +2955,7 @@ host_stage() {
     # opened without `ADDRESS_MODE_CLAMP_TO_BORDER` makes librashader
     # sample clamp-to-edge, and every curved preset then smears its
     # outermost pixels over everything outside the tube.
-    if grep -q "clamp-to-border sampling: off although" "$OUT/mode-sweep.log"; then
+    if want mode-sweep && grep -q "clamp-to-border sampling: off although" "$OUT/mode-sweep.log"; then
       FAIL+=(mode-sweep-border)
       echo "  FAIL mode-sweep-border (the device dropped clamp-to-border)"
     fi
@@ -2944,7 +2984,7 @@ host_stage() {
 
   # the reference scene and the feature test natively over DXVK; window-less
   # (tools/d3dgame-native/win32_headless.h), so no display is needed
-  if [ -f "$D3DPT_DXVK_LIB" ]; then
+  if [ -f "$D3DPT_DXVK_LIB" ] && want d3dgame9-nat d3dfeat9-nat dxvk-no-loader d3d-native; then
     # Linux and macOS: the scene through a Win32 shim on DXVK's native
     # build (tools/d3dgame-native). Windows: the scene's own source as an
     # x64 program, DXVK's d3d9.dll beside it (an application's folder is
@@ -2973,13 +3013,14 @@ host_stage() {
         run_check d3dgame9-nat d3dgame9-golden.log tools/bmpdiff.py "$GOLDEN" "$OUT/g9-native.bmp" \
           --mask "$HUD_MASK" --tolerance 8 --max-over "$BUDGET" -o "$OUT/g9-native-vs-rig.bmp" \
           && sed -n 1,2p "$OUT/d3dgame9-golden.log" | sed 's/^/       /'
-      else FAIL+=(d3dgame9-nat); echo "  FAIL d3dgame9-nat (no frame) — $OUT/d3dgame9-native.log"; tail -3 "$OUT/d3dgame9-native.log"; fi
+      elif want d3dgame9-nat; then FAIL+=(d3dgame9-nat); echo "  FAIL d3dgame9-nat (no frame) — $OUT/d3dgame9-native.log"; tail -3 "$OUT/d3dgame9-native.log"; fi
       ( cd "$OUT" && export BOXLOG="$OUT" "${wsi[@]}" && ${nat}d3dfeat9-native -frames 600 -dump 300 f9-native.bmp ) >"$OUT/d3dfeat9-native.log" 2>&1
       # the occlusion query must have *resolved* (S_OK), not merely been
       # logged: a window-less client that nothing paces runs so far ahead of
       # the CS thread that GetData spins out and reports S_FALSE with 0
       # pixels, and then only the guest-vs-native diff notices
-      if [ -f "$OUT/f9-native.bmp" ] && grep -q "occlusion query at frame .*: 0x00000000, [1-9]" "$OUT/D3DFEAT9.LOG"; then
+      if ! want d3dfeat9-nat; then :
+      elif [ -f "$OUT/f9-native.bmp" ] && grep -q "occlusion query at frame .*: 0x00000000, [1-9]" "$OUT/D3DFEAT9.LOG"; then
         PASS+=(d3dfeat9-nat); echo "  PASS d3dfeat9-nat"
         grep "occlusion query\|getters" "$OUT/D3DFEAT9.LOG" | sed 's/^/       /'
       else FAIL+=(d3dfeat9-nat); echo "  FAIL d3dfeat9-nat — $OUT/d3dfeat9-native.log"; grep "occlusion query" "$OUT/D3DFEAT9.LOG" | sed 's/^/       /'; tail -3 "$OUT/d3dfeat9-native.log"; fi
@@ -2987,7 +3028,8 @@ host_stage() {
       # never calls through a null vkGetInstanceProcAddr (DXVK patch 17).
       # Only a Mac can take the loader away: this script hands it over in
       # DYLD_LIBRARY_PATH, where Linux and Windows have one system-wide.
-      if [ "$OS" = Darwin ] && ! ls /usr/local/lib/libvulkan* >/dev/null 2>&1; then
+      if ! want dxvk-no-loader; then :
+      elif [ "$OS" = Darwin ] && ! ls /usr/local/lib/libvulkan* >/dev/null 2>&1; then
         local rc
         ( cd "$OUT" && unset DYLD_LIBRARY_PATH && export BOXLOG="$OUT" "${wsi[@]}" \
           && ../d3dgame9-native -frames 10 g9-no-loader.bmp ) >"$OUT/dxvk-no-loader.log" 2>&1; rc=$?
@@ -2997,7 +3039,7 @@ host_stage() {
       else
         skip dxvk-no-loader "macOS with no Vulkan loader in /usr/local/lib only"
       fi
-    else FAIL+=(d3d-native); echo "  FAIL d3d native harness (build)"; fi
+    else fail_note d3d-native "(the native harness's build)"; fi
   else
     skip d3dgame9-nat "needs build/dxvk"
     skip d3dfeat9-nat "needs build/dxvk"
@@ -3063,13 +3105,14 @@ guest_stage() {
   # an installed launcher machine (WIN11_FRAMES_MACHINE, default the
   # library's win11); skips without one or without W11_PASSWORD.
   run_check win11-frames win11-frames.log tools/win11-frames-test.py ${WIN11_FRAMES_MACHINE:+"$WIN11_FRAMES_MACHINE"} || true
-  case "$OS" in Linux|Windows) ;; *) skip guest "Linux and Windows only for now (mtools)"; return;; esac
-  for t in mcopy mmd mformat; do command -v $t >/dev/null || { skip guest "needs $t (mtools)"; return; }; done
-  [ -f "$img" ] || { skip guest "no XP image at $img (WINXP_IMG)"; return; }
-  [ -n "$iso" ] && [ -f "$iso" ] || { skip guest "no guest-tools ISO (guest-tools/build-wrappers.sh)"; return; }
-  [ -x $QSYS ] || { skip guest "no $QSYS"; return; }
+  case "$OS" in Linux|Windows) ;; *) skip_guest "Linux and Windows only for now (mtools)"; return;; esac
+  for t in mcopy mmd mformat; do command -v $t >/dev/null || { skip_guest "needs $t (mtools)"; return; }; done
+  [ -f "$img" ] || { skip_guest "no XP image at $img (WINXP_IMG)"; return; }
+  [ -n "$iso" ] && [ -f "$iso" ] || { skip_guest "no guest-tools ISO (guest-tools/build-wrappers.sh)"; return; }
+  [ -x $QSYS ] || { skip_guest "no $QSYS"; return; }
   # the CD-ROM backend: XP copies a converted guest-tools disc through cdrom.sys (doc 17 §6.3)
-  if [ -x $DISCX ] && command -v bsdtar >/dev/null; then
+  if ! want guest-cdimage guest-dirdisc; then :
+  elif [ -x $DISCX ] && command -v bsdtar >/dev/null; then
     # bsdtar keeps the ISO's read-only modes: make the previous extraction deletable first
     [ -d "$OUT/gt-iso" ] && chmod -R u+w "$OUT/gt-iso"
     rm -rf "$OUT/gt-iso"; mkdir -p "$OUT/gt-iso" "$OUT/disc"
@@ -3088,36 +3131,39 @@ guest_stage() {
       run_check guest-dirdisc guest-dirdisc.log tools/xp-cdimage-test.sh "$img" "isodir:$OUT/gt-iso" "$OUT/gt-iso" "$OUT/dirdisc-xp" || true
     else skip guest-cdimage "could not extract or convert $iso"; fi
   else skip guest-cdimage "needs $DISCX and bsdtar"; fi
-  [ -f "$D3DPT_EXEC_LIB" ] || { skip guest "no $D3DPT_EXEC_LIB"; return; }
-  [ -f "$OUT/g9-native.bmp" ] && [ -f "$OUT/f9-native.bmp" ] || { skip guest "run the host stage first (native oracle frames)"; return; }
+  [ -f "$D3DPT_EXEC_LIB" ] || { skip_guest "no $D3DPT_EXEC_LIB"; return; }
+  [ -f "$OUT/g9-native.bmp" ] && [ -f "$OUT/f9-native.bmp" ] || { skip_guest "run the host stage first (native oracle frames)"; return; }
   # XP on the display driver through its own runtime (M16 step 7): a fresh
   # overlay, the driver installed from the ISO, then the scenes in one boot
-  rm -f "$OUT"/G9.BMP "$OUT"/G8.BMP "$OUT"/F9.BMP "$OUT"/guest-*.log
-  echo "  XP: $img (overlay), ISO: $iso"
-  if OUT="$OUT/xpdx9" tools/xp-dx9-test.sh "$img" "$iso" > "$OUT/xpdx9.log" 2>&1; then
-    echo "  $(tail -1 "$OUT/xpdx9.log")"
-  else FAIL+=(guest-run); echo "  FAIL guest-run — $OUT/xpdx9.log"; tail -3 "$OUT/xpdx9.log" | sed 's/^/       /'; fi
-  local g
-  for g in G9.BMP G8.BMP F9.BMP guest-ddvmtest.log guest-d3dgame9.log guest-d3dgame8.log guest-d3dfeat9.log; do
-    [ -f "$OUT/xpdx9/$g" ] && cp "$OUT/xpdx9/$g" "$OUT/"
-  done
-  # a Vice City-style launcher check through Windows' own ddraw.dll: the driver's video memory
-  if grep -qiF "ddraw.dll is C:\\WINDOWS" "$OUT/guest-ddvmtest.log" 2>/dev/null && grep -q ": enough" "$OUT/guest-ddvmtest.log"; then
-    PASS+=(guest-ddvm); echo "  PASS guest-ddvm"; grep "GetAvailableVidMem" "$OUT/guest-ddvmtest.log" | tr -d '\r' | sed 's/^/       /'
-  else FAIL+=(guest-ddvm); echo "  FAIL guest-ddvm — $OUT/guest-ddvmtest.log"; cat "$OUT/guest-ddvmtest.log" 2>/dev/null | tr -d '\r' | sed 's/^/       /'; fi
+  if want guest-run guest-ddvm guest-G9 guest-G8 guest-F9 "guest-G9=native" "guest-G9~rig" \
+          "guest-G8=native" "guest-G8~rig" "guest-F9=native" "guest-F9-log=native"; then
+    rm -f "$OUT"/G9.BMP "$OUT"/G8.BMP "$OUT"/F9.BMP "$OUT"/guest-*.log
+    echo "  XP: $img (overlay), ISO: $iso"
+    if OUT="$OUT/xpdx9" tools/xp-dx9-test.sh "$img" "$iso" > "$OUT/xpdx9.log" 2>&1; then
+      echo "  $(tail -1 "$OUT/xpdx9.log")"
+    else FAIL+=(guest-run); echo "  FAIL guest-run — $OUT/xpdx9.log"; tail -3 "$OUT/xpdx9.log" | sed 's/^/       /'; fi
+    local g
+    for g in G9.BMP G8.BMP F9.BMP guest-ddvmtest.log guest-d3dgame9.log guest-d3dgame8.log guest-d3dfeat9.log; do
+      [ -f "$OUT/xpdx9/$g" ] && cp "$OUT/xpdx9/$g" "$OUT/"
+    done
+    # a Vice City-style launcher check through Windows' own ddraw.dll: the driver's video memory
+    if grep -qiF "ddraw.dll is C:\\WINDOWS" "$OUT/guest-ddvmtest.log" 2>/dev/null && grep -q ": enough" "$OUT/guest-ddvmtest.log"; then
+      PASS+=(guest-ddvm); echo "  PASS guest-ddvm"; grep "GetAvailableVidMem" "$OUT/guest-ddvmtest.log" | tr -d '\r' | sed 's/^/       /'
+    else FAIL+=(guest-ddvm); echo "  FAIL guest-ddvm — $OUT/guest-ddvmtest.log"; cat "$OUT/guest-ddvmtest.log" 2>/dev/null | tr -d '\r' | sed 's/^/       /'; fi
 
-  local f
-  for f in G9 G8; do
-    if [ ! -f "$OUT/$f.BMP" ]; then FAIL+=("guest-$f"); echo "  FAIL guest-$f (no frame on the scratch disk)"; continue; fi
-    run_check "guest-$f=native" "guest-$f-native.log" tools/bmpdiff.py "$OUT/g9-native.bmp" "$OUT/$f.BMP" --mask "$HUD_MASK" || true
-    run_check "guest-$f~rig" "guest-$f-rig.log" tools/bmpdiff.py "$GOLDEN" "$OUT/$f.BMP" --mask "$HUD_MASK" --tolerance 8 --max-over "$BUDGET" || true
-  done
-  if [ ! -f "$OUT/F9.BMP" ]; then FAIL+=(guest-F9); echo "  FAIL guest-F9 (no frame on the scratch disk)"
-  else
-    run_check "guest-F9=native" guest-F9-native.log cmp "$OUT/f9-native.bmp" "$OUT/F9.BMP" || true
-    grep -h "occlusion query\|getters" "$OUT/D3DFEAT9.LOG" | sort > "$OUT/f9-native.lines"
-    grep -h "occlusion query\|getters" "$OUT/guest-d3dfeat9.log" 2>/dev/null | tr -d '\r' | sort > "$OUT/f9-guest.lines"
-    run_check "guest-F9-log=native" guest-F9-log.log diff "$OUT/f9-native.lines" "$OUT/f9-guest.lines" || true
+    local f
+    for f in G9 G8; do
+      if [ ! -f "$OUT/$f.BMP" ]; then FAIL+=("guest-$f"); echo "  FAIL guest-$f (no frame on the scratch disk)"; continue; fi
+      run_check "guest-$f=native" "guest-$f-native.log" tools/bmpdiff.py "$OUT/g9-native.bmp" "$OUT/$f.BMP" --mask "$HUD_MASK" || true
+      run_check "guest-$f~rig" "guest-$f-rig.log" tools/bmpdiff.py "$GOLDEN" "$OUT/$f.BMP" --mask "$HUD_MASK" --tolerance 8 --max-over "$BUDGET" || true
+    done
+    if [ ! -f "$OUT/F9.BMP" ]; then FAIL+=(guest-F9); echo "  FAIL guest-F9 (no frame on the scratch disk)"
+    else
+      run_check "guest-F9=native" guest-F9-native.log cmp "$OUT/f9-native.bmp" "$OUT/F9.BMP" || true
+      grep -h "occlusion query\|getters" "$OUT/D3DFEAT9.LOG" | sort > "$OUT/f9-native.lines"
+      grep -h "occlusion query\|getters" "$OUT/guest-d3dfeat9.log" 2>/dev/null | tr -d '\r' | sort > "$OUT/f9-guest.lines"
+      run_check "guest-F9-log=native" guest-F9-log.log diff "$OUT/f9-native.lines" "$OUT/f9-guest.lines" || true
+    fi
   fi
 
   # The USB HID pad as a Windows game finds it (M13 path A), **last in the
@@ -3171,10 +3217,10 @@ win98_checks() { # the Win98 driver's Direct3D (M16 step 5): its own boots, what
   local d98="$DATA_DIR/machines/$m98/disk.qcow2"
   if [ -f "$d98" ] && [ -f build/winetest/out/wtrun.exe ]; then
     run_check win98-dx9 win98-dx9.log env RAW="$OUT/w98.raw" tools/win98-dx9-test.sh "$d98" || true
-    grep "^  [PF]A[SI][SL]" "$OUT/win98-dx9.log" | sed 's/^/     /'
+    want win98-dx9 && grep "^  [PF]A[SI][SL]" "$OUT/win98-dx9.log" | sed 's/^/     /'
     run_check win98-winetest win98-winetest.log env RAW="$OUT/w98.raw" OUT="$OUT/w98wt" WT_BASELINE=w98-driver \
       tools/win98-winetest.sh "$d98" || true
-    tail -9 "$OUT/win98-winetest.log" | sed 's/^/     /'
+    want win98-winetest && tail -9 "$OUT/win98-winetest.log" | sed 's/^/     /'
   elif [ -f "$d98" ]; then
     skip win98-dx9 "no build/winetest/out (guest-tools/build-winetests.sh)"
     skip win98-winetest "no build/winetest/out (guest-tools/build-winetests.sh)"
@@ -3188,7 +3234,7 @@ win98_checks() { # the Win98 driver's Direct3D (M16 step 5): its own boots, what
   if [ -f "$d98" ] && [ -x "$TREL/player" ]; then
     run_check win98-cursors win98-cursors.log env RAW="$OUT/w98.raw" OUT="$OUT/w98cursor" \
       tools/win98-cursor-test.sh "$d98" || true
-    grep "^recognised" "$OUT/win98-cursors.log" | sed 's/^/     /'
+    want win98-cursors && grep "^recognised" "$OUT/win98-cursors.log" | sed 's/^/     /'
   elif [ -f "$d98" ]; then
     skip win98-cursors "needs $TREL/player"
   else
@@ -3212,7 +3258,7 @@ win7_checks() { # Windows 7 from its install disc to Aero (M18 finding 14)
     skip win7-aero "no WDDM\\ on the guest-tools ISO (build-windows.sh's wddm stage, or scripts/windows-drivers.sh)"
   else
     run_check win7-aero win7-aero.log tools/win7-aero-test.sh "$WIN7_ISO" || true
-    grep "^-- " "$OUT/win7-aero.log" | sed 's/^/     /'
+    want win7-aero && grep "^-- " "$OUT/win7-aero.log" | sed 's/^/     /'
   fi
 }
 
@@ -3220,9 +3266,13 @@ case "$STAGE" in
   host) host_stage;;
   guest) guest_stage; win98_checks; win7_checks;;
   all) host_stage; guest_stage; win98_checks; win7_checks;;
-  *) echo "usage: $0 [host|guest|all]"; exit 2;;
 esac
 
+if [ ${#ONLY[@]} -gt 0 ]; then
+  for i in "${!ONLY[@]}"; do
+    [ -n "${ONLY_HIT[$i]:-}" ] || FAIL+=("${ONLY[$i]} (no such check in the $STAGE stage)")
+  done
+fi
 printf '\n%d passed, %d failed, %d skipped\n' ${#PASS[@]} ${#FAIL[@]} ${#SKIP[@]}
 for s in "${SKIP[@]}"; do echo "  skip: $s"; done
 for f in "${FAIL[@]}"; do echo "  FAIL: $f"; done

@@ -30,10 +30,18 @@ What each part has to show:
   `w * src.bpp`); `run_d3d` and `d3d_put` check each record's size again
   where they read and copy it; `d3dpt_remove_device` closes
   `follow_event_h`. Check on x64 Windows 11 and on 32-bit Windows 7:
-  `D3DGAME11 -compare 300` and `D3DGAME9 -compare 300` (doc 15's probes,
-  `g11.ps1`), DWM composing, the taskbar's text, a window dragged, a
-  full-screen flip chain. Then `build-windows.sh wddm --publish` so Linux
-  and the Mac fetch it.
+  `D3DGAME11 -compare 300` (doc 15's probes, `g11.ps1`), `D3DGAME9
+  -frames 600` windowed and with `-fs` (it has no `-compare`), DWM
+  composing, the taskbar's text, a window dragged, a full-screen flip
+  chain. Then `build-windows.sh wddm --publish` so Linux and the Mac
+  fetch it.
+  - **Windows 11 x64, 2026-10-25, with section 2's fixes too**: it
+    compiles for x86, x64 and ARM64 with no warnings and loads;
+    `D3DGAME11.EXE` and `D3DGAME64.EXE -compare 300` PASS; `D3DGAME9
+    -frames 600` 59 fps windowed, 60 fps full screen (the flip waits for
+    the blank); `GDITEST` 37 of 37; DWM composes, the taskbar's text and
+    clock draw; no refusal, reset or `CollectDbgInfo` in the log. Not yet
+    checked: 32-bit Windows 7, a window dragged by hand, `--publish`.
 - **The executor** (`d3dpt/exec/`, MSVC): `d3dpt-dp2` and
   `d3dpt-dp2-system` in the suite. The `system` run matters: Windows'
   own d3d9 is the one D3D9 that the saturated primitive count
@@ -50,61 +58,71 @@ What each part has to show:
   the write then falls back to in place: edit a running machine's
   settings and the disc shelf while it plays. Starting a machine that
   is already up must say so instead of starting a second player.
+- **The suite on the PC, 2026-10-25**: everything built (`build-windows.sh`,
+  505 s). `test.sh all` found two regressions of pass 3's form check
+  ("That disk image doesn't exist."): `capi` and `mitsuami` create a
+  machine on the null device, and Windows' `NUL` has no metadata, so
+  `Path::exists` is false there. The check now also takes a path that
+  opens (`wizard.rs`), and the launcher's `create` screen names `NUL` on
+  Windows rather than `/dev/null`. `whpx-i386` failed once (the MMIO push
+  never reported) and passed on its own run after; watch it. `test.sh`
+  gained single-check mode for these reruns (`test.sh capi mitsuami`,
+  docs/testing.md).
 
-## 2. The WDDM driver: fixes left
+## 2. The WDDM driver: the four fixes (made on the PC)
 
-Each needs the EWDK to build and a Windows 7 / 11 guest to check, so
-none was attempted on Linux. Line numbers are as of d80cd9e5.
+Made in `wddm/km/d3dptkmd.c` on the PC and checked with item 1's
+driver on Windows 11 x64 (its results above); Windows 7 is still to do.
+A refusal shows in the driver's log as one of the lines named below.
 
-1. **`CreateAllocation` trusts the user-mode driver's descriptor**
-   (`d3dptkmd.c` ~1795-1890). Any process can call D3DKMTCreateAllocation
-   with its own private data.
-   - On x86, `ROUND_TO_PAGES((SIZE_T)d->size)` wraps to 0 for a size
-     over 0xFFFFF000, and `(SIZE_T)d->pitch * d->h` wraps the same way.
-     `info->Size` is then tiny while `w`, `h`, `pitch` and `lv[]` still
-     describe a large surface, which `d3d_register` hands to the host:
-     a one-page allocation registered as a surface over other processes'
-     VRAM (the host bounds it by all of VRAM, not by the allocation).
-   - Nothing checks `kind` is one we know, `pitch >= w * bpp`, `bpp`
-     against `format`, or that the `lv[]` offsets and sizes fit inside
-     `d->size`.
-   - A failed `ExAllocatePoolWithTag` returns `STATUS_INVALID_PARAMETER`
-     through `fail:` (~1890); it should be `STATUS_NO_MEMORY`.
-   - Fix: compute sizes in `ULONGLONG` and refuse past a cap (the
-     segment's size); refuse an unknown `kind`; for the non-D3D kinds
-     recompute `bpp` and `pitch` from `format` and `w` rather than take
-     them; check every `lv[i]` inside `d->size`; keep the status in a
-     variable that `fail:` returns.
-2. **Patch locations may land on a record's header** (Render, ~3890-3925).
-   The records are checked first, then the patches are applied, and a
-   patch is only required to be in range and 4-aligned. A HANDLE or
-   OFFSET patch on a record's `size` rewrites it after the check. The
-   readers now refuse a record whose size no longer fits (d80cd9e5), so
-   this no longer reaches a 4 GiB copy, but the batch is cut short.
-   Fix at the source: while checking the records in Render, keep their
-   start offsets, and refuse a patch whose `[PatchOffset, +4)` is not
-   wholly inside one record's body (at or past `start +
-   sizeof(d3dpt_cmd)`). Compare with `PatchOffset > CommandLength - 4`,
-   which cannot wrap.
-3. **One process can name another's host context.** The user-mode
-   drivers make the id (`um/d3dptumd.c:2371`, `(pid << 8) | n`;
-   `um11/d11_dev.c:371`), `CreateContext` takes it from the private data
-   (~1646), `DestroyContext` queues `CTX_DESTROY` for it (~1670), and the
-   records name it too. A process that passes DWM's id destroys DWM's
-   host context when it exits, or draws into it. Making the kernel driver
-   pick the id is not enough on its own, because the records carry it:
-   the kernel driver would have to give each `D3DPT_CONTEXT` its own id
-   (from a counter, not the pid) and either rewrite or check the context
-   handle in every record of a submission against the submitting
-   context's (`Render` already walks every record). A protocol change on
-   both sides; bump `D3DPT_PROTO_VERSION` if the records change.
-4. **Flip state written outside the interrupt lock** (`run`, ~2929-2931;
-   the rule is stated at ~154). `flip_addr`, `flip_pa` (64-bit, tears on
-   x86) and `flip_vram` are written there while the ISR and
-   `release_flip_sync` read them. `MaxQueuedFlipOnVSync = 1` keeps it
-   from happening today. Move the three writes into the
-   `DxgkCbSynchronizeExecution` callback `finish_submission` already
-   runs.
+1. **`CreateAllocation` checks the descriptor** (`alloc_desc_check`):
+   a kind we know, sizes in 64 bits and refused past the segment (on x86
+   a size near 4 GiB wrapped to one page), a D3D allocation's first level
+   (`pitch` x rows, DXT rows in blocks) and every `lv[]` offset inside
+   `size`; dxgkrnl's kinds get `bpp` and `pitch` remade from `format` and
+   `w`, as GetStandardAllocationDriverData makes them. The check runs on
+   the driver's copy. A failed pool allocation returns
+   `STATUS_NO_MEMORY`. Log: `CreateAllocation refused, kind`.
+2. **A patch lands inside one record's body** (Render): not on a header,
+   and not on the context word of a record that names one; the compare
+   is `PatchOffset <= CommandLength - 4`, which cannot wrap. Log: `a bad
+   patch location`.
+3. **A process names only its own host context.** No protocol change:
+   `CreateContext` (which runs in the calling process) refuses an id that
+   is not built from the caller's process id as the user-mode drivers
+   build it (`pid << 8 | n`; `1 << 31 | pid << 7 | n`; `host_ctx_mine`),
+   and Render, which runs in the submitting process, passes only the ops
+   the user-mode drivers send (NOP, RELEASE, the queries, CTX_CREATE,
+   CTX_DESTROY, DP2, READBACK, VRAM_DIRTY, D11, the RETURN record), with
+   the context word of CTX_CREATE, CTX_DESTROY, DP2 and D11 built from
+   that process's id the same way. Render cannot compare with its
+   context's id: the driver is not MultiEngineAware, so dxgkrnl never
+   calls CreateContext and Render's handle is the *device's* (the first
+   build compared with it, read a pointer, and refused every Direct3D
+   record; the desktop froze). Before, a user record could also register VRAM
+   (`VRAM_SURFACE`), release another's surface, or run a GDI operation
+   over any VRAM. Logs: `CreateContext: host context ... is not process`,
+   `Render: record refused, op`.
+4. **The deferred flip's address is queued under the interrupt's
+   synchronization**: `run` keeps it in `defer_addr`, and
+   `finish_submission` (already a `DxgkCbSynchronizeExecution` callback)
+   writes `flip_addr`, `flip_pa` and `flip_vram`.
+
+Left open, for track M20: resources and surfaces are global host
+handles (a counter), and a user-mode driver can write one into a record
+raw instead of through a patch, so a process can still name another's
+surface or Direct3D 11 resource (read it, draw into it) and query handles
+are the guest's choice too. Closing it means the kernel driver checking
+every handle in DP2 and D11 token streams against the submission's
+allocation list, or per-process handle spaces on the host.
+
+Also open (found while fixing item 3): since CreateContext and
+DestroyContext are never called, a process's host contexts are never
+destroyed when it ends without its own CTX_DESTROY (a crash, a kill):
+DestroyContext's `ctx_rel` queue never fills. The device is the object
+dxgkrnl does destroy; the fix is to keep the host context ids a device's
+submissions named (Render has `h`, the device) and queue them in
+DestroyDevice.
 
 ## 3. Changed on Linux, to be checked in a Windows 11 guest
 
