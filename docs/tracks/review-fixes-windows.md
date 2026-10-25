@@ -69,7 +69,7 @@ What each part has to show:
   gained single-check mode for these reruns (`test.sh capi mitsuami`,
   docs/testing.md).
 
-## 2. The WDDM driver: the four fixes (made on the PC)
+## 2. The WDDM driver: the fixes made on the PC
 
 Made in `wddm/km/d3dptkmd.c` on the PC and checked with item 1's
 driver on Windows 11 x64 (its results above); Windows 7 is still to do.
@@ -108,21 +108,33 @@ A refusal shows in the driver's log as one of the lines named below.
    `finish_submission` (already a `DxgkCbSynchronizeExecution` callback)
    writes `flip_addr`, `flip_pa` and `flip_vram`.
 
-Left open, for track M20: resources and surfaces are global host
-handles (a counter), and a user-mode driver can write one into a record
-raw instead of through a patch, so a process can still name another's
-surface or Direct3D 11 resource (read it, draw into it) and query handles
-are the guest's choice too. Closing it means the kernel driver checking
-every handle in DP2 and D11 token streams against the submission's
-allocation list, or per-process handle spaces on the host.
-
-Also open (found while fixing item 3): since CreateContext and
-DestroyContext are never called, a process's host contexts are never
-destroyed when it ends without its own CTX_DESTROY (a crash, a kill):
-DestroyContext's `ctx_rel` queue never fills. The device is the object
-dxgkrnl does destroy; the fix is to keep the host context ids a device's
-submissions named (Render has `h`, the device) and queue them in
-DestroyDevice.
+5. **A process names only its own submission's surfaces** (protocol
+   v31, `SCOPE`). Resources and surfaces are global host handles, and a
+   user-mode driver could write one into a record raw instead of through
+   a patch. The kernel driver now opens a scope of the submission's
+   allocation-list handles around its records (`d3d_scope`), and the
+   executor refuses a surface or resource a record or token names from
+   outside it (`surf_named`, `buf_ref`, `res_ref`, `RES_CREATE` and the
+   other naming sites), while a handle a context bound earlier stays
+   usable. Queries carry the process's id too, now `(pid >> 2) << 12 |
+   n` with a process-wide count (it was 12 bits of the pid, so two
+   processes could already collide), checked like contexts. Doc 14
+   "One process cannot name another's objects"; `d3dpt-dp2`'s scope
+   cases.
+6. **A crashed process's host contexts are destroyed.** CreateContext
+   and DestroyContext never run here, so the device remembers the host
+   contexts its submissions name (`device_note_ctx`, from Render's
+   CTX_CREATE, DP2 and D11 records: a Direct3D 11 context is made by its
+   first D11 record, there is no CTX_CREATE) and DestroyDevice queues
+   their destroy, the call dxgkrnl makes for a process that ended
+   without its own. Checked on Windows 11 x64: D3DGAME11 killed after
+   10 s, `DestroyDevice: host contexts to destroy 1 first 0x80038001`
+   (its pid 1792, 0x700, in the Direct3D 11 encoding).
+   - The test machine had `dwm.exe` in `HKLM\SOFTWARE\2ksbox`'s
+     `D3D11Trace` (every call logged, a VM exit a character): it filled
+     the DEBUG register's 1000 lines a second and slowed the desktop
+     (D3DGAME11 -compare 9.3 s, 6.3 s without). Taken off 2026-10-25;
+     `d3d11-probe.exe` stays.
 
 ## 3. Changed on Linux, to be checked in a Windows 11 guest
 

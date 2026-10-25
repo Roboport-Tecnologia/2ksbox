@@ -688,6 +688,11 @@ static VramSurf *surf(Exec &x, uint32_t h) {
     return &it->second;
 }
 
+/* v31: a surface a record or a token names, as surf(); none outside the
+ * kernel driver's SCOPE. Not for a handle a context holds (a target, a
+ * stage's texture): bound in an earlier submission, it is in no scope now */
+static VramSurf *surf_named(Exec &x, uint32_t h) { return x.named(h) ? surf(x, h) : nullptr; }
+
 /* a registration under handle h may be made: a handle already known is
  * one again, a new one only below MAX_SURFS (the record fails otherwise) */
 static bool surf_room(Exec &x, Batch &b, uint32_t h) {
@@ -1818,7 +1823,7 @@ struct Dp2 {
     /* v9: a range of a VRAM buffer (D3DPT_VS_BUFFER) named by a DRAW8, or
      * null (the draw is skipped, once logged) */
     const uint8_t *vram_range(uint32_t handle, uint32_t off, size_t bytes, const char *what) {
-        VramSurf *s = surf(x, handle);
+        VramSurf *s = surf_named(x, handle);
         if (!s || !(s->d.caps & D3DPT_VS_BUFFER)) {
             if (d.warn_once(0xa0100)) x.log("ddi: dp2: draw8 %s buffer %u unknown%s (draw skipped)", what, handle, s ? " (not a buffer)" : "");
             return nullptr;
@@ -2513,8 +2518,8 @@ struct Dp2 {
 
     void set_targets(uint32_t rt, uint32_t z) {
         tr("render target %u z %u", rt, z);
-        if (!surf(x, rt)) { if (d.warn_once(0x60000)) x.log("ddi: dp2: render target handle %u unknown", rt); return; }
-        if (z && !surf(x, z)) z = 0;
+        if (!surf_named(x, rt)) { if (d.warn_once(0x60000)) x.log("ddi: dp2: render target handle %u unknown", rt); return; }
+        if (z && !surf_named(x, z)) z = 0;
         c.rt = rt; c.z = z;
         /* Direct3D 9's rule: a new target 0 resets the scissor to the
          * whole target, also when the host has it bound already */
@@ -2654,6 +2659,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated TEXTURESTAGESTATE");
                 for (uint32_t i = 0; i < count; i++) {
                     uint32_t stg = u16(q + 8 * i), st = u16(q + 8 * i + 2), v = u32(q + 8 * i + 4);
+                    if (st == 0 && !x.named(v)) return fail("a texture outside the submission's scope");
                     if (stg == 0 && st == 1) d.legacy_cop = false;                  /* the app's own op from now on */
                     if (stg == 0 && st == 4) d.legacy_aop = false;
                     stage_state(stg, st, v);
@@ -2708,7 +2714,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated SETPALETTE");
                 for (uint32_t i = 0; i < count; i++) {
                     uint32_t ph = u32(q + 12 * i), fl = u32(q + 12 * i + 4), sh = u32(q + 12 * i + 8);
-                    VramSurf *s = surf(x, sh);
+                    VramSurf *s = surf_named(x, sh);
                     tr("palette %u (flags 0x%x) on surface %u%s", ph, fl, sh, s ? "" : " (unknown)");
                     if (d.pal_lines < 48) { d.pal_lines++; x.log("ddi: dp2: SETPALETTE palette %u flags 0x%x on surface %u%s", ph, fl, sh, s ? "" : " (unknown)"); }
                     if (!s) { if (d.warn_once(0xd0000)) x.log("ddi: dp2: SETPALETTE on unknown surface %u", sh); continue; }
@@ -3092,7 +3098,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated BLT");
                 for (uint32_t i = 0; i < count; i++) {
                     const uint8_t *e = q + 52 * i;
-                    VramSurf *src = surf(x, u32(e)), *dst = surf(x, u32(e + 24));
+                    VramSurf *src = surf_named(x, u32(e)), *dst = surf_named(x, u32(e + 24));
                     RECT sr, dr;
                     memcpy(&sr, e + 4, sizeof sr); memcpy(&dr, e + 28, sizeof dr);
                     const uint32_t colour = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;
@@ -3250,7 +3256,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated COLORFILL");
                 for (uint32_t i = 0; i < count; i++) {
                     const uint8_t *e = q + 24 * i;
-                    VramSurf *s = surf(x, u32(e));
+                    VramSurf *s = surf_named(x, u32(e));
                     RECT r; memcpy(&r, e + 4, sizeof r);
                     const uint32_t colour = D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY;
                     tr("colorfill %u (%d,%d,%d,%d) 0x%08x", u32(e), (int)r.left, (int)r.top, (int)r.right, (int)r.bottom, u32(e + 20));
@@ -3282,7 +3288,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated SETRENDERTARGET2");
                 for (uint32_t i = 0; i < count; i++) {
                     uint32_t idx = u32(q + 8 * i), h = u32(q + 8 * i + 4);
-                    VramSurf *m = h ? surf(x, h) : nullptr;
+                    VramSurf *m = h ? surf_named(x, h) : nullptr;
                     tr("render target %u: %u%s", idx, h, h && !m ? " (unknown)" : "");
                     if (idx < 1 || idx > 3) return fail("SETRENDERTARGET2 index");
                     if (h && (!m || !(m->d.caps & (D3DPT_VS_RENDER_TARGET | D3DPT_VS_PRIMARY)) || (m->d.caps & D3DPT_VS_ZBUFFER))) {
@@ -3301,7 +3307,7 @@ struct Dp2 {
                 if (need > left) return fail("truncated GENERATEMIPSUBLEVELS");
                 for (uint32_t i = 0; i < count; i++) {
                     uint32_t h = u32(q + 8 * i), filter = u32(q + 8 * i + 4);
-                    VramSurf *s = surf(x, h);
+                    VramSurf *s = surf_named(x, h);
                     tr("generate mip sublevels of %u, filter %u%s", h, filter, s && (s->d.caps & D3DPT_VS_AUTOGEN) ? "" : " (not an autogen texture)");
                     if (!s || !(s->d.caps & D3DPT_VS_AUTOGEN) || !ensure_object(x, *s) || !s->tex) {
                         if (d.warn_once(0xe0000)) x.log("ddi: dp2: GENERATEMIPSUBLEVELS on surface %u, which is no autogen texture", h);
@@ -3867,6 +3873,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
     }
     case D3DPT_OP_VRAM_DIRTY: {
         auto *a = body<d3dpt_handle>(c, 0, b); if (!a) return true;
+        if (!x.named(a->handle)) { b.err = D3DPT_ERR_BAD_HANDLE; return true; }
         VramSurf *s = surf(x, a->handle);
         if (s) sev(x, *s, "VRAM_DIRTY (the guest wrote its VRAM)");
         if (s && s->rendered && x.ddi->lost_lines < 32) {
@@ -3926,7 +3933,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
             if (d.warn_once(0xd0005)) x.log("ddi: context %u refused: %zu contexts already", a->handle, d.ctxs.size());
             return true;
         }
-        VramSurf *rt = surf(x, a->rt);
+        VramSurf *rt = surf_named(x, a->rt);
         if (!rt) { r->hr = (uint32_t)D3DERR_INVALIDCALL; x.log("ddi: context %u: render target %u unknown", a->handle, a->rt); return true; }
         /* the device as it was new: its state then, no light on (the
          * runtime sends the new context's own render and stage states,
@@ -3949,7 +3956,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         }
         Ctx cx;
         cx.rt = a->rt;
-        cx.z = surf(x, a->z) ? a->z : 0;
+        cx.z = surf_named(x, a->z) ? a->z : 0;
         cx.vp = { 0, 0, rt->d.width, rt->d.height, 0.0f, 1.0f };
         cx.np2cond = (a->flags & D3DPT_CTX_NP2_CONDITIONAL) != 0;
         if (!ensure_object(x, *rt) || (cx.z && !ensure_object(x, *surf(x, cx.z)))) { r->hr = (uint32_t)E_FAIL; return true; }
@@ -4049,7 +4056,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
     case D3DPT_OP_READBACK: {
         auto *a = body<d3dpt_sync>(c, 0, b); if (!a) return true;
         d3dpt_ret *r = b.slot(a->ret_off, 0); if (!r) return true;
-        VramSurf *s = surf(x, a->handle);
+        VramSurf *s = surf_named(x, a->handle);
         if (!s) { r->hr = (uint32_t)D3DERR_INVALIDCALL; return true; }
         bool had = s->rendered;
         r->hr = had ? (uint32_t)readback(x, *x.ddi, *s) : (uint32_t)S_FALSE;

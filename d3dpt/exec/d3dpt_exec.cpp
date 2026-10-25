@@ -99,6 +99,16 @@ static void exec_one(Batch &b, const d3dpt_cmd *c) {
     switch (c->op) {
     case D3DPT_OP_NOP:
         break;
+    case D3DPT_OP_SCOPE: {
+        auto *a = body<d3dpt_u32x2>(c, 0, b); if (!a) return;
+        if (!(a->b & 1)) { x.scoped = false; x.scope.clear(); break; }
+        if (a->a > (c->size - sizeof(*c) - sizeof(*a)) / 4) { b.err = D3DPT_ERR_MALFORMED; return; }
+        const uint8_t *h = tail(a);
+        x.scope.clear();
+        for (uint32_t i = 0; i < a->a; i++) { uint32_t v; memcpy(&v, h + 4 * i, 4); x.scope.insert(v); }
+        x.scoped = true;
+        break;
+    }
     case D3DPT_OP_RELEASE: {
         auto *a = body<d3dpt_handle>(c, 0, b); if (!a) return;
         auto it = x.objs.find(a->handle);
@@ -484,6 +494,9 @@ void d3dpt_exec_attach(d3dpt_exec_t *xp, int attach)
 {
     Exec *x = (Exec *)xp;
     if (!x) return;
+    /* a guest that went away mid-submission left its scope open */
+    x->scoped = false;
+    x->scope.clear();
     if (attach) x->attach++;
     else if (x->attach > 0 && --x->attach == 0) x->release_all();
 }

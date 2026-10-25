@@ -476,6 +476,28 @@ beside that d3d9.
   `RES_UPDATE`, which is the guest's UpdateSubresource and its dynamic
   resources' maps alike, and a map is never predicated. Found by
   `d3dgame11 -compare` (its red marker drew).
+- **One process cannot name another's objects** (protocol v31, the
+  review pass, 2026-10-25). Every guest process shares the host's one
+  device and its handle tables, so the WDDM kernel driver keeps them
+  apart. Render passes only the record kinds the user-mode drivers send
+  (registrations, GDI and scanouts are the kernel driver's own), and a
+  host context or Direct3D 9 query a record names must carry the
+  submitting process's id (contexts `pid << 8 | n` and `1 << 31 | pid <<
+  7 | n`, queries `(pid >> 2) << 12 | n`). Surfaces and resources are the
+  kernel driver's handles and are shared on purpose (DWM opens a
+  program's swap chain), so the kernel driver opens a `SCOPE` around each
+  submission's records: the host handles of its allocation list, which
+  holds every handle the submission names through a patch. A surface or
+  resource a record or a token names from outside it fails as an
+  unknown one (a raw handle written over the patch's zero); one a
+  context bound earlier is looked up again unchecked, as it was named
+  in scope when it was bound. The checks are at the naming sites
+  (`surf_named`, `buf_ref`, `res_ref`, `RES_CREATE`, which would
+  otherwise replace another process's resource). The driver is not
+  MultiEngineAware, so dxgkrnl creates no contexts: Render's handle is
+  the device, which remembers the host contexts its submissions
+  created and destroys them at DestroyDevice, the call a process that
+  crashed still gets.
 
 The token set and its rules are `d3dpt_proto.h`'s; the track doc has
 what was found on the way.

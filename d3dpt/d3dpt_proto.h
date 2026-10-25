@@ -59,6 +59,14 @@
  * target back at EndScene, only at a Lock, a blit and (without a ring) a
  * flip.
  *
+ * v31 (review): SCOPE, the handles a guest process's records may name.
+ * The WDDM kernel driver opens one around each user-mode submission (its
+ * allocation list's host handles) and closes it after; while one is
+ * open, a surface or Direct3D 11 resource a record or token names from
+ * outside it fails as an unknown handle would, so one process cannot
+ * name another's by writing its handle raw. Handles a context bound
+ * earlier are not named again and stay usable.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef D3DPT_PROTO_H
@@ -66,7 +74,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   30u
+#define D3DPT_PROTO_VERSION   31u
 
 #define D3DPT_SHM_SIZE        0x04000000u          /* 64 MiB */
 #define D3DPT_CMD_OFFSET      0x00001000u          /* records start after the header page */
@@ -148,6 +156,8 @@ enum d3dpt_op {
     D3DPT_OP_D11 = 109,                 /* body: d3dpt_d11 + tokens: a Direct3D 11 context's run (v25; see below) */
     D3DPT_OP_GDI = 110,                 /* body: d3dpt_gdi (v27) or d3dpt_gdi2 (v29) + n d3dpt_gdi_rect: a GDI operation (forward) */
     D3DPT_OP_SCANOUT = 111,             /* body: d3dpt_sync: a flip will show this target (v30, M26); S_FALSE: VRAM has its frame */
+    D3DPT_OP_SCOPE = 112,               /* body: d3dpt_u32x2 (n, flags) + n handles, 8-aligned: flags 1 opens a scope of the
+                                         * n handles, 0 closes it (v31; forward) */
     D3DPT_OP_MAX
 };
 

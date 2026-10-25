@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "d3dpt_exec.h"
@@ -109,6 +110,14 @@ struct Exec {
      * its check and its use */
     std::vector<uint8_t> cmds;
     uint32_t ring_held = 0;         /* M26: scanout ring slots the front end may still sample (d3dpt_exec_ring_held) */
+    /* v31: SCOPE, the handles a guest process's records may name, open
+     * from the kernel driver's SCOPE until its close (across batches: a
+     * submission's RETURN runs it in pieces). Only where a record or a
+     * token names a surface or a resource; what a context bound before is
+     * looked up again unchecked. */
+    bool scoped = false;
+    std::unordered_set<uint32_t> scope;
+    bool named(uint32_t h) const { return !scoped || !h || scope.count(h) != 0; }
 
     /* A scene, opened by the executor rather than by whatever it is
      * executing. The display driver's DP2 stream carries no scene at all

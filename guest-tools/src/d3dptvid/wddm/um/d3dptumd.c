@@ -98,7 +98,6 @@ typedef struct UMD_DEV {
     struct UMD_RES *qres;                         /* the queries' result page (umd_result_res) */
     struct UMD_RES *rbstage;                      /* a shared target read back for the CPU (umd_stage) */
     struct UMD_RES *upstage;                      /* texels on their way into a shared target (umd_upload_shared) */
-    ULONG next_query;
 } UMD_DEV;
 
 /* a process HKLM\SOFTWARE\2ksbox's D3D9Trace names: the routine lines
@@ -2142,8 +2141,13 @@ static HRESULT APIENTRY umd_create_query(HANDLE h, D3DDDIARG_CREATEQUERY *a)
     if (q->type == D3DDDIQUERYTYPE_OCCLUSION) {
         d3dpt_create_query *c;
 
-        /* the host's handle space is the whole guest's: this process's id in it */
-        q->host = 0x51000000u | ((GetCurrentProcessId() & 0xfffu) << 12) | (++d->next_query & 0xfffu);
+        /* the host's handle space is the whole guest's: this process's id
+         * in it, as the kernel driver checks (process ids are multiples of
+         * 4; its query_mine), and a count of the process's, not the
+         * device's (two devices numbered alike) */
+        static volatile LONG queries;
+
+        q->host = (((GetCurrentProcessId() >> 2) & 0xfffffu) << 12) | ((ULONG)InterlockedIncrement(&queries) & 0xfffu);
         c = (d3dpt_create_query *)cmd_rec(d, D3DPT_OP_CREATE_QUERY, sizeof(*c), 0, 0);
         if (c) {
             c->handle = q->host;

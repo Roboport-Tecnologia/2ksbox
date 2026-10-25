@@ -186,13 +186,26 @@ typedef struct D3DPT_ADAPTER {
     ULONG rel_lost;
     ULONG ctx_rel_n;                  /* host contexts to destroy at the next submission (rel_lock) */
     ULONG ctx_rel[256];
+    /* the host handles of the submission being run (its PKT_REG): the
+     * SCOPE its records run in (protocol v31) */
+    ULONG scope_n;
+    ULONG scope_h[D3DPT_ALLOC_LIST];
 } D3DPT_ADAPTER;
 
 /* A device and a context are only names here: everything they would hold
- * lives in the adapter (one engine, executed on the CPU at submit time). */
+ * lives in the adapter (one engine, executed on the CPU at submit time).
+ * The host contexts the device's submissions created go with it at
+ * DestroyDevice, the one call dxgkrnl makes when a process ends without
+ * destroying its own (the driver is not MultiEngineAware: no context is
+ * ever created or destroyed here, and Render's handle is the device). */
+#define D3DPT_DEVICE_MAGIC 0x44565344u   /* "DSVD" */
+#define D3DPT_DEVICE_CTX 8
 typedef struct D3DPT_DEVICE {
+    ULONG magic;
     D3DPT_ADAPTER *a;
     HANDLE dxgk_device;
+    volatile LONG nctx;
+    ULONG host_ctx[D3DPT_DEVICE_CTX];
 } D3DPT_DEVICE;
 
 typedef struct D3DPT_CONTEXT {
@@ -1605,6 +1618,8 @@ static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_C
     if (!d) {
         return STATUS_NO_MEMORY;
     }
+    RtlZeroMemory(d, sizeof(*d));
+    d->magic = D3DPT_DEVICE_MAGIC;
     d->a = (D3DPT_ADAPTER *)h;
     d->dxgk_device = c->hDevice;
     c->hDevice = d;
@@ -1628,9 +1643,48 @@ static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_C
 static DXGKDDI_DESTROYDEVICE d3dpt_destroy_device;
 static NTSTATUS APIENTRY d3dpt_destroy_device(IN_CONST_HANDLE h)
 {
+    D3DPT_DEVICE *d = (D3DPT_DEVICE *)h;
+    LONG i, n = d->nctx < D3DPT_DEVICE_CTX ? d->nctx : D3DPT_DEVICE_CTX;
+
     dbg_line("DestroyDevice");
+    /* the host contexts go at the next submission, as DestroyContext's
+     * would: a second destroy after the user-mode driver's own is a no-op
+     * there, and a context id made again later is created after it */
+    if (n) {
+        KIRQL irql;
+
+        KeAcquireSpinLock(&d->a->rel_lock, &irql);
+        for (i = 0; i < n && d->a->ctx_rel_n < RTL_NUMBER_OF(d->a->ctx_rel); i++) {
+            d->a->ctx_rel[d->a->ctx_rel_n++] = d->host_ctx[i];
+        }
+        KeReleaseSpinLock(&d->a->rel_lock, irql);
+        if (g_trace) {
+            dbg_hex("d3dptkmd: DestroyDevice: host contexts to destroy ", (ULONG)n);
+            dbg_hex(" first ", d->host_ctx[0]);
+            dbg_puts("\n");
+        }
+    }
+    d->magic = 0;
     ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
     return STATUS_SUCCESS;
+}
+
+/* a host context a submission of the device's names (Render: CTX_CREATE, DP2, D11) */
+static void device_note_ctx(D3DPT_DEVICE *d, ULONG id)
+{
+    LONG i, n = d->nctx < D3DPT_DEVICE_CTX ? d->nctx : D3DPT_DEVICE_CTX;
+
+    for (i = 0; i < n; i++) {
+        if (d->host_ctx[i] == id) {
+            return;
+        }
+    }
+    i = InterlockedIncrement(&d->nctx) - 1;
+    if (i < D3DPT_DEVICE_CTX) {
+        d->host_ctx[i] = id;
+    } else {
+        InterlockedDecrement(&d->nctx);
+    }
 }
 
 /* A host context id is its process's: the user-mode drivers build it from
@@ -2564,6 +2618,14 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
     }
     a->rel_n = 0;
     KeReleaseSpinLock(&a->rel_lock, irql);
+    /* the handles this submission's records may name (run_d3d's SCOPE):
+     * every one they name legitimately is a patch of one of these */
+    a->scope_n = 0;
+    for (i = 0; i < p->n && a->scope_n < RTL_NUMBER_OF(a->scope_h); i++) {
+        if (p->e[i].al && p->e[i].al->handle) {
+            a->scope_h[a->scope_n++] = p->e[i].al->handle;
+        }
+    }
     for (i = 0; i < p->n; i++) {
         const PKT_REG_E *e = &p->e[i];
 
@@ -2658,11 +2720,28 @@ static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG coun
     }
 }
 
+/* Open (the submission's handles) or close the host's SCOPE, which the
+ * records between run in (protocol v31): a process's records name only
+ * the allocations of its own submission, never another's by its handle */
+static void d3d_scope(D3DPT_ADAPTER *a, BOOLEAN open)
+{
+    ULONG n = open ? a->scope_n : 0;
+    d3dpt_u32x2 *s = d3dpt_enc_cmd(&a->enc, D3DPT_OP_SCOPE, sizeof(*s), n * sizeof(ULONG));
+
+    if (s) {
+        s->a = n;
+        s->b = open ? 1 : 0;
+        RtlCopyMemory(s + 1, a->scope_h, n * sizeof(ULONG));
+    }
+}
+
 static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 {
     const UCHAR *r = (const UCHAR *)(p + 1), *end = (const UCHAR *)p + p->h.size, *run_at = r;
     ULONG i, ret_dst = 0, ret_bytes = 0, run_n = 0;
     BOOLEAN ret = FALSE;
+
+    d3d_scope(a, TRUE);
 
     for (i = 0; i < p->count && r + sizeof(d3dpt_cmd) <= end; i++) {
         d3dpt_cmd *c = (d3dpt_cmd *)r;
@@ -2707,6 +2786,8 @@ static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
         ret = FALSE;
     }
     d3d_put(a, run_at, (ULONG)(r - run_at), run_n);
+    d3d_scope(a, FALSE);
+    a->scope_n = 0;
 }
 
 /* Execute one submission: every packet from start to end, in order. */
@@ -3918,10 +3999,34 @@ static NTSTATUS APIENTRY d3dpt_render_km(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDE
 }
 #endif
 
-/* the records whose body starts with the host context they run on */
-static BOOL op_names_ctx(ULONG op)
+/* A Direct3D 9 query's host handle is its process's too: d3dptumd makes
+ * it (pid >> 2) << 12 | n (process ids are multiples of 4), and the
+ * host's queries are one table for the whole guest. */
+static BOOLEAN query_mine(ULONG id)
 {
-    return op == D3DPT_OP_CTX_CREATE || op == D3DPT_OP_CTX_DESTROY || op == D3DPT_OP_DP2 || op == D3DPT_OP_D11;
+    ULONG pid = (ULONG)(ULONG_PTR)PsGetCurrentProcessId();
+
+    return ((id >> 12) & 0xfffffu) == ((pid >> 2) & 0xfffffu);
+}
+
+/* the records whose body starts with an id the submitting process must
+ * own: a host context (1) or a query (2) */
+static ULONG op_owned(ULONG op)
+{
+    switch (op) {
+    case D3DPT_OP_CTX_CREATE:
+    case D3DPT_OP_CTX_DESTROY:
+    case D3DPT_OP_DP2:
+    case D3DPT_OP_D11:
+        return 1;
+    case D3DPT_OP_RELEASE:
+    case D3DPT_OP_CREATE_QUERY:
+    case D3DPT_OP_QUERY_ISSUE:
+    case D3DPT_OP_QUERY_GET_DATA:
+        return 2;
+    default:
+        return 0;
+    }
 }
 
 static DXGKDDI_RENDER d3dpt_render;
@@ -3936,8 +4041,9 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
     ULONG rstart, rend;
     D3DPT_UMD_CMD hdr;
     PUCHAR rec;
+    /* the device (not MultiEngineAware: no context is ever made here) */
+    D3DPT_DEVICE *dev = h && ((D3DPT_DEVICE *)h)->magic == D3DPT_DEVICE_MAGIC ? (D3DPT_DEVICE *)h : NULL;
 
-    UNREFERENCED_PARAMETER(h);
     if (r->CommandLength < sizeof(hdr) || (r->CommandLength & 7)) {
         dbg_hex("d3dptkmd: Render: command length ", r->CommandLength);
         dbg_puts("\n");
@@ -3973,14 +4079,16 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
      * one of the submitting process's (its body's first word) */
     for (off = 0, count = 0; off < rec_bytes; count++) {
         const d3dpt_cmd *c = (const d3dpt_cmd *)(rec + off);
-        BOOL ok, names_ctx;
+        BOOL ok;
+        ULONG owned, id;
 
         if (rec_bytes - off < sizeof(*c) || c->size < sizeof(*c) || (c->size & 7) || c->size > rec_bytes - off) {
             dbg_hex("d3dptkmd: Render: a broken record at ", off);
             dbg_puts("\n");
             return STATUS_INVALID_PARAMETER;
         }
-        names_ctx = op_names_ctx(c->op);
+        owned = op_owned(c->op);
+        id = c->size >= sizeof(*c) + 4 ? *(const ULONG *)(c + 1) : 0;
         switch (c->op) {
         case D3DPT_OP_CTX_CREATE:
         case D3DPT_OP_CTX_DESTROY:
@@ -3994,7 +4102,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         case D3DPT_OP_READBACK:
         case D3DPT_OP_VRAM_DIRTY:
         case D3DPT_UMD_OP_RETURN:
-            ok = !names_ctx || (c->size >= sizeof(*c) + 4 && host_ctx_mine(*(const ULONG *)(c + 1)));
+            ok = !owned || (c->size >= sizeof(*c) + 4 && (owned == 1 ? host_ctx_mine(id) : query_mine(id)));
             break;
         default:
             ok = FALSE;
@@ -4006,11 +4114,16 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
             if (refused < 16 && InterlockedIncrement(&refused) <= 16) {
                 dbg_hex("d3dptkmd: Render: record refused, op ", c->op);
                 dbg_hex(" at ", off);
-                dbg_hex(" names ", c->size >= sizeof(*c) + 4 ? *(const ULONG *)(c + 1) : 0);
+                dbg_hex(" names ", id);
                 dbg_hex(" process ", (ULONG)(ULONG_PTR)PsGetCurrentProcessId());
                 dbg_puts("\n");
             }
             return STATUS_INVALID_PARAMETER;
+        }
+        /* a Direct3D 11 context is made by its first D11 record, a
+         * Direct3D 9 one by CTX_CREATE */
+        if (owned == 1 && c->op != D3DPT_OP_CTX_DESTROY && dev) {
+            device_note_ctx(dev, id);
         }
         off += c->size;
     }
@@ -4061,7 +4174,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
                 rend += ((const d3dpt_cmd *)(rec + rstart))->size;
             }
             /* nor on the context a record names, checked above */
-            body = at >= rstart + sizeof(d3dpt_cmd) + (op_names_ctx(((const d3dpt_cmd *)(rec + rstart))->op) ? 4 : 0) &&
+            body = at >= rstart + sizeof(d3dpt_cmd) + (op_owned(((const d3dpt_cmd *)(rec + rstart))->op) ? 4 : 0) &&
                    at + 4 <= rend;
         }
         if (in.AllocationIndex >= nal || !body ||

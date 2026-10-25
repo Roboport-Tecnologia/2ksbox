@@ -967,7 +967,7 @@ void put_obj(Run &r, uint32_t id, uint32_t kind, IUnknown *p, HRESULT hr, uint32
 ID3D11Buffer *buf_ref(Run &r, uint32_t h)
 {
     if (!h) return nullptr;
-    D11Res *x = res_of(r.d, h);
+    D11Res *x = r.x.named(h) ? res_of(r.d, h) : nullptr;    /* v31: none outside the scope */
     if (!x || x->d.dim != 1) {
         r.fail(E_INVALIDARG);
         return nullptr;
@@ -995,7 +995,7 @@ void mark_targets(Run &r)
 ID3D11Resource *res_ref(Run &r, uint32_t h)
 {
     if (!h) return nullptr;
-    D11Res *x = res_of(r.d, h);
+    D11Res *x = r.x.named(h) ? res_of(r.d, h) : nullptr;    /* v31: none outside the scope */
     if (!x) {
         r.fail(E_INVALIDARG);
         if (r.d.warn(0x30000000u | (h & 0xfffffff))) r.x.log("d11: resource %u unknown", h);
@@ -1147,6 +1147,7 @@ void create_view(Run &r, uint32_t op, const d3dpt_d11_view *v)
  * Direct3D 9 surface (DWM's) through VRAM */
 void blt(Run &r, const d3dpt_d11_blt *b)
 {
+    if (!r.x.named(b->src) || !r.x.named(b->dst)) { r.fail(E_INVALIDARG); return; }
     D11Res *src = res_of(r.d, b->src), *dst = res_of(r.d, b->dst);
     if (!src || b->src_sub >= sub_count(*src) || b->right <= b->left || b->bottom <= b->top) { r.fail(E_INVALIDARG); return; }
     uint32_t w = b->right - b->left, h = b->bottom - b->top;
@@ -1212,6 +1213,8 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
     case D3DPT_D11_RES_CREATE: {
         NEED(d3dpt_d11_res);
         if (sizeof(*a) + (uint64_t)a->nsub * sizeof(d3dpt_d11_sub) > size) { r.fail(E_INVALIDARG); return; }
+        /* v31: never over another process's resource */
+        if (!r.x.named(a->res)) { r.fail(E_INVALIDARG); return; }
         auto it = d.res.find(a->res);
         if (a->opened && it != d.res.end() && it->second.res) {
             /* another process opened it: the host has it */
@@ -1237,7 +1240,7 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
     }
     case D3DPT_D11_RES_UPDATE: {
         NEED(d3dpt_d11_update);
-        D11Res *x = res_of(d, a->res);
+        D11Res *x = r.x.named(a->res) ? res_of(d, a->res) : nullptr;
         if (!x || sizeof(*a) + (uint64_t)a->bytes > size || !box_ok(*x, a->sub, a->has_box ? a->box : nullptr)) { r.fail(E_INVALIDARG); return; }
         uint64_t need = box_bytes(*x, a->sub, a->has_box ? a->box : nullptr, a->row_pitch, a->depth_pitch);
         if (!need || need > a->bytes) { r.fail(E_INVALIDARG); return; }
@@ -1248,7 +1251,7 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
     }
     case D3DPT_D11_RES_DIRTY: case D3DPT_D11_RES_READBACK: case D3DPT_D11_RES_SCANOUT: {
         NEED(d3dpt_d11_ref);
-        D11Res *x = res_of(d, a->a);
+        D11Res *x = r.x.named(a->a) ? res_of(d, a->a) : nullptr;
         if (!x) { r.fail(E_INVALIDARG); return; }
         if (t->op == D3DPT_D11_RES_DIRTY) res_dirty(r.x, d, a->a, *x, a->b);
         else res_readback(r.x, d, a->a, *x, a->b, t->op == D3DPT_D11_RES_SCANOUT);

@@ -1722,6 +1722,33 @@ int main(int argc, char **argv) {
         hr = send_dp2(&enc, d, vtx);
         CHECK(hr == 0, "the scene draws on the re-created context (0x%08x)", hr);
     }
+    /* --- v31: SCOPE, the handles a WDDM process's submission may name. A surface named from
+     * outside it is refused as an unknown one; the context's target, bound before the scope
+     * opened, still draws; closed, everything is named again --- */
+    {
+        auto scope = [&](std::initializer_list<uint32_t> hs, bool open) {
+            d3dpt_u32x2 *s = (d3dpt_u32x2 *)d3dpt_enc_cmd(&enc, D3DPT_OP_SCOPE, sizeof *s, (uint32_t)hs.size() * 4);
+            s->a = (uint32_t)hs.size(); s->b = open ? 1 : 0;
+            uint32_t i = 0; for (uint32_t h : hs) memcpy((uint8_t *)(s + 1) + 4 * i++, &h, 4);
+        };
+        scope({ H_RT }, true);
+        hr = readback(&enc, H_RT);
+        CHECK(hr == 0 || hr == 1, "in scope: a readback of the target (0x%08x)", hr);
+        Dp2Buf named; named.tss(0, 0, H_TEX16); named.trilist(0, 2);
+        hr = send_dp2(&enc, named, vtx);
+        CHECK(hr == 0x88760BB8u, "out of scope: a texture named is refused (0x%08x)", hr);
+        scope({}, true);
+        Dp2Buf held; held.clear(D3DCLEAR_TARGET, CLEAR_COLOR, 1.0f); held.trilist(0, 2);
+        hr = send_dp2(&enc, held, vtx);
+        CHECK(hr == 0, "an empty scope: the context's held target still draws (0x%08x)", hr);
+        hr = readback(&enc, H_RT);
+        CHECK(hr == (uint32_t)D3DERR_INVALIDCALL, "an empty scope: a readback naming the target is refused (0x%08x)", hr);
+        scope({}, false);
+        hr = readback(&enc, H_RT);
+        CHECK(hr == 0, "scope closed: the target is named again (0x%08x)", hr);
+        hr = send_dp2(&enc, named, vtx);
+        CHECK(hr == 0, "scope closed: the texture binds again (0x%08x)", hr);
+    }
 #ifdef _WIN32
     if (native_d3d9) reset_device(&enc, d, vtx);
 #endif
