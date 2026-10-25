@@ -544,6 +544,26 @@ int main(int argc, char **argv) {
         hr = send_dp2(&enc, s2, vtx);
         hr |= readback(&enc, H_RT);
         CHECK(hr == 0 && near_(px(100, 100), 0x00ff00, 2), "vertex shader constant c0 green: 0x%06x", px(100, 100));
+        /* vs 1.0, which d3d8.dll takes and Windows' own d3d9 refuses
+         * (3DMark2001 SE's Dragothic drew no dragon on D3DPT_D3D9=system):
+         * the executor hands it on as the vs 1.1 it is a subset of */
+        {
+            const uint32_t H_VS10 = 0x181;
+            std::vector<uint32_t> vs10 = vs_code;
+            vs10[0] = 0xFFFE0100u;
+            Dp2Buf s3;
+            s3.create_vs(H_VS10, decl_pc, vs10);
+            s3.vs_const(0, 0, 0, 1, 1);                                        /* c0 = blue */
+            s3.set_vs(H_VS10);
+            s3.clear(D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, CLEAR_COLOR, 1.0f);
+            s3.draw8(4, 2, H_VS10, sq);
+            hr = send_dp2(&enc, s3, vtx);
+            hr |= readback(&enc, H_RT);
+            CHECK(hr == 0 && near_(px(100, 100), 0x0000ff, 2), "vs 1.0 (as 1.1), c0 blue: 0x%06x", px(100, 100));
+            Dp2Buf s4;
+            s4.set_vs(H_VS);
+            hr = send_dp2(&enc, s4, vtx);
+        }
         /* the DX9 DDI (M16): a declaration (CREATEVERTEXSHADERDECL, D3DVERTEXELEMENT9s) and
          * a vs 1.1 function apart (CREATE / SETVERTEXSHADERFUNC). d3d9.dll's vs 1.1
          * carries dcl instructions, which d3d8.dll's never did; a dcl naming a
@@ -630,6 +650,19 @@ int main(int argc, char **argv) {
         hr = send_dp2(&enc, s5, vtx);
         hr |= readback(&enc, H_RT);
         CHECK(hr == 0 && near_(px(100, 100), 0xffff00, 2), "ps 1.1 r0 = c0 yellow: 0x%06x", px(100, 100));
+        {
+            const uint32_t H_PS10 = 0x281;
+            std::vector<uint32_t> ps10 = ps_const;
+            ps10[0] = 0xFFFF0100u;
+            Dp2Buf s5b;
+            s5b.create_ps(H_PS10, ps10);
+            s5b.ps_const(0, 1, 0, 1, 1);                                       /* magenta */
+            s5b.set_ps(H_PS10);
+            s5b.draw8(4, 2, H_VS_CONST, sq);
+            hr = send_dp2(&enc, s5b, vtx);
+            hr |= readback(&enc, H_RT);
+            CHECK(hr == 0 && near_(px(100, 100), 0xff00ff, 2), "ps 1.0 r0 = c0 magenta: 0x%06x", px(100, 100));
+        }
         Dp2Buf s6;
         s6.set_ps(0);
         s6.draw8(4, 2, H_VS_CONST, sq);

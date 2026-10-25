@@ -798,6 +798,16 @@ to one subsystem lives in its design doc; pointers are at the end.
   every fence done, the device's IRQ status pending): WHPX's EOI exit
   broadcast to the IOAPIC without the BQL, racing a device's raise on
   another vCPU. Patch 94 locks it (track M25, on main since 2026-10-17).
+- **A DX8 game whose models are missing only with `d3d9=system`**: look
+  in `player.log` for `CreateVertexShader 0x8876086c` / `CreatePixelShader
+  0x8876086c`. Windows' own d3d9 refuses shader version 1.0, which DXVK
+  takes; the executor hands 1.0 on as 1.1 since 2026-10-25 (3DMark2001
+  SE's Dragothic, doc 19 §39a).
+- **"Expected VxD version 1.4, got 1.2" from a Glide game on the Voodoo
+  2**: the guest's `SYSTEM\FXMEMMAP.VXD` is our (qemu-3dfx's) 1.2, not
+  3dfx's 1.4. A SETUP run while the card was off put it there; since
+  2026-10-25 SETUP never replaces a newer one. Copy 3dfx's back from its
+  driver package (doc 21, "Our guest tools stay out of its way").
 
 ### Devices and corruption
 

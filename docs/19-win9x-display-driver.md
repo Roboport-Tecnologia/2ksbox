@@ -1133,6 +1133,18 @@ through `GetDriverInfo` for `GUID_DDMoreSurfaceCaps`. NT's dxg never asks
 for it; the 9x layer now answers. `ddflags=0x400000` (`DDF_NO_CUBE`)
 withholds it along with the cube caps. CUBETEST passes 9 of 9 on Win98.
 
+### 39a. 3DMark2001 SE's Dragothic drew no dragon on Windows' own d3d9
+
+On the PC with `d3d9=system` the dragon and the other skinned objects
+were missing; the log had `vertex shader 0x3: CreateVertexShader
+0x8876086c (version 0xfffe0100, 56 bytes)` and then `vertex shader
+handle 0x5 unknown (draws with it are skipped)`. 3DMark's shaders are
+`vs.1.0`, which d3d8.dll takes and DXVK compiles, but **Windows' own
+d3d9 refuses version 1.0 of either stage** (`D3DERR_INVALIDCALL`). Both
+are subsets of their 1.1, so the executor hands a 1.0 vertex or pixel
+shader on with the 1.1 version token (2026-10-25). `d3dpt-dp2` checks
+both on both backends.
+
 ## No executor
 
 ### 40. `no-exec` on 9x: the HAL claimed a Direct3D it did not have

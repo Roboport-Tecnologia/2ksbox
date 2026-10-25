@@ -433,12 +433,34 @@ static int adapter_has_irq(void)
  * driver a service must point at.
  *
  * The 9x mapper is 3dfx's own binary (FXMEMMAP.VXD 4.10.01.0013, the Glide
- * 2.42 one, same IOCTLs), so on a machine with a 3dfx card (the emulated
- * Voodoo 2, doc 21) the copy 3dfx's driver put there serves our DLLs as
- * well and is left alone rather than downgraded; NT's FXPTL.SYS is
+ * 2.42 one, same IOCTLs, but device version 1.2), so on a machine with a
+ * 3dfx card (the emulated Voodoo 2, doc 21) the copy 3dfx's driver put
+ * there serves our DLLs as well and is left alone, and a newer one is
+ * never downgraded even while the card is off (3dfx's 3.02 Glide wants
+ * 1.4 and refuses ours); NT's FXPTL.SYS is
  * qemu-3dfx's own name and installed as always. Glide itself is not ours
  * to install: a Glide game runs on the Voodoo 2 with 3dfx's driver
  * (ADR-020). */
+/* A VxD's version from its device descriptor block, as major << 8 | minor,
+ * or -1. The DDB is DDB_Next (0 in the file), the SDK version, the device
+ * number, the major and minor bytes, the flags, then the 8-byte name; 3dfx's
+ * Glide reads the version and refuses an older mapper ("expected VxD
+ * version 1.4, got 1.2"). */
+static int vxd_version(const char *path, const char *name8)
+{
+    static unsigned char buf[65536];
+    FILE *f = fopen(path, "rb");
+    size_t n, i;
+
+    if (!f) return -1;
+    n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    for (i = 12; i + 8 <= n; i++)
+        if (!memcmp(buf + i, name8, 8) && !buf[i - 12] && !buf[i - 11] && !buf[i - 10] && !buf[i - 9])
+            return buf[i - 4] << 8 | buf[i - 3];
+    return -1;
+}
+
 static int step_mapper(void)
 {
     static const char *const vxd[] = { "FXMEMMAP.VXD", NULL };
@@ -452,9 +474,18 @@ static int step_mapper(void)
     if (g_3dfx[0])
         say("    a 3dfx card is on this machine (%s)", g_3dfx);
     if (!g_nt) {
+        int have, ours;
         snprintf(path, sizeof path, "%s\\FXMEMMAP.VXD", g_sys);
+        have = vxd_version(path, "FXMEMMAP");
+        ours = vxd_version(iso(cmd, "MAPPER\\FXMEMMAP.VXD"), "FXMEMMAP");
+        /* never a downgrade, card or not: a machine whose Voodoo 2 is off
+         * for a while still has 3dfx's newer mapper, which its Glide needs
+         * once the card is back */
         if (g_3dfx[0] && GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES)
             say("    FXMEMMAP.VXD: already there, left alone (3dfx's driver brings its own)");
+        else if (have > ours)
+            say("    FXMEMMAP.VXD: version %d.%d already there, newer than ours (%d.%d), left alone",
+                have >> 8, have & 0xff, ours >> 8, ours & 0xff);
         else
             bad = copy_set("MAPPER", g_sys, vxd);
         return bad;

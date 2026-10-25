@@ -378,11 +378,18 @@ talks to the chip. 3dfx's driver finds the card by scanning PCI for
 **Our guest tools stay out of its way.** 3dfx's driver installs
 `GLIDE2X.DLL` / `GLIDE3X.DLL` / `FXMEMMAP.VXD` in the system folder; the
 last is the device mapper our OpenGL pass-through DLL also needs
-(qemu-3dfx's copy is 3dfx's own binary, 4.10.01.0013, so either serves
-both). SETUP looks for a *present* 3dfx PCI device (9x: the devnode
-tree in `HKEY_DYN_DATA`; NT: `CM_Locate_DevNode`) and, with one, leaves
-an existing `FXMEMMAP.VXD` alone rather than downgrade it; the disc
-carries no Glide of its own (ADR-020). `VOODOO=1
+(qemu-3dfx's copy is 3dfx's own binary, 4.10.01.0013, with the same
+IOCTLs, so 3dfx's serves our DLL; but its device version is 1.2, and
+3dfx's 3.02 Glide refuses it: "expected VxD version 1.4, got 1.2").
+SETUP looks for a *present* 3dfx PCI device (9x: the devnode tree in
+`HKEY_DYN_DATA`; NT: `CM_Locate_DevNode`) and, with one, leaves an
+existing `FXMEMMAP.VXD` alone. Without one it still never replaces a
+mapper whose device descriptor block carries a newer version than ours
+(since 2026-10-25): a machine run with its Voodoo 2 off for a while had
+SETUP put 1.2 over 3dfx's 1.4, and Glide failed once the card was back.
+Repair such a guest by copying `FXMEMMAP.VXD` from 3dfx's driver package
+into `WINDOWS\SYSTEM` (or reinstalling the driver). The disc carries no
+Glide of its own (ADR-020). `VOODOO=1
 tools/setup-guest-test.sh` checks it on 98 and XP.
 
 **The PCI map.** On both 2D adapters SeaBIOS puts the BAR at

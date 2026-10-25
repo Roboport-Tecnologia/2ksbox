@@ -1716,9 +1716,11 @@ struct Dp2 {
                 return;
             }
             /* a dcl per input register the declaration feeds, in front of the
-             * function (d3d9 wants them; DX8 shaders have none) */
+             * function (d3d9 wants them; DX8 shaders have none). vs 1.0 goes
+             * on as the vs 1.1 it is a subset of: Windows' own d3d9 refuses
+             * 1.0 (3DMark2001 SE's Dragothic drew no dragon), DXVK takes both */
             std::vector<uint32_t> f;
-            f.push_back(u32(code));
+            f.push_back(u32(code) == 0xfffe0100u ? 0xfffe0101u : u32(code));
             for (uint32_t r = 0; r <= 16; r++) if (regs & (1u << r)) {
                 f.push_back(0x0000001Fu);
                 f.push_back(0x80000000u | vsde_usage[r].usage | ((uint32_t)vsde_usage[r].index << 16));
@@ -1770,6 +1772,8 @@ struct Dp2 {
             if (d.warn_once(0xc1009)) x.log("ddi: dp2: pixel shader 0x%x is not valid ps 1.x (version 0x%08x, %u bytes), refused", handle, u32(code), codebytes);
             return;
         }
+        /* ps 1.0 as 1.1, as vs 1.0 is: Windows' own d3d9 refuses 1.0 */
+        if (f[0] == 0xffff0100u) f[0] = 0xffff0101u;
         IDirect3DPixelShader9 *ps = nullptr;
         HRESULT hr = x.dev->CreatePixelShader((const DWORD *)f.data(), &ps);
         if (FAILED(hr) || !ps) {
