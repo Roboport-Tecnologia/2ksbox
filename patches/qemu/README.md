@@ -162,6 +162,13 @@ for empty registers after a pop. DOS loop 21.6 (softfloat) / 10.6 (patch
 05) / 2.9 ns per op; XP Super PI 1M on the Air 9:49 → 1:57. **Switch:**
 `x87-fast`. **Test:** `tools/x87-guest-test.py`. **Drop:** upstream float
 ops in TCG, or an upstream rewrite of the x87 translator. **On 11.1:** the eight ops are `TCGOutOp` descriptors (`TCGOutOpBinary`, `TCGOutOpUnary`, and `TCGOutOpTernary` for fmsub, in `tcg/tcg.c`) behind `TCG_TARGET_F64`, x86-64 gated at run time on AVX + FMA; the shadow has its own scratch temps (`x87s_t32`/`x87s_t64`, 11.0 removed `tmp2_i32`/`tmp1_i64`), the third `insn_start` word carries its state, and FXCH and `fst st(i)` mirror 11.1.2's tag-word and C1 fixes. It carries 07's and 09's hunks on the shadow.
+**`fcomp m32/m64`'s slow block popped twice until 2026-10-25**: the
+newer `gen_helper_fp_arith_ST0_FT0` pops inside for op 3, and the block
+popped again. Any `fcomp` against memory that left the fast path (PC=24
+with a value not binary64-exact, a NaN, a denormal or an empty register
+at PC=64) lost a stack register; Vice City's player position became the
+indefinite NaN and its sector walk ran for ever (the game "froze" on
+Win98). `tools/x87-fuzz-guest-test.py` found it.
 
 ### 010-embed-api
 Meson builds `shared_library('qemu-embed-<target>')` per system target

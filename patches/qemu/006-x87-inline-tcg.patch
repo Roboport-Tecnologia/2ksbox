@@ -642,7 +642,7 @@ new file mode 100644
 index 0000000000..9b923990d8
 --- /dev/null
 +++ b/target/i386/tcg/x87-shadow.c.inc
-@@ -0,0 +1,1672 @@
+@@ -0,0 +1,1670 @@
 +/*
 + * x87 shadow-double translation: keep the FPU stack as host doubles
 + * across instructions.
@@ -1358,10 +1358,8 @@ index 0000000000..9b923990d8
 +                tcg_gen_extrl_i64_i32(m32, b->m);
 +                gen_helper_flds_FT0(tcg_env, m32);
 +            }
++            /* fcomp (op1 3) pops inside the helper: no fpop here */
 +            gen_helper_fp_arith_ST0_FT0(b->op1);
-+            if (b->op1 == 3) {
-+                gen_helper_fpop(tcg_env);
-+            }
 +            break;
 +        case X87S_SLOW_ARITH_ST:
 +            if (b->stn) {

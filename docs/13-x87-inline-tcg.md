@@ -358,6 +358,19 @@ out_asm -D log` on the failing test and read the TB.
 
 - `-cpu pentium3,x87-fast=off` is the fallback if a Windows guest
   misbehaves; doc 22 §3 lists the other switches.
+- **Sequences, not only instructions.** Vice City froze on Win98 with
+  the fast path on (2026-10-25): `fcomp m32/m64` on the slow path popped
+  twice (patch 06), and the stack one short made the player's position
+  the indefinite NaN. The battery runs each instruction from a clean
+  stack and never takes that path after a load it cannot shadow.
+  `tools/x87-fuzz-guest-test.py` runs random sequences on and off and
+  shrinks what differs. With the fix, seed 1 still has 33 of 1200 strict
+  sequences differing (267 before), not yet looked at one by one. The
+  first is `frndint` at PC=24 with chop: softfloat rounds its result
+  to 24 bits, the fast path does not, and the manuals say precision
+  control applies to `+ − × ÷` and `fsqrt` only, so softfloat may be the
+  one that is off there. Without `STRICT=1`, stack faults add more.
+  Once it is clean, it goes into `scripts/test.sh`.
 - Per-op cost (~45 host instructions in mode 1) can still drop: defer
   FIP/FCS to flush points with the pc in the insn_start word (~4), keep
   FDP eager. The x87 C transform in `SSEBENCH.EXE` runs at 16–18 % of

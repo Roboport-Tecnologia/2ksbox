@@ -803,6 +803,11 @@ to one subsystem lives in its design doc; pointers are at the end.
   0x8876086c`. Windows' own d3d9 refuses shader version 1.0, which DXVK
   takes; the executor hands 1.0 on as 1.1 since 2026-10-25 (3DMark2001
   SE's Dragothic, doc 19 §39a).
+- **A game that freezes in its own code with the fast path on and not
+  with `x87-fast=off`**: an x87 bug, not the device. Vice City's was
+  `fcomp m32/m64` popping twice on the slow path (patch 06, fixed
+  2026-10-25; doc 13 "Follow-ups"). `info registers` a few times over QMP
+  shows the loop; `tools/x87-fuzz-guest-test.py` finds the sequence.
 - **"Expected VxD version 1.4, got 1.2" from a Glide game on the Voodoo
   2**: the guest's `SYSTEM\FXMEMMAP.VXD` is our (qemu-3dfx's) 1.2, not
   3dfx's 1.4. A SETUP run while the card was off put it there; since
