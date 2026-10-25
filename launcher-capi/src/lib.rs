@@ -41,7 +41,7 @@
 use launcher_core::bundle::{Accel, Boot, CpuSpeed, Family, Optimization};
 use launcher_core::{editor, machines, preview, shelf, snaps, wizard};
 use std::ffi::{c_char, CStr, CString};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 // --- strings ---------------------------------------------------------
 
@@ -58,7 +58,8 @@ fn out_opt(s: Option<&str>) -> *mut c_char {
 }
 
 /// Borrow a caller's string. Empty for NULL or invalid UTF-8, which is
-/// the same thing an empty field means everywhere in these models.
+/// the same thing an empty field means everywhere in these models. Never
+/// for a path: those go through `path_arg` or `borrow_utf8`.
 ///
 /// # Safety
 /// `s` must be NULL or a NUL-terminated string valid for this call.
@@ -68,6 +69,32 @@ unsafe fn borrow<'a>(s: *const c_char) -> &'a str {
     }
     unsafe { CStr::from_ptr(s) }.to_str().unwrap_or("")
 }
+
+/// Borrow a caller's string that may be NULL (meaning empty), refusing
+/// one that is not UTF-8 rather than reading it as empty.
+///
+/// # Safety
+/// As `borrow`.
+unsafe fn borrow_utf8<'a>(s: *const c_char) -> Option<&'a str> {
+    if s.is_null() {
+        return Some("");
+    }
+    unsafe { CStr::from_ptr(s) }.to_str().ok()
+}
+
+/// A path argument: None for NULL, an empty string or one that is not
+/// UTF-8. Every call that takes one acts on a file, and an empty path
+/// would make it act on the wrong one (the working directory, a row
+/// named "").
+///
+/// # Safety
+/// As `borrow`.
+unsafe fn path_arg(s: *const c_char) -> Option<PathBuf> {
+    unsafe { borrow_utf8(s) }.filter(|p| !p.is_empty()).map(PathBuf::from)
+}
+
+/// The error a call shows for a path it could not read.
+const BAD_PATH: &str = "The path is empty or not valid text.";
 
 /// # Safety
 /// `s` must be NULL or a pointer returned by a function in this library
@@ -223,7 +250,8 @@ pub unsafe extern "C" fn lc_machines_is_running(m: *const LcMachines, row: usize
 /// `m` must be a live handle; `dir` a NUL-terminated string or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn lc_machines_is_running_dir(m: *const LcMachines, dir: *const c_char) -> bool {
-    handle!(m, false).0.is_running_dir(Path::new(unsafe { borrow(dir) }))
+    let Some(dir) = (unsafe { path_arg(dir) }) else { return false };
+    handle!(m, false).0.is_running_dir(&dir)
 }
 
 /// Start a machine's player. Returns true on success; either way
@@ -433,7 +461,12 @@ pub unsafe extern "C" fn lc_wizard_open_new(w: *mut LcWizard, family: usize) {
 #[no_mangle]
 pub unsafe extern "C" fn lc_wizard_open_edit(w: *mut LcWizard, bundle_path: *const c_char) -> bool {
     let w = handle_mut!(w, false);
-    w.0.open_edit_path(PathBuf::from(unsafe { borrow(bundle_path) }));
+    let Some(path) = (unsafe { path_arg(bundle_path) }) else {
+        w.0.open = false;
+        w.0.error = Some(BAD_PATH.into());
+        return false;
+    };
+    w.0.open_edit_path(path);
     w.0.open
 }
 
@@ -1299,13 +1332,18 @@ pub unsafe extern "C" fn lc_wizard_set_disk_size_gb(w: *mut LcWizard, gb: u32) {
 /// `w` must be a live handle; `library_dir` NULL or NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_wizard_submit(w: *mut LcWizard, library_dir: *const c_char) -> bool {
-    let dir = unsafe { borrow(library_dir) };
+    let w = handle_mut!(w, false);
+    // Invalid UTF-8 is refused, not read as "" (the user's own library).
+    let Some(dir) = (unsafe { borrow_utf8(library_dir) }) else {
+        w.0.error = Some(BAD_PATH.into());
+        return false;
+    };
     let dir = if dir.is_empty() {
         launcher_core::library::default_dir()
     } else {
         PathBuf::from(dir)
     };
-    handle_mut!(w, false).0.submit(&dir).is_some()
+    w.0.submit(&dir).is_some()
 }
 
 /// The `machine.toml` the last successful submit wrote, or "".
@@ -1342,13 +1380,14 @@ pub unsafe extern "C" fn lc_shelf_free(s: *mut LcShelf) {
     }
 }
 
-/// Open on the shared shelf alone.
+/// Open on the shared shelf alone. An empty or non-UTF-8 path does
+/// nothing (`path_arg`), as in every void call taking a path.
 ///
 /// # Safety
 /// `s` must be a live handle; `library_path` NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_shelf_open_library(s: *mut LcShelf, library_path: *const c_char) {
-    let path = PathBuf::from(unsafe { borrow(library_path) });
+    let Some(path) = (unsafe { path_arg(library_path) }) else { return };
     handle_mut!(s, ()).0.open_library(&path);
 }
 
@@ -1359,8 +1398,9 @@ pub unsafe extern "C" fn lc_shelf_open_library(s: *mut LcShelf, library_path: *c
 /// `s` must be a live handle; both paths NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_shelf_open_for(s: *mut LcShelf, bundle_path: *const c_char, library_path: *const c_char) {
-    let bundle = PathBuf::from(unsafe { borrow(bundle_path) });
-    let library = PathBuf::from(unsafe { borrow(library_path) });
+    let (Some(bundle), Some(library)) = (unsafe { path_arg(bundle_path) }, unsafe { path_arg(library_path) }) else {
+        return;
+    };
     handle_mut!(s, ()).0.open_for_path(bundle, &library);
 }
 
@@ -1423,7 +1463,7 @@ pub unsafe extern "C" fn lc_shelf_set_label(s: *mut LcShelf, row: usize, label: 
 /// `s` must be a live handle; `path` NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_shelf_add(s: *mut LcShelf, path: *const c_char) {
-    let path = PathBuf::from(unsafe { borrow(path) });
+    let Some(path) = (unsafe { path_arg(path) }) else { return };
     handle_mut!(s, ()).0.add(path);
 }
 
@@ -1569,7 +1609,7 @@ pub unsafe extern "C" fn lc_snapshots_free(s: *mut LcSnapshots) {
 /// `s` must be a live handle; `bundle_path` NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_snapshots_open_for(s: *mut LcSnapshots, bundle_path: *const c_char, running: bool) {
-    let path = PathBuf::from(unsafe { borrow(bundle_path) });
+    let Some(path) = (unsafe { path_arg(bundle_path) }) else { return };
     handle_mut!(s, ()).0.open_for_path(&path, running);
 }
 
@@ -1755,7 +1795,7 @@ pub unsafe extern "C" fn lc_editor_new_profile(e: *mut LcEditor) {
 /// `e` must be a live handle; `path` NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_editor_edit(e: *mut LcEditor, path: *const c_char) {
-    let path = PathBuf::from(unsafe { borrow(path) });
+    let Some(path) = (unsafe { path_arg(path) }) else { return };
     handle_mut!(e, ()).editor.edit_path(path);
 }
 
@@ -2005,13 +2045,17 @@ pub unsafe extern "C" fn lc_editor_read_frame(e: *const LcEditor, buf: *mut u8, 
 /// `e` must be a live handle; `profiles_dir` NULL or NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn lc_editor_save(e: *mut LcEditor, profiles_dir: *const c_char) -> bool {
-    let dir = unsafe { borrow(profiles_dir) };
+    let e = handle_mut!(e, false);
+    let Some(dir) = (unsafe { borrow_utf8(profiles_dir) }) else {
+        e.editor.error = Some(BAD_PATH.into());
+        return false;
+    };
     let dir = if dir.is_empty() {
         launcher_core::shader_library::default_dir()
     } else {
         PathBuf::from(dir)
     };
-    handle_mut!(e, false).editor.save(&dir)
+    e.editor.save(&dir)
 }
 
 /// # Safety

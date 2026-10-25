@@ -27,6 +27,10 @@ pub struct Input {
     pad_mode: pad::Mode,
     /// The pad's keys, while `pad_mode` is `Keys` and there is a pad.
     pad_keys: Option<pad::KeyMap>,
+    /// The pad state last sent to the pad device, and the calls since
+    /// (`apply_pad_device`).
+    pad_sent: Option<([u8; 4], u8, u16)>,
+    pad_unsent: u32,
 }
 
 impl Input {
@@ -193,20 +197,29 @@ impl Input {
     /// the absent one ignores it, so the player never has to know which
     /// device the bundle chose, only that there is one.
     ///
-    /// The whole pad every time, not a change: each device compares
-    /// against what it holds and does nothing when they match, so an
-    /// untouched controller costs one comparison per published frame and
-    /// never wakes the guest. Sending changes instead would put the "did
-    /// anything move" question on this side of a queue that is allowed to
-    /// drop, and a dropped button-up is a button held down in the guest
-    /// forever.
+    /// The whole pad, not a change: each device compares against what it
+    /// holds and does nothing when they match. It goes when it differs
+    /// from what was last sent, and again every `PAD_RESEND` calls when it
+    /// does not: the queue it goes through is allowed to drop, and a
+    /// dropped button-up would otherwise be a button held down in the
+    /// guest forever. The resend puts it right within a second at most; an
+    /// untouched controller no longer flushes input (a bottom half under
+    /// the BQL) on every published frame.
     fn apply_pad_device(&mut self, vm: Option<Qemu>) {
+        const PAD_RESEND: u32 = 30;
         if !self.pad_mode.is_device() {
             return;
         }
         let Some(pads) = self.pads.as_ref() else { return };
-        let (axes, hat, buttons) = pads.hid_state();
+        let state = pads.hid_state();
         let Some(vm) = vm else { return };
+        self.pad_unsent += 1;
+        if self.pad_sent == Some(state) && self.pad_unsent < PAD_RESEND {
+            return;
+        }
+        self.pad_sent = Some(state);
+        self.pad_unsent = 0;
+        let (axes, hat, buttons) = state;
         vm.pad_state(axes, hat, buttons);
         vm.input_flush();
     }

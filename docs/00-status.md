@@ -271,6 +271,12 @@ live in its track doc; fixed things leave this list.
 Each track's own order is in its track doc. This is the order across
 tracks, plus the items no track owns.
 
+0. **The review pass's Windows half** (`tracks/review-fixes-windows.md`,
+   branch `track/review-fixes`): build and run on the PC what Linux
+   could not (the WDDM driver's fixes are unbuilt), the WDDM driver's
+   four open fixes, and the executor's GDI cache and limits checked in a
+   Windows 11 guest. Merge the branch after.
+
 1. **M15, the Direct3D fallback on Wine** (ADR-018,
    `tracks/m15-wine-executor.md`). Steps 1–7 are done. Left: a game
    through the Flatpak's Wine add-on on a below-floor host, and the

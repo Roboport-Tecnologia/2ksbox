@@ -134,8 +134,12 @@ struct Exec {
         if (it == objs.end() || it->second.kind != k) return nullptr;
         return static_cast<T *>(it->second.p);
     }
+    /* the queries a guest may hold at once: a program keeps a few per
+     * frame in flight (DWM's events, a game's occlusion queries), and a
+     * record of a few bytes makes each */
+    static constexpr size_t MAX_OBJS = 65536;
     bool put(uint32_t h, Kind k, IUnknown *p) {
-        if (!h || objs.count(h)) { if (p) p->Release(); return false; }
+        if (!h || objs.count(h) || objs.size() >= MAX_OBJS) { if (p) p->Release(); return false; }
         objs[h] = { k, p };
         return true;
     }

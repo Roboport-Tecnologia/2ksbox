@@ -231,12 +231,21 @@ void embed_gl_drawable_size(int *w, int *h)
 
 static int drawable_resize(int w, int h)
 {
+    /* a size the platform refused, not asked again at every swap */
+    static int failed_w, failed_h;
+
     if (win_ready && win_w == w && win_h == h) {
         return 1;
     }
-    if (!plat_drawable(w, h)) {
+    if (w == failed_w && h == failed_h) {
         return 0;
     }
+    if (!plat_drawable(w, h)) {
+        failed_w = w;
+        failed_h = h;
+        return 0;
+    }
+    failed_w = failed_h = 0;
     win_w = w;
     win_h = h;
     readback = g_realloc(readback, (size_t)w * h * sizeof(uint32_t));

@@ -52,6 +52,9 @@ pub struct Gpu {
     /// blended there (a buffer kept, not one a frame)
     fb_sprite: Option<qemu_vm::Rect>,
     fb_sprite_px: Vec<u32>,
+    /// the sprite last drawn into `fb_tex` (shape, hot spot): a take that
+    /// changed nothing under it and moved nothing leaves it where it is
+    fb_sprite_last: Option<(std::sync::Arc<qemu_vm::CursorImage>, i32, i32)>,
     /// zero-copy 3D frames: imported dma-buf ring slots and the one on show
     ext: Vec<Option<Shown>>,
     ext_current: Option<usize>,
@@ -62,6 +65,12 @@ pub struct Gpu {
     adapter_info: wgpu::AdapterInfo,
     pub(crate) chain: Option<shader_chain::Chain>,
     chain_bg: Option<(wgpu::BindGroup, u32, u32)>,
+    /// What the chain draws from may differ from its last run: the texture
+    /// on show was written or swapped, or the preset, its parameters or
+    /// the fit changed. An idle tick wakes the render thread without any
+    /// of these, and an unanimated preset's last output is then drawn
+    /// again instead of the chain run (`render`). Set whenever in doubt.
+    chain_stale: bool,
     /// mode analysis of the guest surface on show (doc 03 rules 2 and 3)
     mode: mode::Mode,
     /// Where the picture goes in the host surface, in physical pixels
@@ -265,6 +274,7 @@ impl Gpu {
             fb_whole: true,
             fb_sprite: None,
             fb_sprite_px: Vec::new(),
+            fb_sprite_last: None,
             ext: Vec::new(),
             ext_current: None,
             slots_done: Default::default(),
@@ -272,6 +282,7 @@ impl Gpu {
             adapter_info,
             chain: None,
             chain_bg: None,
+            chain_stale: true,
             mode: mode::Mode::analyse(0, 0),
             geom: (0.0, 0.0, 1.0, 1.0),
             warned_no_scanline_params: false,
@@ -311,6 +322,7 @@ impl Gpu {
         // the old chain's output, which a bind group of the same size
         // would otherwise go on drawing
         self.chain_bg = None;
+        self.chain_stale = true;
         self.warned_no_scanline_params = false;
         self.mode = mode::Mode::analyse(0, 0);
         self.guest_surface_changed();
@@ -339,6 +351,7 @@ impl Gpu {
         if self.follows_window != on {
             self.follows_window = on;
             self.geom = self.fit();
+            self.chain_stale = true;
             eprintln!("[display] the guest {} the window's size", if on { "takes" } else { "no longer takes" });
             self.min_size_changed = true;
         }
@@ -358,6 +371,7 @@ impl Gpu {
         if self.fixed_scale != scale {
             self.fixed_scale = scale;
             self.geom = self.fit();
+            self.chain_stale = true;
         }
     }
 
@@ -383,6 +397,7 @@ impl Gpu {
         self.config.height = h.max(1);
         self.surface.configure(&self.device, &self.config);
         self.geom = self.fit();
+        self.chain_stale = true;
     }
 
     /// (Re)create the guest framebuffer texture when its size changes.
@@ -420,6 +435,8 @@ impl Gpu {
         self.fb_tex = Some((tex, bg, w, h));
         self.fb_whole = true;
         self.fb_sprite = None;
+        self.fb_sprite_last = None;
+        self.chain_stale = true;
         if self.ext_current.is_none() {
             self.guest_surface_changed();
         }
@@ -460,6 +477,7 @@ impl Gpu {
                     self.ext.resize_with(slot + 1, || None);
                 }
                 self.ext[slot] = Some((tex, bg, w, h));
+                self.chain_stale = true;
                 eprintln!("[3d] slot {slot}: imported {w}x{h}");
                 if self.ext_current == Some(slot) {
                     self.guest_surface_changed();
@@ -530,11 +548,17 @@ impl Gpu {
     /// Show an imported slot (Some) or the CPU-uploaded framebuffer (None).
     fn use_slot(&mut self, slot: Option<usize>) {
         let before = self.shown_size();
+        let was = (self.ext_current, self.comp_on);
         self.comp_on = false;
         self.ext_current = match slot {
             Some(s) if self.ext.get(s).map(|e| e.is_some()).unwrap_or(false) => Some(s),
             _ => None,
         };
+        // another texture on show, or the same slot with a new frame in it
+        // (a ring slot index comes round again with new content)
+        if (self.ext_current, self.comp_on) != was || self.ext_current.is_some() {
+            self.chain_stale = true;
+        }
         // a 3D frame and the VGA surface need not be the same size: the
         // picture just changed, even though neither texture did
         if self.shown_size() != before {
@@ -668,6 +692,7 @@ impl Gpu {
         }
         self.queue.submit(Some(enc.finish()));
         self.comp_on = true;
+        self.chain_stale = true;
     }
 
     /// The size of the texture on show, if there is one.
@@ -834,7 +859,8 @@ impl Gpu {
     }
 
     /// Write `r` of `fb_tex` from `data`, rows `stride` pixels apart.
-    fn write_fb(&self, data: &[u32], stride: u32, r: qemu_vm::Rect) {
+    fn write_fb(&mut self, data: &[u32], stride: u32, r: qemu_vm::Rect) {
+        self.chain_stale = true;
         let (tex, _, _, _) = self.fb_tex.as_ref().unwrap();
         let w = stride;
         self.queue.write_texture(
@@ -941,6 +967,7 @@ impl Gpu {
     pub(crate) fn force_surface(&mut self, size: (u32, u32)) {
         self.forced_surface = Some(size);
         self.geom = self.fit();
+        self.chain_stale = true;
     }
 
     /// The surface the geometry stage fits the picture into.
@@ -995,6 +1022,7 @@ impl Gpu {
     /// size (`import_slot`). Nothing derives geometry while a frame is
     /// drawn.
     fn guest_surface_changed(&mut self) {
+        self.chain_stale = true;
         let Some((_, _, tw, th)) = self.current() else {
             return;
         };
@@ -1061,8 +1089,19 @@ impl Gpu {
         // CRT chain: guest texture → viewport-sized output texture (doc 03)
         let (_, _, vw, vh) = self.viewport();
         let (vw, vh) = (vw.max(1.0) as u32, vh.max(1.0) as u32);
+        // Nothing the chain draws from changed since its last run, and the
+        // preset draws the same picture from the same input: its last
+        // output stands (`chain_stale`). `PLAYER_DUMP_OUT` counts runs,
+        // so it gets every one, as before.
+        static DUMP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let dump = *DUMP.get_or_init(|| std::env::var_os("PLAYER_DUMP_OUT").is_some());
+        let same = !self.chain_stale
+            && !dump
+            && matches!(&self.chain_bg, Some((_, w, h)) if *w == vw && *h == vh)
+            && self.chain.as_ref().is_some_and(|c| !c.animated());
+        self.chain_stale = false;
         let mut chain_enc = None;
-        if let Some(chain) = self.chain.as_mut() {
+        if let Some(chain) = self.chain.as_mut().filter(|_| !same) {
             let mut enc = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1233,16 +1272,28 @@ pub(crate) fn present_guest_frame(
                 // the published frame (M22: no whole-frame copies)
                 let whole = gpu.fb_whole || !matches!(gpu.fb_tex, Some((_, _, tw, th)) if tw == w && th == h);
                 let region = if whole { Some(qemu_vm::Rect::whole(f.width, f.height)) } else { f.dirty };
-                if let Some(r) = region {
-                    gpu.upload_rect(f.pixels, w, h, r);
-                }
-                // the last sprite taken off (its rect from the frame) and
-                // this one drawn
-                if let Some(r) = gpu.fb_sprite.take().filter(|_| !whole) {
-                    gpu.upload_rect(f.pixels, w, h, r);
-                }
-                if let Some((c, x, y)) = sprite {
-                    gpu.upload_sprite(f.pixels, f.width, f.height, &c, x, y);
+                // a take that changed nothing, the sprite the same one in
+                // the same place (a refresh tick, a guest idle under a
+                // grabbed mouse): what is on show stands, and so does the
+                // chain's output drawn from it
+                let same_sprite = match (&sprite, &gpu.fb_sprite_last) {
+                    (Some((c, x, y)), Some((lc, lx, ly))) => std::sync::Arc::ptr_eq(c, lc) && x == lx && y == ly,
+                    (None, None) => true,
+                    _ => false,
+                };
+                if region.is_some() || !same_sprite {
+                    if let Some(r) = region {
+                        gpu.upload_rect(f.pixels, w, h, r);
+                    }
+                    // the last sprite taken off (its rect from the frame)
+                    // and this one drawn
+                    if let Some(r) = gpu.fb_sprite.take().filter(|_| !whole) {
+                        gpu.upload_rect(f.pixels, w, h, r);
+                    }
+                    if let Some((c, x, y)) = &sprite {
+                        gpu.upload_sprite(f.pixels, f.width, f.height, c, *x, *y);
+                    }
+                    gpu.fb_sprite_last = sprite;
                 }
             }
         }

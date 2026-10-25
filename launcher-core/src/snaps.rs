@@ -409,8 +409,16 @@ impl Snapshots {
 
     fn poll_now(&mut self) {
         let Some(job_id) = self.job.clone() else { return };
-        let state = self.control().and_then(|mut c| c.job(&job_id));
+        // The short timeout: this runs on the window's timer, and a
+        // busy QEMU is asked again on the next tick.
+        let state = self
+            .bundle_dir
+            .as_deref()
+            .ok_or_else(|| "no machine open".to_string())
+            .and_then(|dir| Control::connect_poll(&control::socket_path(dir)))
+            .and_then(|mut c| c.job(&job_id));
         let (status, error) = match state {
+            Err(e) if e == control::TIMED_OUT => return,
             Ok(Some(state)) => state,
             // Gone already (or the monitor went away with the guest):
             // stop polling rather than spinning on a job that can't

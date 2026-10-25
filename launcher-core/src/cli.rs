@@ -68,7 +68,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // library (`LAUNCHER_LIBRARY_DIR`), as the window finds it.
             let path = args.next().expect("usage: --machine-details <machine.toml>");
             let dir = Path::new(&path).parent().expect("a bundle in a directory").to_path_buf();
-            let library = machines::Machines::load();
+            let library = machines::Machines::scanned();
             let row = library.entries().iter().position(|e| e.dir == dir).expect("a machine in the library");
             println!("{}", library.subtitle(row));
             for group in library.details(row) {

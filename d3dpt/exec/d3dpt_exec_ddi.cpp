@@ -261,6 +261,18 @@ struct Ctx {
     }
 };
 
+/* How many of each object the guest may have at once. A record of a few
+ * bytes makes each one, so without a cap a broken or hostile driver grows
+ * host memory without end. Every cap is far above what a program reaches:
+ * a game keeps a few thousand surfaces and a few hundred shaders, palettes
+ * and state sets, Windows 7's DWM a context per Direct3D program. A
+ * refused object is logged once and fails as its malformed twin does. */
+constexpr size_t MAX_SURFS = 262144;    /* registrations, each a host texture at its use (Windows 11's Direct3D 11 allocations too) */
+constexpr size_t MAX_CTXS = 4096;       /* each keeps a state block of the whole device */
+constexpr size_t MAX_SHADERS = 65536;   /* every context's DX8 vertex, pixel and DX9 vertex function shaders together */
+constexpr size_t MAX_SBLOCKS = 16384;   /* a state block of everything is the device's whole state */
+constexpr size_t MAX_PALETTES = 4096;   /* 1 KiB each, from a 12-byte token */
+
 } // namespace
 
 struct Ddi {
@@ -674,6 +686,16 @@ static VramSurf *surf(Exec &x, uint32_t h) {
      * DWM composes): what Direct3D 11 drew into it comes through VRAM */
     if (it->second.d.caps & D3DPT_VS_D3D11) exec_d11_sync(x, h);
     return &it->second;
+}
+
+/* a registration under handle h may be made: a handle already known is
+ * one again, a new one only below MAX_SURFS (the record fails otherwise) */
+static bool surf_room(Exec &x, Batch &b, uint32_t h) {
+    Ddi &d = ddi(x);
+    if (d.surfs.size() < MAX_SURFS || d.surfs.count(h)) return true;
+    if (d.warn_once(0xd0004)) x.log("ddi: surface %u refused: %zu surfaces already", h, d.surfs.size());
+    b.err = D3DPT_ERR_BAD_ARG;
+    return false;
 }
 
 static bool ensure_device(Exec &x, uint32_t w, uint32_t h) {
@@ -1451,6 +1473,16 @@ struct Dp2 {
         char buf[400]; va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
         x.log("ddi: trace: %6u %s", pos, buf);
     }
+    /* the contexts hold as many shaders as the guest may have
+     * (MAX_SHADERS, counted when one is made, which is rare and slow
+     * anyway): the new one is refused as a malformed one is */
+    bool full(const char *what, uint32_t handle) {
+        size_t n = 0;
+        for (const auto &kv : d.ctxs) n += kv.second.vshaders.size() + kv.second.pshaders.size() + kv.second.vfuncs.size();
+        if (n < MAX_SHADERS) return false;
+        if (d.warn_once(0xc1017)) x.log("ddi: dp2: %s 0x%x refused: %zu shaders already", what, handle, n);
+        return true;
+    }
     /* every level of a traced texture, as tex-<handle>-l<n>.ppm (RGB) +
      * tex-<handle>-l<n>-a.pgm (alpha) next to the flag file, once per handle;
      * a cube's faces after the first as tex-<handle>-f<face>-l<n>; every
@@ -1571,6 +1603,7 @@ struct Dp2 {
     void create_vdecl(uint32_t handle, const uint8_t *e, uint32_t n) {
         static const uint8_t type_bytes[17] = { 4, 8, 12, 16, 4, 4, 4, 8, 4, 4, 8, 4, 8, 4, 4, 4, 8 };
         delete_vshader(handle);
+        if (full("vertex declaration", handle)) return;
         VShader8 s;
         std::vector<D3DVERTEXELEMENT9> el;
         for (uint32_t i = 0; i < n; i++) {
@@ -1614,6 +1647,7 @@ struct Dp2 {
     }
     void create_vfunc(uint32_t handle, const uint8_t *code, uint32_t codebytes) {
         delete_vfunc(handle);
+        if (full("vertex shader function", handle)) return;
         dump_code("vs", handle, code, codebytes);
         uint32_t ver = codebytes >= 4 ? u32(code) : 0;
         if (!handle || codebytes < 8 || codebytes % 4 || codebytes > (256u << 10) || ver >> 16 != 0xfffe ||
@@ -1648,6 +1682,7 @@ struct Dp2 {
         auto old = c.vshaders.find(handle);
         if (old != c.vshaders.end()) { old->second.release(); c.vshaders.erase(old); }
         if (handle == cur_vs) cur_vs = ~0u;
+        if (full("vertex shader", handle)) return;
         if (!handle || declbytes < 4 || declbytes % 4 || declbytes > (64u << 10) || codebytes % 4 || codebytes > (256u << 10) ||
             (codebytes && (codebytes < 8 || u32(code) >> 16 != 0xfffe || u32(code + codebytes - 4) != 0x0000ffffu))) {
             if (d.warn_once(0xc1000)) x.log("ddi: dp2: vertex shader 0x%x refused: declaration %u bytes, function %u bytes", handle, declbytes, codebytes);
@@ -1716,6 +1751,7 @@ struct Dp2 {
     void create_pshader(uint32_t handle, const uint8_t *code, uint32_t codebytes) {
         auto old = c.pshaders.find(handle);
         if (old != c.pshaders.end()) { if (old->second) old->second->Release(); c.pshaders.erase(old); }
+        if (full("pixel shader", handle)) return;
         dump_code("ps", handle, code, codebytes);
         if (!handle || codebytes < 8 || codebytes % 4 || codebytes > (256u << 10) || u32(code) >> 16 != 0xffff ||
             (u32(code) & 0xffff) > 0x0300 || u32(code + codebytes - 4) != 0x0000ffffu) {
@@ -2688,6 +2724,10 @@ struct Dp2 {
                 if (start + n > 256) return fail("UPDATEPALETTE beyond 256 entries");
                 tr("palette %u entries %u..%u", ph, start, start + n);
                 if (d.pal_lines < 48) { d.pal_lines++; x.log("ddi: dp2: UPDATEPALETTE palette %u entries %u..%u (first %02x%02x%02x/%02x)", ph, start, start + n, q[8], q[9], q[10], q[11]); }
+                if (d.palettes.size() >= MAX_PALETTES && !d.palettes.count(ph)) {
+                    if (d.warn_once(0xd0002)) x.log("ddi: dp2: UPDATEPALETTE palette %u refused: %zu palettes already", ph, d.palettes.size());
+                    break;
+                }
                 auto made = d.palettes.try_emplace(ph);
                 Palette &pal = made.first->second;
                 bool changed = made.second;   /* its textures were expanded without it */
@@ -2782,6 +2822,10 @@ struct Dp2 {
                     case 0:                                             /* BEGIN */
                         if (d.recording) { IDirect3DStateBlock9 *sb = nullptr; x.dev->EndStateBlock(&sb); if (sb) sb->Release(); d.recording = false; }
                         if (it != d.sblocks.end()) { if (it->second) it->second->Release(); d.sblocks.erase(it); }
+                        if (d.sblocks.size() >= MAX_SBLOCKS) {
+                            if (d.warn_once(0xd0003)) x.log("ddi: dp2: state set %u refused: %zu state sets already", handle, d.sblocks.size());
+                            break;
+                        }
                         if (type >= 1 && type <= 3) {
                             IDirect3DStateBlock9 *sb = nullptr;
                             if (SUCCEEDED(x.dev->CreateStateBlock((D3DSTATEBLOCKTYPE)type, &sb)) && sb) d.sblocks[handle] = sb;
@@ -3561,6 +3605,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
     case D3DPT_OP_VRAM_SURFACE: {
         auto *a = body<d3dpt_vram_surface>(c, 0, b); if (!a) return true;
         if (!x.vram) { b.err = D3DPT_ERR_NO_DEVICE; return true; }
+        if (!surf_room(x, b, a->handle)) return true;
         /* v25: a Direct3D 11 resource's allocation that is no Direct3D 9
          * surface is a VRAM range as a buffer is (d3dpt_exec_d11.cpp keeps
          * the object) */
@@ -3724,6 +3769,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         uint32_t root_h = a->b;
         d3dpt_u32x2 lvl = r->levels[a->c - 1];
         d3dpt_vram_surface rd = r->d;
+        if (!surf_room(x, b, a->a)) return true;
         VramSurf &s = ddi(x).surfs[a->a];               /* node-based map: r stays valid */
         r = surf(x, root_h);
         if (s.tex || s.rt || s.cube || s.vol) s.release();
@@ -3757,6 +3803,7 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
         if (!r || !(r->d.caps & D3DPT_VS_CUBE)) { b.err = D3DPT_ERR_BAD_HANDLE; return true; }
         uint32_t i = a->c * r->d.levels;                 /* face c's level 0 in the level table (entry i - 1) */
         if (i > r->levels.size()) { b.err = D3DPT_ERR_BAD_ARG; return true; }
+        if (!surf_room(x, b, a->a)) return true;
         VramSurf &s = ddi(x).surfs[a->a];               /* node-based map: r stays valid */
         if (s.tex || s.rt || s.cube || s.vol) s.release();
         s.shadow.clear();
@@ -3873,6 +3920,11 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c)
             if (x.dev && (!stale->second.vshaders.empty() || !stale->second.pshaders.empty())) { x.dev->SetVertexShader(nullptr); x.dev->SetPixelShader(nullptr); }
             stale->second.release_shaders();
             d.ctxs.erase(stale);
+        }
+        if (d.ctxs.size() >= MAX_CTXS) {
+            r->hr = (uint32_t)E_OUTOFMEMORY;
+            if (d.warn_once(0xd0005)) x.log("ddi: context %u refused: %zu contexts already", a->handle, d.ctxs.size());
+            return true;
         }
         VramSurf *rt = surf(x, a->rt);
         if (!rt) { r->hr = (uint32_t)D3DERR_INVALIDCALL; x.log("ddi: context %u: render target %u unknown", a->handle, a->rt); return true; }

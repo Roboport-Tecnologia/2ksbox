@@ -171,10 +171,16 @@ impl Shelf {
     /// (`live_changed`).
     pub fn probe_live(&self) -> LiveProbe {
         let Some(dir) = self.bundle_dir() else { return LiveProbe::default() };
-        match control::Control::connect(&control::socket_path(dir)) {
+        // The short timeout: this runs on the window's timer.
+        let unchanged = || LiveProbe { drive: self.live.clone(), error: None };
+        match control::Control::connect_poll(&control::socket_path(dir)) {
+            // A machine that took the connection but did not answer in
+            // time is busy, not stopped: keep what the window shows.
+            Err(e) if e == control::TIMED_OUT => unchanged(),
             Err(_) => LiveProbe::default(),
             Ok(mut c) => match c.cd_medium() {
                 Ok(disc) => LiveProbe { drive: Some(disc), error: None },
+                Err(e) if e == control::TIMED_OUT => unchanged(),
                 Err(e) => LiveProbe { drive: None, error: Some(e) },
             },
         }

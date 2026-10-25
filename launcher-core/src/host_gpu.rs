@@ -168,12 +168,38 @@ fn find_wine() -> Option<PathBuf> {
 /// `wine --version` prints `wine-10.0` (or `wine-11.17 (Staging)`) and
 /// exits; it starts no server and makes no prefix. A Wine that cannot
 /// do that counts as no Wine.
+/// One that does not exit within five seconds (a broken install waiting
+/// on something) is killed and counts as none too, so the probe always
+/// ends.
 fn wine_version(path: &Path) -> Option<String> {
-    let out = Command::new(path).arg("--version").output().ok()?;
-    if !out.status.success() {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let mut child = Command::new(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
+    // One short line, so it fit the pipe while the child ran.
+    let mut text = String::new();
+    child.stdout.take()?.read_to_string(&mut text).ok()?;
     let line = text.lines().next()?.trim();
     Some(line.strip_prefix("wine-").unwrap_or(line).to_string())
 }
@@ -585,6 +611,23 @@ pub fn probe() -> Probe {
 pub fn cached() -> &'static Probe {
     static ONCE: OnceLock<Probe> = OnceLock::new();
     ONCE.get_or_init(probe)
+}
+
+/// Start [`cached`] and [`wine`] on a thread of their own, so the first
+/// window that asks (the wizard's Direct3D note) finds the answer ready
+/// instead of waiting on the Vulkan loader and `wine --version`. A caller
+/// that asks before the thread is done waits for it, as it would have
+/// for its own probe. Called once a window's model exists
+/// (`machines::Machines::load`), never by a verb: a process that exits
+/// mid-probe would race the Vulkan driver's teardown.
+pub fn warm() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let _ = std::thread::Builder::new().name("host-gpu-probe".into()).spawn(|| {
+            cached();
+            wine();
+        });
+    });
 }
 
 /// The report `--host-check` prints: the verdict, then every device the

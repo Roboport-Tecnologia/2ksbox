@@ -111,6 +111,12 @@ static void exec_one(Batch &b, const d3dpt_cmd *c) {
         auto *a = body<d3dpt_create_query>(c, 0, b); if (!a) return;
         d3dpt_ret *r = b.slot(a->ret_off, 0); if (!r) return;
         if (!need_device(b)) return;
+        if (x.objs.size() >= Exec::MAX_OBJS && !x.objs.count(a->handle)) {
+            static bool told;
+            if (!told) { told = true; x.log("query %u refused: %zu queries already", a->handle, x.objs.size()); }
+            r->hr = (uint32_t)E_OUTOFMEMORY;
+            break;
+        }
         IDirect3DQuery9 *q = nullptr;
         r->hr = (uint32_t)x.dev->CreateQuery((D3DQUERYTYPE)a->type, &q);
         if (SUCCEEDED(r->hr) && !x.put(a->handle, K_QUERY, q)) { r->hr = (uint32_t)D3DERR_INVALIDCALL; b.err = D3DPT_ERR_BAD_HANDLE; }

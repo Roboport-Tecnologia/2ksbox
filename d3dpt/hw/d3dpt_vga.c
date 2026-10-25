@@ -154,6 +154,8 @@ struct D3dptVgaState {
 
     char dbg[256];
     unsigned dbg_len;
+    int64_t dbg_second;         /* the realtime second the lines below count */
+    unsigned dbg_lines, dbg_dropped;
 
     /* M7c: the command window at the top of VRAM and its executor */
     uint32_t cmd_offset;        /* 0 = VRAM too small for a window */
@@ -1681,8 +1683,23 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
     case D3DPT_FB_REG_DEBUG: {
         char c = (char)val;
         if (c == '\n' || s->dbg_len == sizeof(s->dbg) - 1) {
+            /* the driver's debug channel, a line a VM exit a character:
+             * plenty for debugging, but a guest looping on it does not
+             * fill the host's log (1000 lines a second, the rest counted) */
+            int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME) / 1000;
+            if (now != s->dbg_second) {
+                if (s->dbg_dropped) {
+                    info_report("d3dpt-vga: guest: %u debug lines dropped", s->dbg_dropped);
+                }
+                s->dbg_second = now;
+                s->dbg_lines = s->dbg_dropped = 0;
+            }
             s->dbg[s->dbg_len] = 0;
-            info_report("d3dpt-vga: guest: %s", s->dbg);
+            if (s->dbg_lines++ < 1000) {
+                info_report("d3dpt-vga: guest: %s", s->dbg);
+            } else {
+                s->dbg_dropped++;
+            }
             s->dbg_len = 0;
             if (c == '\n') {
                 break;

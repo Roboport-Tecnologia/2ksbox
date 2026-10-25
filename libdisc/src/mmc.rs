@@ -315,12 +315,14 @@ pub fn read_cd_sector(disc: &Disc, lba: i32, expected_type: u8, byte9: u8, byte1
     if out.len() < total {
         return Err(Error::Invalid(format!("READ CD: buffer of {} bytes for a {total}-byte sector", out.len())));
     }
-    let (kind, _, _) = disc.classify(lba)?;
+    let mut raw = [0u8; 2352];
+    let ((kind, _, _), read) = disc.classify_into(lba, &mut raw)?;
     if !kind_matches(expected_type, kind) {
         return Err(Error::Mode);
     }
-    let mut raw = [0u8; 2352];
-    disc.read_raw(lba, &mut raw)?;
+    if !read {
+        disc.read_raw(lba, &mut raw)?;
+    }
     let sel = selected(byte9);
     let main = main_length(expected_type, byte9)?;
     // A request for user data without the EDC/ECC field is a cooked read: L-EC is

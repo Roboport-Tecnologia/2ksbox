@@ -629,32 +629,50 @@ impl Disc {
     /// The kind of the sector at `lba` without verifying L-EC (reads the
     /// sector only for tracks whose form is per sector).
     pub fn classify(&self, lba: i32) -> Result<(SectorKind, u8, u8)> {
+        let mut raw = [0u8; 2352];
+        self.classify_into(lba, &mut raw).map(|(c, _)| c)
+    }
+
+    /// `classify`, keeping the raw sector when it had to be read to tell
+    /// the kind (`true` alongside the result): a stored raw track's
+    /// sectors are classified from their own bytes, and a caller that
+    /// wants those bytes too would otherwise read the sector twice.
+    pub(crate) fn classify_into(&self, lba: i32, raw: &mut [u8; 2352]) -> Result<((SectorKind, u8, u8), bool)> {
         self.check_range(lba)?;
         let Some((_, t, index)) = self.locate(lba) else {
-            return Ok((SectorKind::Gap, 0, 0));
+            return Ok(((SectorKind::Gap, 0, 0), false));
         };
         let e = self.extent_at(t, lba).ok_or_else(|| Error::Invalid(format!("track {} has no extent at LBA {lba}", t.number)))?;
         let stored_raw = matches!(e.source, Source::File { layout: Layout::Raw2352 | Layout::Raw2352Sub96 | Layout::Mode2_2336, .. });
-        let kind = if t.mode == TrackMode::Audio || !stored_raw {
-            t.mode.default_kind()
-        } else {
-            let mut raw = [0u8; 2352];
-            self.read_raw(lba, &mut raw)?;
-            match (t.mode, sector::detect_kind(&raw)) {
-                (TrackMode::Mode2Formless, _) => SectorKind::Mode2Formless,
-                (_, Some(k)) => k,
-                (m, None) => m.default_kind(),
-            }
+        if t.mode == TrackMode::Audio || !stored_raw {
+            return Ok(((t.mode.default_kind(), t.number, index), false));
+        }
+        self.read_raw(lba, raw)?;
+        let kind = match (t.mode, sector::detect_kind(raw)) {
+            (TrackMode::Mode2Formless, _) => SectorKind::Mode2Formless,
+            (_, Some(k)) => k,
+            (m, None) => m.default_kind(),
         };
-        Ok((kind, t.number, index))
+        Ok(((kind, t.number, index), true))
+    }
+
+    /// Kind and raw bytes of the sector at `lba`, read once.
+    pub fn classify_and_read(&self, lba: i32, raw: &mut [u8; 2352]) -> Result<(SectorKind, u8, u8)> {
+        let (c, read) = self.classify_into(lba, raw)?;
+        if !read {
+            self.read_raw(lba, raw)?;
+        }
+        Ok(c)
     }
 
     /// Kind, track, index and L-EC state of the sector at `lba`.
     pub fn sector_info(&self, lba: i32) -> Result<SectorInfo> {
-        let (kind, track, index) = self.classify(lba)?;
+        let mut raw = [0u8; 2352];
+        let ((kind, track, index), read) = self.classify_into(lba, &mut raw)?;
         let lec_ok = if kind.is_data() {
-            let mut raw = [0u8; 2352];
-            self.read_raw(lba, &mut raw)?;
+            if !read {
+                self.read_raw(lba, &mut raw)?;
+            }
             Some(sector::verify(&raw, kind).is_ok())
         } else {
             None
@@ -668,8 +686,7 @@ impl Disc {
     /// audio, gap and form 2 sectors (what a drive answers to READ(10)).
     pub fn read_cooked(&self, lba: i32, out: &mut [u8; 2048]) -> Result<()> {
         let mut raw = [0u8; 2352];
-        let (kind, _, _) = self.classify(lba)?;
-        self.read_raw(lba, &mut raw)?;
+        let (kind, _, _) = self.classify_and_read(lba, &mut raw)?;
         let kind = match kind {
             SectorKind::Mode1 | SectorKind::Mode2Form1 => kind,
             SectorKind::Audio | SectorKind::Gap | SectorKind::Mode2Form2 | SectorKind::Mode2Formless => return Err(Error::Mode),

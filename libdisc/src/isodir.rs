@@ -91,6 +91,9 @@ struct Builder {
     nodes: Vec<Node>,
     dirs: usize,
     warnings: usize,
+    /// File data sectors found so far, so a tree too big for any disc is
+    /// refused while it is walked, not after every file in it was opened.
+    data_sectors: u64,
 }
 
 /// One tree's plan: the ordering the standard wants, the numbering that
@@ -131,7 +134,7 @@ impl Builder {
             jol_id: vec![0],
             lba: 0,
         };
-        Ok(Builder { root: dir.to_path_buf(), disc: Disc::new(), nodes: vec![root], dirs: 1, warnings: 0 })
+        Ok(Builder { root: dir.to_path_buf(), disc: Disc::new(), nodes: vec![root], dirs: 1, warnings: 0, data_sectors: 0 })
     }
 
     /// Say what we are dropping and why. A shared folder is the user's
@@ -227,6 +230,15 @@ impl Builder {
                         }
                     }
                 };
+                if payload.is_some() {
+                    // Metadata is not laid out yet, so this is a lower
+                    // bound of what `finish` checks; past it, no later
+                    // file can bring the total back under.
+                    self.data_sectors += sectors_for_len(len) as u64;
+                    if self.data_sectors + TAIL_PAD as u64 > MAX_SECTORS {
+                        return Err(self.too_big(self.data_sectors + TAIL_PAD as u64));
+                    }
+                }
                 let idx = self.push(Node {
                     name,
                     is_dir: false,
@@ -247,6 +259,16 @@ impl Builder {
         }
         ancestors.pop();
         Ok(())
+    }
+
+    /// The refusal for a tree of `sectors` (or more) that no disc holds.
+    fn too_big(&self, sectors: u64) -> Error {
+        Error::Invalid(format!(
+            "{}: the folder holds {}, and a disc holds at most {} (a dual-layer DVD); share a folder that fits, or make an image of this one",
+            self.root.display(),
+            size_str(sectors),
+            size_str(MAX_SECTORS)
+        ))
     }
 
     fn push(&mut self, n: Node) -> usize {
@@ -363,12 +385,7 @@ impl Builder {
         let data: u64 = self.nodes.iter().filter(|n| n.payload.is_some()).map(|n| sectors_for_len(n.len) as u64).sum();
         let want = meta_sectors as u64 + data + TAIL_PAD as u64;
         if want > MAX_SECTORS {
-            return Err(Error::Invalid(format!(
-                "{}: the folder holds {}, and a disc holds at most {} (a dual-layer DVD); share a folder that fits, or make an image of this one",
-                self.root.display(),
-                size_str(want),
-                size_str(MAX_SECTORS)
-            )));
+            return Err(self.too_big(want));
         }
 
         // Files, in the primary tree's order: a directory's own files

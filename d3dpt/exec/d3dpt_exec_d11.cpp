@@ -110,6 +110,7 @@ struct D11Res {
      * what differs from it the CPU drew since */
     std::vector<uint8_t> gdi_shadow;
     uint32_t gdi_w = 0, gdi_h = 0;
+    uint64_t bytes = 0;                         /* res and stage, in D11::res_bytes (res_drop takes them out) */
     void release() {
         if (res) res->Release();
         if (stage) stage->Release();
@@ -142,6 +143,14 @@ struct D11 {
     uint32_t cur = 0;                           /* the guest context whose state is in */
     std::unordered_map<uint32_t, D11Res> res;
     std::unordered_map<uint32_t, D11Ctx> ctxs;
+    uint64_t res_bytes = 0;                     /* every resource's host memory, against D11_RES_BUDGET */
+    size_t nobjs = 0;                           /* every context's objects, against D11_MAX_OBJS */
+    /* GDI's readbacks (v27, v29): BGRA8 staging textures kept between
+     * operations, grown to the largest rectangle read (in steps of 64),
+     * one per role, so one operation reads its destination, source and
+     * coverage at once; and the copy an overlapping scroll goes through */
+    enum { GDI_D, GDI_S, GDI_A, GDI_TMP, GDI_N };
+    struct GdiTex { ID3D11Texture2D *tex = nullptr; uint32_t w = 0, h = 0; } gdi_tex[GDI_N];
     std::unordered_map<uint32_t, int> warned;
     bool warn(uint32_t key) { return warned[key]++ == 0; }
     /* D3DPT_D11_PROF set: each token kind's count and time, logged every 5 s;
@@ -189,6 +198,17 @@ D11 *&d11_of(Exec &x)
 {
     return reinterpret_cast<D11 *&>(x.d11);
 }
+
+/* How much the guest may make. Each object comes from a few bytes of
+ * record, so a broken or hostile driver could exhaust host memory and the
+ * GPU's; the caps are far above Windows 11's desktop with its programs
+ * open and a game running: a few hundred guest devices, tens of thousands
+ * of allocations, a few GiB of them. Past one, the creation fails as one
+ * Direct3D 11 refuses (E_OUTOFMEMORY / E_INVALIDARG), said once. */
+constexpr size_t D11_MAX_CTXS = 4096;          /* each an ID3DDeviceContextState */
+constexpr size_t D11_MAX_RES = 262144;          /* allocations (the kernel driver's handles) */
+constexpr size_t D11_MAX_OBJS = 1048576;        /* views, states, shaders, layouts, queries: every context's */
+constexpr uint64_t D11_RES_BUDGET = 8ull << 30; /* resources' memory, staging twins included */
 
 /* -------------------------------------------------------------- formats */
 
@@ -507,6 +527,10 @@ D11Ctx *enter(Exec &x, D11 &d, uint32_t ctx)
 {
     auto it = d.ctxs.find(ctx);
     if (it == d.ctxs.end()) {
+        if (d.ctxs.size() >= D11_MAX_CTXS) {
+            if (d.warn(0x11000000u)) x.log("d11: context 0x%08x refused: %zu contexts already", ctx, d.ctxs.size());
+            return nullptr;
+        }
         D11Ctx c;
         const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
         HRESULT hr = d.dev->CreateDeviceContextState(0, &fl, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), nullptr, &c.state);
@@ -531,9 +555,52 @@ D11Res *res_of(D11 &d, uint32_t h)
     return it == d.res.end() || !it->second.res ? nullptr : &it->second;
 }
 
+/* A resource's host memory, every mip, slice and sample (an unknown
+ * format at 16 bytes an element, the most there is); 0 when it is beyond
+ * what Direct3D 11 makes at all: 16384 texels a side (2048 in 3D), 2048
+ * slices, 15 levels, 32 samples, 2 GiB (its largest resource) */
+uint64_t res_size(const d3dpt_d11_res &s)
+{
+    const uint64_t most = 2ull << 30;
+    if (s.dim == 1) return s.width <= most ? s.width : 0;
+    uint32_t side = s.dim == 4 ? 2048 : 16384;
+    if (s.dim < 2 || s.dim > 4 || s.width > side || (s.dim >= 3 && s.height > side) || (s.dim == 4 && s.depth > side) ||
+        s.array > (s.dim == 4 ? 1u : 2048u) || s.mips > 15 || s.samples > 32)
+        return 0;
+    uint32_t block, bpe = dxgi_bytes(s.format, &block);
+    if (!bpe) { bpe = 16; block = 1; }
+    uint32_t w = std::max(1u, s.width), h = s.dim >= 3 ? std::max(1u, s.height) : 1, dep = s.dim == 4 ? std::max(1u, s.depth) : 1;
+    uint64_t total = 0;
+    for (uint32_t m = 0; m < 15 && (s.mips ? m < s.mips : true); m++) {
+        total += (uint64_t)((w + block - 1) / block) * ((h + block - 1) / block) * dep * bpe;
+        if (!s.mips && w == 1 && h == 1 && dep == 1) break;     /* 0 levels: the whole chain */
+        w = std::max(1u, w >> 1);
+        h = std::max(1u, h >> 1);
+        dep = std::max(1u, dep >> 1);
+    }
+    total *= (uint64_t)std::max(1u, s.array) * std::max(1u, s.samples);
+    return total <= most ? total : 0;
+}
+
+/* the resource's memory leaves the budget with it */
+void res_drop(D11 &d, D11Res &r)
+{
+    d.res_bytes -= std::min(d.res_bytes, r.bytes);
+    r.bytes = 0;
+    r.release();
+}
+
 HRESULT res_create(Exec &x, D11 &d, D11Res &r)
 {
     const d3dpt_d11_res &s = r.d;
+    const uint64_t size = res_size(s);
+    if (!size || d.res_bytes + size > D11_RES_BUDGET || (d.res.size() >= D11_MAX_RES && !d.res.count(s.res))) {
+        if (d.warn(0x12000000u | (size ? 1u : 0u)))
+            x.log("d11: resource dim %u fmt %u %ux%ux%u mips %u array %u samples %u refused: %s", s.dim, s.format, s.width, s.height,
+                  s.depth, s.mips, s.array, s.samples,
+                  !size ? "beyond Direct3D 11's limits" : d.res_bytes + size > D11_RES_BUDGET ? "the resources' memory is spent" : "too many resources");
+        return size ? E_OUTOFMEMORY : E_INVALIDARG;
+    }
     r.staging = s.usage == 3;
     D3D11_USAGE usage = r.staging ? D3D11_USAGE_STAGING : D3D11_USAGE_DEFAULT;
     UINT cpu = r.staging ? D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE : 0;
@@ -575,6 +642,10 @@ HRESULT res_create(Exec &x, D11 &d, D11Res &r)
     if (FAILED(hr) && d.warn(0x10000000u | (s.format << 8) | s.dim))
         x.log("d11: resource dim %u fmt %u %ux%ux%u mips %u array %u usage %u bind 0x%x misc 0x%x: 0x%08x", s.dim, s.format, s.width,
               s.height, s.depth, s.mips, s.array, s.usage, s.bind, s.misc, (unsigned)hr);
+    if (SUCCEEDED(hr)) {
+        d.res_bytes += size;
+        r.bytes += size;
+    }
     return hr;
 }
 
@@ -826,6 +897,7 @@ void res_readback(Exec &x, D11 &d, uint32_t h, D11Res &r, uint32_t sub, bool sca
         t.d.quality = 0;
         if (FAILED(res_create(x, d, t))) return;
         r.stage = t.res;
+        r.bytes += t.bytes;
         t.res = nullptr;
     }
     uint32_t n = sub_count(r), first = sub == ~0u ? 0 : sub, last = sub == ~0u ? n : sub + 1;
@@ -879,7 +951,14 @@ void put_obj(Run &r, uint32_t id, uint32_t kind, IUnknown *p, HRESULT hr, uint32
         return;
     }
     auto it = r.c.objs.find(id);
-    if (it != r.c.objs.end() && it->second.p) it->second.p->Release();
+    if (it == r.c.objs.end() && r.d.nobjs >= D11_MAX_OBJS) {
+        p->Release();
+        r.fail(E_OUTOFMEMORY);
+        if (r.d.warn(0x13000000u)) r.x.log("d11: an object of kind %u refused: %zu objects already", kind, r.d.nobjs);
+        return;
+    }
+    if (it == r.c.objs.end()) r.d.nobjs++;
+    else if (it->second.p) it->second.p->Release();
     r.c.objs[id] = { kind, p, stage };
 }
 
@@ -1149,7 +1228,7 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
         if (FAILED(res_create(r.x, d, x))) { r.fail(E_INVALIDARG); return; }
         owed_settle(r.x, d, a->res, false, true);  /* the old one's */
         D11Res &nr = d.res[a->res];
-        nr.release();
+        res_drop(d, nr);
         nr = x;
         /* a surface another API drew first (a Direct3D 9 one a process
          * opened here): its pixels come from VRAM */
@@ -1231,6 +1310,7 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
         if (it != r.c.objs.end() && it->second.kind == a->a) {
             if (it->second.p) it->second.p->Release();
             r.c.objs.erase(it);
+            r.d.nobjs--;
         }
         return;
     }
@@ -1582,7 +1662,7 @@ D11Res *gdi_object(Exec &x, D11 &d, const d3dpt_gdi_side &s)
     r.d.depth = r.d.mips = r.d.array = r.d.samples = 1;
     if (FAILED(res_create(x, d, r))) return nullptr;
     D11Res &nr = d.res[s.handle];
-    nr.release();
+    res_drop(d, nr);
     nr = r;
     return &nr;
 }
@@ -1729,8 +1809,93 @@ void gdi_fill(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
     }
 }
 
+/* the role's texture (D11::gdi_tex), at least w x h: grown, never
+ * shrunk, and kept for the next operation */
+ID3D11Texture2D *gdi_tex(D11 &d, int role, uint32_t w, uint32_t h)
+{
+    D11::GdiTex &t = d.gdi_tex[role];
+    if (t.tex && t.w >= w && t.h >= h) return t.tex;
+    const uint32_t nw = std::max(t.w, (w + 63) & ~63u), nh = std::max(t.h, (h + 63) & ~63u);
+    const bool stage = role != D11::GDI_TMP;
+    D3D11_TEXTURE2D_DESC desc = { nw, nh, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, stage ? D3D11_USAGE_STAGING : D3D11_USAGE_DEFAULT, 0,
+                                  stage ? (UINT)D3D11_CPU_ACCESS_READ : 0u, 0 };
+    ID3D11Texture2D *n = nullptr;
+    if (FAILED(d.dev->CreateTexture2D(&desc, nullptr, &n)) || !n) return nullptr;
+    if (t.tex) t.tex->Release();
+    t.tex = n;
+    t.w = nw;
+    t.h = nh;
+    return n;
+}
+
+/* A rectangle of a side's pixels on the CPU (v29's operations, a copy's
+ * readback): read from its object through the role's staging texture, or
+ * from its VRAM */
+struct GdiPx {
+    std::vector<uint32_t> p;
+    int32_t x0 = 0, y0 = 0, w = 0, h = 0;
+    ID3D11Texture2D *stg = nullptr;             /* copied there, not read yet (gdi_read_end) */
+    uint32_t &at(int32_t x, int32_t y) { return p[(size_t)(y - y0) * (size_t)w + (size_t)(x - x0)]; }
+};
+
+/* The read's first half: VRAM is read now, an object's rectangle copied
+ * into staging. gdi_read_end reads that, so an operation copies all its
+ * rectangles before it maps the first and waits for the GPU once. */
+bool gdi_read(D11 &d, const GdiSide &s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, GdiPx &o, int role)
+{
+    if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0 || (uint32_t)x1 > s.w || (uint32_t)y1 > s.h) return false;
+    o.x0 = x0;
+    o.y0 = y0;
+    o.w = x1 - x0;
+    o.h = y1 - y0;
+    o.p.assign((size_t)o.w * (size_t)o.h, 0);
+    o.stg = nullptr;
+    if (s.obj) {
+        ID3D11Texture2D *stg = gdi_tex(d, role, (uint32_t)o.w, (uint32_t)o.h);
+        if (!stg) return false;
+        D3D11_BOX box = { (UINT)x0, (UINT)y0, 0, (UINT)x1, (UINT)y1, 1 };
+        d.ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, s.obj->res, 0, &box);
+        o.stg = stg;
+        return true;
+    }
+    if (!s.mem) return false;
+    for (int32_t y = 0; y < o.h; y++)
+        memcpy(&o.p[(size_t)y * o.w], s.mem + (uint64_t)(y0 + y) * s.pitch + (uint64_t)x0 * 4, (size_t)o.w * 4);
+    return true;
+}
+
+bool gdi_read_end(D11 &d, GdiPx &o)
+{
+    if (!o.stg) return true;
+    D3D11_MAPPED_SUBRESOURCE m;
+    bool ok = SUCCEEDED(d.ctx->Map(o.stg, 0, D3D11_MAP_READ, 0, &m));
+    if (ok) {
+        for (int32_t y = 0; y < o.h; y++)
+            memcpy(&o.p[(size_t)y * o.w], (const uint8_t *)m.pData + (uint64_t)y * m.RowPitch, (size_t)o.w * 4);
+        d.ctx->Unmap(o.stg, 0);
+    }
+    o.stg = nullptr;
+    return ok;
+}
+
 void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, const GdiSide &src, const GdiSide &dst)
 {
+    /* a readback: the source under every rectangle in one staging copy,
+     * one wait for the GPU (writing the destination's VRAM changes no
+     * object, so the source reads the same before as between) */
+    GdiPx back;
+    if (src.obj && !dst.obj) {
+        int32_t x0 = INT32_MAX, y0 = INT32_MAX, x1 = INT32_MIN, y1 = INT32_MIN;
+        for (uint32_t i = 0; i < g.n; i++) {
+            const d3dpt_gdi_rect &r = rc[i];
+            if (!gdi_rect_ok(r, dst, &src)) continue;
+            x0 = std::min(x0, r.sx);
+            y0 = std::min(y0, r.sy);
+            x1 = std::max(x1, r.sx + (r.r - r.l));
+            y1 = std::max(y1, r.sy + (r.b - r.t));
+        }
+        if (x1 <= x0 || !gdi_read(d, src, x0, y0, x1, y1, back, D11::GDI_S) || !gdi_read_end(d, back)) return;
+    }
     for (uint32_t i = 0; i < g.n; i++) {
         const d3dpt_gdi_rect &r = rc[i];
         if (!gdi_rect_ok(r, dst, &src)) continue;
@@ -1745,12 +1910,11 @@ void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
                 d.ctx->CopySubresourceRegion(dst.obj->res, 0, (UINT)r.l, (UINT)r.t, 0, src.obj->res, 0, &box);
             } else {
                 /* within one bitmap, overlapping (a scroll): through a copy of the source */
-                D3D11_TEXTURE2D_DESC t = { w, h, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, D3D11_USAGE_DEFAULT, 0, 0, 0 };
-                ID3D11Texture2D *tmp = nullptr;
-                if (FAILED(d.dev->CreateTexture2D(&t, nullptr, &tmp))) continue;
+                ID3D11Texture2D *tmp = gdi_tex(d, D11::GDI_TMP, w, h);
+                if (!tmp) continue;
+                const D3D11_BOX tb = { 0, 0, 0, w, h, 1 };
                 d.ctx->CopySubresourceRegion(tmp, 0, 0, 0, 0, src.obj->res, 0, &box);
-                d.ctx->CopySubresourceRegion(dst.obj->res, 0, (UINT)r.l, (UINT)r.t, 0, tmp, 0, nullptr);
-                tmp->Release();
+                d.ctx->CopySubresourceRegion(dst.obj->res, 0, (UINT)r.l, (UINT)r.t, 0, tmp, 0, &tb);
             }
             gdi_obj_written(dst.obj);
         } else if (dst.obj) {
@@ -1769,18 +1933,9 @@ void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
                 shadow_take(dst.obj, dst, (uint32_t)r.l, (uint32_t)r.t, (uint32_t)r.r, (uint32_t)r.b);
             }
         } else if (src.obj) {
-            /* a readback: through a staging copy of the rectangle */
-            D3D11_TEXTURE2D_DESC t = { w, h, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
-            ID3D11Texture2D *stg = nullptr;
-            if (FAILED(d.dev->CreateTexture2D(&t, nullptr, &stg))) continue;
-            d.ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, src.obj->res, 0, &box);
-            D3D11_MAPPED_SUBRESOURCE m;
-            if (SUCCEEDED(d.ctx->Map(stg, 0, D3D11_MAP_READ, 0, &m))) {
-                for (uint32_t y = 0; y < h; y++)
-                    memcpy(dst.mem + (uint64_t)(r.t + y) * dst.pitch + (uint64_t)r.l * 4, (const uint8_t *)m.pData + (uint64_t)y * m.RowPitch, w * 4);
-                d.ctx->Unmap(stg, 0);
-            }
-            stg->Release();
+            /* a readback: from the copy read above */
+            for (uint32_t y = 0; y < h; y++)
+                memcpy(dst.mem + (uint64_t)(r.t + y) * dst.pitch + (uint64_t)r.l * 4, &back.at(r.sx, r.sy + (int32_t)y), w * 4);
             gdi_mem_written(x, d, dst, r);
         } else {
             /* VRAM to VRAM, bottom up when the rows overlap downwards */
@@ -1793,44 +1948,6 @@ void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
             gdi_mem_written(x, d, dst, r);
         }
     }
-}
-
-/* A rectangle of a side's pixels on the CPU (v29's operations): read from
- * its object through a staging copy, or from its VRAM */
-struct GdiPx {
-    std::vector<uint32_t> p;
-    int32_t x0 = 0, y0 = 0, w = 0, h = 0;
-    uint32_t &at(int32_t x, int32_t y) { return p[(size_t)(y - y0) * (size_t)w + (size_t)(x - x0)]; }
-};
-
-bool gdi_read(D11 &d, const GdiSide &s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, GdiPx &o)
-{
-    if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0 || (uint32_t)x1 > s.w || (uint32_t)y1 > s.h) return false;
-    o.x0 = x0;
-    o.y0 = y0;
-    o.w = x1 - x0;
-    o.h = y1 - y0;
-    o.p.assign((size_t)o.w * (size_t)o.h, 0);
-    if (s.obj) {
-        D3D11_TEXTURE2D_DESC t = { (UINT)o.w, (UINT)o.h, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
-        ID3D11Texture2D *stg = nullptr;
-        if (FAILED(d.dev->CreateTexture2D(&t, nullptr, &stg))) return false;
-        D3D11_BOX box = { (UINT)x0, (UINT)y0, 0, (UINT)x1, (UINT)y1, 1 };
-        d.ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, s.obj->res, 0, &box);
-        D3D11_MAPPED_SUBRESOURCE m;
-        bool ok = SUCCEEDED(d.ctx->Map(stg, 0, D3D11_MAP_READ, 0, &m));
-        if (ok) {
-            for (int32_t y = 0; y < o.h; y++)
-                memcpy(&o.p[(size_t)y * o.w], (const uint8_t *)m.pData + (uint64_t)y * m.RowPitch, (size_t)o.w * 4);
-            d.ctx->Unmap(stg, 0);
-        }
-        stg->Release();
-        return ok;
-    }
-    if (!s.mem) return false;
-    for (int32_t y = 0; y < o.h; y++)
-        memcpy(&o.p[(size_t)y * o.w], s.mem + (uint64_t)(y0 + y) * s.pitch + (uint64_t)x0 * 4, (size_t)o.w * 4);
-    return true;
 }
 
 /* the rectangles of `px` back where they came from, as a copy's: into the
@@ -1871,6 +1988,18 @@ inline int32_t gdi_map(int32_t xd, int32_t dl, int32_t dr, int32_t sl, int32_t s
 /* a ROP3 over 32-bit pixels: bit P*4 + S*2 + D of `rop` */
 inline uint32_t rop3(uint32_t rop, uint32_t P, uint32_t S, uint32_t D)
 {
+    /* the ROPs GDI sends most, in one operation each */
+    switch (rop & 0xff) {
+    case 0x00: return 0;            /* BLACKNESS */
+    case 0x33: return ~S;           /* NOTSRCCOPY */
+    case 0x55: return ~D;           /* DSTINVERT */
+    case 0x66: return S ^ D;        /* SRCINVERT */
+    case 0x88: return S & D;        /* SRCAND */
+    case 0xcc: return S;            /* SRCCOPY */
+    case 0xee: return S | D;        /* SRCPAINT */
+    case 0xf0: return P;            /* PATCOPY */
+    case 0xff: return ~0u;          /* WHITENESS */
+    }
     uint32_t out = 0;
     for (uint32_t i = 0; i < 8; i++)
         if (rop & (1u << i)) out |= ((i & 4) ? P : ~P) & ((i & 2) ? S : ~S) & ((i & 1) ? D : ~D);
@@ -1890,7 +2019,7 @@ void gdi_ex(Exec &x, D11 &d, const d3dpt_gdi2 &g, const d3dpt_gdi_rect *rc, cons
         y1 = std::max(y1, rc[i].b);
     }
     GdiPx D, S, A;
-    if (x1 <= x0 || !gdi_read(d, dst, x0, y0, x1, y1, D)) return;
+    if (x1 <= x0 || !gdi_read(d, dst, x0, y0, x1, y1, D, D11::GDI_D)) return;
     const bool stretch = g.op != D3DPT_GDI_ROP && g.op != D3DPT_GDI_CLEARTYPE;
     if (src) {
         /* the source rectangle (a ROP's: the corner, the destination's size) */
@@ -1901,13 +2030,13 @@ void gdi_ex(Exec &x, D11 &d, const d3dpt_gdi2 &g, const d3dpt_gdi_rect *rc, cons
             sx1 = sx0 + (x1 - x0);
             sy1 = sy0 + (y1 - y0);
         }
-        if (!gdi_read(d, *src, sx0, sy0, sx1, sy1, S)) return;
+        if (!gdi_read(d, *src, sx0, sy0, sx1, sy1, S, D11::GDI_S)) return;
     }
     const uint8_t *gam = nullptr, *inv = nullptr;
     if (g.op == D3DPT_GDI_CLEARTYPE) {
         /* the coverage, at the destination's place plus the offset */
         GdiSide as;
-        if (!gdi_side(x, d, g.alpha, as) || !gdi_read(d, as, x0 + g.ax, y0 + g.ay, x1 + g.ax, y1 + g.ay, A)) return;
+        if (!gdi_side(x, d, g.alpha, as) || !gdi_read(d, as, x0 + g.ax, y0 + g.ay, x1 + g.ax, y1 + g.ay, A, D11::GDI_A)) return;
         if (g.gamma != ~0u) {
             const d3dpt_gdi_side &l = g.lut;
             if (g.gamma > 15 || !x.vram || l.pitch < 512 || (uint64_t)l.offset + (uint64_t)l.pitch * g.gamma + 512 > x.vram_size) return;
@@ -1915,6 +2044,7 @@ void gdi_ex(Exec &x, D11 &d, const d3dpt_gdi2 &g, const d3dpt_gdi_rect *rc, cons
             inv = gam + 256;
         }
     }
+    if (!gdi_read_end(d, D) || !gdi_read_end(d, S) || !gdi_read_end(d, A)) return;
     const bool opaque = (g.dst.flags & D3DPT_GDI_TEXTURE) && (g.op == D3DPT_GDI_ROP);
     const int32_t sw = g.sr - g.sl, sh = g.sb - g.st, dw = g.dr - g.dl, dh = g.db - g.dt;
     for (uint32_t i = 0; i < g.n; i++) {
@@ -2136,7 +2266,7 @@ void exec_d11_vram_release(Exec &x, uint32_t h)
     scans_forget(*d, h);
     auto it = d->res.find(h);
     if (it == d->res.end()) return;
-    it->second.release();
+    res_drop(*d, it->second);
     d->res.erase(it);
 }
 
@@ -2418,6 +2548,7 @@ bool exec_d11_ctx_destroy(Exec &x, uint32_t ctx)
         d->ctx->SwapDeviceContextState(d->idle, nullptr);
         d->cur = 0;
     }
+    d->nobjs -= std::min(d->nobjs, it->second.objs.size());
     it->second.release();
     d->ctxs.erase(it);
     return true;
@@ -2431,6 +2562,7 @@ void exec_d11_release(Exec &x)
     if (d->ctx) ring_drop(*d);
     for (auto &kv : d->ctxs) kv.second.release();
     for (auto &kv : d->res) kv.second.release();
+    for (D11::GdiTex &t : d->gdi_tex) if (t.tex) t.tex->Release();
     if (d->idle) d->idle->Release();
     if (d->ctx) d->ctx->Release();
     if (d->dev) d->dev->Release();
