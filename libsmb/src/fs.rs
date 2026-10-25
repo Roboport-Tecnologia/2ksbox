@@ -211,21 +211,45 @@ pub fn dir_entry(class: u8, index: u32, e: &Entry) -> Option<Vec<u8>> {
     Some(w.0)
 }
 
-/// `*`, `?` and DOS's `<`, `>`, `"`, matched case-insensitively.
+/// `*`, `?` and DOS's `<`, `>`, `"`, matched case-insensitively. The
+/// pattern is the guest's: run as a set of pattern positions stepped one
+/// name character at a time, O(pattern x name) with no recursion (a
+/// backtracking `*a*a*a…b` took forever, and 30k stars ran out of stack).
 pub fn wildcard(pattern: &str, name: &str) -> bool {
-    fn m(p: &[char], n: &[char]) -> bool {
-        match p.first() {
-            None => n.is_empty(),
-            Some('*') | Some('<') => (0..=n.len()).any(|k| m(&p[1..], &n[k..])),
-            Some('?') => !n.is_empty() && m(&p[1..], &n[1..]),
-            Some('>') => (!n.is_empty() && m(&p[1..], &n[1..])) || m(&p[1..], n),
-            Some('"') => (n.first() == Some(&'.') && m(&p[1..], &n[1..])) || (n.is_empty() && m(&p[1..], n)),
-            Some(c) => n.first() == Some(c) && m(&p[1..], &n[1..]),
-        }
-    }
     let p: Vec<char> = pattern.to_lowercase().chars().collect();
     let n: Vec<char> = name.to_lowercase().chars().collect();
-    pattern == "*" || m(&p, &n)
+    if pattern == "*" {
+        return true;
+    }
+    // the positions reachable without consuming a character: `*`, `<` and
+    // `>` match nothing anywhere, `"` only at the end of the name
+    let close = |set: &mut Vec<bool>, at_end: bool| {
+        for i in 0..p.len() {
+            if set[i] && (matches!(p[i], '*' | '<' | '>') || (p[i] == '"' && at_end)) {
+                set[i + 1] = true;
+            }
+        }
+    };
+    let mut set = vec![false; p.len() + 1];
+    set[0] = true;
+    close(&mut set, n.is_empty());
+    for (k, &c) in n.iter().enumerate() {
+        let mut next = vec![false; p.len() + 1];
+        for i in 0..p.len() {
+            if !set[i] {
+                continue;
+            }
+            match p[i] {
+                '*' | '<' => next[i] = true,
+                '?' | '>' => next[i + 1] = true,
+                '"' => next[i + 1] |= c == '.',
+                l => next[i + 1] |= l == c,
+            }
+        }
+        close(&mut next, k + 1 == n.len());
+        set = next;
+    }
+    set[p.len()]
 }
 
 /// The volume's size: (total, available) bytes.

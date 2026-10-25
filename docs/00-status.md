@@ -791,6 +791,11 @@ to one subsystem lives in its design doc; pointers are at the end.
 
 ### Devices and corruption
 
+- **What the guest writes is read once.** Shared memory (the command
+  window, a header in VRAM) can change between a check and its use when
+  another vCPU runs beside the device (any accelerator but TCG): copy it
+  or read the field once, as `d3dpt_exec_submit` and `d3d_dma_append` do
+  (doc 14 "Transport").
 - **An interrupt a guest cannot acknowledge costs the line, not one
   interrupt.** On the edge-triggered i8259 every later assertion into the
   held line is lost silently (doc 20 §5.2). `info irq` counts rising

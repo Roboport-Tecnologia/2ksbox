@@ -351,6 +351,9 @@ voodoo_undither_frame(struct voodoo_t *v, uint8_t *dst, int dst_stride,
         return 0;
     }
     if ((uint64_t) v->front_offset + (uint64_t) h * (uint32_t) v->row_width >
+        (uint64_t) v->fb_mask + 1 ||
+        /* each row is read 2*w bytes from its start, whatever the stride */
+        (uint64_t) v->front_offset + (uint64_t) (h - 1) * (uint32_t) v->row_width + 2u * (uint32_t) w >
         (uint64_t) v->fb_mask + 1) {
         *why = "the front buffer runs past the frame buffer";
         return 0;

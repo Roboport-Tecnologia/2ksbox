@@ -114,7 +114,7 @@ impl Lineage {
              # which snapshot each one was taken from, and which one the disk's\n\
              # present state descends from. The disk itself records no parent.\n\n{text}"
         );
-        std::fs::write(path, text)
+        crate::paths::write_atomic(&path, text)
     }
 
     fn find(&self, id: &str) -> Option<&Record> {

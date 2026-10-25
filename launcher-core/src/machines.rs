@@ -163,6 +163,12 @@ impl Machines {
     pub fn play(&mut self, row: usize) -> Result<String, String> {
         let entry = self.entries.get_mut(row).ok_or("no such machine")?;
         let dir = entry.dir.clone();
+        // A second player would take the first one's monitor socket (and
+        // fail on the disk's lock anyway), whoever started the first.
+        let alive = self.running.get_mut(&dir).map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false);
+        if alive || control::listening(&control::socket_path(&dir)) {
+            return Err(format!("“{}” is already running", entry.machine.name));
+        }
         // A bundle from before `disk_size` learns it here, while the
         // disk is still there to read it from
         if player::record_disk_size(&mut entry.machine) {

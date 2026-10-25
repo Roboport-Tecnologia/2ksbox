@@ -50,7 +50,11 @@ guest (XP / Win98)                      host (QEMU process)
   accelerator (track M25: the device's own lock serialises the executor,
   and its re-entrancy guard is lowered meanwhile, or another vCPU's
   register read is refused and reads 0); a decoder thread waits until a
-  measurement asks for it.
+  measurement asks for it. Off TCG another vCPU can write the window
+  while a batch runs, so the executor copies the batch's records out
+  first and checks and runs the copy (one `memcpy` of `cmd_bytes`); the
+  device reads `cmd_bytes` once for a `DMA_APPEND`. Only the return area
+  and VRAM stay shared.
 - **Protocol.** `d3dpt/d3dpt_proto.h` is the one header for the display
   drivers, the adapter and the executor (`D3DPT_PROTO_VERSION`, 22
   today; v21 dropped the guest DLLs' records, whose op numbers stay

@@ -426,9 +426,12 @@ fn walk(dir: &Path, rel: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> std::io::R
         let entry = entry?;
         let path = entry.path();
         let rel = rel.join(entry.file_name());
-        // Followed, so a symlinked disk is copied as the disk it names.
+        // A symlinked file is followed, so a symlinked disk is copied as
+        // the disk it names; a symlinked folder is not (`link -> ..` would
+        // recurse until the stack ran out).
+        let link = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
         match std::fs::metadata(&path) {
-            Ok(m) if m.is_dir() => walk(&path, &rel, out)?,
+            Ok(m) if m.is_dir() && !link => walk(&path, &rel, out)?,
             Ok(m) if m.is_file() => out.push((path, rel)),
             _ => {}
         }

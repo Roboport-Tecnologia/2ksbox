@@ -247,7 +247,7 @@ impl DiscLibrary {
             std::fs::create_dir_all(parent)?;
         }
         let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        crate::paths::write_atomic(path, text)
     }
 
     pub fn position(&self, path: &Path) -> Option<usize> {
@@ -309,7 +309,7 @@ pub fn write_shelf_file(library: &DiscLibrary, path: &Path) -> std::io::Result<(
         out.push_str(&path_str);
         out.push('\n');
     }
-    std::fs::write(path, out)
+    crate::paths::write_atomic(path, out)
 }
 
 /// Matches `CDSHELF_FILE_MAX_ENTRIES` in `cdshelf/cdshelf_proto.h`: the

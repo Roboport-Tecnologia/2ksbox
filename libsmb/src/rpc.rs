@@ -20,6 +20,8 @@ const FAULT: u8 = 3;
 
 const PFC_FIRST: u8 = 0x01;
 const PFC_LAST: u8 = 0x02;
+/// What one pipe buffers either way: srvsvc's answers are a few KiB.
+const MAX_PDU_BYTES: usize = 1 << 20;
 
 /// NDR's transfer syntax, 8a885d04-1ceb-11c9-9fe8-08002b104860 v2.
 const NDR: [u8; 16] = [
@@ -159,7 +161,12 @@ impl Pipe {
                 let opnum = u16_at(p, 22);
                 let cont_id = u16_at(p, 20);
                 let stub_at = if flags & 0x80 != 0 { 40 } else { 24 };
-                self.partial.extend_from_slice(p.get(stub_at..).unwrap_or(&[]));
+                let stub = p.get(stub_at..).unwrap_or(&[]);
+                if self.partial.len() + stub.len() > MAX_PDU_BYTES {
+                    self.partial.clear();
+                    return format!("request op {} dropped: fragments past {} bytes", opnum, MAX_PDU_BYTES);
+                }
+                self.partial.extend_from_slice(stub);
                 if flags & PFC_LAST == 0 {
                     return format!("request op {} (fragment)", opnum);
                 }
@@ -201,6 +208,10 @@ impl Pipe {
     }
 
     fn emit(&mut self, ptype: u8, flags: u8, call_id: u32, body: &[u8]) {
+        // a guest that writes and never reads gets no more answers
+        if self.out.len() > MAX_PDU_BYTES {
+            return;
+        }
         let mut w = W::new();
         w.u8(5).u8(0).u8(ptype).u8(flags).bytes(&[0x10, 0, 0, 0]);
         w.u16((16 + body.len()) as u16).u16(0).u32(call_id).bytes(body);

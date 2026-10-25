@@ -141,7 +141,12 @@ static void exec_one(Batch &b, const d3dpt_cmd *c) {
             r->bytes = a->size;
             break;
         }
-        r->hr = (uint32_t)q->GetData(a->size ? (void *)(r + 1) : nullptr, a->size, a->flags & D3DGETDATA_FLUSH);
+        /* never more than the query's own size: DXVK copies what it is
+         * asked for out of a 16-byte cache, and the rest is host heap */
+        uint8_t data[256] = {};
+        DWORD want = std::min((DWORD)a->size, q->GetDataSize());
+        r->hr = (uint32_t)q->GetData(a->size ? (void *)data : nullptr, want, a->flags & D3DGETDATA_FLUSH);
+        memcpy(r + 1, data, a->size);
         r->bytes = r->hr == S_OK ? a->size : 0;
         break;
     }
@@ -496,7 +501,11 @@ uint32_t d3dpt_exec_submit(d3dpt_exec_t *xp, void *shm, uint32_t shm_size)
     uint32_t bytes = hdr->cmd_bytes, count = hdr->cmd_count;
     hdr->batches++;
     if (bytes > D3DPT_CMD_SIZE || bytes % 8) { b.err = D3DPT_ERR_MALFORMED; }
-    const uint8_t *p = (const uint8_t *)shm + D3DPT_CMD_OFFSET, *end = p + (b.err ? 0 : bytes);
+    if (!b.err) {
+        if (x->cmds.size() < bytes) x->cmds.resize(bytes);
+        memcpy(x->cmds.data(), (const uint8_t *)shm + D3DPT_CMD_OFFSET, bytes);
+    }
+    const uint8_t *p = x->cmds.data(), *end = p + (b.err ? 0 : bytes);
     while (!b.err && p < end) {
         if (end - p < (ptrdiff_t)sizeof(d3dpt_cmd)) { b.err = D3DPT_ERR_MALFORMED; break; }
         const d3dpt_cmd *c = (const d3dpt_cmd *)p;

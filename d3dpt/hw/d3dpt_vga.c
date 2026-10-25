@@ -426,8 +426,12 @@ static uint32_t fb_copy(D3dptVgaState *s, uint32_t dir)
     uint64_t span = (uint64_t)(rows - 1) * s->copy_vpitch + s->copy_bytes;
 
     if (dir < D3DPT_FB_COPY_TO_PAGES || dir > D3DPT_FB_COPY_VRAM_VRAM ||
-        (uint64_t)s->copy_vram + span > s->vga.vram_size || s->copy_list_off >= 4096) {
+        (uint64_t)s->copy_vram + span > s->vga.vram_size || s->copy_list_off >= 4096 ||
+        (uint64_t)rows * s->copy_bytes > s->vga.vram_size) {
         return D3DPT_FB_FILL_BAD;
+    }
+    if (!s->copy_bytes) {
+        return D3DPT_FB_FILL_OK;    /* nothing to move: no 4-billion-row walk under the BQL */
     }
     if (dir == D3DPT_FB_COPY_VRAM_VRAM) {
         if ((uint64_t)s->copy_src + (uint64_t)(rows - 1) * s->copy_ppitch + s->copy_bytes > s->vga.vram_size) {
@@ -1177,18 +1181,23 @@ static uint32_t d3d_dma_append(D3dptVgaState *s, uint32_t count)
     uint8_t *win = memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset;
     d3dpt_shm_hdr *h = (d3dpt_shm_hdr *)win;
     dma_addr_t addr = ((uint64_t)s->dma_hi << 32) | s->dma_lo;
-    uint32_t bytes = s->dma_bytes;
+    uint32_t bytes = s->dma_bytes, cur;
 
-    if (!s->cmd_offset || !count || !bytes || (bytes & 7) || h->cmd_bytes > D3DPT_CMD_SIZE) {
+    if (!s->cmd_offset) {
         return D3DPT_FB_DMA_BAD;
     }
-    if (bytes > D3DPT_CMD_SIZE - h->cmd_bytes) {
+    /* the header is guest memory another vCPU may write meanwhile: read it once */
+    cur = qatomic_read(&h->cmd_bytes);
+    if (!count || !bytes || (bytes & 7) || cur > D3DPT_CMD_SIZE) {
+        return D3DPT_FB_DMA_BAD;
+    }
+    if (bytes > D3DPT_CMD_SIZE - cur) {
         return D3DPT_FB_DMA_NO_ROOM;
     }
-    if (pci_dma_read(&s->dev, addr, win + D3DPT_CMD_OFFSET + h->cmd_bytes, bytes) != MEMTX_OK) {
+    if (pci_dma_read(&s->dev, addr, win + D3DPT_CMD_OFFSET + cur, bytes) != MEMTX_OK) {
         return D3DPT_FB_DMA_BAD;
     }
-    h->cmd_bytes += bytes;
+    qatomic_set(&h->cmd_bytes, cur + bytes);
     h->cmd_count += count;
     s->dma_appends++;
     s->dma_appended += bytes;
@@ -1209,6 +1218,8 @@ static void d3d_reset(D3dptVgaState *s)
     }
     s->d3d_err = 0;
     s->batches = 0;
+    s->batches_last = 0;
+    s->exec_ns_last = s->exec_ns;
 }
 
 /* ------------------------------------------------------------- registers */
@@ -1593,6 +1604,7 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
                                  unsigned size)
 {
     D3dptVgaState *s = opaque;
+    bool changed;
 
     switch (addr) {
     case D3DPT_FB_REG_MODE_SEL:
@@ -1634,7 +1646,8 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
             /* DirectDraw page flips: the first few, so the log shows them */
             info_report("d3dpt-vga: scanout offset %u -> %" PRIu64, s->r_offset, val);
         }
-        if (val != s->r_offset) {
+        changed = val != s->r_offset;
+        if (changed) {
             s->flips++;
             fb_flip_rate(s);
             if (s->r_enable && !(s->cur_flags & D3DPT_FB_CURSOR_OWNED)) {
@@ -1654,9 +1667,9 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
                           qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + D3DPT_FB_FLIP_IDLE_MS);
             }
         }
-        if (val != s->r_offset) {
+        if (changed) {
             s->r_offset = val;
-            fb_flip_push(s);
+            fb_flip_push(s);    /* also the flip that hid the cursor above */
         }
         break;
     case D3DPT_FB_REG_HZ:

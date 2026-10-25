@@ -1927,7 +1927,7 @@ void gdi_ex(Exec &x, D11 &d, const d3dpt_gdi2 &g, const d3dpt_gdi_rect *rc, cons
                 ys = gdi_map(yd, g.dt, g.db, g.st, g.sb);
                 if (mirror_y) ys = g.sb - 1 - (ys - g.st);
                 /* a mono mode's shrink: every source row onto this one */
-                ys1 = (g.op == D3DPT_GDI_STRETCH && (g.rop == 1 || g.rop == 2) && sh > dh && !mirror_y)
+                ys1 = (g.op == D3DPT_GDI_STRETCH && (g.rop == 1 || g.rop == 2) && dh > 0 && sh > dh && !mirror_y)
                           ? std::max(ys + 1, g.st + (int32_t)(((int64_t)(yd + 1 - g.dt) * sh) / dh)) : ys + 1;
                 ys1 = std::min(ys1, g.sb);
             }
@@ -1944,7 +1944,7 @@ void gdi_ex(Exec &x, D11 &d, const d3dpt_gdi2 &g, const d3dpt_gdi_rect *rc, cons
                     if (g.op == D3DPT_GDI_STRETCH && (g.flags & 1)) xs = g.sr - 1 - (xs - g.sl);
                     uint32_t sv = S.at(xs, ys);
                     if (g.op == D3DPT_GDI_STRETCH) {
-                        int32_t xs1 = (g.rop == 1 || g.rop == 2) && sw > dw && !(g.flags & 1)
+                        int32_t xs1 = (g.rop == 1 || g.rop == 2) && dw > 0 && sw > dw && !(g.flags & 1)
                                           ? std::max(xs + 1, g.sl + (int32_t)(((int64_t)(xd + 1 - g.dl) * sw) / dw)) : xs + 1;
                         xs1 = std::min(xs1, g.sr);
                         for (int32_t yy = ys; yy < ys1; yy++)

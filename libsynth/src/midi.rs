@@ -89,7 +89,10 @@ impl Parser {
         }
         if byte & 0x80 != 0 {
             if byte == 0xF0 {
+                // SysEx ends running status and any message half received
                 self.running = 0;
+                self.status = 0;
+                self.have = 0;
                 self.sysex = Some(vec![0xF0]);
                 return None;
             }
@@ -99,6 +102,7 @@ impl Parser {
                     // A one-byte system common message (tune request):
                     // complete on its own, and it ends running status.
                     self.running = 0;
+                    self.status = 0;
                     self.want = 0;
                     return Some(Event::Message(byte, 0, 0));
                 }

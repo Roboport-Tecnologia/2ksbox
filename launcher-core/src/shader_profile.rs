@@ -38,7 +38,7 @@ impl ShaderProfile {
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        crate::paths::write_atomic(path, text)
     }
 
     /// The player's `--shader-params` value (`name=value,name=value`,

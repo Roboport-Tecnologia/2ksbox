@@ -2148,12 +2148,18 @@ voodoo2_exit(PCIDevice *dev)
     }
     if (s->set) {
         voodoo2_set_override(s, 0);
+        uint8_t *ours = NULL;
+
+        /* 86Box's buffer back before its close frees it, and ours freed
+         * only after that close has joined the FIFO and render threads,
+         * which may still hold a pointer to it */
         if (s->fb_86box) {
-            qemu_vfree(s->v->fb_mem);
+            ours = s->v->fb_mem;
             s->v->fb_mem = s->fb_86box;
             s->fb_86box  = NULL;
         }
         voodoo_close(s->set);
+        qemu_vfree(ours);
         s->set = NULL;
         s->v   = NULL;
     }

@@ -1762,15 +1762,22 @@ struct Dp2 {
         if (it->second) it->second->Release();
         c.pshaders.erase(it);
     }
+    /* the most host memory one DRAW8 may make from a few bytes of record
+     * (a stream that reads as zeros, the interleaved vertices) */
+    static constexpr uint64_t DRAW8_SCRATCH_MAX = 256ull << 20;
+    /* saturated, so a guest's huge count fails the range checks instead
+     * of wrapping into them (0x55555556 triangles were 2 vertices) */
     static uint32_t prim_verts(uint32_t t, uint32_t count) {
+        uint64_t n;
         switch (t) {
-        case D3DPT_POINTLIST: return count;
-        case D3DPT_LINELIST: return count * 2;
-        case D3DPT_LINESTRIP: return count + 1;
-        case D3DPT_TRIANGLELIST: return count * 3;
-        case D3DPT_TRIANGLESTRIP: case D3DPT_TRIANGLEFAN: return count + 2;
+        case D3DPT_POINTLIST: n = count; break;
+        case D3DPT_LINELIST: n = (uint64_t)count * 2; break;
+        case D3DPT_LINESTRIP: n = (uint64_t)count + 1; break;
+        case D3DPT_TRIANGLELIST: n = (uint64_t)count * 3; break;
+        case D3DPT_TRIANGLESTRIP: case D3DPT_TRIANGLEFAN: n = (uint64_t)count + 2; break;
         default: return 0;
         }
+        return n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
     }
     /* v9: a range of a VRAM buffer (D3DPT_VS_BUFFER) named by a DRAW8, or
      * null (the draw is skipped, once logged) */
@@ -1942,6 +1949,7 @@ struct Dp2 {
                 uint32_t zb = 0;
                 for (uint32_t i = 0; i < D3DPT_DRAW8_MAX_STREAMS; i++)
                     if ((s.streams & ~carried & (1u << i)) && s.stream_bytes[i] > zb) zb = s.stream_bytes[i];
+                if ((uint64_t)(inst > h.nverts ? inst : h.nverts) * zb > DRAW8_SCRATCH_MAX) return fail("DRAW8 zero stream too big");
                 d.zeros.assign((size_t)(inst > h.nverts ? inst : h.nverts) * zb, 0);
                 for (uint32_t i = 0; i < D3DPT_DRAW8_MAX_STREAMS; i++)
                     if (s.streams & ~carried & (1u << i)) { sd[i] = d.zeros.data(); ss[i] = s.stream_bytes[i]; }
@@ -1962,6 +1970,7 @@ struct Dp2 {
                     if (d.warn_once(0xc0003)) x.log("ddi: dp2: vertex shader 0x%x: no interleaved declaration for streams 0x%x (%u bytes a vertex), draw skipped", h.fvf, s.streams, total);
                     return true;
                 }
+                if ((uint64_t)h.nverts * total > DRAW8_SCRATCH_MAX) return fail("DRAW8 interleave too big");
                 d.ilv.resize((size_t)h.nverts * total);
                 ilv_fill(s.streams, sd, ss, sdiv, h.nverts, 0);
                 vd = d.ilv.data();

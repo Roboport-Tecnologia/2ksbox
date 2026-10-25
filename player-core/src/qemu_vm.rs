@@ -540,6 +540,10 @@ unsafe extern "C" fn on_switch(
     s.width = w as usize;
     s.height = h as usize;
     s.vga_dirty = true;
+    // the whole new surface, not a union with what changed in the last
+    // one: a bigger mode's rect, kept over ticks that published nothing
+    // (3D, a ring slot), outran this one's pixels
+    s.surface_dirty = None;
     mark_rect(&mut s, 0, 0, w as usize, h as usize);
 }
 

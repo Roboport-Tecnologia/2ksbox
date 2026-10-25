@@ -1693,7 +1693,7 @@ impl Machine {
             }
         }
         let text = toml::to_string_pretty(&out).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        crate::paths::write_atomic(path, text)
     }
 
     /// The accelerator, as `-accel` options. `Auto` is expressed as

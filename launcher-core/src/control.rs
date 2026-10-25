@@ -44,8 +44,16 @@ pub fn socket_path(bundle_dir: &Path) -> PathBuf {
         hash ^= *b as u64;
         hash = hash.wrapping_mul(0x1000_0000_01b3);
     }
-    let stem: String =
-        bundle_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().chars().take(24).collect();
+    // Only characters QEMU's option parser and every filesystem take as
+    // they are (a comma would end `-qmp unix:<path>`); the hash keeps it unique.
+    let stem: String = bundle_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .take(24)
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect();
     dir.join(format!("{stem}-{hash:016x}.qmp"))
 }
 
@@ -97,7 +105,7 @@ pub fn qmp_args(path: &Path) -> Option<Vec<String>> {
         eprintln!("live control off: this host cannot bind a Unix socket at {}: {e}", path.display());
         return None;
     }
-    Some(vec!["-qmp".into(), format!("unix:{},server,nowait", path.display())])
+    Some(vec!["-qmp".into(), format!("unix:{},server,nowait", path.display().to_string().replace(',', ",,"))])
 }
 
 /// Whether something is listening on `path`, meaning a player is up,

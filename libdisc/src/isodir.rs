@@ -17,6 +17,7 @@
 //! reads. A file's bytes are laid out once and both trees point at them.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -264,8 +265,8 @@ impl Builder {
             if self.nodes[i].depth > ISO_MAX_DEPTH {
                 deep += 1;
             }
-            let mut iso_taken: Vec<Vec<u8>> = Vec::new();
-            let mut jol_taken: Vec<Vec<u8>> = Vec::new();
+            let mut iso_taken = HashSet::new();
+            let mut jol_taken = HashSet::new();
             for k in kids {
                 let (name, is_dir) = (self.nodes[k].name.clone(), self.nodes[k].is_dir);
                 let iso = unique(iso_ident(&name, is_dir), &mut iso_taken, iso_suffix);
@@ -771,17 +772,19 @@ fn joliet_suffix(id: &[u8], n: u32) -> Vec<u8> {
     ucs2(&units)
 }
 
-/// Make `id` unique among `taken`, case-insensitively: two names that
-/// differ only in case are one name to both trees' readers.
-fn unique(id: Vec<u8>, taken: &mut Vec<Vec<u8>>, suffix: fn(&[u8], u32) -> Vec<u8>) -> Vec<u8> {
+/// Make `id` unique among `taken` (its siblings' identifiers, folded),
+/// case-insensitively: two names that differ only in case are one name to
+/// both trees' readers. A set, so a folder of thousands of names sharing
+/// their first eight characters opens in a moment rather than minutes.
+fn unique(id: Vec<u8>, taken: &mut HashSet<Vec<u8>>, suffix: fn(&[u8], u32) -> Vec<u8>) -> Vec<u8> {
     let fold = |v: &[u8]| -> Vec<u8> { v.iter().map(|b| b.to_ascii_uppercase()).collect() };
     let mut candidate = id;
     let mut n = 1u32;
-    while taken.iter().any(|t| fold(t) == fold(&candidate)) {
+    while taken.contains(&fold(&candidate)) {
         candidate = suffix(&candidate, n);
         n += 1;
     }
-    taken.push(candidate.clone());
+    taken.insert(fold(&candidate));
     candidate
 }
 
