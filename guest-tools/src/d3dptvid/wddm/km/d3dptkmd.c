@@ -916,6 +916,13 @@ static NTSTATUS d3dpt_remove_device(IN_CONST_PVOID ctx)
     dbg_line("RemoveDevice");
     if (a) {
         unmap(a);
+        /* the named event lives on its handle: closed with the adapter,
+         * not over a restart, which keeps it */
+        if (a->follow_event_h) {
+            ZwClose(a->follow_event_h);
+            a->follow_event_h = NULL;
+            a->follow_event = NULL;
+        }
         ExFreePoolWithTag(a, D3DPT_TAG);
     }
     return STATUS_SUCCESS;
@@ -2374,9 +2381,12 @@ static void run_blt(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
             PUCHAR srow = NULL;
 
             if (p->h.op == PKT_BLT) {
+                /* checked for the bytes copied, which are the
+                 * destination's pixels (an allocation's bpp is the
+                 * process's word) */
                 srow = seg_va(a, p->src.seg,
                               p->src.addr + ((ULONG)r->sy + y) * p->src.pitch + (ULONG)r->sx * p->src.bpp,
-                              w * p->src.bpp);
+                              w * p->dst.bpp);
             }
             if (!drow || (p->h.op == PKT_BLT && !srow)) {
                 if (skipped < 16) {
@@ -2546,7 +2556,13 @@ static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG coun
     }
     for (i = 0; i < count; i++) {
         const d3dpt_cmd *c = (const d3dpt_cmd *)from;
-        UCHAR *body = (UCHAR *)d3dpt_enc_cmd(&a->enc, c->op, c->size - sizeof(*c), 0);
+        UCHAR *body;
+
+        if (c->size < sizeof(*c) || c->size > bytes) {
+            break;      /* run_d3d's checks, kept where the copy happens */
+        }
+        bytes -= c->size;
+        body = (UCHAR *)d3dpt_enc_cmd(&a->enc, c->op, c->size - sizeof(*c), 0);
 
         if (body) {
             RtlCopyMemory(body, c + 1, c->size - sizeof(*c));
@@ -2563,7 +2579,14 @@ static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
 
     for (i = 0; i < p->count && r + sizeof(d3dpt_cmd) <= end; i++) {
         d3dpt_cmd *c = (d3dpt_cmd *)r;
-        ULONG body_size = c->size - sizeof(*c), slot;
+        ULONG body_size, slot;
+
+        /* Render checked the records, but a patch location may since have
+         * landed on a size: a record that no longer fits ends the batch */
+        if (c->size < sizeof(*c) || (c->size & 7) || c->size > (ULONG)(end - r)) {
+            break;
+        }
+        body_size = c->size - sizeof(*c);
 
         if (c->op == D3DPT_UMD_OP_RETURN) {
             const d3dpt_u32x2 *u = (const d3dpt_u32x2 *)(c + 1);
@@ -2572,7 +2595,9 @@ static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
             r += c->size;
             run_at = r;
             run_n = 0;
-            ret = body_size >= sizeof(*u) && u->b <= 4096 && u->a + sizeof(d3dpt_ret) + u->b <= a->seg_size;
+            /* 64-bit: on x86 a slot near 4 GiB wrapped the sum into range */
+            ret = body_size >= sizeof(*u) && u->b <= 4096 &&
+                  (ULONGLONG)u->a + sizeof(d3dpt_ret) + u->b <= a->seg_size;
             ret_dst = ret ? u->a : 0;
             ret_bytes = ret ? u->b : 0;
             continue;

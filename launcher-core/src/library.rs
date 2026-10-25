@@ -183,11 +183,20 @@ fn slug(dir: &Path, name: &str) -> String {
 /// both) without writing a `machine.toml` yet. The wizard needs the
 /// directory first, to create a disk image inside it before the bundle
 /// that references that disk can be written.
+///
+/// The folder is one this call made (`create_dir`, not `create_dir_all`):
+/// a caller that fails removes it whole, which must never be another
+/// machine's that a second launcher reserved under the same name.
 pub fn reserve_dir(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let machine_dir = dir.join(slug(dir, name));
-    std::fs::create_dir_all(&machine_dir)?;
-    Ok(machine_dir)
+    loop {
+        let machine_dir = dir.join(slug(dir, name));
+        match std::fs::create_dir(&machine_dir) {
+            Ok(()) => return Ok(machine_dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// Create a new bundle under `dir` from doc 06's reference defaults,

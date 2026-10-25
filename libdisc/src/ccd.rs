@@ -179,6 +179,9 @@ pub fn parse(text: &str, ccd_path: &Path) -> Result<Disc> {
                 }
                 None => leadout,
             };
+            if first < 0 || end < first {
+                return Err(Error::Invalid(format!("track {}: sectors {first} to {end}", e.point)));
+            }
             if end > img_sectors {
                 return Err(Error::Invalid(format!("track {}: ends at {end} but {} has {img_sectors} sectors", e.point, img_path.display())));
             }

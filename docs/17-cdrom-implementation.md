@@ -186,7 +186,10 @@ Where cue parsers go wrong:
   (pregap in the file) is accepted as is.
 - Control: AUDIO 0x0, +0x1 `PRE`, +0x2 `DCP`, +0x8 `4CH`; data 0x4.
 - Payloads resolve relative to the cue, then case-insensitively (dumps
-  made on Windows), then fail naming the path tried.
+  made on Windows), then fail naming the path tried. A name that leaves
+  the cue's folder (absolute, a drive, `..`) is looked up by its leaf
+  only (`resolve_payload`, cue, ccd and mds alike): a downloaded image
+  must not hand the guest a host file.
 - Single session only. A declared second session is named in the error.
 
 ### 2.4 CloneCD (`ccd.rs`)

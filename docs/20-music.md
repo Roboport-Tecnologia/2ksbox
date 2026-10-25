@@ -87,7 +87,11 @@ One ships, `soundfonts/TimGM6mb.sf2` (5.7 MB, GPL-2, the bank MuseScore
 hash, and says why we don't ship the better-sounding GeneralUser GS: its
 author does not vouch for every sample's origin, which is fine for a
 bank a user picks but not for one in a GPL package. The machine form
-lets the user pick any `.sf2` instead.
+lets the user pick any `.sf2` instead. Its RIFF chunk headers are
+walked first (`gm.rs`'s `check_chunks`): `rustysynth` allocates each
+chunk's declared size before reading it and reads an odd `smpl` size a
+byte past its buffer, so a chunk past its parent or the file, or sample
+data of an odd length, is refused with the bank's name.
 
 **The bundle does not name the bank** unless the user chose one. A
 machine says `synth=gm`, and the device finds the file by the rule every

@@ -765,11 +765,16 @@ pub fn sniff(head: &[u8]) -> Option<&'static str> {
 
 /// Resolve a payload path named by an image next to `base`: as written,
 /// then case-insensitively in the same directory (dumps made on Windows).
+/// A name that leaves the image's folder (absolute, or through `..`) is
+/// taken by its leaf only: a downloaded image must not hand the guest
+/// any file of the host's.
 pub(crate) fn resolve_payload(base: &Path, name: &str) -> Result<PathBuf> {
     let dir = base.parent().unwrap_or_else(|| Path::new("."));
     let name = name.replace('\\', "/");
     let leaf = Path::new(&name).file_name().and_then(|s| s.to_str()).unwrap_or(&name).to_string();
-    let direct = dir.join(&name);
+    let inside = !name.contains(':')
+        && Path::new(&name).components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+    let direct = dir.join(if inside { name.as_str() } else { leaf.as_str() });
     if direct.is_file() {
         return Ok(direct);
     }

@@ -52,6 +52,8 @@ const MAX_IO: u32 = 1 << 20;
 const HDR: usize = 64;
 /// Opens one connection may hold, under the host's usual 1024 descriptors.
 const MAX_OPENS: usize = 512;
+/// Change notifications one connection may wait on (Explorer: one a window).
+const MAX_WATCHES: usize = 128;
 
 const FSCTL_DFS_GET_REFERRALS: u32 = 0x0006_0194;
 const FSCTL_DFS_GET_REFERRALS_EX: u32 = 0x0006_01b0;
@@ -1416,6 +1418,10 @@ impl Conn {
         let o = &self.opens[&id];
         if !o.is_dir {
             return Err(STATUS_INVALID_PARAMETER);
+        }
+        // each one is a snapshot of its folder taken every second
+        if self.watches.lock().unwrap().len() >= MAX_WATCHES {
+            return Err(STATUS_INSUFFICIENT_RESOURCES);
         }
         let Some(Session { state: SessionState::Done { key, .. }, .. }) = self.sessions.get(&c.session_id) else {
             return Err(STATUS_USER_SESSION_DELETED);

@@ -90,6 +90,10 @@ pub fn wave_data(path: &Path) -> Result<(u64, u64)> {
         let len = u32::from_le_bytes([ch[4], ch[5], ch[6], ch[7]]) as u64;
         pos += 8;
         if &ch[..4] == b"fmt " {
+            // a PCM format chunk is 16 bytes (18 or 40 with extensions)
+            if !(16..=4096).contains(&len) {
+                return Err(Error::Invalid(format!("{}: a {len}-byte format chunk", path.display())));
+            }
             let mut fm = vec![0u8; len as usize];
             f.read_exact(&mut fm)?;
             let tag = u16::from_le_bytes([fm[0], fm[1]]);
@@ -272,7 +276,13 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
                 }
                 (next - first) as u32
             } else {
-                let rest = f.data_offset + f.data_len - byte_off;
+                let Some(rest) = (f.data_offset + f.data_len).checked_sub(byte_off) else {
+                    return Err(Error::Invalid(format!(
+                        "{}: track {} starts past the end of the file",
+                        disc.file(f.payload).path.display(),
+                        t.number
+                    )));
+                };
                 if rest % stride != 0 {
                     return Err(Error::Invalid(format!(
                         "{}: size {} is not a multiple of {} bytes per sector for track {}",

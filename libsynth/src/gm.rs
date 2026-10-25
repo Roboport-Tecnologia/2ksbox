@@ -7,7 +7,7 @@
 //! how the music sounds far more than anything in this file does.
 
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -40,8 +40,10 @@ impl Gm {
     /// Open a bank. The error is the sentence the device fails to
     /// realize with, so it says which file and what was wrong with it.
     pub fn new(soundfont: &Path) -> Result<Gm, String> {
-        let file = File::open(soundfont)
+        let mut file = File::open(soundfont)
             .map_err(|e| format!("SoundFont {}: {e}", soundfont.display()))?;
+        check_chunks(&mut file).map_err(|e| format!("SoundFont {}: {e}", soundfont.display()))?;
+        file.seek(SeekFrom::Start(0)).map_err(|e| format!("SoundFont {}: {e}", soundfont.display()))?;
         let mut reader = BufReader::new(file);
         let sf = SoundFont::new(&mut reader)
             .map_err(|e| format!("SoundFont {}: {e}", soundfont.display()))?;
@@ -130,4 +132,52 @@ impl Voice for Gm {
         self.gain = percent.min(400) as f32 / 100.0;
         self.synth.set_master_volume(self.gain);
     }
+}
+
+/// The bank's RIFF chunk headers walked before rustysynth reads it, which
+/// allocates every chunk's declared size before reading it (a few bytes
+/// of file asked for 4 GiB, an abort no `catch_unwind` takes) and reads
+/// an odd `smpl` size one byte past its buffer. Each chunk must fit inside
+/// its parent and the file, and the sample data be whole 16-bit samples.
+fn check_chunks(f: &mut File) -> Result<(), String> {
+    let len = f.metadata().map_err(|e| e.to_string())?.len();
+    let mut head = [0u8; 12];
+    f.read_exact(&mut head).map_err(|_| "not a SoundFont (too short)".to_string())?;
+    if &head[0..4] != b"RIFF" || &head[8..12] != b"sfbk" {
+        return Err("not a SoundFont (no RIFF sfbk header)".into());
+    }
+    let riff_end = 8 + u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as u64;
+    if riff_end > len {
+        return Err(format!("the RIFF chunk says {riff_end} bytes, the file has {len}"));
+    }
+    let chunk = |f: &mut File, at: u64| -> Result<([u8; 4], u64), String> {
+        let mut h = [0u8; 8];
+        f.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+        f.read_exact(&mut h).map_err(|e| e.to_string())?;
+        Ok(([h[0], h[1], h[2], h[3]], u32::from_le_bytes([h[4], h[5], h[6], h[7]]) as u64))
+    };
+    let mut at = 12;
+    while at + 8 <= riff_end {
+        let (id, size) = chunk(f, at)?;
+        let end = at + 8 + size;
+        if end > riff_end {
+            return Err(format!("chunk {} runs past the file", String::from_utf8_lossy(&id)));
+        }
+        if &id == b"LIST" {
+            let mut sub = at + 12;
+            while sub + 8 <= end {
+                let (sid, ssize) = chunk(f, sub)?;
+                let send = sub + 8 + ssize;
+                if send > end {
+                    return Err(format!("chunk {} runs past its list", String::from_utf8_lossy(&sid)));
+                }
+                if &sid == b"smpl" && ssize % 2 != 0 {
+                    return Err(format!("{ssize} bytes of samples is not whole 16-bit samples"));
+                }
+                sub = send;
+            }
+        }
+        at = end;
+    }
+    Ok(())
 }

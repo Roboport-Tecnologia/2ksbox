@@ -240,7 +240,8 @@ pub fn parse(mds: &[u8], mds_path: &Path) -> Result<Disc> {
         for t in &s.tracks {
             for e in &t.extents {
                 if let Source::File { file, offset, layout, .. } = e.source {
-                    let need = offset + e.count as u64 * layout.stride() as u64;
+                    let need = offset.checked_add(e.count as u64 * layout.stride() as u64);
+                    let need = need.unwrap_or(u64::MAX);
                     if need > disc.file(file).len {
                         return Err(bad(&format!("track {}: needs {} bytes of {}, which has {}", t.number, need, disc.file(file).path.display(), disc.file(file).len)));
                     }
@@ -254,6 +255,11 @@ pub fn parse(mds: &[u8], mds_path: &Path) -> Result<Disc> {
 }
 
 pub fn open(path: &Path) -> Result<Disc> {
+    // a descriptor is a few KiB: not a whole big file read for one named .mds
+    let len = std::fs::metadata(path).map_err(|e| Error::Invalid(format!("{}: {}", path.display(), e)))?.len();
+    if len > 16 << 20 {
+        return Err(Error::Invalid(format!("{}: {len} bytes is no MDS descriptor", path.display())));
+    }
     let bytes = std::fs::read(path).map_err(|e| Error::Invalid(format!("{}: {}", path.display(), e)))?;
     parse(&bytes, path)
 }

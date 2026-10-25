@@ -61,8 +61,8 @@ guest SMB client ─TCP→ 10.0.2.4:445 (slirp) ─AF_UNIX→ <runtime dir>/smb.
 - The guest is untrusted, and a panic costs only its connection's thread
   (an abort, a stack overflow say, costs the player). So nothing a guest
   sends recurses (`fs::wildcard` steps a set of pattern positions), a
-  connection holds at most 512 opens (each is a host descriptor;
-  `STATUS_INSUFFICIENT_RESOURCES` past them), an RPC pipe buffers at most
+  connection holds at most 512 opens (each is a host descriptor) and 128
+  change notifications (`STATUS_INSUFFICIENT_RESOURCES` past them), an RPC pipe buffers at most
   1 MiB either way, and the share's own folder cannot be deleted.
 - `slirp_add_unix` is `G_OS_UNIX` only. Windows 10 and later have
   `AF_UNIX` (`afunix.h`), so Windows hosts need a `patches/deps/libslirp`

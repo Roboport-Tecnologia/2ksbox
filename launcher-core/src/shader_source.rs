@@ -187,10 +187,18 @@ pub fn fetch(dest: &Path, bytes: &AtomicU64) -> std::io::Result<()> {
     // rename onto a non-empty directory fails.
     let previous = staging.with_extension("previous");
     std::fs::remove_dir_all(&previous).ok();
-    if dest.exists() {
+    let had = dest.exists();
+    if had {
         std::fs::rename(dest, &previous)?;
     }
-    std::fs::rename(&staging, dest)?;
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        // the old collection back where it was, not stranded for the
+        // next download to delete
+        if had {
+            std::fs::rename(&previous, dest).ok();
+        }
+        return Err(e);
+    }
     std::fs::remove_dir_all(&previous).ok();
     Ok(())
 }
