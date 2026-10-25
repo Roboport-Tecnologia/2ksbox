@@ -295,7 +295,8 @@ mod platform {
                 }
             }
             count = count.wrapping_add(1);
-            if count % every == 0 {
+            // not once the player has dropped this: the VM goes next
+            if count % every == 0 && !shared.stop.load(Ordering::Relaxed) {
                 vm.vblank();
             }
         }
@@ -404,7 +405,7 @@ mod platform {
     ) -> i32 {
         let t = unsafe { &*(ctx as *const Ticks) };
         let every = t.shared.every.load(Ordering::Relaxed);
-        if every > 0 && (t.count.fetch_add(1, Ordering::Relaxed) + 1) % every == 0 {
+        if every > 0 && (t.count.fetch_add(1, Ordering::Relaxed) + 1) % every == 0 && !t.shared.stop.load(Ordering::Relaxed) {
             t.vm.vblank();
         }
         0
@@ -1041,7 +1042,8 @@ mod platform {
                 continue;
             }
             count = count.wrapping_add(1);
-            if count % every == 0 {
+            // not once the player has dropped this: the VM goes next
+            if count % every == 0 && !shared.stop.load(Ordering::Relaxed) {
                 vm.vblank();
             }
         }

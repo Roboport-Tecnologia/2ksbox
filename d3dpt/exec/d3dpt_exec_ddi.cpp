@@ -2688,12 +2688,19 @@ struct Dp2 {
                 if (start + n > 256) return fail("UPDATEPALETTE beyond 256 entries");
                 tr("palette %u entries %u..%u", ph, start, start + n);
                 if (d.pal_lines < 48) { d.pal_lines++; x.log("ddi: dp2: UPDATEPALETTE palette %u entries %u..%u (first %02x%02x%02x/%02x)", ph, start, start + n, q[8], q[9], q[10], q[11]); }
-                Palette &pal = d.palettes[ph];
+                auto made = d.palettes.try_emplace(ph);
+                Palette &pal = made.first->second;
+                bool changed = made.second;   /* its textures were expanded without it */
                 for (uint32_t i = 0; i < n; i++) {
                     const uint8_t *e = q + 8 + 4 * i;
-                    pal.argb[start + i] = ((uint32_t)e[3] << 24) | ((uint32_t)e[0] << 16) | ((uint32_t)e[1] << 8) | e[2];
+                    uint32_t argb = ((uint32_t)e[3] << 24) | ((uint32_t)e[0] << 16) | ((uint32_t)e[1] << 8) | e[2];
+                    changed |= pal.argb[start + i] != argb;
+                    pal.argb[start + i] = argb;
                 }
-                for (auto &kv : d.surfs) if (kv.second.palette == ph && kv.second.d.format == D3DFMT_P8) kv.second.dirty = true;
+                /* a game that sends the same palette every frame re-expands
+                 * no texture for it */
+                if (changed)
+                    for (auto &kv : d.surfs) if (kv.second.palette == ph && kv.second.d.format == D3DFMT_P8) kv.second.dirty = true;
                 break;
             }
             case DP2_ZRANGE:
@@ -2900,12 +2907,13 @@ struct Dp2 {
                         bool ok = cnt && (uint64_t)reg + cnt <= (op == DP2_SETVERTEXSHADERCONST ? 256u : 224u);
                         tr("%s constants c%u.. x%u%s", op == DP2_SETVERTEXSHADERCONST ? "vertex shader" : "pixel shader", reg, cnt, ok ? "" : " (dropped)");
                         if (!ok) { if (cnt && d.warn_once(0xc1007 | (op << 16))) x.log("ddi: dp2: shader constants c%u x%u out of range, dropped", reg, cnt); continue; }
-                        std::vector<float> f(cnt * 4);
-                        memcpy(f.data(), e + 8, (size_t)cnt * 16);
+                        /* on the stack: a game sets constants every draw */
+                        alignas(16) float f[256 * 4];
+                        memcpy(f, e + 8, (size_t)cnt * 16);
                         for (uint32_t k = 0; d.trace && k < cnt && k < 8; k++)
                             tr("  c%u = %g %g %g %g", reg + k, f[4 * k], f[4 * k + 1], f[4 * k + 2], f[4 * k + 3]);
-                        if (op == DP2_SETVERTEXSHADERCONST) x.dev->SetVertexShaderConstantF(reg, f.data(), cnt);
-                        else x.dev->SetPixelShaderConstantF(reg, f.data(), cnt);
+                        if (op == DP2_SETVERTEXSHADERCONST) x.dev->SetVertexShaderConstantF(reg, f, cnt);
+                        else x.dev->SetPixelShaderConstantF(reg, f, cnt);
                     }
                 }
                 break;
@@ -3018,12 +3026,12 @@ struct Dp2 {
                     bool ok = cnt && (uint64_t)reg + cnt <= 16;
                     tr("%s %s constants %u.. x%u%s", vsc ? "vertex shader" : "pixel shader", ints ? "integer" : "boolean", reg, cnt, ok ? "" : " (dropped)");
                     if (!ok) { if (cnt && d.warn_once(0xc1016 | (op << 16))) x.log("ddi: dp2: %s constants %u x%u out of range, dropped", ints ? "integer" : "boolean", reg, cnt); continue; }
-                    std::vector<int> v((size_t)cnt * (ints ? 4 : 1));
-                    memcpy(v.data(), e + 8, v.size() * 4);
-                    if (ints && vsc) x.dev->SetVertexShaderConstantI(reg, v.data(), cnt);
-                    else if (ints) x.dev->SetPixelShaderConstantI(reg, v.data(), cnt);
-                    else if (vsc) x.dev->SetVertexShaderConstantB(reg, (const BOOL *)v.data(), cnt);
-                    else x.dev->SetPixelShaderConstantB(reg, (const BOOL *)v.data(), cnt);
+                    int v[16 * 4];      /* reg + cnt <= 16 */
+                    memcpy(v, e + 8, (size_t)cnt * (ints ? 4 : 1) * 4);
+                    if (ints && vsc) x.dev->SetVertexShaderConstantI(reg, v, cnt);
+                    else if (ints) x.dev->SetPixelShaderConstantI(reg, v, cnt);
+                    else if (vsc) x.dev->SetVertexShaderConstantB(reg, (const BOOL *)v, cnt);
+                    else x.dev->SetPixelShaderConstantB(reg, (const BOOL *)v, cnt);
                 }
                 break;
             }

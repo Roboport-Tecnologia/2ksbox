@@ -251,14 +251,16 @@ pub(crate) fn shot_every() -> Option<u64> {
 /// Debug: PLAYER_DUMP=<file.png> writes guest frame #PLAYER_DUMP_SEQ (default
 /// 60) from the staging buffer, then exits. Lets CI/agents verify a boot.
 pub fn maybe_dump(pixels: &[u32], w: usize, h: usize, seq: u64) {
-    let Ok(path) = std::env::var("PLAYER_DUMP") else {
+    // read once: this runs at every publish, under the frame's lock
+    static DUMP: std::sync::OnceLock<Option<(String, u64)>> = std::sync::OnceLock::new();
+    let Some((path, want)) = DUMP.get_or_init(|| {
+        let path = std::env::var("PLAYER_DUMP").ok()?;
+        let want = std::env::var("PLAYER_DUMP_SEQ").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        Some((path, want))
+    }) else {
         return;
     };
-    let want: u64 = std::env::var("PLAYER_DUMP_SEQ")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(60);
-    if seq < want {
+    if seq < *want {
         return;
     }
     let mut rgb = Vec::with_capacity(w * h * 3);

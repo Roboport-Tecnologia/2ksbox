@@ -215,6 +215,8 @@ fn main() {
         .with(|p| p.borrow_mut().take())
         .map(|mut p| {
             std::mem::forget(p.render.as_mut().and_then(Render::stop));
+            // the host-vblank thread stops before the VM it ticks is freed
+            p.vblank = None;
             session(&p, Session::join).unwrap_or(0)
         })
         .unwrap_or(0);

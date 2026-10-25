@@ -658,6 +658,12 @@ void qemu_embed_destroy(qemu_embed_t *e, int status)
     qemu_scanout_ring_register(NULL);
     fx_instance = NULL;
     qemu_console_unregister_listener(&e->dcl);
+    /* off QEMU's clipboard before e is freed: a notifier left on its list
+     * points into freed memory */
+    if (e->cb_registered) {
+        qemu_clipboard_peer_unregister(&e->cbpeer);
+        e->cb_registered = false;
+    }
     qemu_cleanup(status);
     /* qemu_init took the BQL and the replay lock on this thread; give them
      * back as upstream's qemu_default_main does before exit(). Since QEMU
@@ -668,6 +674,9 @@ void qemu_embed_destroy(qemu_embed_t *e, int status)
     replay_mutex_unlock();
     g_free(e->flip);
     qemu_mutex_destroy(&e->in_lock);
+    qemu_mutex_destroy(&e->clip_lock);
+    g_free(e->clip_next);
+    g_free(e->clip_text);
     for (int i = 0; i < e->argc; i++) {
         g_free(e->argv[i]);
     }
@@ -760,7 +769,14 @@ static void enqueue(qemu_embed_t *e, in_event ev)
 {
     ev.t = g_get_monotonic_time();
     qemu_mutex_lock(&e->in_lock);
-    if (e->in_n < IN_QUEUE_LEN) {
+    if (ev.kind == EV_REL && e->in_n && e->in_q[e->in_n - 1].kind == EV_REL) {
+        /* motion behind motion is one move: a 1000 Hz mouse filled the
+         * queue in half a second of a stalled main loop */
+        e->in_q[e->in_n - 1].a += ev.a;
+        e->in_q[e->in_n - 1].b += ev.b;
+    } else if (e->in_n < IN_QUEUE_LEN - (ev.kind == EV_REL || ev.kind == EV_ABS ? 64 : 0)) {
+        /* the last 64 slots are kept for keys and buttons, whose release
+         * dropped would leave them held in the guest */
         e->in_q[e->in_n++] = ev;
     } else {
         /* drop: a stalled main loop should not grow memory unbounded */

@@ -371,8 +371,11 @@ embed library, into a target dir of its own:
    keys and pads), and the render thread uploads `pending` straight from
    `front` under the lock (`Display::take_newer`, `Gpu::upload_rect`).
    Whole copies remain for a resize, a 3D readback (`front_stale`), a
-   frame shown black after a switch, a new texture and the cursor sprite
-   composited into the frame. `win11-frames` compares the player's frame
+   frame shown black after a switch and a new texture; the cursor sprite
+   (a relative mouse, a grab) is blended into its own rect only and put
+   back from the frame at the next take (`Gpu::upload_sprite`; it was the
+   whole frame copied, blended and uploaded every frame until
+   2026-10-25). `win11-frames` compares the player's frame
    with the surface. Player CPU on an idle Windows 11 desktop 59 % → 33 %
    of a core, 275 % → 228 % with a window dragged (the tool's dumps
    included); the user saw no difference by eye ("given that it's a

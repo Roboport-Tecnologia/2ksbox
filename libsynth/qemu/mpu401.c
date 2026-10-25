@@ -79,7 +79,8 @@ struct Mpu401State {
     int queue_pos;
 
     bool active;
-    uint8_t buf[MPU_BUF_BYTES];
+    /* rendered as int16_t samples: aligned for them */
+    uint8_t buf[MPU_BUF_BYTES] QEMU_ALIGNED(4);
     int pending;
     int pos;
 

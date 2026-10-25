@@ -419,6 +419,9 @@ static uint32_t fb_fill(D3dptVgaState *s)
  * at LIST_OFF; the device reads and writes them itself, the vCPU's copy
  * through the BAR being uncached under WHPX (the WDDM driver's paging
  * transfers, track M20). */
+/* a surface's rows at most (16384 is Direct3D's largest), with room: a
+ * row costs a page-list read and a DMA under the BQL */
+#define D3DPT_FB_COPY_ROWS_MAX 65536
 static uint32_t fb_copy(D3dptVgaState *s, uint32_t dir)
 {
     uint8_t *vram = memory_region_get_ram_ptr(&s->vga.vram);
@@ -427,7 +430,7 @@ static uint32_t fb_copy(D3dptVgaState *s, uint32_t dir)
 
     if (dir < D3DPT_FB_COPY_TO_PAGES || dir > D3DPT_FB_COPY_VRAM_VRAM ||
         (uint64_t)s->copy_vram + span > s->vga.vram_size || s->copy_list_off >= 4096 ||
-        (uint64_t)rows * s->copy_bytes > s->vga.vram_size) {
+        (uint64_t)rows * s->copy_bytes > s->vga.vram_size || rows > D3DPT_FB_COPY_ROWS_MAX) {
         return D3DPT_FB_FILL_BAD;
     }
     if (!s->copy_bytes) {

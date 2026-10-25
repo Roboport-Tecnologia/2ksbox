@@ -65,6 +65,10 @@ struct TPMLibtpms {
     TPMLibtpmsOptions *options;
     QemuMutex mutex;          /* every libtpms call but the cancel */
     bool running;             /* between TPMLIB_MainInit and _Terminate */
+    /* TPM_IO_TpmEstablished_Get's answer after the last call that could
+     * change it: the guest reads it under the BQL on every LOC_STATE read,
+     * and the mutex is held for a whole command, seconds for a key */
+    bool established;
     size_t buffersize;        /* asked for while an incoming state waited */
 
     /* TPMLIB_Process's response buffer, libtpms's own (malloc/realloc) */
@@ -144,8 +148,9 @@ static TPM_RESULT tpm_libtpms_nvram_storedata(const unsigned char *data,
         g_autoptr(GError) gerr = NULL;
 
         /* a temporary file renamed over the old one: never half written */
-        if (!g_file_set_contents(t->options->state, (const gchar *)data,
-                                 length, &gerr)) {
+        if (!g_file_set_contents_full(t->options->state, (const gchar *)data,
+                                 length, G_FILE_SET_CONTENTS_CONSISTENT,
+                                 0600, &gerr)) {
             error_report("tpm-libtpms: %s", gerr->message);
             return TPM_FAIL;
         }
@@ -211,6 +216,18 @@ static void tpm_libtpms_stop(TPMLibtpms *t)
         TPMLIB_Terminate();
         t->running = false;
     }
+    qatomic_set(&t->established, false);
+}
+
+/* Called with the mutex held. */
+static void tpm_libtpms_note_established(TPMLibtpms *t)
+{
+    TPM_BOOL established = FALSE;
+
+    if (t->running) {
+        TPM_IO_TpmEstablished_Get(&established);
+    }
+    qatomic_set(&t->established, established);
 }
 
 /* Called with the mutex held. A restart is a power cycle, as swtpm's INIT. */
@@ -228,6 +245,7 @@ static int tpm_libtpms_start(TPMLibtpms *t, size_t buffersize)
         return -1;
     }
     t->running = true;
+    tpm_libtpms_note_established(t);
     return 0;
 }
 
@@ -263,6 +281,7 @@ static void tpm_libtpms_handle_request(TPMBackend *tb, TPMBackendCmd *cmd,
     }
     cur_locty = cmd->locty;
     res = TPMLIB_Process(&t->rbuf, &resp_size, &t->rbuf_size, in, cmd->in_len);
+    tpm_libtpms_note_established(t);
     if (res != TPM_SUCCESS || resp_size < TPM_RESP_HDR_SIZE ||
         resp_size > cmd->out_len) {
         error_setg(errp, "tpm-libtpms: TPMLIB_Process: 0x%x, %u bytes for %u",
@@ -284,19 +303,16 @@ static void tpm_libtpms_cancel_cmd(TPMBackend *tb)
 static bool tpm_libtpms_get_tpm_established_flag(TPMBackend *tb)
 {
     TPMLibtpms *t = TPM_LIBTPMS(tb);
-    TPM_BOOL established = FALSE;
 
-    QEMU_LOCK_GUARD(&t->mutex);
-    if (t->running) {
-        TPM_IO_TpmEstablished_Get(&established);
-    }
-    return established;
+    /* no lock: see `established` */
+    return qatomic_read(&t->established);
 }
 
 static int tpm_libtpms_reset_tpm_established_flag(TPMBackend *tb,
                                                   uint8_t locty)
 {
     TPMLibtpms *t = TPM_LIBTPMS(tb);
+    TPM_RESULT res;
 
     QEMU_LOCK_GUARD(&t->mutex);
     if (!t->running) {
@@ -304,7 +320,9 @@ static int tpm_libtpms_reset_tpm_established_flag(TPMBackend *tb,
     }
     /* only localities 3 and 4 may; libtpms checks through the callback */
     cur_locty = locty;
-    return TPM_IO_TpmEstablished_Reset() == TPM_SUCCESS ? 0 : -1;
+    res = TPM_IO_TpmEstablished_Reset();
+    tpm_libtpms_note_established(t);
+    return res == TPM_SUCCESS ? 0 : -1;
 }
 
 static TPMVersion tpm_libtpms_get_tpm_version(TPMBackend *tb)
@@ -446,8 +464,9 @@ static int tpm_libtpms_post_load(void *opaque, int version_id)
     }
 
     /* the file follows the snapshot, as the disk does */
-    if (!g_file_set_contents(t->options->state, (const gchar *)t->permanent,
-                             t->permanent_len, &gerr)) {
+    if (!g_file_set_contents_full(t->options->state, (const gchar *)t->permanent,
+                             t->permanent_len,
+                             G_FILE_SET_CONTENTS_CONSISTENT, 0600, &gerr)) {
         error_report("tpm-libtpms: %s", gerr->message);
         return -EIO;
     }

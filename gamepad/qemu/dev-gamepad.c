@@ -339,7 +339,13 @@ static void usb_gamepad_handle_data(USBDevice *dev, USBPacket *p)
             p->status = USB_RET_NAK;
             return;
         }
-        len = usb_gamepad_poll(s, buf, sizeof(buf));
+        /* the guest's transfer may be shorter than a report: copying the
+         * whole report into it trips usb_packet_copy's assertion */
+        len = usb_gamepad_poll(s, buf, MIN((int)sizeof(buf), (int)p->iov.size));
+        if (!len) {
+            p->status = USB_RET_NAK;
+            return;
+        }
         usb_packet_copy(p, buf, len);
         break;
     default:
