@@ -92,7 +92,8 @@ class Gen:
         i = r.randrange(max(d, 1)) if not loose else r.randrange(8)
         cands = []
         if d < 8 or loose:
-            cands += [("fld st%d" % i, 1), ("fld dword " + m(4), 1), ("fld qword " + m(8), 1),
+            cands += [("fld st%d" % i, 1)] if d >= 1 or loose else []
+            cands += [("fld dword " + m(4), 1), ("fld qword " + m(8), 1),
                       ("fld tword " + m(10), 1), ("fld tword [pool+%d]" % (10 * r.randrange(self.npool)), 1),
                       ("fild word " + m(2), 1), ("fild dword " + m(4), 1), ("fild qword " + m(8), 1),
                       (r.choice(["fld1", "fldz", "fldpi", "fldl2e", "fldln2"]), 1)]
@@ -258,7 +259,11 @@ def assemble(seqs, pool_asm):
         for s, (cw, code, mb) in enumerate(seqs[f:f + PER_FILE]):
             mems.append("    db " + ", ".join("0%02xh" % x for x in mb))
             body.append("; seq %d cw %04x" % (f + s, cw))
-            body += ["    finit", "    mov word [cwtmp], 0%04xh" % cw, "    fldcw [cwtmp]",
+            # eight zeros first: finit only tags the registers empty, and
+            # a sequence that reads one (QEMU's helpers seldom flag it)
+            # would see what the one before left there, which the shadow
+            # stack and softfloat leave differently
+            body += ["    finit"] + ["    fldz"] * 8 + ["    finit", "    mov word [cwtmp], 0%04xh" % cw, "    fldcw [cwtmp]",
                      "    mov si, seqmem+%d" % (64 * s), "    mov di, mem", "    mov cx, 32", "    rep movsw"]
             # a branch's label once per copy (the shrinker runs many in a file)
             body += [re.sub(r"\.b(\d+)", r".s%d_b\1" % (f + s), "    " + l if not l.startswith(".") else l) for l in code]
@@ -300,21 +305,70 @@ def run(seqs, pool_asm):
     return out
 
 
-def shrink(seq, pool_asm):
-    """the sequence with lines dropped while it still differs: every
-    one-line deletion in one boot, the first that differs kept"""
-    cw, code, mb = seq
-    while True:
-        cands = [code[:i] + code[i + 1:] for i in range(len(code)) if not code[i].startswith(".")]
-        # a branch's label goes with its jump
-        cands = [c for c in cands if all(("jb " + l[:-1]) in "\n".join(c) for l in c if l.startswith("."))]
-        if not cands:
-            return cw, code, mb
-        a, b = run([(cw, c, mb) for c in cands], pool_asm)
-        hit = [i for i in range(len(cands)) if visible(a[i]) != visible(b[i])]
-        if not hit:
-            return cw, code, mb
-        code = cands[hit[0]]
+def depth_ok(code):
+    """the sequence never reads an empty register nor pushes onto a full
+    stack, from its text: QEMU's helpers seldom set SF, so the shrinker
+    under STRICT=1 asks this before it keeps a deletion"""
+    d = 0
+    for line in code:
+        for t in line.split("\n"):
+            t = t.strip()
+            if not t.startswith("f") or t.startswith(("fnstcw", "fldcw", "fnstsw", "fnop")):
+                continue
+            m = t.split()[0]
+            regs = [int(x) for x in re.findall(r"st(\d)", t)]
+            need = max(regs + [0]) + 1 if regs or m not in ("fld1", "fldz", "fldpi", "fldl2e", "fldln2") else 0
+            if m in ("fld", "fild") and "st" not in t:
+                need = 0
+            if m in ("fscale", "fprem", "fcompp", "fucompp"):
+                need = 2
+            if d < need:
+                return False
+            if m in ("fld", "fild", "fld1", "fldz", "fldpi", "fldl2e", "fldln2"):
+                if d == 8:
+                    return False
+                d += 1
+            elif m in ("fcompp", "fucompp"):
+                d -= 2
+            elif m.endswith("p") and m not in ("fxch",) or m in ("fstp", "fistp"):
+                d -= 1
+    return True
+
+
+def stack_fault(line):
+    """the status word's SF: the sequence under- or overflowed the stack"""
+    env = line.split()[0]
+    return int(env[10:12] + env[8:10], 16) & 0x40 != 0
+
+
+def shrink_all(seqs, pool_asm):
+    """each sequence with lines dropped while it still differs: every
+    one-line deletion of every sequence still shrinking in one boot, the
+    first that differs kept (under STRICT=1, one with no stack fault)"""
+    seqs = list(seqs)
+    live = set(range(len(seqs)))
+    while live:
+        batch, owner = [], []
+        for k in sorted(live):
+            cw, code, mb = seqs[k]
+            for i in range(len(code)):
+                if code[i].startswith("."):
+                    continue
+                c = code[:i] + code[i + 1:]
+                # a branch's label goes with its jump
+                if all(("jb " + l[:-1]) in "\n".join(c) for l in c if l.startswith(".")) and (not STRICT or depth_ok(c)):
+                    batch.append((cw, c, mb))
+                    owner.append(k)
+        if not batch:
+            break
+        a, b = run(batch, pool_asm)
+        done = set(live)
+        for j, k in enumerate(owner):
+            if k in done and visible(a[j]) != visible(b[j]) and not (STRICT and stack_fault(a[j])):
+                seqs[k] = batch[j]
+                done.discard(k)
+        live -= done
+    return seqs
 
 
 def visible(line):
@@ -344,14 +398,20 @@ def main():
         print("x87 fuzz (seed %d): %d sequences identical with the fast path on and off" % (seed, len(seqs)))
         return 0
     print("x87 fuzz (seed %d): MISMATCH in %d of %d sequences; the first ones shrunk:" % (seed, len(bad), len(seqs)))
-    for i in bad[:int(os.environ.get("SHRINK", "3"))]:
-        cw, code, mb = shrink(seqs[i], pool_asm)
-        x, y = run([(cw, code, mb)], pool_asm)
-        print("--- sequence %d, cw %04x, memory %s" % (i, cw, mb.hex()))
+    pick = bad[:int(os.environ.get("SHRINK", "3"))]
+    if not pick:
+        return 1
+    small = shrink_all([seqs[i] for i in pick], pool_asm)
+    # each shrunk sequence alone as well: one that differs only after
+    # others in its file has state that leaks across sequences
+    x, y = run(small, pool_asm)
+    for i, (cw, code, mb), xo, yo in zip(pick, small, x, y):
+        print("--- sequence %d, cw %04x, memory %s%s" % (i, cw, mb.hex(),
+              "" if visible(xo) != visible(yo) else " (identical when run without the others)"))
         for l in code:
             print("    " + l.replace("\n", "; "))
-        print("  off: " + x[0])
-        print("  on:  " + y[0])
+        print("  off: " + xo)
+        print("  on:  " + yo)
     return 1
 
 

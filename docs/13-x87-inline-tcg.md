@@ -364,13 +364,19 @@ out_asm -D log` on the failing test and read the TB.
   the indefinite NaN. The battery runs each instruction from a clean
   stack and never takes that path after a load it cannot shadow.
   `tools/x87-fuzz-guest-test.py` runs random sequences on and off and
-  shrinks what differs. With the fix, seed 1 still has 33 of 1200 strict
-  sequences differing (267 before), not yet looked at one by one. The
-  first is `frndint` at PC=24 with chop: softfloat rounds its result
-  to 24 bits, the fast path does not, and the manuals say precision
-  control applies to `+ − × ÷` and `fsqrt` only, so softfloat may be the
-  one that is off there. Without `STRICT=1`, stack faults add more.
-  Once it is clean, it goes into `scripts/test.sh`.
+  shrinks what differs. With `STRICT=1`, 13 of 3600 sequences (seeds
+  1–3) still differ, and every one is upstream softfloat, not the fast
+  path, checked against the PC's own x87: at PC=24
+  `helper_fildl_FT0` (the `fiadd`…`fidivr m32` operand) rounds the
+  integer to the precision before the operation, where the hardware is
+  exact (`fild 834; fimul 0xbc96acb5` gives `db9d21…`, softfloat
+  `db9d22…`), and `helper_frndint`'s softfloat branch rounds its result to
+  the precision and sets PE, where precision control does not apply.
+  Patch 05 does both exactly, so the fast path is the one that matches
+  the x87. Left as upstream has it (user decision, 2026-10-25); the
+  fuzzer stays out of `scripts/test.sh` while they differ. Without
+  `STRICT=1`, stack faults add more: what a popped register held, the
+  deviation in patch 06's entry.
 - Per-op cost (~45 host instructions in mode 1) can still drop: defer
   FIP/FCS to flush points with the pc in the insn_start word (~4), keep
   FDP eager. The x87 C transform in `SSEBENCH.EXE` runs at 16–18 % of
