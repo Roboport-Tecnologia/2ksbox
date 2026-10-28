@@ -26,6 +26,8 @@ CORE_SRC=("$CORE/core_dp2.c" "$CORE/core_surf.c" "$CORE/core_caps.c" "$CORE/core
 OUT="$ROOT/guest-tools/out/driver"
 CC=i686-w64-mingw32-gcc
 command -v "$CC" >/dev/null || { echo "need $CC (mingw-w64)"; exit 1; }
+. "$ROOT/guest-tools/msvcrt-toolchain.sh"
+select_msvcrt_crt "$CC"
 # The headers sit under the toolchain's sysroot: /usr/i686-w64-mingw32 on
 # Arch, Cellar/mingw-w64/<ver>/toolchain-i686/i686-w64-mingw32 on Homebrew
 # (where the compiler in /opt/homebrew/bin is only a symlink, so deriving the
@@ -82,51 +84,51 @@ echo "==> d3dptdisp.dll (display driver)"
   -o "$OUT/d3dptdisp.dll" "$NT/d3dptdisp.c" "${CORE_OBJ[@]}" "$SRC/kcrt.c" "$NT/d3dptdisp.def" -lwin32k -lgcc
 rm -f "${CORE_OBJ[@]}"
 echo "==> drvinst.exe (installer, user mode, msvcrt)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/drvinst.exe" "$SRC/drvinst.c" -ladvapi32 -luser32
 echo "==> setmode.exe (mode switch from a script)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/setmode.exe" "$SRC/setmode.c" -luser32
 echo "==> d3d7test.exe (Direct3D 7 HAL test)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/d3d7test.exe" "$SRC/d3d7test.c" -lddraw -ldxguid -lgdi32 -luser32
 echo "==> ddtest.exe (DirectDraw 7 flip-chain test)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/ddtest.exe" "$SRC/ddtest.c" -lddraw -ldxguid -lgdi32 -luser32
 echo "==> ditest.exe (DirectInput keyboard under load)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/ditest.exe" "$SRC/ditest.c" -ldinput -lddraw -ldxguid -lgdi32 -luser32
 echo "==> dxttest.exe (which texture formats d3d8.dll creates, per pool)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/dxttest.exe" "$SRC/dxttest.c" -ld3d8 -lgdi32 -luser32
 echo "==> cktest.exe (palettized textures and colour keying through the DX7 HAL)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/cktest.exe" "$SRC/cktest.c" -lddraw -ldxguid -lgdi32 -luser32
 echo "==> zfilltest.exe (a Z buffer reset by a depth fill or through a Lock, doc 19 §34)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/zfilltest.exe" "$SRC/zfilltest.c" -lddraw -ldxguid -lgdi32 -luser32
 echo "==> ebtest.exe (the DirectX 3 path: execute buffers and texture handles on the HAL)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/ebtest.exe" "$SRC/ebtest.c" -lddraw -ldxguid -lgdi32 -luser32
 echo "==> shtest.exe (vertex / pixel shaders 1.x through d3d8.dll on the DX8 DDI)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/shtest.exe" "$SRC/shtest.c" -ld3d8 -lgdi32 -luser32
 for v in 8 9; do
   echo "==> dx${v}caps.exe (what d3d${v}.dll makes of the driver: device types, depth formats, CreateDevice, caps; M16)"
-  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic -DDXVER=$v \
+  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic -DDXVER=$v \
     -o "$OUT/dx${v}caps.exe" "$SRC/dx9caps.c" -lgdi32 -luser32
   echo "==> wtprobe${v}.exe (windowed CreateDevice across the ways Wine's tests and the caps tools differ; M16)"
-  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic -DDXVER=$v \
+  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic -DDXVER=$v \
     -o "$OUT/wtprobe${v}.exe" "$SRC/wtprobe.c" -lgdi32 -luser32
 done
 echo "==> d9ctest.exe (the resources d3d9.dll creates on the driver, and float render-target readback; M16)"
-"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+"$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
   -o "$OUT/d9ctest.exe" "$SRC/d9ctest.c" -lgdi32 -luser32
 # the DX8 feature probes (d3d8probe.h): each one says "not offered" while the
 # driver lacks its feature and is the feature's check once it has it
 for t in cubetest strmtest voltest fmttest bumptest sprtest anistest patchtst msaatest mgdtest gammatest; do
   echo "==> $t.exe (a DX8 feature probe through d3d8.dll on the DX8 DDI)"
-  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 -mtune=generic \
+  "$CC" -O2 -Wall -D__MSVCRT_VERSION__=0x700 "${MSVCRT_CRT_FLAG[@]}" -march=pentium3 -mtune=generic \
     -o "$OUT/$t.exe" "$SRC/$t.c" -ld3d8 -lgdi32 -luser32
 done
 

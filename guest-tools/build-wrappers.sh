@@ -63,7 +63,8 @@ ensure_gnu_tools
 # force classic msvcrt: msvcrt-mode headers + link msvcrt.dll (import lib
 # libmsvcrt-os.a on UCRT-default toolchains). Done via a compiler shim so
 # qemu-3dfx's Makefiles need no changes; the same flags build wglgears.
-MSVCRT_FLAGS="-D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os"
+. "$ROOT/guest-tools/msvcrt-toolchain.sh"
+# Selected after locating the real compiler, before creating the GCC shim.
 # qemu-3dfx's Makefiles use -march=x86-64-v2 (SSE4.2/POPCNT); our reference
 # guests are pentium2/pentium3 class (doc 06) and would #UD. Appended AFTER
 # the Makefile's flags so it wins: Pentium III floor (SSE1; doubles on x87).
@@ -78,10 +79,16 @@ ensure_msvcrt_cc() {
   real="$(command -v i686-w64-mingw32-gcc || true)"
   case "$real" in "$bin"/*) echo "internal error: shim resolved to itself"; exit 1;; esac
   [ -n "$real" ] || { echo "need i686-w64-mingw32-gcc (mingw-w64)"; exit 1; }
-  [ -f "$(dirname "$(dirname "$real")")/i686-w64-mingw32/lib/libmsvcrt-os.a" ] || \
-  [ -f "$(dirname "$real")/../i686-w64-mingw32/lib/libmsvcrt-os.a" ] || \
-  [ -f "$(dirname "$real")/../lib/libmsvcrt-os.a" ] || \
-    echo "warning: libmsvcrt-os.a not found next to the toolchain; msvcrt link may fail"
+  select_msvcrt_crt "$real"
+  MSVCRT_FLAGS="-D__MSVCRT_VERSION__=0x700 ${MSVCRT_CRT_FLAG[*]}"
+  # Only explicit -mcrtdll mode needs this import library. The default-
+  # MSVCRT toolchain path already passed the PE import check above.
+  if [ "${#MSVCRT_CRT_FLAG[@]}" -gt 0 ]; then
+    [ -f "$(dirname "$(dirname "$real")")/i686-w64-mingw32/lib/libmsvcrt-os.a" ] || \
+    [ -f "$(dirname "$real")/../i686-w64-mingw32/lib/libmsvcrt-os.a" ] || \
+    [ -f "$(dirname "$real")/../lib/libmsvcrt-os.a" ] || \
+      echo "warning: libmsvcrt-os.a not found next to the toolchain; msvcrt link may fail"
+  fi
   printf '#!/usr/bin/env bash\nexec "%s" %s "$@" %s\n' "$real" "$MSVCRT_FLAGS" "$ARCH_FLAGS" > "$bin/i686-w64-mingw32-gcc"
   chmod +x "$bin/i686-w64-mingw32-gcc"
   # MSYS2 (msys2-i686.sh): conf_wrapper's native mode writes CC=gcc into
@@ -146,7 +153,7 @@ cp "$ROOT/guest-tools/wrapgl32.ext" "$OUT/iso/OPENGL/WRAPGL32.EXT"
 # 2000's match, doc 15). Silent by default; D3DPT_DINPUT_LOG=1 in the
 # environment adds the log of what the game asks of its keyboard / mouse
 # devices and what it gets back.
-i686-w64-mingw32-gcc -O2 -Wall -shared -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -shared -D__MSVCRT_VERSION__=0x700 \
   -o "$OUT/iso/DINPUT/dinput.dll" "$ROOT/guest-tools/src/dinput/dinput.c" "$ROOT/guest-tools/src/dinput/dinput.def" \
   -static-libgcc -Wl,--kill-at -Wl,--enable-stdcall-fixup -ldxguid
 
@@ -159,25 +166,25 @@ i686-w64-mingw32-gcc -O2 -Wall -shared -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcr
 # no era Windows has. A UCRT-linked build runs only on an image that happens
 # to carry the redistributable and dies before main() everywhere else (on
 # Win98, silently: the process never reached DirectDraw).
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/d3dgame9.exe" "$ROOT/guest-tools/src/d3dgame9.c" -ld3d9 -lgdi32 -luser32
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/d3dgame8.exe" "$ROOT/guest-tools/src/d3dgame8.c" -ld3d8 -lgdi32 -luser32
 # The same scene on Direct3D 11 at feature level 10_0 (track M25), for the
 # WDDM driver on Windows 11: shaders, instancing, a texture array, stream
 # output and DrawAuto, geometry shader billboards, GenerateMips, occlusion
 # predicates, an HDR target; -compare N checks frame N against WARP. 32-bit
 # like the rest, so on x64 Windows it runs on the WoW64 user-mode driver.
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/d3dgame11.exe" "$ROOT/guest-tools/src/d3dgame11.c" -ld3d11 -ldxgi -luuid -lgdi32 -luser32
 # GDI's operations on a window against the same on a DIB (track M25: the
 # WDDM driver's GDI acceleration, RenderKm): ROPs, StretchBlt, AlphaBlend,
 # TransparentBlt, ClearType text, a scroll, and GDI with Direct3D 11 on one
 # GDI-compatible texture (Notepad's text area); `gditest: N cases, M failed`.
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/gditest.exe" "$ROOT/guest-tools/src/gditest.c" -lmsimg32 -lgdi32 -luser32
 # Feature test (doc 14 P3): shaders, declarations, state blocks, queries, cube maps, surfaces.
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/d3dfeat9.exe" "$ROOT/guest-tools/src/d3dfeat9.c" -ld3d9 -lgdi32 -luser32
 # D3D9 smoke test (guest-tools/src/d3d9test.c): adapter string, HAL caps,
 # x87 control word after CreateDevice, spinning triangle with fps.
@@ -185,7 +192,7 @@ i686-w64-mingw32-gcc -O2 -o "$T/d3d9test.exe" "$ROOT/guest-tools/src/d3d9test.c"
 # D3D9MEM.EXE: how many 4 MiB textures a Direct3D 9 device takes before
 # CreateTexture fails, with the HRESULT, the runtime's texture budget and
 # the process's address space (guest-tools/src/d3d9mem.c, track M25).
-i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os -march=pentium3 \
+i686-w64-mingw32-gcc -O2 -D__MSVCRT_VERSION__=0x700 -march=pentium3 \
   -o "$T/d3d9mem.exe" "$ROOT/guest-tools/src/d3d9mem.c" -ld3d9 -luser32
 # DDVMTEST.EXE prints what a launcher's video-memory check sees (Vice
 # City's: DirectDraw's free video memory, which the display driver answers).
@@ -248,20 +255,20 @@ nasm -f bin -o "$T/qclock.com" "$ROOT/guest-tools/src/qclock.asm"
 # shell to redirect. The name is PADWIN, not PADTEST, because the DOS probe above is
 # PADTEST.COM in this same folder, and both DOS and cmd resolve a bare name
 # to the .COM first.
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -o "$T/padwin.exe" "$ROOT/guest-tools/src/padwin.c" \
   -ldinput -ldxguid -lwinmm -luser32
 # WAVECAPS.EXE: every wave / MIDI / mixer device's 32-byte name as
 # GetDevCaps returns it, with where its NUL is, into C:\2KSBOX\WAVECAPS.LOG. A name
 # that fills all 32 bytes is what kills DirectX 9's DSOUND.DLL (its /GS
 # cookie, c0000409): the Portuguese Win98's SB16 wave-in name (doc 20 §5.3).
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -mwindows -o "$T/wavecaps.exe" \
   "$ROOT/guest-tools/src/wavecaps.c" -lwinmm
 # CURSORS.EXE: each standard cursor (IDC_*) in turn, its name to COM1
 # first, so PLAYER_CURSOR_LOG=1 gives the hash of each: the table
 # player-core's cursor_shape.rs recognises them by (doc 15 "Player").
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -mwindows -o "$T/cursors.exe" \
   "$ROOT/guest-tools/src/cursors.c"
 
@@ -271,7 +278,7 @@ i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
 # base98-br). A sleeping Win32 program costs nothing, and with `then=` no
 # DOS box is open during the wait at all. A loose copy beside the ISO too: tools/win98-game-test.sh
 # stages it into the image rather than mounting the disc.
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -mwindows -o "$OUT/iso/TESTS/waitfile.exe" \
   "$ROOT/guest-tools/src/waitfile.c"
 cp "$OUT/iso/TESTS/waitfile.exe" "$OUT/waitfile.exe"
@@ -280,7 +287,7 @@ cp "$OUT/iso/TESTS/waitfile.exe" "$OUT/waitfile.exe"
 # doc 19 §43). It loads opengl32 at run time rather than importing it, so that
 # a pass-through refusing to load without its device mapper is a line in its
 # log instead of a program that dies before main().
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -o "$OUT/iso/TESTS/glprobe.exe" \
   "$ROOT/guest-tools/src/glprobe.c" -lgdi32 -luser32
 cp "$OUT/iso/TESTS/glprobe.exe" "$OUT/glprobe.exe"
@@ -300,7 +307,7 @@ nasm -f bin -o "$OUT/iso/CDSHELF/cdshelf.com" "$ROOT/guest-tools/src/cdshelf.asm
 # another process for seconds under TCG and hangs any Glide game started
 # meanwhile; SETUP takes the helper's Run entry and puts this in its place,
 # which runs it and keeps a notice on the desktop until it is done. Win98/Me only.
-i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 -mcrtdll=msvcrt-os \
+i686-w64-mingw32-gcc -O2 -Wall -D__MSVCRT_VERSION__=0x700 \
   -march=pentium3 -mtune=generic -mwindows -o "$OUT/iso/VOODOO2/v2start.exe" \
   "$ROOT/guest-tools/src/v2start.c"
 
