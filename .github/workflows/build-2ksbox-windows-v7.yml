@@ -1,0 +1,108 @@
+name: Build 2ksbox Windows x64
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Configure Git for Windows checkout
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+          # Windows Git cannot reliably create symlinks on all hosted runners.
+          # Store symlink targets as files rather than failing the checkout.
+          git config --global core.symlinks false
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          path: s
+      - name: Ensure nested repositories inherit Windows checkout settings
+        shell: pwsh
+        working-directory: s
+        run: |
+          git config --local core.longpaths true
+          git config --local core.autocrlf false
+          git config --local core.symlinks false
+          git submodule foreach --recursive 'git config --local core.longpaths true; git config --local core.autocrlf false; git config --local core.symlinks false'
+      - name: Install MSYS2 MINGW64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-i686-gcc
+            nasm xorriso
+      - name: Install Rust targets
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc stable-x86_64-pc-windows-gnu
+          rustup default stable-x86_64-pc-windows-msvc
+      - name: Install project MSYS2 dependencies
+        working-directory: s
+        shell: msys2 {0}
+        run: |
+          # Upstream currently references a package absent from MSYS2 repositories.
+          # Remove only that unavailable dependency from the local build script.
+          sed -i 's/ mingw-w64-x86_64-tools make which/ make which/' scripts/build-windows.sh
+          # Pacman must not prompt in noninteractive GitHub Actions.
+          # Export a Bash function so the child build script also uses --noconfirm.
+          pacman() { command pacman --noconfirm "$@"; }
+          export -f pacman
+          scripts/build-windows.sh --msys2-deps
+      - name: Build Windows components (diagnostic trace)
+        working-directory: s
+        shell: msys2 {0}
+        run: |
+          set -Eeuo pipefail
+          export PATH="$(cygpath -u "$USERPROFILE")/.cargo/bin:$PATH"
+          mkdir -p build-diagnostics
+          echo "Checking Rust toolchain visibility..."
+          command -v cargo
+          command -v rustc
+          cargo --version
+          rustc --version
+          echo "Tracing the upstream build script; the complete output will be uploaded even on failure."
+          # Bash -x traces commands executed by the script. Capture stderr as well.
+          # pipefail prevents tee from hiding a nonzero build exit status.
+          export PS4='+ ${BASH_SOURCE}:${LINENO}: '
+          set +e
+          bash -x scripts/build-windows.sh 2>&1 | tee build-diagnostics/build-trace.log
+          result=${PIPESTATUS[0]}
+          set -e
+          echo "Upstream build script exit code: $result"
+          if (( result != 0 )); then
+            echo "::error::2ksbox build failed (exit $result). Download the build-diagnostics artifact for the full trace."
+            exit "$result"
+          fi
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2ksbox-build-diagnostics
+          path: s/build-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Package Windows distribution
+        working-directory: s
+        shell: msys2 {0}
+        run: |
+          export PATH="$(cygpath -u "$USERPROFILE")/.cargo/bin:$PATH"
+          scripts/package-windows.sh
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2ksbox-windows-x64
+          path: s/build/win/package/*windows-x86_64.zip
+          if-no-files-found: error
