@@ -61,4 +61,7 @@ pollster = "1"
 # version is already in the lock through wgpu's tree. `CopyFileExW` is
 # the clone's copy, for its progress callback (`clone_machine.rs`).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_Storage_FileSystem"] }
+# `host_drives.rs` lists the host's optical drives and USB disks with
+# `GetDriveTypeW` and `DeviceIoControl` (`Win32_Foundation`, `Win32_System_IO`;
+# `CreateFileW` is behind `Win32_Security`).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }

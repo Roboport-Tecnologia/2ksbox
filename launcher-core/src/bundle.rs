@@ -1282,6 +1282,24 @@ pub struct Machine {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floppy: Option<PathBuf>,
 
+    /// One of this computer's own CD/DVD drives, passed through as the
+    /// machine's second CD-ROM drive (`host_drives`): `/dev/sr0`,
+    /// `\\.\D:`, `/dev/disk4`. The guest reads the real disc in it,
+    /// copy protection and audio tracks included. Absent = none; the
+    /// emulated drive (`disc`) is there either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_optical: Option<String>,
+    /// One of this computer's removable or external disks (a USB stick,
+    /// a memory card, a USB hard disk) passed through as the machine's
+    /// second hard disk, `\\.\PhysicalDrive2` or `/dev/sdb`. Absent =
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_disk: Option<String>,
+    /// Whether the guest may write to `host_disk`. Off unless picked: a
+    /// disk the host also has mounted is corrupted by a second writer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_disk_writable: bool,
+
     /// Which drive to boot from. Absent = `Boot::Auto`, which is what
     /// every bundle written before this field existed was doing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1619,6 +1637,9 @@ impl Machine {
             shader_off: false,
             shader: None,
             floppy: None,
+            host_optical: None,
+            host_disk: None,
+            host_disk_writable: false,
             boot: None,
             cpu_speed: Some(default_cpu_speed(family)),
             video: default_video(family),
@@ -2190,6 +2211,7 @@ impl Machine {
             Family::Win11 => unreachable!("a modern family's machine is modern_args"),
         }
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         // Last, so an option given twice is the user's: QEMU takes the
         // later of most repeated options.
         args.extend(self.extra_qemu_args.iter().cloned());
@@ -2225,6 +2247,77 @@ impl Machine {
             cd.push_str(&format!(",shelf={}", opt_value(&shelf.display().to_string())));
         }
         vec!["-drive".into(), drive, "-device".into(), cd]
+    }
+
+    /// This computer's own drives, when the machine names any
+    /// (`host_drives`). They take the slots nothing else uses, so adding
+    /// or removing one moves no other device:
+    ///
+    /// * the era's i440FX: the optical drive is the secondary channel's
+    ///   slave (`ide.1`, unit 1, beside the emulated CD-ROM), the disk the
+    ///   primary channel's slave (`ide.0`, unit 1, beside the hard disk).
+    ///   Windows 95/98/XP and DOS drive both with their own IDE drivers.
+    /// * the q35 and Arm's AHCI, one device per port: the optical drive
+    ///   on `ide.3` and the disk on `ide.4` (`ide.2` is the drivers disc).
+    ///
+    /// The optical drive is read-only, as a real CD-ROM drive. The disk is
+    /// read-only unless the machine says otherwise
+    /// (`host_disk_writable`), and always `format=raw`, so a stick that
+    /// happens to begin with a qcow2 header is never taken for one.
+    fn host_drive_args(&self) -> Vec<String> {
+        let modern = self.family.is_modern();
+        let mut args = Vec::new();
+        if let Some(dev) = self.host_optical.as_deref().filter(|d| !d.is_empty()) {
+            args.extend([
+                "-drive".into(),
+                format!(
+                    "if=none,id=hostcd0,media=cdrom,format=raw,readonly=on,file.driver={},file.filename={}",
+                    crate::host_drives::qemu_driver(true),
+                    opt_value(dev)
+                ),
+                "-device".into(),
+                format!(
+                    "ide-cd,{},id={},drive=hostcd0",
+                    if modern { "bus=ide.3" } else { "bus=ide.1,unit=1" },
+                    crate::control::HOST_CDROM_ID
+                ),
+            ]);
+        }
+        if let Some(dev) = self.host_disk.as_deref().filter(|d| !d.is_empty()) {
+            args.extend([
+                "-drive".into(),
+                format!(
+                    "if=none,id=hostdisk0,format=raw,readonly={},file.driver={},file.filename={}",
+                    if self.host_disk_writable { "off" } else { "on" },
+                    crate::host_drives::qemu_driver(false),
+                    opt_value(dev)
+                ),
+                "-device".into(),
+                format!("ide-hd,{},drive=hostdisk0", if modern { "bus=ide.4" } else { "bus=ide.0,unit=1" }),
+            ]);
+        }
+        args
+    }
+
+    /// The host drives the machine names that are not there now (a
+    /// USB stick pulled out, a drive on another computer), for
+    /// `player::spawn` to refuse with rather than QEMU failing half-way.
+    pub fn missing_host_drive(&self) -> Option<String> {
+        let gone = |d: &Option<String>| {
+            d.as_deref().filter(|d| !d.is_empty() && !crate::host_drives::is_present(d)).map(str::to_string)
+        };
+        if let Some(d) = gone(&self.host_optical) {
+            return Some(format!(
+                "This machine uses the optical drive {d}, which isn't connected. Connect it, or choose None \
+                 for \u{201c}Optical drive\u{201d} on the machine's Storage page."
+            ));
+        }
+        gone(&self.host_disk).map(|d| {
+            format!(
+                "This machine uses the disk {d}, which isn't connected. Plug it in, or choose None for \
+                 \u{201c}Physical disk\u{201d} on the machine's Storage page."
+            )
+        })
     }
 
     /// Which QEMU runs this machine: `i386` for the era's families,
@@ -2371,6 +2464,7 @@ impl Machine {
         }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(Arch::X86_64));
         args.extend(self.extra_qemu_args.iter().cloned());
@@ -2501,6 +2595,7 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(arch));
         args.extend(self.extra_qemu_args.iter().cloned());

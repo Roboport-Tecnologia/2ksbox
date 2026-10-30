@@ -316,24 +316,27 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
         system.push(("Processors", machine.effective_cpus().to_string()));
     }
     system.push(("Acceleration", machine.effective_accel().label().to_owned()));
+    let mut storage = vec![
+        DetailRow { label: "Hard disk", value: short_path(&machine.disk), path: Some(machine.disk.clone()) },
+        file("CD in drive", machine.boot_disc()),
+    ];
+    // This computer's own drives, only when the machine has one
+    // (`host_drives`), by the device's name as the form saved it.
+    if let Some(dev) = machine.host_optical.as_deref() {
+        storage.push(("Optical drive", dev.to_owned()).into());
+    }
+    if let Some(dev) = machine.host_disk.as_deref() {
+        let mode = if machine.host_disk_writable { "read-write" } else { "read-only" };
+        storage.push(("Physical disk", format!("{dev} ({mode})")).into());
+    }
+    storage.push(file("Floppy", machine.floppy.as_ref()));
+    storage.push(("Boot from", machine.effective_boot().label().to_owned()).into());
     vec![
         DetailGroup {
             title: Section::System.label(),
             rows: rows(system),
         },
-        DetailGroup {
-            title: Section::Storage.label(),
-            rows: vec![
-                DetailRow {
-                    label: "Hard disk",
-                    value: short_path(&machine.disk),
-                    path: Some(machine.disk.clone()),
-                },
-                file("CD in drive", machine.boot_disc()),
-                file("Floppy", machine.floppy.as_ref()),
-                ("Boot from", machine.effective_boot().label().to_owned()).into(),
-            ],
-        },
+        DetailGroup { title: Section::Storage.label(), rows: storage },
         DetailGroup { title: Section::Display.label(), rows: rows(display) },
         DetailGroup { title: Section::Audio.label(), rows: audio },
         DetailGroup { title: Section::Input.label(), rows: rows(input) },

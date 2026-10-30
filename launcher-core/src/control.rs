@@ -309,6 +309,10 @@ impl Control {
 /// medium change can name it.
 pub const CDROM_ID: &str = "ide1-cd0";
 
+/// The qdev id `bundle::Machine::host_drive_args` gives the passthrough
+/// optical drive (`Machine::host_optical`), for `insert_host_drive`.
+pub const HOST_CDROM_ID: &str = "hostcd";
+
 /// The host path behind a medium name from `query-block`, the inverse of
 /// `disc_library::qemu_medium`.
 fn medium_path(file: &str) -> PathBuf {
@@ -350,6 +354,26 @@ impl Control {
             // No comma doubling here: this is a JSON string, not a QEMU
             // option string.
             serde_json::json!({"id": CDROM_ID, "filename": crate::disc_library::qemu_medium(disc), "force": true}),
+        )
+        .map(|_| ())
+    }
+
+    /// Put one of this computer's own CD/DVD drives (`host_drives`:
+    /// `/dev/sr0`, `\\.\D:`, `/dev/disk4`) in the tray of `device`
+    /// (`CDROM_ID`, or `HOST_CDROM_ID` for the passthrough drive),
+    /// replacing whatever is there. QEMU picks the device driver from the
+    /// name (`host_cdrom` on Linux, `host_device` elsewhere), as it does
+    /// on the command line; `format` is raw so a disc is never probed as
+    /// an image format.
+    ///
+    /// Doing it again with the same drive is how a disc swapped in the
+    /// real drive reaches the guest where QEMU does not follow the real
+    /// tray (Windows, macOS): the guest sees the tray open and close on a
+    /// new disc, exactly as for an image swap. `force` as `insert_disc`.
+    pub fn insert_host_drive(&mut self, device: &str, dev: &str) -> Result<(), String> {
+        self.execute(
+            "blockdev-change-medium",
+            serde_json::json!({"id": device, "filename": dev, "format": "raw", "read-only-mode": "read-only", "force": true}),
         )
         .map(|_| ())
     }

@@ -730,6 +730,38 @@ fn StoragePage() -> impl View {
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
+            // This computer's own CD/DVD drive and USB disk, passed
+            // through (`launcher_core::host_drives`). Refresh rescans for a
+            // stick plugged in while the window is open.
+            <Row gap=Spacing::Sm align=Align::Center>
+                <Text width=LABEL_W>"Optical drive"</Text>
+                <Select
+                    label="Optical drive"
+                    width=FIELD_W
+                    options=get(wiz, Form::host_optical_labels)
+                    selected=get(wiz, Form::host_optical_index)
+                    @change=move |i| wiz.edit(|f| f.choose_host_optical(i))
+                />
+                <Button @click=move || wiz.edit(Form::rescan_host_drives)>"Refresh"</Button>
+            </Row>
+            <Note text=get(wiz, |f| joined(&f.host_optical_notes()))/>
+            <Row gap=Spacing::Sm align=Align::Center>
+                <Text width=LABEL_W>"Physical disk"</Text>
+                <Select
+                    label="Physical disk"
+                    width=FIELD_W
+                    options=get(wiz, Form::host_disk_labels)
+                    selected=get(wiz, Form::host_disk_index)
+                    @change=move |i| wiz.edit(|f| f.choose_host_disk(i))
+                />
+                <Button @click=move || wiz.edit(Form::rescan_host_drives)>"Refresh"</Button>
+            </Row>
+            <Show when=get(wiz, Form::host_disk_writable_applies)>
+                <Checkbox checked=get(wiz, |f| f.host_disk_writable) @change=move |on| wiz.edit(|f| f.host_disk_writable = on)>
+                    "Allow the machine to write to it"
+                </Checkbox>
+            </Show>
+            <Note text=get(wiz, |f| joined(&f.host_disk_notes()))/>
             <Show when=get(wiz, Form::floppy_applies)>
                 <PathField
                     label_width=LABEL_W

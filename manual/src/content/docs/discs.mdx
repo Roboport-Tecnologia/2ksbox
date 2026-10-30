@@ -91,3 +91,45 @@ that won't run in a DOS box. Choose it from the `SETUP` menu.
 4. Before you play, read [3D games](../3d/) if it's a 3D game.
 
 </Steps>
+
+## Use this computer's own drives
+
+A machine can also use real drives. In the machine's **Settings**, on
+the **Storage** page:
+
+- **Optical drive** picks one of this computer's CD or DVD drives. The
+  machine gets a second CD-ROM drive with the real disc in it, next to
+  the usual **CD in drive**. Windows 95, 98 and XP and DOS's CD-ROM
+  driver find it by themselves. The machine reads the disc itself, so
+  audio tracks and most copy protection work. On Linux a disc swapped
+  in the real drive is swapped in the machine; on Windows and macOS put
+  the disc in before you start the machine.
+- **Physical disk** picks a USB stick, memory card or external disk. The
+  machine gets it as a second hard disk. It is read-only unless you tick
+  **Allow the machine to write to it**; before you do, unmount it on
+  this computer (on Windows, `mountvol E: /p` as administrator, with its
+  letter), because two systems writing to one disk ruin its files.
+  Windows 95 and 98 read FAT and FAT32 sticks, DOS only FAT16. The
+  computer's own disk is never offered, and snapshots don't cover this
+  disk.
+
+You don't need to set anything up to swap real discs while a machine
+runs. In the player, *Machine* > *Disc* lists this computer's CD and DVD
+drives under your discs, marked *(real drive)*. Choose one and it goes
+in the machine's CD drive, as a disc image would. When a game asks for
+the next disc, put it in the real drive and choose **Re-read Real
+Drive**: the game sees the disc change. Choose a disc image or **Eject**
+to take the real drive out again. **Look for Drives Again** finds a
+drive plugged in after the machine started. A machine with a second CD
+drive set up on the Storage page gets **Re-read Second CD Drive** for
+the same thing.
+
+Press **Refresh** after plugging a drive in. A machine whose drive isn't
+connected refuses to start and says which one is missing.
+
+<Aside type="caution">
+Reading a whole disk needs permission. On Windows, run 2ksbox as
+administrator for **Physical disk**. On Linux, join the `disk` group
+(`sudo usermod -aG disk $USER`, then sign in again). The Flatpak needs
+`flatpak override --user --device=all com._2ksbox.Launcher` once.
+</Aside>

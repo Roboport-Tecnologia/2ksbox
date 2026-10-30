@@ -361,6 +361,61 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 None => panic!("save bundle: {}", form.error.unwrap_or_default()),
             }
         }
+        "--host-drives" => {
+            // The Storage page's two pickers and their notes, as the form
+            // fills them: this computer's optical drives and removable
+            // disks (`host_drives`), each row numbered for
+            // `--set-host-drive`. With a bundle, that machine's choices
+            // are the ones marked.
+            let mut form = wizard::Form::default();
+            match args.next() {
+                Some(bundle) => form.open_edit_path(PathBuf::from(bundle)),
+                None => form.open_new(Family::Win98),
+            }
+            if let Some(e) = &form.error {
+                panic!("{e}");
+            }
+            let show = |what: &str, labels: Vec<String>, chosen: usize, notes: Vec<&str>| {
+                println!("{what}:");
+                for (i, l) in labels.iter().enumerate() {
+                    println!("  {}{i}\t{l}", if i == chosen { "*" } else { " " });
+                }
+                for n in notes {
+                    println!("  note: {n}");
+                }
+            };
+            show("optical", form.host_optical_labels(), form.host_optical_index(), form.host_optical_notes());
+            show("disk", form.host_disk_labels(), form.host_disk_index(), form.host_disk_notes());
+        }
+        "--set-host-drive" => {
+            // Headless equivalent of picking a row in the Storage page's
+            // "Optical drive" or "Physical disk" picker and saving
+            // (`--host-drives` numbers the rows; 0 is None).
+            let usage = "usage: --set-host-drive <machine.toml> <optical|disk> <row> [ro|rw]";
+            let path: PathBuf = args.next().expect(usage).into();
+            let which = args.next().expect(usage);
+            let row: usize = args.next().expect(usage).parse().expect("row must be a number");
+            let mut form = wizard::Form::default();
+            form.open_edit_path(path);
+            if let Some(e) = &form.error {
+                panic!("{e}");
+            }
+            match which.as_str() {
+                "optical" => form.choose_host_optical(row),
+                "disk" => form.choose_host_disk(row),
+                other => panic!("{other:?}: {usage}"),
+            }
+            match args.next().as_deref() {
+                None => {}
+                Some("ro") => form.host_disk_writable = false,
+                Some("rw") => form.host_disk_writable = true,
+                Some(other) => panic!("{other:?}: {usage}"),
+            }
+            match form.submit(&library::default_dir()) {
+                Some(saved) => println!("{}", saved.display()),
+                None => panic!("save bundle: {}", form.error.unwrap_or_default()),
+            }
+        }
         "--clone" => {
             // Headless equivalent of a row's "Clone…" then "Clone": the
             // same model, so the same default name, the same refusals (a
@@ -609,12 +664,23 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // whether it is the one in the drive. `insert`/`eject` are the
             // card's and the rows' buttons, which set the boot disc and,
             // on a running machine, swap the disc now as well.
-            let usage = "usage: --drive <machine.toml> [insert <disc>|eject]";
+            // `insert-host <device>` is the player's Disc menu's real drive
+            // (`Shelf::menu_host_drives`: `/dev/sr0`, `\\.\D:`), into the
+            // machine's drive; done again it is "Re-read Real Drive".
+            // `reread-second` re-reads the passthrough drive. The menu's
+            // real-drive rows follow the discs, as `host\t<mark>\t<label>`.
+            let usage = "usage: --drive <machine.toml> [insert <disc>|insert-host <device>|reread-second|eject]";
             let path: PathBuf = args.next().expect(usage).into();
             let mut shelf = shelf::Shelf::default();
-            shelf.open_for_path(path, &disc_library::default_path());
+            shelf.open_for_path(path.clone(), &disc_library::default_path());
+            shelf.scan_host_drives();
             match (args.next().as_deref(), args.next()) {
                 (Some("insert"), Some(disc)) => shelf.insert(Path::new(&disc)),
+                (Some("insert-host"), Some(dev)) => shelf.insert_host(control::CDROM_ID, &dev),
+                (Some("reread-second"), None) => {
+                    let dev = Machine::load(&path).expect("load bundle").host_optical.expect("no passthrough drive");
+                    shelf.insert_host(control::HOST_CDROM_ID, &dev);
+                }
                 (Some("eject"), None) => shelf.eject(),
                 (None, _) => {}
                 _ => panic!("{usage}"),
@@ -632,6 +698,10 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 let kind = shelf.row_kind(row).map_or("", |k| k.key());
                 let mark = if shelf.row_in_drive(row) { "in-drive" } else { "-" };
                 println!("{mark}\t{kind}\t{}\t{}", disc.label, shelf.row_detail(row));
+            }
+            for row in shelf.menu_host_drives() {
+                let mark = if row.in_drive { "in-drive" } else { "-" };
+                println!("host\t{mark}\t{}\t{}\t{}", row.label, row.device, row.dev);
             }
         }
         "--disc-menu" => {

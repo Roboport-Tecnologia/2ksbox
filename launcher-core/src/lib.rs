@@ -30,7 +30,8 @@
 //!   fetching the preset collection), `paths` (where everything lives,
 //!   installed or in a checkout).
 //! * **The machinery.** `player` (spawning one, and `qemu-img`),
-//!   `control` (QMP to a running machine), `snapshots` (`qemu-img`'s
+//!   `control` (QMP to a running machine), `host_drives` (the host's own
+//!   optical drives and USB disks, passed through), `snapshots` (`qemu-img`'s
 //!   half of the same), `preview` (the shader chain on a still image).
 //! * **The window models.** `machines`, `wizard`, `clone_machine`,
 //!   `shelf`, `snaps`, `editor` and `firstrun`, one per window, each
@@ -59,6 +60,9 @@ pub mod firstrun;
 pub mod grants;
 // What this host's GPU can do for the Direct3D executor (ADR-013).
 pub mod host_gpu;
+// This computer's own CD/DVD drives and USB disks, passed through to a
+// machine.
+pub mod host_drives;
 pub mod library;
 pub mod licenses;
 pub mod machines;

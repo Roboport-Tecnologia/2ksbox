@@ -19,7 +19,7 @@ use crate::wake::Wake;
 use crate::watch;
 use launcher_core::browse;
 use launcher_core::disc_library::{self, DISC_FILTER};
-use launcher_core::shelf::Shelf;
+use launcher_core::shelf::{MenuHostDrive, Shelf};
 use mitsuami::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,11 +30,18 @@ pub struct Discs {
     model: Signal<Shelf>,
 }
 
-/// The shelf opened for the machine, its drive asked of the monitor.
+/// The shelf opened for the machine, its drive asked of the monitor, and
+/// this computer's CD/DVD drives listed (`Shelf::menu_host_drives`).
 fn load(bundle: &Path) -> Shelf {
     let mut shelf = Shelf::default();
     shelf.open_for_path(bundle.to_path_buf(), &disc_library::default_path());
+    shelf.scan_host_drives();
     shelf
+}
+
+/// What the menu shows, for `reload`'s "did anything change".
+fn shown(s: &Shelf) -> (Vec<launcher_core::shelf::MenuDisc>, Vec<MenuHostDrive>) {
+    (s.menu_discs(), s.menu_host_drives())
 }
 
 impl Discs {
@@ -59,7 +66,7 @@ impl Discs {
     async fn reload(self) {
         let bundle = self.bundle.get_untracked();
         let fresh = spawn_blocking(move || load(&bundle)).await;
-        if fresh.menu_discs() != self.model.with_untracked(Shelf::menu_discs) {
+        if shown(&fresh) != self.model.with_untracked(shown) {
             self.model.set(fresh);
         }
     }
@@ -131,6 +138,26 @@ impl Discs {
                     })
                     .collect()
             })
+            .separator()
+            // This computer's own CD/DVD drives (`Shelf::menu_host_drives`):
+            // one goes in the tray like a disc image, and "Re-read" shows
+            // the guest a disc changed in the real drive.
+            .children_with(move || {
+                self.model
+                    .with(Shelf::menu_host_drives)
+                    .into_iter()
+                    .map(|row| {
+                        let (device, dev) = (row.device, row.dev);
+                        MenuItem::new(row.label)
+                            .checked(row.in_drive)
+                            .on_select(move || {
+                                let dev = dev.clone();
+                                self.change(move |s| s.insert_host(device, &dev));
+                            })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .item(MenuItem::new("Look for Drives Again").on_select(move || self.change(Shelf::scan_host_drives)))
             .separator()
             .item(
                 MenuItem::new("Eject")

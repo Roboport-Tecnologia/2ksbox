@@ -42,6 +42,9 @@ struct MachineContext {
     /// The machine's current boot disc, mirrored here so a click updates
     /// the row markers before the library is rescanned.
     boot: Option<PathBuf>,
+    /// The machine's passthrough optical drive (`Machine::host_optical`),
+    /// for the Disc menu's "Re-read" row.
+    host_optical: Option<String>,
 }
 
 #[derive(Default)]
@@ -57,6 +60,10 @@ pub struct Shelf {
     /// `None` when the window was opened for the shelf itself rather
     /// than for one machine.
     machine: Option<MachineContext>,
+    /// This computer's CD/DVD drives, for the player's Disc menu
+    /// (`menu_host_drives`). Empty until `scan_host_drives`: the launcher's
+    /// shelf window never lists them, so it never scans.
+    host_drives: Vec<crate::host_drives::HostDrive>,
     /// What the running machine's drive holds (`None` inside for an
     /// empty tray), or `None` when its monitor did not answer: a stopped
     /// machine, or one started outside the launcher.
@@ -81,6 +88,7 @@ impl Shelf {
                 bundle_path,
                 name: machine.name.clone(),
                 boot: machine.boot_disc().cloned(),
+                host_optical: machine.host_optical.clone().filter(|d| !d.is_empty()),
             }),
             ..Default::default()
         };
@@ -216,6 +224,16 @@ impl Shelf {
     pub fn drive_card(&self) -> Option<DriveCard> {
         self.machine.as_ref()?;
         Some(match self.drive() {
+            // one of this computer's drives, put in from the player's menu
+            Some(path) if is_host_device(path) => DriveCard {
+                kind: Some(DiscKind::of(path)),
+                title: self
+                    .host_drives
+                    .iter()
+                    .find(|d| Path::new(&d.path) == path)
+                    .map_or_else(|| path.display().to_string(), |d| d.label.clone()),
+                detail: "This computer's own drive, with the disc that's in it.".into(),
+            },
             Some(path) => DriveCard {
                 kind: Some(DiscKind::of(path)),
                 title: self.label_for(path),
@@ -309,7 +327,8 @@ impl Shelf {
         }
         let drive = self.drive();
         let mut rows = Vec::new();
-        if let Some(path) = drive.filter(|p| self.library.position(p).is_none()) {
+        // A real drive in the tray is `menu_host_drives`' row, not this one.
+        if let Some(path) = drive.filter(|p| self.library.position(p).is_none() && !is_host_device(p)) {
             rows.push(MenuDisc { label: self.label_for(path), path: path.to_path_buf(), in_drive: true });
         }
         rows.extend(self.library.discs.iter().map(|d| MenuDisc {
@@ -318,6 +337,74 @@ impl Shelf {
             in_drive: drive == Some(d.path.as_path()),
         }));
         rows
+    }
+
+    /// Look for this computer's CD/DVD drives (`host_drives`), for
+    /// `menu_host_drives`: when the player's menu loads and on its
+    /// "Look for Drives Again".
+    pub fn scan_host_drives(&mut self) {
+        self.host_drives = crate::host_drives::optical_drives();
+    }
+
+    /// The player's Disc menu's real drives, under the shelf's discs: each
+    /// of this computer's CD/DVD drives, checked when it is in the
+    /// machine's drive; choosing one puts it there, and choosing the
+    /// checked one again re-reads it, which is how a disc changed in the
+    /// real drive reaches the guest (`Control::insert_host_drive`). Then,
+    /// for a machine with a passthrough drive (`Machine::host_optical`), a
+    /// row that re-reads that one. Empty for a stopped machine: these
+    /// swap a running machine's tray and are never its boot disc.
+    pub fn menu_host_drives(&self) -> Vec<MenuHostDrive> {
+        if !self.running() {
+            return Vec::new();
+        }
+        let drive = self.drive();
+        let mut rows: Vec<MenuHostDrive> = self
+            .host_drives
+            .iter()
+            .map(|d| MenuHostDrive {
+                label: format!("{} (real drive)", d.label),
+                dev: d.path.clone(),
+                device: control::CDROM_ID,
+                in_drive: drive == Some(Path::new(&d.path)),
+            })
+            .collect();
+        // Spelled out, since "choose the checked row again" is no gesture
+        // anyone guesses.
+        if let Some(dev) = drive.filter(|p| is_host_device(p)) {
+            rows.push(MenuHostDrive {
+                label: "Re-read Real Drive".into(),
+                dev: dev.to_string_lossy().into_owned(),
+                device: control::CDROM_ID,
+                in_drive: false,
+            });
+        }
+        if let Some(dev) = self.machine.as_ref().and_then(|m| m.host_optical.clone()) {
+            rows.push(MenuHostDrive {
+                label: format!("Re-read Second CD Drive ({dev})"),
+                dev,
+                device: control::HOST_CDROM_ID,
+                in_drive: false,
+            });
+        }
+        rows
+    }
+
+    /// Put a real drive in a running machine's tray, or read it again
+    /// (`menu_host_drives`). The boot disc is left alone: a drive is not
+    /// an image the next start could open in its place.
+    pub fn insert_host(&mut self, device: &str, dev: &str) {
+        if !self.running() {
+            self.status = None;
+            self.error = Some("Start the machine first: a real drive goes in a running machine's tray.".into());
+            return;
+        }
+        let (device, dev) = (device.to_string(), dev.to_string());
+        let done = format!("inserted the real drive {dev}");
+        self.live(|c| c.insert_host_drive(&device, &dev), &done);
+        if self.error.is_none() {
+            self.refresh_live();
+        }
     }
 
     pub fn insert_row(&mut self, row: usize) {
@@ -529,6 +616,25 @@ pub struct DriveCard {
     pub kind: Option<DiscKind>,
     pub title: String,
     pub detail: String,
+}
+
+/// One real drive row of the player's Disc menu (`menu_host_drives`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuHostDrive {
+    pub label: String,
+    /// The drive, as `Control::insert_host_drive` takes it.
+    pub dev: String,
+    /// Which of the machine's CD drives it goes in (`control::CDROM_ID`
+    /// or `HOST_CDROM_ID`).
+    pub device: &'static str,
+    pub in_drive: bool,
+}
+
+/// Whether a medium QEMU reports is one of this computer's drives rather
+/// than a disc image (`/dev/sr0`, `\\.\D:`, `/dev/disk4`).
+pub fn is_host_device(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    s.starts_with("/dev/") || s.starts_with(r"\\.\")
 }
 
 /// One disc in the player's Disc menu (`Shelf::menu_discs`).
