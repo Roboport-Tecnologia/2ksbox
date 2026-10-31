@@ -159,7 +159,7 @@ What differs from Linux, so a failure there reads right:
 | Check | What it proves |
 |---|---|
 | `x87-fast` | patch 05's x87 fast path equals the real x87 (`tools/x87-fast-test.c`; x86 hosts only) |
-| `libdisc` | `discx selftest`: synthetic cue/bin, CCD, ISO; reads, EDC/ECC, Q synthesis, MMC responders (doc 17) |
+| `libdisc` | `discx selftest`: synthetic cue/bin, CCD, ISO; reads, EDC/ECC, Q synthesis, MMC responders, and a real drive (`hostcd`) through a simulated one, answer for answer against the image (doc 17) |
 | `cdimage` | the `cdimage` block driver (patch 50) through QEMU's block layer |
 | `dirdisc` | a folder served as `isodir:` reads back identical through xorriso/bsdtar, qemu-img and SeaBIOS's ATAPI probe (M5g) |
 | `dirshelf`, `shelforder`, `drive` | a folder on the disc shelf and on the boot drive; the shelf is one list in one order; the shelf's one drive: Insert and Eject set the boot disc, and on a running machine (a paused QEMU here) also swap the tray, which the card reads back through `query-block`, a folder disc included; the player's Disc menu (`--disc-menu`): the drive's disc checked, a boot disc off the shelf listed first, and a disc picked there on the shelf and in the running tray |

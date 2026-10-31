@@ -1282,6 +1282,18 @@ pub struct Machine {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floppy: Option<PathBuf>,
 
+    /// One of this computer's own CD/DVD drives, passed through as the
+    /// machine's second CD-ROM drive (`host_drives`): `/dev/sr0`,
+    /// `\\.\D:`, `/dev/disk4`. Absent = none; the emulated drive
+    /// (`disc`) is there either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_optical: Option<String>,
+    /// The speed to read it at, in CD x (8 = 8x); absent = the drive's
+    /// fastest. Also the speed the player's Disc menu puts a real drive
+    /// in the first CD drive at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_optical_speed: Option<u16>,
+
     /// Which drive to boot from. Absent = `Boot::Auto`, which is what
     /// every bundle written before this field existed was doing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1619,6 +1631,8 @@ impl Machine {
             shader_off: false,
             shader: None,
             floppy: None,
+            host_optical: None,
+            host_optical_speed: None,
             boot: None,
             cpu_speed: Some(default_cpu_speed(family)),
             video: default_video(family),
@@ -2190,6 +2204,7 @@ impl Machine {
             Family::Win11 => unreachable!("a modern family's machine is modern_args"),
         }
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         // Last, so an option given twice is the user's: QEMU takes the
         // later of most repeated options.
         args.extend(self.extra_qemu_args.iter().cloned());
@@ -2225,6 +2240,60 @@ impl Machine {
             cd.push_str(&format!(",shelf={}", opt_value(&shelf.display().to_string())));
         }
         vec!["-drive".into(), drive, "-device".into(), cd]
+    }
+
+    /// This computer's own CD/DVD drive, when the machine names one
+    /// (`host_drives`), as a second CD-ROM drive in the slot nothing else
+    /// uses, so adding or removing it moves no other device: the era's
+    /// i440FX secondary channel's slave (`ide.1`, unit 1, beside the
+    /// emulated CD-ROM), which Windows 95/98/XP and DOS drive with their
+    /// own IDE drivers; on the q35 and Arm's AHCI port `ide.3` (`ide.2`
+    /// is the drivers disc). It plays CD audio through the same output as
+    /// the first drive.
+    ///
+    /// Read through libdisc when this user can (`host_drives::reach`), so
+    /// the guest gets audio and protection too, at the machine's speed;
+    /// started empty when the tray is (the Disc menu's "Re-read" puts the
+    /// disc in later). Otherwise QEMU reads the device itself, data only.
+    /// Read-only either way, as a CD-ROM drive.
+    fn host_drive_args(&self) -> Vec<String> {
+        let Some(dev) = self.host_optical.as_deref().filter(|d| !d.is_empty()) else { return Vec::new() };
+        let mut drive = "if=none,id=hostcd0,media=cdrom,readonly=on".to_string();
+        match crate::host_drives::reach(dev).0 {
+            crate::host_drives::Reach::DataOnly => drive.push_str(&format!(
+                ",format=raw,file.driver={},file.filename={}",
+                crate::host_drives::qemu_driver(),
+                opt_value(dev)
+            )),
+            // raw over QEMU's `hostcd` driver, as `qemu-img info` shows
+            // it; said, so QEMU never probes the disc for a format
+            _ if crate::host_drives::has_disc(dev) => drive.push_str(&format!(
+                ",format=raw,file={}",
+                opt_value(&crate::host_drives::medium(dev, self.host_optical_speed))
+            )),
+            _ => {}
+        }
+        vec![
+            "-drive".into(),
+            drive,
+            "-device".into(),
+            format!(
+                "ide-cd,{},id={},drive=hostcd0,audiodev=embed0",
+                if self.family.is_modern() { "bus=ide.3" } else { "bus=ide.1,unit=1" },
+                crate::control::HOST_CDROM_ID
+            ),
+        ]
+    }
+
+    /// The machine's drive when it is not there now (a USB DVD drive
+    /// unplugged, a bundle from another computer), for `player::spawn` to
+    /// refuse with rather than QEMU failing half-way.
+    pub fn missing_host_drive(&self) -> Option<String> {
+        let d = self.host_optical.as_deref().filter(|d| !d.is_empty() && !crate::host_drives::is_present(d))?;
+        Some(format!(
+            "This machine uses the optical drive {d}, which isn't connected. Connect it, or choose None \
+             for \u{201c}Optical drive\u{201d} on the machine's Storage page."
+        ))
     }
 
     /// Which QEMU runs this machine: `i386` for the era's families,
@@ -2371,6 +2440,7 @@ impl Machine {
         }
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(Arch::X86_64));
         args.extend(self.extra_qemu_args.iter().cloned());
@@ -2501,6 +2571,7 @@ impl Machine {
         args.extend(self.clipboard_args());
         args.extend(self.audio_args());
         args.extend(self.cdrom_args(shelf));
+        args.extend(self.host_drive_args());
         args.extend(boot_prompt_args());
         args.extend(drivers_disc_args(arch));
         args.extend(self.extra_qemu_args.iter().cloned());

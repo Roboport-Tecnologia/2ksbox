@@ -376,6 +376,17 @@ cdimage_check() { # the block driver through qemu-img / qemu-io on the selftest 
   case "$o" in *"read failed"*) ;; *) echo "the flipped sector read cleanly"; rc=1;; esac
   o="$($QIO -r -c "read $((2000 * 2048)) 2048" "$d/mixed.cue" 2>&1)"
   case "$o" in *"read failed"*) ;; *) echo "an audio sector read as data"; rc=1;; esac
+  # a real drive (`hostcd:`, doc 17 §9), here libdisc's simulated one over
+  # the same images: QEMU's hostcd driver opens it, sizes it, reads the
+  # data track as the image's and fails the flipped sector alone
+  local hc="hostcd:max:sim:$d"
+  $QIMG info --output=json "$hc/mixed.ccd" | grep -q "\"virtual-size\": $want" || { echo "hostcd: not opened at $want bytes"; rc=1; }
+  $QIMG dd -O raw bs=2048 count=2000 "if=$hc/mixed.ccd" "of=$OUT/hostcd-dd.bin" || rc=1
+  cmp "$OUT/hostcd-dd.bin" "$d/plain.iso" || { echo "the data track through the hostcd driver differs from plain.iso"; rc=1; }
+  o="$($QIO -r -c "read $((1000 * 2048)) 2048" "$hc/lec.cue" 2>&1)"
+  case "$o" in *"read failed"*) ;; *) echo "hostcd: the flipped sector read cleanly"; rc=1;; esac
+  o="$($QIO -r -c "read $((999 * 2048)) 2048" "$hc/lec.cue" 2>&1)"
+  case "$o" in *"read failed"*) echo "hostcd: the sector before the flipped one failed with it"; rc=1;; esac
   [ "$(nm -D build/qemu/libqemu-embed-i386.$SO 2>/dev/null | grep -c ' T _ZN3std')" = 0 ] || { echo "Rust std symbols exported from the embed library"; rc=1; }
   return $rc
 }

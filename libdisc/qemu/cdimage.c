@@ -20,6 +20,13 @@
  * cdimage: the same state, the same reads, the same disc handle reaching
  * hw/ide/atapi.c, so a folder is a disc in the drive like any other.
  *
+ * And `hostcd`, one of the host's own CD/DVD drives read the way a dumping
+ * tool reads it (`hostcd:<speed>:<device>`, doc 17 §9): libdisc asks the
+ * drive for its full TOC, raw sectors and subchannel, so CD audio and a
+ * protection's read errors reach the guest as they do from an image. A
+ * protocol driver for the same reason as isodir: a device is not an
+ * image to probe. The whole name goes to libdisc, which parses it.
+ *
  * Copyright (c) 2026 the win98-xp-virt authors. GPL-2.0-only, like QEMU.
  */
 #include "qemu/osdep.h"
@@ -36,6 +43,7 @@
 
 #define CDIMAGE_SECTOR 2048
 #define ISODIR_PREFIX  "isodir:"
+#define HOSTCD_PREFIX  "hostcd:"
 
 typedef struct BDRVCdimageState {
     libdisc *disc;
@@ -45,6 +53,7 @@ typedef struct BDRVCdimageState {
 
 static BlockDriver bdrv_cdimage;
 static BlockDriver bdrv_isodir;
+static BlockDriver bdrv_hostcd;
 
 /*
  * Open the medium at `path` (an image file, or a directory for isodir)
@@ -196,6 +205,65 @@ static int isodir_open(BlockDriverState *bs, QDict *options, int flags,
     return ret;
 }
 
+/* hostcd:<speed>:<device> -> options["medium"], prefix and all: libdisc parses it. */
+static void hostcd_parse_filename(const char *filename, QDict *options,
+                                  Error **errp)
+{
+    if (!strstart(filename, HOSTCD_PREFIX, NULL) || !filename[strlen(HOSTCD_PREFIX)]) {
+        error_setg(errp, "hostcd: expected " HOSTCD_PREFIX "<speed>:<device>");
+        return;
+    }
+    qdict_put_str(options, "medium", filename);
+}
+
+static QemuOptsList hostcd_runtime_opts = {
+    .name = "hostcd",
+    .head = QTAILQ_HEAD_INITIALIZER(hostcd_runtime_opts.head),
+    .desc = {
+        {
+            .name = "medium",
+            .type = QEMU_OPT_STRING,
+            .help = "hostcd:<speed>:<device>, the host drive to read",
+        },
+        { /* end of list */ }
+    },
+};
+
+static int hostcd_open(BlockDriverState *bs, QDict *options, int flags,
+                       Error **errp)
+{
+    QemuOpts *opts;
+    const char *medium;
+    int ret;
+
+    GLOBAL_STATE_CODE();
+
+    /* A pressed disc: read-only, whatever the caller asked for. */
+    bdrv_graph_rdlock_main_loop();
+    ret = bdrv_apply_auto_read_only(bs, "hostcd discs are read-only", errp);
+    bdrv_graph_rdunlock_main_loop();
+    if (ret < 0) {
+        return ret;
+    }
+
+    opts = qemu_opts_create(&hostcd_runtime_opts, NULL, 0, &error_abort);
+    if (!qemu_opts_absorb_qdict(opts, options, errp)) {
+        qemu_opts_del(opts);
+        return -EINVAL;
+    }
+    medium = qemu_opt_get(opts, "medium");
+    if (!medium) {
+        error_setg(errp, "hostcd needs a 'medium' option (or a "
+                   HOSTCD_PREFIX "<speed>:<device> filename)");
+        qemu_opts_del(opts);
+        return -EINVAL;
+    }
+    /* No child, as isodir: libdisc opens the device itself. */
+    ret = cdimage_open_disc(bs, medium, errp);
+    qemu_opts_del(opts);
+    return ret;
+}
+
 static void cdimage_refresh_limits(BlockDriverState *bs, Error **errp)
 {
     bs->bl.request_alignment = CDIMAGE_SECTOR; /* whole sectors only */
@@ -260,7 +328,8 @@ static BlockDriverState *cdimage_node(BlockDriverState *bs)
     while (bs && bs->drv && bs->drv->is_format && bs->drv != &bdrv_cdimage && bs->file) {
         bs = bdrv_skip_filters(bs->file->bs);
     }
-    if (!bs || (bs->drv != &bdrv_cdimage && bs->drv != &bdrv_isodir)) {
+    if (!bs || (bs->drv != &bdrv_cdimage && bs->drv != &bdrv_isodir &&
+                bs->drv != &bdrv_hostcd)) {
         return NULL;
     }
     return bs;
@@ -330,10 +399,28 @@ static BlockDriver bdrv_isodir = {
     .strong_runtime_opts = isodir_strong_runtime_opts,
 };
 
+static const char *const hostcd_strong_runtime_opts[] = {
+    "medium",
+    NULL
+};
+
+static BlockDriver bdrv_hostcd = {
+    .format_name         = "hostcd",
+    .protocol_name       = "hostcd",
+    .instance_size       = sizeof(BDRVCdimageState),
+    .bdrv_parse_filename = hostcd_parse_filename,
+    .bdrv_open           = hostcd_open,
+    .bdrv_refresh_limits = cdimage_refresh_limits,
+    .bdrv_co_preadv      = cdimage_co_preadv,
+    .bdrv_close          = cdimage_close,
+    .strong_runtime_opts = hostcd_strong_runtime_opts,
+};
+
 static void bdrv_cdimage_init(void)
 {
     bdrv_register(&bdrv_cdimage);
     bdrv_register(&bdrv_isodir);
+    bdrv_register(&bdrv_hostcd);
 }
 
 block_init(bdrv_cdimage_init);
