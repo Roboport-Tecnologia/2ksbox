@@ -9,9 +9,11 @@
 //! opened and every method is safe to call from several threads.
 
 #[allow(non_camel_case_types)]
+#[cfg(feature = "capi")]
 pub mod capi;
 pub mod ccd;
 pub mod cue;
+pub mod drive;
 pub mod ecc;
 pub mod iso;
 pub mod isodir;
@@ -209,6 +211,8 @@ pub enum Source {
     Silence,
     /// Data pregap / postgap: zero-filled sectors of the track's mode with valid EDC/ECC.
     ZeroData,
+    /// The real drive the disc was opened on (`drive`, `hostcd:`).
+    Drive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +332,8 @@ pub struct Disc {
     /// the only mutable state on a disc; it is held to take a handle,
     /// never across the read itself.
     fds: std::sync::Mutex<Vec<(usize, std::sync::Arc<File>)>>,
+    /// The drive behind `Source::Drive` extents (`hostcd:`).
+    drive: Option<drive::Drive>,
 }
 
 impl fmt::Debug for Disc {
@@ -337,6 +343,7 @@ impl fmt::Debug for Disc {
             .field("mcn", &self.mcn)
             .field("raw_toc", &self.raw_toc.as_ref().map(|t| t.len()))
             .field("files", &self.files.iter().map(|p| p.path.display().to_string()).collect::<Vec<_>>())
+            .field("drive", &self.drive)
             .finish()
     }
 }
@@ -350,7 +357,13 @@ impl Disc {
             files: Vec::new(),
             blobs: Vec::new(),
             fds: std::sync::Mutex::new(Vec::new()),
+            drive: None,
         }
+    }
+
+    /// The real drive this disc reads, when it was opened from one.
+    pub fn drive(&self) -> Option<&drive::Drive> {
+        self.drive.as_ref()
     }
 
     /// Register `path` as a payload file; returns its index for
@@ -475,6 +488,9 @@ impl Disc {
     /// prefix the QEMU block driver strips, as a generated ISO 9660 +
     /// Joliet volume over the tree (`isodir`, doc `m5-dirdisc`).
     pub fn open(path: &Path) -> Result<Disc> {
+        if let Some(name) = path.to_str().filter(|p| p.starts_with(drive::PREFIX)) {
+            return drive::open(name);
+        }
         let path = match path.to_str().and_then(|p| p.strip_prefix("isodir:")) {
             Some(dir) => Path::new(dir),
             None => path,
@@ -588,6 +604,13 @@ impl Disc {
         match e.source {
             Source::Silence => out.fill(0),
             Source::ZeroData => synth_from_cooked(t.mode, lba, &[0u8; 2048], out),
+            Source::Drive => {
+                let d = self.drive.as_ref().ok_or_else(|| Error::Invalid("a drive extent on a disc with no drive".into()))?;
+                match d.read(lba, t.end_lba, t.mode == TrackMode::Audio)? {
+                    drive::Sector::Raw(r) => *out = r,
+                    drive::Sector::Cooked(c) => synth_from_cooked(t.mode, lba, &c, out),
+                }
+            }
             Source::Mem { blob, offset } => {
                 let off = (offset + (lba - e.lba) as u64 * 2048) as usize;
                 let blob = &self.blobs[blob];
@@ -643,7 +666,8 @@ impl Disc {
             return Ok(((SectorKind::Gap, 0, 0), false));
         };
         let e = self.extent_at(t, lba).ok_or_else(|| Error::Invalid(format!("track {} has no extent at LBA {lba}", t.number)))?;
-        let stored_raw = matches!(e.source, Source::File { layout: Layout::Raw2352 | Layout::Raw2352Sub96 | Layout::Mode2_2336, .. });
+        let stored_raw = matches!(e.source, Source::File { layout: Layout::Raw2352 | Layout::Raw2352Sub96 | Layout::Mode2_2336, .. })
+            || (e.source == Source::Drive && self.drive.as_ref().is_some_and(|d| d.raw_reads()));
         if t.mode == TrackMode::Audio || !stored_raw {
             return Ok(((t.mode.default_kind(), t.number, index), false));
         }
@@ -708,6 +732,12 @@ impl Disc {
                         let off = offset + (lba - e.lba) as u64 * 96;
                         if off + 96 <= self.files[file].len {
                             return self.read_payload(file, off, out, false);
+                        }
+                    }
+                    None if e.source == Source::Drive => {
+                        if let Some(inter) = self.drive.as_ref().map(|d| d.read_sub(lba, t.end_lba)).transpose()?.flatten() {
+                            subq::deinterleave(&inter, out);
+                            return Ok(());
                         }
                     }
                     None => {

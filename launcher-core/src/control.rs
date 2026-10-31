@@ -309,6 +309,10 @@ impl Control {
 /// medium change can name it.
 pub const CDROM_ID: &str = "ide1-cd0";
 
+/// The qdev id `bundle::Machine::host_drive_args` gives the passthrough
+/// optical drive (`Machine::host_optical`), for `insert_host_drive`.
+pub const HOST_CDROM_ID: &str = "hostcd";
+
 /// The host path behind a medium name from `query-block`, the inverse of
 /// `disc_library::qemu_medium`.
 fn medium_path(file: &str) -> PathBuf {
@@ -317,6 +321,10 @@ fn medium_path(file: &str) -> PathBuf {
     }
     if let Some(json) = file.strip_prefix("json:") {
         let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
+        // a real drive's medium (`hostcd`'s one option) is its own name
+        if let Some(m) = v["medium"].as_str().or_else(|| v["file"]["medium"].as_str()) {
+            return m.into();
+        }
         let dir = v["dir"].as_str().or_else(|| v["file"]["dir"].as_str());
         let name = v["filename"].as_str().or_else(|| v["file"]["filename"].as_str());
         if let Some(path) = dir.or(name) {
@@ -352,6 +360,25 @@ impl Control {
             serde_json::json!({"id": CDROM_ID, "filename": crate::disc_library::qemu_medium(disc), "force": true}),
         )
         .map(|_| ())
+    }
+
+    /// Put one of this computer's own CD/DVD drives (`host_drives`) in
+    /// the tray of `device` (`CDROM_ID`, or `HOST_CDROM_ID` for the
+    /// passthrough drive), replacing whatever is there.
+    ///
+    /// Doing it again with the same drive is how a disc changed in the
+    /// real drive reaches the guest: the drive is read again, and the
+    /// guest sees the tray open and close on a new disc, exactly as for an
+    /// image swap. `force` as `insert_disc`.
+    ///
+    /// `medium` is `hostcd:<speed>:<device>` for a drive read through
+    /// libdisc (`host_drives::medium`), which QEMU's `hostcd` protocol
+    /// driver opens; or the bare device, which QEMU reads itself.
+    pub fn insert_host_drive(&mut self, device: &str, medium: &str) -> Result<(), String> {
+        // raw either way: over `hostcd`, or over the device itself; never
+        // a probe of a disc for an image format
+        let args = serde_json::json!({"id": device, "filename": medium, "format": "raw", "read-only-mode": "read-only", "force": true});
+        self.execute("blockdev-change-medium", args).map(|_| ())
     }
 
     /// Open the tray and leave it empty.

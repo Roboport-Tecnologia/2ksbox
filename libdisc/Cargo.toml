@@ -8,4 +8,21 @@ description = "Raw optical disc model for the QEMU CD backend: formats, subchann
 [lib]
 crate-type = ["rlib", "staticlib"]
 
+# `capi` is the C API QEMU's block driver links (`libdisc.h`). Off for a
+# Rust user of the model (`launcher-core`, for `drive::query`): the player
+# links launcher-core *and* QEMU, and two copies of `libdisc_open` in one
+# process is one too many.
+[features]
+default = ["capi"]
+capi = []
+
+[[bin]]
+name = "discx"
+required-features = ["capi"]
+
 [dependencies]
+
+# `drive::win` also compiles, unlinked, with `--cfg libdisc_wincheck` on a
+# host that is not Windows: how that module is type-checked away from a PC.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(libdisc_wincheck)'] }

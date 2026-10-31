@@ -91,3 +91,48 @@ that won't run in a DOS box. Choose it from the `SETUP` menu.
 4. Before you play, read [3D games](../3d/) if it's a 3D game.
 
 </Steps>
+
+## Use this computer's own CD or DVD drive
+
+A machine can read real discs in this computer's drive.
+
+**As a second CD drive.** In the machine's **Settings**, on the
+**Storage** page, pick the drive in **Optical drive**. The machine gets
+a second CD-ROM drive with the real disc in it, next to the usual **CD
+in drive**. Windows 95, 98 and XP and DOS find it by themselves. The
+picker beside it sets the **speed**: **Automatic** reads as fast as the
+drive can (it shows the drive's top speed when the drive reports it),
+and a lower speed is quieter and reads scratched discs more reliably.
+Press **Refresh** after plugging a drive in or putting a disc in. A
+machine whose drive isn't connected refuses to start and says so.
+
+**In the machine's own drive, while it runs.** In the player,
+*Machine* > *Disc* lists this computer's drives under your discs, marked
+*(real drive)*. Choose one and it goes in the machine's CD drive, as a
+disc image would. Choose a disc image or **Eject** to take it out again.
+**Look for Drives Again** finds a drive plugged in after the machine
+started.
+
+**Changing discs.** When a game asks for the next disc, put it in the
+real drive, then choose **Re-read Real Drive** (or **Re-read Second CD
+Drive** for the drive on the Storage page) in *Machine* > *Disc*. The
+game sees the disc change.
+
+### CD audio and copy protection
+
+2ksbox reads a real disc the way a ripping program does, so CD music,
+every track and copy protection work as they do from a disc image. That
+needs permission to send the drive commands directly:
+
+- **Windows:** CD audio works as is. Copy-protected discs need 2ksbox
+  run as administrator.
+- **Linux:** join the `cdrom` group (`sudo usermod -aG cdrom $USER`, then
+  sign in again). Without it the machine gets the disc's data only.
+- **macOS:** the machine gets the disc's data only.
+
+The Storage page says which you have under **Optical drive**.
+
+<Aside type="caution">
+The Flatpak's sandbox has no access to drives until you allow it once:
+`flatpak override --user --device=all com._2ksbox.Launcher`.
+</Aside>

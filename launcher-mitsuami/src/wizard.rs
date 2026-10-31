@@ -26,6 +26,10 @@ use std::path::PathBuf;
 const LABEL_W: f32 = 180.0;
 /// The pickers' and number boxes' width, so the values line up.
 const FIELD_W: f32 = 260.0;
+/// The Storage page's optical drive row: the drive, its speed and Refresh
+/// on one line, in the width a field and its button take.
+const HOST_DRIVE_W: f32 = 200.0;
+const HOST_SPEED_W: f32 = 130.0;
 /// The window's content, the sidebar beside it. Smaller on macOS (user),
 /// whose sidebar is wider than the other platforms' and whose controls
 /// are more compact.
@@ -730,6 +734,32 @@ fn StoragePage() -> impl View {
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
+            // This computer's own CD/DVD drive, passed through
+            // (`launcher_core::host_drives`), and the speed to read it at,
+            // before Refresh, which rescans for a drive plugged in while
+            // the window is open. The drive picker is narrower than a field
+            // so the three fit the page's width.
+            <Row gap=Spacing::Sm align=Align::Center>
+                <Text width=LABEL_W>"Optical drive"</Text>
+                <Select
+                    label="Optical drive"
+                    width=HOST_DRIVE_W
+                    options=get(wiz, Form::host_optical_labels)
+                    selected=get(wiz, Form::host_optical_index)
+                    @change=move |i| wiz.edit(|f| f.choose_host_optical(i))
+                />
+                <Show when=get(wiz, Form::host_speed_applies)>
+                    <Select
+                        label="Drive speed"
+                        width=HOST_SPEED_W
+                        options=get(wiz, Form::host_speed_labels)
+                        selected=get(wiz, Form::host_speed_index)
+                        @change=move |i| wiz.edit(|f| f.choose_host_speed(i))
+                    />
+                </Show>
+                <Button @click=move || wiz.edit(Form::rescan_host_drives)>"Refresh"</Button>
+            </Row>
+            <Note text=get(wiz, |f| joined(&f.host_optical_notes()))/>
             <Show when=get(wiz, Form::floppy_applies)>
                 <PathField
                     label_width=LABEL_W
