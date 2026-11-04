@@ -35,7 +35,9 @@ The *Disc* menu swaps the disc in the machine's CD drive. See
 | Ctrl+Alt+Shift+S | Save a screenshot of what the window shows, CRT shader included |
 
 Screenshots go to your Pictures folder, in `2ksbox`, numbered
-`2ksbox-0001.png`, `2ksbox-0002.png` and so on.
+`2ksbox-0001.png`, `2ksbox-0002.png` and so on. The Mac App Store
+version saves them to your machines folder instead (Help > Open
+Machines Folder).
 
 ## The mouse
 

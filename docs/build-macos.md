@@ -421,8 +421,10 @@ files the user picks in a panel); everything it starts
 inherits it (`com.apple.security.inherit`), with access to whatever
 the user picked in earlier runs (security-scoped bookmarks, doc 07 "A
 pick outlives the run"; hence `files.bookmarks.app-scope`; and
-`assets.pictures.read-write` for the players' screenshots, which go to
-`~/Pictures/2ksbox`): `qemu-img`
+the players' screenshots go to the machines folder, not
+`~/Pictures/2ksbox`: the launcher sets `PLAYER_SHOT_DIR` to it, and the
+Pictures entitlement is not carried, which App Review asked about on
+2026-11-04): `qemu-img`
 (`app-store-helper.entitlements`), the player with TCG's JIT
 (`app-store-player.entitlements`), and Windows 11 on Arm's player with
 the JIT and HVF (`app-store-hypervisor.entitlements`; Hypervisor.framework

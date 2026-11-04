@@ -403,6 +403,15 @@ pub fn spawn(
             cmd.env("DXVK_LOG_PATH", dir);
         }
     }
+    // In the macOS App Sandbox the player's screenshots go to the machines
+    // folder, which it can already write (the launcher's grant, inherited),
+    // rather than Pictures/2ksbox, which would need the Pictures
+    // entitlement (App Review: no matching use, 2026-11-04). The library
+    // scan only reads folders, so the PNGs beside them are ignored. A
+    // caller's own PLAYER_SHOT_DIR wins.
+    if crate::grants::sandboxed() && std::env::var_os("PLAYER_SHOT_DIR").is_none() {
+        cmd.env("PLAYER_SHOT_DIR", crate::library::default_dir());
+    }
     // Never the windowless launcher's own handles, which may be stale
     // (`console.rs`)
     if !crate::console::inherits_output() {

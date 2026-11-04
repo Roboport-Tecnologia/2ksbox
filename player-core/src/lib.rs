@@ -221,10 +221,11 @@ pub fn shot_path() -> Option<std::path::PathBuf> {
     path
 }
 
-/// The user's Pictures folder: XDG's on Linux, `~/Pictures` on macOS (in
-/// the App Store build's sandbox the container's link to it, opened by
-/// the `assets.pictures.read-write` entitlement), the known folder on
-/// Windows. `~/Pictures` when the platform names none.
+/// The user's Pictures folder: XDG's on Linux, `~/Pictures` on macOS, the
+/// known folder on Windows. `~/Pictures` when the platform names none.
+/// Not in the App Store build's sandbox, which has no Pictures entitlement:
+/// there the launcher sets `PLAYER_SHOT_DIR` to the machines folder
+/// (`launcher_core::player::spawn`).
 fn pictures_dir() -> Option<std::path::PathBuf> {
     if let Some(dirs) = directories::UserDirs::new() {
         if let Some(p) = dirs.picture_dir() {

@@ -20,11 +20,10 @@
   <key>com.apple.security.network.server</key> <true/>
   <!-- Discs, disks and folders the user picks in an open or save panel,
        and keeping them across launches as security-scoped bookmarks
-       (launcher-core/src/grants.rs). -->
+       (launcher-core/src/grants.rs). The screenshots folder is one
+       such pick (launcher-core/src/screenshots.rs), so no Pictures
+       entitlement. -->
   <key>com.apple.security.files.user-selected.read-write</key> <true/>
   <key>com.apple.security.files.bookmarks.app-scope</key> <true/>
-  <!-- The players' screenshots, into ~/Pictures/2ksbox by default
-       (player-core's shot_path); the players inherit this sandbox. -->
-  <key>com.apple.security.assets.pictures.read-write</key> <true/>
 </dict>
 </plist>

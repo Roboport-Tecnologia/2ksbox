@@ -213,7 +213,7 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
 - `Ctrl+Alt+S` writes the guest's own frame (native size, no geometry
   stage, no CRT chain) as `PLAYER_SHOT_DIR/2ksbox-NNNN.png`, or in the
   user's Pictures folder's `2ksbox` when that is unset (doc 03,
-  "Screenshots"). It is evidence of what the
+  "Screenshots"; a sandboxed launcher sets it to the machines folder). It is evidence of what the
   machine rendered, for tests and bug reports. **It is not a picture
   of the product**: a screenshot meant for people (a Store listing,
   Flathub, the README) is the player's window after the shader chain,
