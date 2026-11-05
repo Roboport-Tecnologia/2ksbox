@@ -220,7 +220,11 @@ impl Session {
                 let bucket = *last_seq / every;
                 if bucket != self.shot_bucket {
                     self.shot_bucket = bucket;
-                    gpu.screenshot();
+                    if crate::shot_window() {
+                        gpu.window_shot();
+                    } else {
+                        gpu.screenshot();
+                    }
                 }
             }
         }
@@ -374,7 +378,11 @@ impl Session {
                     let bucket = *last_seq / every;
                     if bucket != self.shot_bucket {
                         self.shot_bucket = bucket;
-                        gpu.screenshot();
+                        if crate::shot_window() {
+                            gpu.window_shot();
+                        } else {
+                            gpu.screenshot();
+                        }
                     }
                 }
             }

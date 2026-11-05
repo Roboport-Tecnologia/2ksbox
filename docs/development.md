@@ -221,8 +221,8 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   (`Ctrl+Alt+Shift+S`, or the OS's own screenshot); a guest frame scaled up shows something the
   box never draws (user, 2026-09-25).
 - `Ctrl+Alt+Shift+S` writes that picture: the window's content after
-  the geometry stage and the CRT chain, at the window's size, black
-  bars included, to the same numbered files. It draws the chain's last
+  the geometry stage and the CRT chain, cropped to the picture (no
+  black bars), to the same numbered files. It draws the chain's last
   output again into a texture of the swapchain's format with the
   blit the window uses (inside the viewport it equals the mode sweep's
   chain dump, 0 pixels differ); the close prompt is left out.
@@ -230,6 +230,8 @@ player [--shader <preset.slangp>] [--shader-params <k=v,...>]
   frames, driven from the wake path so a window behind a terminal still
   shoots. This is how a headless run sees a 3D frame; a QMP screendump
   shows the VGA surface, frozen while the 3D device presents.
+  `PLAYER_SHOT_WINDOW=1` makes those shots `Ctrl+Alt+Shift+S`'s instead
+  (the window's picture, cropped), so a script can check that one too.
 - `PLAYER_REFRESH_MS=16` (default) is the guest frame pull interval
   (QEMU's own default is 30).
 - `PLAYER_FLUSH=0` publishes a device's own flushes (virtio-gpu's

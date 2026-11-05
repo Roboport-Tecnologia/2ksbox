@@ -35,7 +35,8 @@ started, which devices it set up, errors); they are for troubleshooting,
 are never sent anywhere, and you can delete them at any time.
 
 Screenshots you take in the player (Ctrl+Alt+S, Ctrl+Alt+Shift+S) are
-saved in your Pictures folder, in `2ksbox`.
+saved in your Pictures folder, in `2ksbox` (the Mac App Store version
+saves them in your machines folder).
 
 Uninstalling the Microsoft Store package leaves that folder in place,
 so your machines survive a reinstall. Delete the folder yourself if you

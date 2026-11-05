@@ -32,7 +32,7 @@ The *Disc* menu swaps the disc in the machine's CD drive. See
 | Ctrl+Alt+1 to 4 | Scale: 1x to 4x |
 | Ctrl+Alt+Shift+0 | Fit the window to the picture |
 | Ctrl+Alt+S | Save a screenshot of the machine's raw display output |
-| Ctrl+Alt+Shift+S | Save a screenshot of what the window shows, CRT shader included |
+| Ctrl+Alt+Shift+S | Save a screenshot of the picture as the window shows it, CRT shader included, without the black bars around it |
 
 Screenshots go to your Pictures folder, in `2ksbox`, numbered
 `2ksbox-0001.png`, `2ksbox-0002.png` and so on. The Mac App Store

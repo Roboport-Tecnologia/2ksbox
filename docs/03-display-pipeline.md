@@ -204,8 +204,9 @@ shot there panicked in the key handler and aborted the player (both
 players, 2026-10-07). A shot that cannot be written is a line on stderr.
 **Ctrl+Alt+Shift+S** shoots what the window shows instead: the chain's
 last output drawn again, with the window's own blit, into a texture of
-the swapchain's size and format, black bars included and the close
-prompt left out. Drawing it again rather than running the chain again
+the swapchain's size and format, then cropped to the viewport (what of
+it the window shows), so without the black bars (user, 2026-11-05),
+and the close prompt left out. Drawing it again rather than running the chain again
 keeps an animated preset from being stepped by a shot. `PLAYER_DUMP_OUT`
 writes the chain's output alone, at the viewport's size.
 

@@ -551,8 +551,11 @@ tracks, plus the items no track owns.
     found no use for `assets.pictures.read-write` (2026-11-04): in the
     sandbox the players' screenshots now go to the machines folder,
     which the player can already write (`player::spawn` sets
-    `PLAYER_SHOT_DIR`; user), and the entitlement is gone. Left: every
-    gate again from that commit, then the tag.
+    `PLAYER_SHOT_DIR`; user), and the entitlement is gone; the Air's gate
+    passed from `557a0cf2`. Save Screenshot as Shown now crops to the
+    picture, without the black bars (user, 2026-11-05;
+    `PLAYER_SHOT_WINDOW=1` takes it from a script). Left: every gate
+    again from that commit, then the tag.
 13. **The user manual** (`manual/`). Screenshots of the real windows,
     taken through `LAUNCHER_SHOT` and the player's headless dump so they
     never go stale; the store links once the listings are up.

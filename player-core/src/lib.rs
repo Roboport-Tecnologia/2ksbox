@@ -237,6 +237,14 @@ fn pictures_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// `PLAYER_SHOT_WINDOW=1`: `PLAYER_SHOT_EVERY`'s shots are the window's
+/// (`Gpu::window_shot`) rather than the guest frame's, for checking that
+/// shot from a script, which cannot press its keys.
+pub(crate) fn shot_window() -> bool {
+    static WINDOW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *WINDOW.get_or_init(|| std::env::var_os("PLAYER_SHOT_WINDOW").is_some_and(|v| v == "1"))
+}
+
 /// `PLAYER_SHOT_EVERY=<n>`: shoot the guest's own frame every n presented
 /// guest frames (see `Gpu::screenshot`). Unset or 0 = never.
 pub(crate) fn shot_every() -> Option<u64> {

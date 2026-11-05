@@ -770,9 +770,10 @@ impl Gpu {
     }
 
     /// Write what the window shows as a PNG: the picture after the geometry
-    /// stage and the CRT chain, at the window's own size, black bars
-    /// included. The chain's last output is drawn again rather than the
-    /// chain run again, so an animated preset is not stepped by a shot.
+    /// stage and the CRT chain, cropped to the picture (the viewport, and of
+    /// it what the window shows), so no black bars (user, 2026-11-05). The
+    /// chain's last output is drawn again rather than the chain run again,
+    /// so an animated preset is not stepped by a shot.
     /// Ctrl+Alt+Shift+S; `screenshot` is the guest's own frame. Returns
     /// where it went.
     pub fn window_shot(&self) -> Option<std::path::PathBuf> {
@@ -806,6 +807,7 @@ impl Gpu {
         self.draw_picture(&mut encoder, &view);
         self.queue.submit(Some(encoder.finish()));
         let (w, h, rgb) = shader_chain::read_texture(&self.device, &self.queue, &tex);
+        let (w, h, rgb) = crop_rgb(w, h, &rgb, self.viewport());
         let path = shot_path()?;
         if let Err(e) = shader_chain::write_png(&path.to_string_lossy(), w, h, &rgb) {
             eprintln!("[shot] {}: {e}", path.display());
@@ -1302,4 +1304,24 @@ pub(crate) fn present_guest_frame(
         }
         f.published
     })
+}
+
+/// The part of a `w`x`h` RGB picture inside `viewport` (x, y, width,
+/// height, in pixels, possibly fractional and past the edges when the
+/// picture overflows the window), whole pixels only. The picture whole
+/// when that leaves nothing.
+fn crop_rgb(w: u32, h: u32, rgb: &[u8], viewport: (f32, f32, f32, f32)) -> (u32, u32, Vec<u8>) {
+    let (vx, vy, vw, vh) = viewport;
+    let clamp = |v: f32, max: u32| (v.round().max(0.0) as u32).min(max);
+    let (x0, y0) = (clamp(vx, w), clamp(vy, h));
+    let (x1, y1) = (clamp(vx + vw, w), clamp(vy + vh, h));
+    if x1 <= x0 || y1 <= y0 {
+        return (w, h, rgb.to_vec());
+    }
+    let mut out = Vec::with_capacity(((x1 - x0) * (y1 - y0) * 3) as usize);
+    for y in y0..y1 {
+        let row = (y * w * 3) as usize;
+        out.extend_from_slice(&rgb[row + (x0 * 3) as usize..row + (x1 * 3) as usize]);
+    }
+    (x1 - x0, y1 - y0, out)
 }
