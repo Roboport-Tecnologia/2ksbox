@@ -984,6 +984,7 @@ fn selftest(dir: &Path) -> i32 {
     ck.report("read-cd-fill", check_read_cd_fill(dir));
     ck.report("dirdisc", check_dirdisc(dir));
     ck.report("panic-safety", check_panic_safety(dir));
+    ck.report("hostcd", check_hostcd(dir));
     println!("{} passed, {} failed", ck.passes, ck.fails);
     if ck.fails > 0 {
         1
@@ -1846,6 +1847,73 @@ fn check_dirdisc(dir: &Path) -> Result<(), String> {
             Err(e) => return Err(format!("symlink loop: {e}")),
             Ok(_) => return Err("a symlink loop was walked".into()),
         }
+    }
+    Ok(())
+}
+
+/// A real drive (`hostcd:`, `libdisc::drive`) must look to the guest
+/// exactly like the image the disc was dumped to. With no drive here, the
+/// drive is `sim:`, the image answering a drive's own SCSI commands, so
+/// everything between them is under test: the full TOC turned back into
+/// sessions and tracks, pregaps found from the subchannel, the catalog and
+/// ISRCs, raw and cooked reads through the read-ahead, a bad sector
+/// failing alone. Compared on what a guest can ask: every TOC, the codes,
+/// and for every sector READ CD raw with subchannel, READ CD user data
+/// and READ(10), as `mmc` and the cooked path answer them.
+fn check_hostcd(dir: &Path) -> Result<(), String> {
+    use libdisc::mmc;
+    for name in ["mixed.ccd", "mixed.cue", "lec.cue", "nosub.ccd"] {
+        let image = dir.join(name);
+        let a = Disc::open(&image).map_err(|e| format!("{name}: {e}"))?;
+        let medium = libdisc::drive::medium(&format!("sim:{}", image.display()), libdisc::drive::Speed::Max);
+        let b = Disc::open(Path::new(&medium)).map_err(|e| format!("{medium}: {e}"))?;
+        if a.sector_count() != b.sector_count() {
+            return Err(format!("{name}: {} sectors, {} through the drive", a.sector_count(), b.sector_count()));
+        }
+        let (mut x, mut y) = (Vec::new(), Vec::new());
+        for (format, msf, start) in [(0, false, 1), (0, true, 1), (1, false, 0), (2, true, 1)] {
+            let ra = mmc::read_toc(&a, format, msf, start, &mut x).map(|_| x.clone()).map_err(|e| e.to_string());
+            let rb = mmc::read_toc(&b, format, msf, start, &mut y).map(|_| y.clone()).map_err(|e| e.to_string());
+            if ra != rb {
+                return Err(format!("{name}: READ TOC format {format} msf {msf}: {ra:02x?} vs {rb:02x?}"));
+            }
+        }
+        for (format, track) in [(2u8, 0u8)].into_iter().chain((a.first_track()..=a.last_track()).map(|t| (3, t))) {
+            let ra = mmc::read_subchannel(&a, 0, false, true, format, track, 0x15, &mut x).map(|_| x.clone()).map_err(|e| e.to_string());
+            let rb = mmc::read_subchannel(&b, 0, false, true, format, track, 0x15, &mut y).map(|_| y.clone()).map_err(|e| e.to_string());
+            if ra != rb {
+                return Err(format!("{name}: READ SUB-CHANNEL format {format} track {track}: {ra:02x?} vs {rb:02x?}"));
+            }
+        }
+        let (mut sa, mut sb) = (vec![0u8; 2448], vec![0u8; 2448]);
+        for lba in 0..a.sector_count() as i32 {
+            for (byte9, byte10) in [(0xF8, 1), (0x10, 0), (0xF8, 2)] {
+                let ra = mmc::read_cd_sector(&a, lba, 0, byte9, byte10, &mut sa).map(|n| sa[..n].to_vec()).map_err(|e| e.to_string());
+                let rb = mmc::read_cd_sector(&b, lba, 0, byte9, byte10, &mut sb).map(|n| sb[..n].to_vec()).map_err(|e| e.to_string());
+                if ra != rb {
+                    let show = |r: &Result<Vec<u8>, String>| r.as_ref().map(|v| format!("{} bytes", v.len())).unwrap_or_else(|e| e.clone());
+                    return Err(format!("{name}: LBA {lba}: READ CD {byte9:#x}/{byte10}: {} vs {}", show(&ra), show(&rb)));
+                }
+            }
+            let (mut ca, mut cb) = ([0u8; 2048], [0u8; 2048]);
+            let ra = a.read_cooked(lba, &mut ca).map(|_| ca).map_err(|e| e.to_string());
+            let rb = b.read_cooked(lba, &mut cb).map(|_| cb).map_err(|e| e.to_string());
+            if ra != rb {
+                return Err(format!("{name}: LBA {lba}: READ(10) differs ({:?} vs {:?})", ra.err(), rb.err()));
+            }
+        }
+        let d = b.drive().ok_or("no drive behind a hostcd: disc")?;
+        if !d.raw_reads() || !d.subchannel() {
+            return Err(format!("{name}: the sim drive reads raw and subchannel, the disc says {d:?}"));
+        }
+    }
+    let speeds = libdisc::drive::speed_choices(Some(40 * libdisc::drive::CD_1X_KBPS));
+    if speeds.first() != Some(&40) || speeds.last() != Some(&1) {
+        return Err(format!("speed choices for a 40x drive: {speeds:?}"));
+    }
+    match libdisc::drive::parse_medium("hostcd:8x:\\\\.\\D:") {
+        Some((libdisc::drive::Speed::Times(8), "\\\\.\\D:")) => {}
+        other => return Err(format!("hostcd:8x:\\\\.\\D: parsed as {other:?}")),
     }
     Ok(())
 }

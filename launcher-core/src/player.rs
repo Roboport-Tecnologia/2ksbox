@@ -369,6 +369,9 @@ pub fn spawn(
     if let Some(why) = cannot_start(machine) {
         return Err(std::io::Error::other(why));
     }
+    if let Some(why) = machine.missing_host_drive() {
+        return Err(std::io::Error::other(why));
+    }
     prepare(machine)?;
     let mut args = machine.qemu_args(&pc_bios_dir(), shelf);
     if let Some(extra) = qmp_socket.and_then(crate::control::qmp_args) {

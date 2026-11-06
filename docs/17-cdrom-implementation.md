@@ -1022,3 +1022,67 @@ the guest). The `msf` selftest pins both ends of the clamp.
 - The stale-file rule is checked host-side only; in a guest it would
   race XP's read-ahead. There is no MSCDEX leg (the DOS tools' FreeDOS
   floppy has no CD driver); bsdtar with Joliet off stands in.
+
+## 9. A real drive: `hostcd`
+
+`hostcd:<speed>:<device>` (`libdisc/src/drive.rs`) is one of the host's
+own CD/DVD drives as a disc: `max` or `<n>x`, then `/dev/sr0` or
+`\\.\D:`. The launcher names it (`launcher-core/src/host_drives.rs`): the
+machine's second CD drive (`Machine::host_optical`, `host_optical_speed`)
+or the first, from the player's Disc menu (`Shelf::insert_host`).
+
+### Decisions
+
+1. **The drive is read the way a dumper reads it, into the image model.**
+   READ TOC format 2 is kept verbatim as `raw_toc`, as a CloneCD dump's
+   `[Entry]` records are; tracks close at the next one's index 1 (the
+   last at its session's A2); every sector is READ CD with byte 9 = 0xF8
+   and raw P..W; a track's mode comes from its first sector's header.
+   `mmc` and `atapi.c` then answer from it as from an image, so nothing
+   downstream knows.
+2. **Pregaps come from the subchannel.** The TOC gives index 1 only.
+   Where the sector before a track's index 1 has Q = (that track, index
+   0), the start of the run is found by bisection (at most ten seconds
+   back), and those sectors move into the track as index 0. Without it a
+   first audio track's pregap reads as the end of the data track.
+3. **MCN and ISRCs** are READ SUB-CHANNEL formats 2 and 3 at open.
+4. **Reads go through a one-chunk read-ahead** (24 raw or 32 cooked
+   sectors, under 64 KiB, never across a track end). A failed chunk is
+   retried sector by sector, so an unreadable sector fails alone, as the
+   drive said, and a protection's band read sees exactly that.
+5. **Three transports.** SCSI pass-through (`SG_IO`; Windows' SPTI,
+   which most installs allow an administrator only) does all of the
+   above. Without it, Windows' CD-ROM IOCTLs (`READ_TOC_EX`, `RAW_READ`
+   CDDA, `ReadFile`) give the full TOC, audio and cooked data; data
+   sectors' raw bytes and the subchannel are then synthesized, as for an
+   `.iso`. `sim:<image>` answers the same SCSI commands from `mmc`, for
+   the tests. Elsewhere (macOS) `query` fails and the launcher hands QEMU
+   the bare device instead (`host_cdrom` / `host_device`, data only).
+6. **A DVD** has no full TOC and refuses READ CD: format 0, READ
+   CAPACITY for the lead-out, READ(12) cooked.
+7. **Speed** is SET CD SPEED at open (0xFFFF = the drive's fastest), in
+   CD x of 176 kB/s; the picker offers the CD speeds up to what MODE
+   SENSE page 2A reports.
+8. **A disc change is a re-open** (`blockdev-change-medium` with the
+   same name, the Disc menu's "Re-read"): the model is a snapshot of the
+   disc, as an image's is of its file.
+9. **QEMU's side is a protocol driver**, `hostcd` in `cdimage.c`, shaped
+   as `isodir` is and for the same reason: a device is not an image to
+   probe. Its one option, `medium`, is the whole name, which libdisc
+   parses. `cdimage_node` accepts it, so `cdimage_disc` reaches `atapi.c`.
+10. **The launcher links libdisc without its C API** (feature `capi`, on
+    by default for QEMU's staticlib): the player links launcher-core and
+    QEMU, and two copies of `libdisc_open` in one process is one too many.
+
+### Tests
+
+- `discx selftest`'s `hostcd` check: `mixed.ccd`, `mixed.cue`, `lec.cue`
+  and `nosub.ccd` through `hostcd:max:sim:<image>`, compared with the
+  image on every TOC format, the MCN and each ISRC, and for every sector
+  READ CD raw with subchannel, user data, formatted Q and READ(10).
+- `scripts/test.sh`'s `cdimage` check opens the same through qemu-img and
+  qemu-io: the size, the data track byte for byte against `plain.iso`,
+  and the flipped sector failing alone.
+- `drive::win` compiles on Linux with `RUSTFLAGS="--cfg libdisc_wincheck"`
+  (unlinked), the type check of the Windows transports away from a PC.
+- Not yet run against a real drive.

@@ -28,6 +28,7 @@ use crate::bundle::{
 };
 use crate::disc_library::DISC_FILTER;
 use crate::shader_library::{self, ProfileEntry};
+use crate::host_drives::{self, HostDrive};
 use crate::{host_gpu, library, player};
 use std::path::{Path, PathBuf};
 
@@ -146,6 +147,20 @@ pub struct Form {
     pub name: String,
     /// A floppy image in A:, or empty for an empty drive.
     pub floppy: String,
+    /// This computer's own CD/DVD drive passed through as a second CD-ROM
+    /// drive (`Machine::host_optical`), by device path; `None` for none.
+    /// Private: it is picked from `host_optical_labels`, a list that
+    /// changes as drives come and go.
+    host_optical: Option<String>,
+    /// Its speed in CD x (`Machine::host_optical_speed`); `None` for the
+    /// drive's fastest.
+    host_optical_speed: Option<u16>,
+    /// The drives the host has, scanned when the form opens and on
+    /// Refresh (`rescan_host_drives`), never per frame.
+    host_opticals: Vec<HostDrive>,
+    /// How the chosen drive can be read and its fastest speed in CD x
+    /// (`host_drives::reach`), asked when it is chosen and on Refresh.
+    host_reach: Option<(host_drives::Reach, Option<u16>)>,
     pub boot: Boot,
     /// The display adapter, on a family that has a choice of one
     /// (`video_applies`). Private, unlike `boot`, because it is one of
@@ -295,6 +310,10 @@ impl Default for Form {
             section: Section::General,
             name: String::new(),
             floppy: String::new(),
+            host_optical: None,
+            host_optical_speed: None,
+            host_opticals: host_drives::optical_drives(),
+            host_reach: None,
             boot: Boot::default(),
             video: bundle::default_video(Family::Win98).unwrap_or(Video::Std),
             video_chosen: false,
@@ -383,6 +402,9 @@ impl Form {
             cpu_speed_chosen: true,
             optimizations: machine.optimizations.clone(),
             floppy: machine.floppy.as_ref().map(|f| f.display().to_string()).unwrap_or_default(),
+            host_optical: machine.host_optical.clone().filter(|d| !d.is_empty()),
+            host_optical_speed: machine.host_optical_speed,
+            host_reach: machine.host_optical.as_deref().filter(|d| !d.is_empty()).map(host_drives::reach),
             boot: machine.effective_boot(),
             // An existing machine's adapter, card, MIDI port and pad are
             // chosen values for the same reason its memory is: whatever
@@ -1657,6 +1679,116 @@ impl Form {
         })
     }
 
+    /// Look for drives again: a USB DVD drive plugged in while the form
+    /// is open, a drive that went away, a disc put in.
+    pub fn rescan_host_drives(&mut self) {
+        self.host_opticals = host_drives::optical_drives();
+        self.host_reach = self.host_optical.as_deref().map(host_drives::reach);
+    }
+
+    /// The "Optical drive" picker's rows: None, then each drive the host
+    /// has, then the machine's own drive if it is not connected now, so
+    /// opening a machine whose drive is unplugged does not quietly turn
+    /// it off.
+    pub fn host_optical_labels(&self) -> Vec<String> {
+        host_drive_labels(&self.host_opticals, self.host_optical.as_deref())
+    }
+
+    pub fn host_optical_index(&self) -> usize {
+        host_drive_index(&self.host_opticals, self.host_optical.as_deref())
+    }
+
+    /// By the row of `host_optical_labels`. A different drive starts at
+    /// its fastest: a speed picked for the old one may be beyond it.
+    pub fn choose_host_optical(&mut self, index: usize) {
+        let chosen = host_drive_at(&self.host_opticals, self.host_optical.as_deref(), index);
+        if chosen != self.host_optical {
+            self.host_optical_speed = None;
+            self.host_reach = chosen.as_deref().map(host_drives::reach);
+        }
+        self.host_optical = chosen;
+    }
+
+    /// Whether the speed picker is shown: with a drive picked that libdisc
+    /// reads (a data-only drive is QEMU's to read, at its own speed).
+    pub fn host_speed_applies(&self) -> bool {
+        self.host_optical.is_some() && self.host_reach.is_none_or(|r| r.0 != host_drives::Reach::DataOnly)
+    }
+
+    /// The speed picker's rows: "Automatic", naming the drive's fastest
+    /// when it says, then the CD speeds up to it, then the machine's own
+    /// speed if the list lacks it.
+    pub fn host_speed_labels(&self) -> Vec<String> {
+        let max = self.host_reach.and_then(|r| r.1);
+        let mut out = vec![match max {
+            Some(x) => format!("Automatic ({x}x)"),
+            None => "Automatic".to_string(),
+        }];
+        let choices = host_drives::speed_choices(max);
+        out.extend(choices.iter().map(|x| format!("{x}x")));
+        if let Some(x) = self.host_optical_speed.filter(|x| !choices.contains(x)) {
+            out.push(format!("{x}x"));
+        }
+        out
+    }
+
+    pub fn host_speed_index(&self) -> usize {
+        let choices = host_drives::speed_choices(self.host_reach.and_then(|r| r.1));
+        match self.host_optical_speed {
+            None => 0,
+            Some(x) => choices.iter().position(|&c| c == x).map_or(choices.len() + 1, |i| i + 1),
+        }
+    }
+
+    /// By the row of `host_speed_labels`.
+    pub fn choose_host_speed(&mut self, index: usize) {
+        let choices = host_drives::speed_choices(self.host_reach.and_then(|r| r.1));
+        self.host_optical_speed = match index {
+            0 => None,
+            i if i <= choices.len() => Some(choices[i - 1]),
+            _ => self.host_optical_speed,
+        };
+    }
+
+    /// Under the "Optical drive" picker: what the machine gets from the
+    /// drive, how to change discs, and what this computer asks first.
+    pub fn host_optical_notes(&self) -> Vec<&'static str> {
+        let mut notes = Vec::new();
+        let Some((reach, _)) = self.host_optical.as_ref().and(self.host_reach) else {
+            notes.push(if self.host_opticals.is_empty() {
+                "No CD or DVD drive found on this computer. Connect one and press Refresh."
+            } else {
+                "A real CD or DVD drive of this computer's, as a second CD-ROM drive in the machine. \
+                 Windows 95, 98 and XP and DOS find it by themselves."
+            });
+            notes.extend(sandbox_note());
+            return notes;
+        };
+        notes.push(match reach {
+            host_drives::Reach::Full => {
+                "The machine reads the disc the way a ripping program does: data, CD audio and copy \
+                 protection all work."
+            }
+            host_drives::Reach::Audio => {
+                "Data and CD audio work. For copy-protected discs, run 2ksbox as administrator: Windows \
+                 lets only an administrator read a disc the way protection checks it."
+            }
+            host_drives::Reach::DataOnly => data_only_note(),
+        });
+        notes.push(
+            "After changing the disc in the drive, choose Machine > Disc > Re-read Second CD Drive in the \
+             running machine.",
+        );
+        if reach != host_drives::Reach::DataOnly {
+            notes.push(
+                "Automatic lets the drive read as fast as it can. A slower speed is quieter, and reads \
+                 scratched discs more reliably.",
+            );
+        }
+        notes.extend(sandbox_note());
+        notes
+    }
+
     /// Whether the boot picker is a question: a modern machine's UEFI
     /// keeps its own boot order (Windows' boot manager, then the disc
     /// when the disk is empty), which a BIOS boot order does not reach.
@@ -1699,6 +1831,8 @@ impl Form {
                 shader_off: false,
                 shader: edit.shader.clone(),
                 floppy: None,
+                host_optical: None,
+                host_optical_speed: None,
                 boot: None,
                 cpu_speed: None,
                 video: None,
@@ -1770,6 +1904,9 @@ impl Form {
         // (`bundle::pad_choices`), so a family switch must not keep one.
         machine.pad = bundle::pad_choices(self.family).contains(&self.pad).then_some(self.pad);
         machine.floppy = Some(self.floppy.trim()).filter(|f| !f.is_empty()).map(PathBuf::from);
+        machine.host_optical = self.host_optical.clone();
+        // only meaningful with a drive; not kept on a machine without one
+        machine.host_optical_speed = self.host_optical.as_ref().and(self.host_optical_speed);
         // Only where the family offers them (Windows 11, M23).
         let modern = self.family.is_modern();
         machine.shared_folder =
@@ -1872,4 +2009,50 @@ impl Form {
         machine.save(&bundle_path)?;
         Ok(bundle_path)
     }
+}
+
+/// `Form::host_optical_labels`.
+fn host_drive_labels(found: &[HostDrive], chosen: Option<&str>) -> Vec<String> {
+    let mut out = vec!["None".to_string()];
+    out.extend(found.iter().map(|d| d.label.clone()));
+    if let Some(c) = chosen.filter(|c| !found.iter().any(|d| d.path == *c)) {
+        out.push(format!("{c} (not connected)"));
+    }
+    out
+}
+
+fn host_drive_index(found: &[HostDrive], chosen: Option<&str>) -> usize {
+    match chosen {
+        None => 0,
+        Some(c) => found.iter().position(|d| d.path == c).map_or(found.len() + 1, |i| i + 1),
+    }
+}
+
+fn host_drive_at(found: &[HostDrive], chosen: Option<&str>, index: usize) -> Option<String> {
+    match index {
+        0 => None,
+        i if i <= found.len() => Some(found[i - 1].path.clone()),
+        _ => chosen.map(str::to_string),
+    }
+}
+
+/// Why a drive is read data-only (`host_drives::Reach::DataOnly`), on
+/// this platform.
+fn data_only_note() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "On a Mac the machine gets the disc's data only: no CD audio or copy protection."
+    } else if cfg!(target_os = "linux") {
+        "Only the disc's data reaches the machine: you can't send this drive commands. For CD audio and \
+         copy protection, join the \u{201c}cdrom\u{201d} group (sudo usermod -aG cdrom $USER), then sign in again."
+    } else {
+        "Only the disc's data reaches the machine: Windows didn't let 2ksbox read this drive directly."
+    }
+}
+
+/// The Flatpak's sandbox has no drives until allowed.
+fn sandbox_note() -> Option<&'static str> {
+    host_drives::in_flatpak().then_some(
+        "The Flatpak's sandbox has no access to drives. Allow it once in a terminal: \
+         flatpak override --user --device=all com._2ksbox.Launcher",
+    )
 }

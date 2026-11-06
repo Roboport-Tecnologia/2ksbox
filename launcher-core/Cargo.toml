@@ -22,6 +22,10 @@ download = ["dep:ureq"]
 # dma-buf import.
 ash = "0.38"
 directories = "6.0.0"
+# `drive::query` and friends, for the Storage page's optical drive: how a
+# real drive can be read and how fast it goes (`host_drives`). Without the
+# C API: the player links this crate and QEMU, which carries its own.
+libdisc = { path = "../libdisc", default-features = false }
 # `getxattr`, for the document portal's host-path attribute on a file a
 # sandboxed dialog picked (`browse::picked`).
 libc = "0.2"
@@ -61,4 +65,7 @@ pollster = "1"
 # version is already in the lock through wgpu's tree. `CopyFileExW` is
 # the clone's copy, for its progress callback (`clone_machine.rs`).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_Storage_FileSystem"] }
+# `host_drives.rs` lists the host's optical drives and USB disks with
+# `GetDriveTypeW` and `DeviceIoControl` (`Win32_Foundation`, `Win32_System_IO`;
+# `CreateFileW` is behind `Win32_Security`).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }
