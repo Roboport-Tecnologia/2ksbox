@@ -330,6 +330,17 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
                     path: Some(machine.disk.clone()),
                 },
                 file("CD in drive", machine.boot_disc()),
+                (
+                    "Real CD/DVD drive",
+                    match &machine.host_drive {
+                        Some(dev) => crate::host_drive::list()
+                            .into_iter()
+                            .find(|d| &d.path == dev)
+                            .map_or_else(|| format!("{} (not connected)", dev.display()), |d| d.name),
+                        None => "None".to_string(),
+                    },
+                )
+                    .into(),
                 file("Floppy", machine.floppy.as_ref()),
                 ("Boot from", machine.effective_boot().label().to_owned()).into(),
             ],

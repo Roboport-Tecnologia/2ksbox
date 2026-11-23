@@ -1027,12 +1027,14 @@ the guest). The `msf` selftest pins both ends of the clamp.
 
 ## 9. A host's own drive: `hostcd`
 
-`hostcd:/dev/sr0` puts the disc in the host's real optical drive in the
-guest's drive (track M5h, `docs/tracks/m5-hostcd.md`). libdisc builds
+`hostcd:/dev/sr0` puts the disc in the host's real optical drive in a
+guest drive (track M5h, `docs/tracks/m5-hostcd.md`). The launcher makes
+it a second CD-ROM, apart from the drive the shelf fills
+(`Machine::host_drive`). libdisc builds
 the model from the drive's TOC, like a CloneCD image's from its entries,
 and reads each sector from the drive when the guest asks for it, through
 SCSI pass-through (`libdisc/src/drive.rs`). Everything above the model
-is unchanged: the responders, patch 51, CD-DA, the shelf.
+is unchanged: the responders, patch 51, CD-DA.
 
 ### What comes from the drive
 
@@ -1089,8 +1091,7 @@ needs:
   `change_media` of its own, so the walk goes through BDS parents). A
   swap is out, then in, as `blockdev-change-medium` does it: the guest
   sees its tray open, then NOT READY, then UNIT ATTENTION, and QEMU
-  emits `DEVICE_TRAY_MOVED`, which the launcher's shelf and the player's
-  Disc menu follow. A disc that does not open (a blank) is warned about
+  emits `DEVICE_TRAY_MOVED`. A disc that does not open (a blank) is warned about
   once and retried only after it comes out.
 - **The guest's eject opens the real tray** (`bdrv_co_eject`,
   `libdisc_drive_eject`). The guest's tray lock is not passed on.

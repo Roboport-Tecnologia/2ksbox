@@ -28,7 +28,7 @@ use crate::bundle::{
 };
 use crate::disc_library::DISC_FILTER;
 use crate::shader_library::{self, ProfileEntry};
-use crate::{host_gpu, library, player};
+use crate::{host_drive, host_gpu, library, player};
 use std::path::{Path, PathBuf};
 
 /// The shader picker's first row, and the "Shader" column's word for a
@@ -272,6 +272,10 @@ pub struct Form {
     /// which keeps the "only the difference is stored" rule
     /// (`Optimizations::set`) out of the front ends.
     optimizations: Optimizations,
+    /// The host's own drive as a second CD-ROM (`Machine::host_drive`),
+    /// and the drives this host has, read once when the form opens.
+    host_drive: Option<PathBuf>,
+    host_drives: Vec<host_drive::HostDrive>,
 
     /// Whether this host can give a guest KVM. Read once when the form
     /// opens rather than per frame: it opens `/dev/kvm` to find out (a
@@ -334,6 +338,8 @@ impl Default for Form {
             cpu_speed: bundle::default_cpu_speed(Family::Win98),
             cpu_speed_chosen: false,
             optimizations: Optimizations::default(),
+            host_drive: None,
+            host_drives: host_drive::list(),
             have_kvm: player::hw_accel_available(),
             host_gpu: host_gpu::cached().gpu,
             editing: None,
@@ -382,6 +388,7 @@ impl Form {
             cpu_speed: machine.effective_cpu_speed(),
             cpu_speed_chosen: true,
             optimizations: machine.optimizations.clone(),
+            host_drive: machine.host_drive.clone(),
             floppy: machine.floppy.as_ref().map(|f| f.display().to_string()).unwrap_or_default(),
             boot: machine.effective_boot(),
             // An existing machine's adapter, card, MIDI port and pad are
@@ -923,6 +930,59 @@ impl Form {
         } else {
             &["Copy and paste stay inside the machine."]
         }
+    }
+
+    /// Whether the real-drive picker is: a host with a drive, or a machine
+    /// that names one this host does not have at the moment (unplugged).
+    pub fn host_drive_applies(&self) -> bool {
+        !self.host_drives.is_empty() || self.host_drive.is_some()
+    }
+
+    /// The picker's rows: None, then each of the host's drives by model,
+    /// then the machine's own if it is not plugged in now.
+    pub fn host_drive_labels(&self) -> Vec<String> {
+        let mut labels = vec!["None".to_string()];
+        labels.extend(self.host_drives.iter().map(|d| d.name.clone()));
+        if let Some(dev) = self.host_drive.as_ref().filter(|p| !self.host_drives.iter().any(|d| &d.path == *p)) {
+            labels.push(format!("{} (not connected)", dev.display()));
+        }
+        labels
+    }
+
+    pub fn host_drive_index(&self) -> usize {
+        match &self.host_drive {
+            None => 0,
+            Some(p) => self.host_drives.iter().position(|d| &d.path == p).unwrap_or(self.host_drives.len()) + 1,
+        }
+    }
+
+    /// Row `index` of `host_drive_labels`. The last row of an unplugged
+    /// drive keeps it.
+    pub fn choose_host_drive(&mut self, index: usize) {
+        match index {
+            0 => self.host_drive = None,
+            i => {
+                if let Some(d) = self.host_drives.get(i - 1) {
+                    self.host_drive = Some(d.path.clone());
+                }
+            }
+        }
+    }
+
+    /// The drive at `path`, if this host has it (the headless verb).
+    pub fn choose_host_drive_path(&mut self, path: &Path) -> bool {
+        match self.host_drives.iter().position(|d| d.path == path) {
+            Some(i) => {
+                self.choose_host_drive(i + 1);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Under the picker.
+    pub fn host_drive_note(&self) -> &'static str {
+        "A second CD drive in the machine with the disc in your real drive. Change discs in it at any time."
     }
 
     /// Whether the floppy field is: Windows 11's machine (a q35) has no
@@ -1708,6 +1768,7 @@ impl Form {
                 soundfont: None,
                 mt32_roms: None,
                 shared_folder: None,
+                host_drive: None,
                 clipboard: false,
                 pad: None,
                 board: edit.board.clone(),
@@ -1775,6 +1836,7 @@ impl Form {
         machine.shared_folder =
             Some(self.shared_folder.trim()).filter(|d| modern && !d.is_empty()).map(PathBuf::from);
         machine.clipboard = modern && self.clipboard;
+        machine.host_drive = self.host_drive.clone();
         machine.shader_profile = self.shader_profile.clone();
         machine.shader_off = self.shader_off;
         // The single slot this form has is the machine's boot disc;

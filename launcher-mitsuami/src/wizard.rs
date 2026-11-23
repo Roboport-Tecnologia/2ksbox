@@ -730,6 +730,18 @@ fn StoragePage() -> impl View {
                 value=get(wiz, |f| f.install_media.clone())
                 @edit=move |p| wiz.edit(|f| f.install_media = p)
             />
+            <Show when=get(wiz, Form::host_drive_applies)>
+                <Column gap=Spacing::Md>
+                    <Picker
+                        label="Real CD/DVD drive"
+                        resettable=false
+                        options=get(wiz, Form::host_drive_labels)
+                        selected=get(wiz, Form::host_drive_index)
+                        @choose=move |i| wiz.edit(|f| f.choose_host_drive(i))
+                    />
+                    <Note text=get(wiz, |f| f.host_drive_note().to_owned())/>
+                </Column>
+            </Show>
             <Show when=get(wiz, Form::floppy_applies)>
                 <PathField
                     label_width=LABEL_W

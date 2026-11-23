@@ -45,13 +45,8 @@ pub const DISC_FILTER: (&str, &[&str]) = ("Disc images", &["iso", "cue", "ccd", 
 /// Decided from the path each time rather than remembered, so a folder
 /// deleted since is reported as a missing file rather than a folder disc
 /// QEMU cannot generate.
-///
-/// A **host drive** (`/dev/sr0`) is `hostcd:` (track M5h, `host_drive`):
-/// the disc in the real drive, whichever it is at the moment.
 pub fn qemu_medium(path: &Path) -> String {
-    if crate::host_drive::is_host_drive(path) {
-        format!("{}{}", crate::host_drive::PREFIX, path.display())
-    } else if path.is_dir() {
+    if path.is_dir() {
         format!("isodir:{}", path.display())
     } else {
         path.display().to_string()
@@ -87,9 +82,6 @@ pub fn default_path() -> PathBuf {
 /// keeps its whole name, extension and all (`Patch 1.3` is a name,
 /// `Patch 1` a mangling of one).
 pub fn default_label(path: &Path) -> String {
-    if let Some(name) = crate::host_drive::label(path) {
-        return name;
-    }
     let name = if is_folder(path) { path.file_name() } else { path.file_stem() };
     name.map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
@@ -118,17 +110,13 @@ pub enum DiscKind {
     Folder,
     /// One of our guest-tools ISOs, any revision (`guest_tools_iso`).
     GuestTools,
-    /// The host's own optical drive (`host_drive`).
-    Drive,
 }
 
 impl DiscKind {
     /// Decided from the path each time, like `qemu_medium` (`is_folder`).
     pub fn of(path: &Path) -> DiscKind {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        if path.starts_with("/dev") && crate::host_drive::is_host_drive(path) {
-            DiscKind::Drive
-        } else if is_folder(path) {
+        if is_folder(path) {
             DiscKind::Folder
         } else if name.starts_with("guest-tools-") && name.ends_with(".iso") {
             DiscKind::GuestTools
@@ -143,7 +131,6 @@ impl DiscKind {
             DiscKind::Disc => "disc",
             DiscKind::Folder => "folder",
             DiscKind::GuestTools => "tools",
-            DiscKind::Drive => "drive",
         }
     }
 
@@ -152,7 +139,6 @@ impl DiscKind {
             DiscKind::Disc => "Disc image",
             DiscKind::Folder => "Folder",
             DiscKind::GuestTools => "Guest tools",
-            DiscKind::Drive => "Drive",
         }
     }
 }

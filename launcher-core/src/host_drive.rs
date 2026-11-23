@@ -1,16 +1,15 @@
-//! The host's own optical drives, as discs on the shelf (track M5h).
+//! The host's own optical drives (track M5h).
 //!
-//! A drive goes on the shelf like an image, by its device path
-//! (`/dev/sr0`), and QEMU opens it as `hostcd:/dev/sr0`
-//! (`disc_library::qemu_medium`): libdisc reads the disc in it through
-//! SCSI pass-through, and QEMU's `hostcd` driver turns a disc put in or
-//! taken out of the real drive into the guest's medium change (doc 17 §9).
-//! So the shelf entry is the drive, not the disc in it.
+//! A machine can have one as a second CD-ROM (`bundle::Machine::host_drive`),
+//! apart from the drive the shelf fills: QEMU opens it as `hostcd:/dev/sr0`,
+//! libdisc reads the disc in it through SCSI pass-through, and QEMU's
+//! `hostcd` driver turns a disc put in or taken out of the real drive into
+//! the guest's medium change (doc 17 §9).
 //!
 //! Linux only for now: libdisc's pass-through is `SG_IO`. Other hosts list
 //! no drives.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The prefix QEMU's `hostcd` driver is named with (libdisc's `drive::PREFIX`).
 pub const PREFIX: &str = "hostcd:";
@@ -48,25 +47,4 @@ pub fn list() -> Vec<HostDrive> {
 #[cfg(not(target_os = "linux"))]
 pub fn list() -> Vec<HostDrive> {
     Vec::new()
-}
-
-/// Whether a shelf entry is a host drive: a block device under `/dev`.
-/// The prefix is checked first, so an image on an idle network share is
-/// never asked.
-pub fn is_host_drive(path: &Path) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::FileTypeExt;
-        path.starts_with("/dev") && std::fs::metadata(path).is_ok_and(|m| m.file_type().is_block_device())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = path;
-        false
-    }
-}
-
-/// The label a drive gets on the shelf: its model.
-pub fn label(path: &Path) -> Option<String> {
-    list().into_iter().find(|d| d.path == path).map(|d| d.name)
 }

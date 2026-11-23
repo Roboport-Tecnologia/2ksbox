@@ -217,7 +217,7 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // a bundle, change the fields given, save it back in place.
             // `-` keeps a field as it is.
             let usage =
-                "usage: --wizard-edit <machine.toml> <new-name|-> [ram-mb|-] [auto|kvm|tcg|-] [net|nonet] [cpu-speed|-] [boot|-] [seamless|noseamless] [d3dpt|std|cirrus|-] [none|usb|keys|-] [voodoo|voodoo-undither|novoodoo|-] [extra-qemu-args|-] [auto|dxvk|system|-] [clipboard|noclipboard|-] [shared-folder|none|-] [cpus|-]";
+                "usage: --wizard-edit <machine.toml> <new-name|-> [ram-mb|-] [auto|kvm|tcg|-] [net|nonet] [cpu-speed|-] [boot|-] [seamless|noseamless] [d3dpt|std|cirrus|-] [none|usb|keys|-] [voodoo|voodoo-undither|novoodoo|-] [extra-qemu-args|-] [auto|dxvk|system|-] [clipboard|noclipboard|-] [shared-folder|none|-] [cpus|-] [/dev/srN|none|-]";
             let path: PathBuf = args.next().expect(usage).into();
             let new_name = args.next().expect(usage);
             let mut form = wizard::Form::default();
@@ -355,6 +355,16 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             match args.next().as_deref() {
                 None | Some("-") => {}
                 Some(n) => form.choose_cpus(n.parse().expect("processors must be a number")),
+            }
+            // The host's own drive as a second CD-ROM (M5h): one this host has.
+            match args.next().as_deref() {
+                None | Some("-") => {}
+                Some("none") => form.choose_host_drive(0),
+                Some(dev) => {
+                    if !form.choose_host_drive_path(Path::new(dev)) {
+                        panic!("{dev} is not one of this host's drives: {:?}", form.host_drive_labels());
+                    }
+                }
             }
             match form.submit(&library::default_dir()) {
                 Some(saved) => println!("{}", saved.display()),

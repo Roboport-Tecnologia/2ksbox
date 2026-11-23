@@ -641,9 +641,7 @@ change runs from a bottom half, so the tray moves after the command
 returns, as on a real drive. Which entry is in the drive is read off the
 medium itself on every listing (`cdimage_medium_path`, by inode), so the
 bundle's boot disc and a disc the launcher inserted over QMP are marked
-like one the guest loaded. An entry's `isodir:` or `hostcd:` prefix (a
-folder, a host drive) comes off before the host path is checked.
-Protocol `cdshelf/cdshelf_proto.h` (bump
+like one the guest loaded. Protocol `cdshelf/cdshelf_proto.h` (bump
 `CDSHELF_PROTO_VERSION` on change). **Test:** `tools/atapi-guest-test.py`,
 `tools/cdshelf-guest-test.sh`. **Drop:** never.
 

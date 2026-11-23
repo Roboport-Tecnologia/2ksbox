@@ -1383,6 +1383,12 @@ pub struct Machine {
     /// (`share_folder`). Absent = none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_folder: Option<PathBuf>,
+    /// The host's own CD/DVD drive (`/dev/sr0`) as a second CD-ROM in
+    /// the guest, beside the drive the shelf fills (track M5h). QEMU opens
+    /// it as `hostcd:`, and a disc put into or taken out of the real drive
+    /// is a disc change in the guest (doc 17 §9). Absent = none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_drive: Option<PathBuf>,
     /// Windows 11 (M23): the clipboard shared with the host, through
     /// QEMU's `qemu-vdagent` and our agent in the guest (doc 24 §3-4).
     #[serde(default)]
@@ -1628,6 +1634,7 @@ impl Machine {
             soundfont: None,
             mt32_roms: None,
             shared_folder: None,
+            host_drive: None,
             clipboard: family.is_modern(),
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
@@ -2224,7 +2231,25 @@ impl Machine {
             // `player` gets.
             cd.push_str(&format!(",shelf={}", opt_value(&shelf.display().to_string())));
         }
-        vec!["-drive".into(), drive, "-device".into(), cd]
+        let mut args = vec!["-drive".into(), drive, "-device".into(), cd];
+        args.extend(self.host_drive_args());
+        args
+    }
+
+    /// The host's own drive (`host_drive`), a second CD-ROM: the secondary
+    /// channel's slave on the era's IDE, a port of its own on Windows 11's
+    /// AHCI (after the drivers disc on `ide.2`). No shelf: the disc in it
+    /// is whatever is in the real drive.
+    fn host_drive_args(&self) -> Vec<String> {
+        let Some(dev) = &self.host_drive else { return Vec::new() };
+        let medium = format!("{}{}", crate::host_drive::PREFIX, dev.display());
+        let bus = if self.family.is_modern() { "bus=ide.3" } else { "bus=ide.1,unit=1" };
+        vec![
+            "-drive".into(),
+            format!("if=none,id=hostcd0,media=cdrom,readonly=on,file={}", opt_value(&medium)),
+            "-device".into(),
+            format!("ide-cd,{bus},id={},drive=hostcd0,audiodev=embed0", crate::control::HOST_CDROM_ID),
+        ]
     }
 
     /// Which QEMU runs this machine: `i386` for the era's families,

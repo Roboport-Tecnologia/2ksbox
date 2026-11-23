@@ -402,23 +402,6 @@ impl Shelf {
         }
     }
 
-    /// The host's optical drives, each with whether it is on the shelf
-    /// already, for the Add menu (one item per drive, checked when it is).
-    pub fn host_drives(&self) -> Vec<(crate::host_drive::HostDrive, bool)> {
-        crate::host_drive::list()
-            .into_iter()
-            .map(|d| {
-                let on = self.library.position(&d.path).is_some();
-                (d, on)
-            })
-            .collect()
-    }
-
-    /// Put a host drive on the shelf (`host_drives`).
-    pub fn add_host_drive(&mut self, path: &Path) {
-        self.add(path.to_path_buf());
-    }
-
     /// Whether the guest-tools ISO `add_guest_tools` would add is on the
     /// shelf already, for a check mark on its menu item.
     pub fn has_guest_tools(&self) -> bool {

@@ -1,7 +1,7 @@
 # Track M5h: the host's own optical drive (`hostcd:`)
 
-`hostcd:/dev/sr0` puts the disc in a real drive on the host into the
-guest's drive, so a game runs from its original CD or DVD. The disc can
+`hostcd:/dev/sr0` puts the disc in a real drive on the host into a
+second CD drive in the guest, beside the one the shelf fills, so a game runs from its original CD or DVD. The disc can
 be swapped in the real drive at any time and the guest sees a disc
 change. Opened 2026-11-23 (user: a real USB CD/DVD drive, "I need the
 feature of being able to swap cds at any time"). The design is doc 17
@@ -17,16 +17,24 @@ feature of being able to swap cds at any time"). The design is doc 17
 - `libdisc/src/capi.rs`, `libdisc.h`: `libdisc_drive_ready`,
   `libdisc_drive_eject`; `LIBDISC_API_VERSION` 2.
 - `libdisc/qemu/cdimage.c`: the `hostcd` driver and its watch thread.
-- QEMU patch 52: the shelf strips `hostcd:` as it strips `isodir:`.
 - `launcher-core/src/host_drive.rs`: the host's drives (Linux:
-  `/sys/class/block/sr*`), with `disc_library::qemu_medium`,
-  `DiscKind::Drive`, `control::medium_path` and `Shelf::host_drives`.
-- `launcher-mitsuami/src/discs.rs`: one "Drive: <model>" item per drive
-  in the shelf's Add menu.
+  `/sys/class/block/sr*`).
+- `bundle::Machine::host_drive` and `host_drive_args`: **a second
+  CD-ROM**, apart from the drive the shelf fills (user: "the real drive
+  should be a separate drive, apart from the virtual one"). The
+  secondary IDE slave (`bus=ide.1,unit=1`) on the era's families, AHCI
+  port `ide.3` on Windows 11 (after the drivers disc on `ide.2`); qdev id
+  `hostcd` (`control::HOST_CDROM_ID`). No shelf property: only the real
+  drive changes its disc.
+- `wizard::Form`: the "Real CD/DVD drive" picker on the Storage page
+  (None, each drive by model, a drive the machine names that is not
+  plugged in now), the machine details' row, `--wizard-edit`'s last
+  argument (`/dev/srN|none`).
+- `launcher-mitsuami/src/wizard.rs`: the picker.
 
-A drive goes on the shelf like an image, by device path, so the boot
-disc, a live insert, the player's Disc menu and the guest's CDSHELF all
-take it with no change of their own.
+The first cut put the drive on the shelf like an image; the user wanted
+it as its own drive, so the shelf, CDSHELF and the player's Disc menu
+never see it.
 
 ## Test loop
 
@@ -47,7 +55,9 @@ two drives.
 
 - Step 1, libdisc reads a drive: done (Linux).
 - Step 2, the QEMU driver with the swap: written; a guest run pending.
-- Step 3, the launcher's shelf: written; a click test pending.
+- Step 3, the machine setting: done headless (`--wizard-edit`, the QEMU
+  arguments of a 98 and a Windows 11 machine, both drives in one QEMU);
+  a click test of the picker pending.
 
 ## Traps
 

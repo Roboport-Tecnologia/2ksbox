@@ -919,9 +919,6 @@ pub(crate) mod icons {
     pub const CLEAR: &str = platform! {
         macos => "star.slash", gtk => "edit-clear-symbolic", kde => "edit-clear", windows => "\u{E8D9}",
     };
-    pub const DRIVE: &str = platform! {
-        macos => "opticaldiscdrive", gtk => "drive-optical-symbolic", kde => "drive-optical", windows => "\u{E958}",
-    };
     pub const FOLDER: &str = platform! {
         macos => "folder", gtk => "folder-symbolic", kde => "folder", windows => "\u{E8B7}",
     };
