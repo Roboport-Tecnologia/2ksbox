@@ -12,6 +12,7 @@
 pub mod capi;
 pub mod ccd;
 pub mod cue;
+pub mod drive;
 pub mod ecc;
 pub mod iso;
 pub mod isodir;
@@ -205,6 +206,11 @@ pub enum Source {
         blob: usize,
         offset: u64,
     },
+    /// A host's optical drive (`hostcd:`, `drive.rs`): READ CD's raw
+    /// 2352 bytes when `raw`, a DVD's 2048 through READ(10) when not.
+    Drive {
+        raw: bool,
+    },
     /// Audio pregap / postgap: digital silence.
     Silence,
     /// Data pregap / postgap: zero-filled sectors of the track's mode with valid EDC/ECC.
@@ -328,6 +334,8 @@ pub struct Disc {
     /// the only mutable state on a disc; it is held to take a handle,
     /// never across the read itself.
     fds: std::sync::Mutex<Vec<(usize, std::sync::Arc<File>)>>,
+    /// The host drive every `Source::Drive` extent reads from.
+    drive: Option<drive::Drive>,
 }
 
 impl fmt::Debug for Disc {
@@ -350,6 +358,7 @@ impl Disc {
             files: Vec::new(),
             blobs: Vec::new(),
             fds: std::sync::Mutex::new(Vec::new()),
+            drive: None,
         }
     }
 
@@ -475,6 +484,9 @@ impl Disc {
     /// prefix the QEMU block driver strips, as a generated ISO 9660 +
     /// Joliet volume over the tree (`isodir`, doc `m5-dirdisc`).
     pub fn open(path: &Path) -> Result<Disc> {
+        if let Some(dev) = path.to_str().and_then(|p| p.strip_prefix(drive::PREFIX)) {
+            return drive::open(dev);
+        }
         let path = match path.to_str().and_then(|p| p.strip_prefix("isodir:")) {
             Some(dir) => Path::new(dir),
             None => path,
@@ -586,6 +598,16 @@ impl Disc {
         };
         let e = self.extent_at(t, lba).ok_or_else(|| Error::Invalid(format!("track {} has no extent at LBA {lba}", t.number)))?;
         match e.source {
+            Source::Drive { raw } => {
+                let d = self.drive.as_ref().ok_or_else(|| Error::Invalid("a drive extent with no drive".into()))?;
+                if raw {
+                    d.read_raw(t, lba, out)?;
+                } else {
+                    let mut data = [0u8; 2048];
+                    d.read_cooked(t, lba, &mut data)?;
+                    synth_from_cooked(t.mode, lba, &data, out);
+                }
+            }
             Source::Silence => out.fill(0),
             Source::ZeroData => synth_from_cooked(t.mode, lba, &[0u8; 2048], out),
             Source::Mem { blob, offset } => {
@@ -643,7 +665,7 @@ impl Disc {
             return Ok(((SectorKind::Gap, 0, 0), false));
         };
         let e = self.extent_at(t, lba).ok_or_else(|| Error::Invalid(format!("track {} has no extent at LBA {lba}", t.number)))?;
-        let stored_raw = matches!(e.source, Source::File { layout: Layout::Raw2352 | Layout::Raw2352Sub96 | Layout::Mode2_2336, .. });
+        let stored_raw = matches!(e.source, Source::File { layout: Layout::Raw2352 | Layout::Raw2352Sub96 | Layout::Mode2_2336, .. } | Source::Drive { raw: true });
         if t.mode == TrackMode::Audio || !stored_raw {
             return Ok(((t.mode.default_kind(), t.number, index), false));
         }
@@ -711,6 +733,11 @@ impl Disc {
                         }
                     }
                     None => {
+                        if let (Source::Drive { raw: true }, Some(d)) = (e.source, self.drive.as_ref()) {
+                            if let Some(r) = d.read_sub(t, lba, out) {
+                                return r;
+                            }
+                        }
                         if let Source::File { file, offset, layout: Layout::Raw2352Sub96, .. } = e.source {
                             let off = offset + (lba - e.lba) as u64 * 2448 + 2352;
                             let mut inter = [0u8; 96];

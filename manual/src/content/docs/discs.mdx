@@ -17,6 +17,7 @@ can use it.
 | Alcohol 120% | `.mds` with its `.mdf` |
 | ISO | `.iso` |
 | A folder | Any folder on your computer, served as a CD |
+| Your CD or DVD drive | The disc in it, whichever disc that is (Linux) |
 
 The drive reads raw dumps the way a real CD-ROM drive does, so CD audio
 plays and many copy-protected discs work. A folder becomes an ordinary
@@ -29,6 +30,8 @@ Open the **Disc Shelf**, or a machine's **Discs** window, and click
 
 - **Disc image…** picks an image file.
 - **Folder as disc…** picks a folder.
+- **Drive:** followed by a drive's name adds your computer's CD or DVD
+  drive. It shows only on Linux, for now.
 - **Guest tools ISO** adds the disc with 2ksbox's drivers.
 
 You can also drag disc images or folders from your file manager onto the
@@ -61,6 +64,22 @@ with that disc next time.
 shelf and put it in the drive in one step. The Mac App Store version
 doesn't have these two: add the disc in the **Discs** window, then
 choose it here.
+
+## Play from your own CD or DVD drive
+
+Add the drive to the shelf (**Add > Drive:** and its name), then insert
+it like any other disc. The machine reads the disc in the drive. CD audio
+plays, and copy-protected originals see a real disc.
+
+Change discs in the drive itself, at any time: take one out and put
+another in. The machine notices within a second or two, as a real PC
+would. Ejecting from inside the machine opens the drive's tray.
+
+<Aside>
+On Linux your user needs permission to read the drive (`/dev/sr0`). The
+desktop usually gives it to whoever is logged in; if not, add yourself to
+the `optical` group.
+</Aside>
 
 ## Swap discs from inside the machine
 

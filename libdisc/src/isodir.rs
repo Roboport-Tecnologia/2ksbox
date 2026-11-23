@@ -55,7 +55,7 @@ const MAX_DIRS: usize = 65535;
 /// meaning anything, which is why the CD's own ceiling
 /// (`msf::MAX_LBA`, 99:59:74) is not the limit here. Past a DVD-9 there
 /// is no medium left to claim to be, so the tree is refused.
-const MAX_SECTORS: u64 = 4_173_824;
+pub(crate) const MAX_SECTORS: u64 = 4_173_824;
 
 /// Serve `dir` as a disc.
 pub fn open(dir: &Path) -> Result<Disc> {

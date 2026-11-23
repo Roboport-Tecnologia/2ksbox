@@ -3,8 +3,8 @@
 How the drive emulation of doc 05 is built: the `libdisc` disc model,
 the image formats, error correction and subchannel, the C API, the MMC
 reply layouts, the QEMU block driver and ATAPI patches, CD-DA, the
-tests, what the protections we own actually read, and a host folder as
-a disc (§8). Doc 05 has the problem and the acceptance table; the track
+tests, what the protections we own actually read, a host folder as
+a disc (§8) and a host's own drive (§9). Doc 05 has the problem and the acceptance table; the track
 records are `docs/tracks/m5-cdrom-backend.md` and `m5-dirdisc.md`; the
 disc shelf is doc 07 and patch 52. QEMU function names are exact for the
 pinned tree (v11.1.2; the patches were ported from 9.2.4 in track M21).
@@ -66,6 +66,7 @@ linked into QEMU.
 | `src/msf.rs` | `Msf` ⇄ LBA (LBA 0 = MSF 00:02:00) |
 | `src/cue.rs`, `ccd.rs`, `mds.rs`, `iso.rs` | the image formats (§2.3–2.4b) |
 | `src/isodir.rs` | a host folder as an ISO 9660 + Joliet volume (§8) |
+| `src/drive.rs` | a host's optical drive as the disc, through SCSI pass-through (§9) |
 | `src/sector.rs` | raw ⇄ cooked: sync, header, subheader, EDC placement, sector-kind detection |
 | `src/ecc.rs` | EDC and RSPC P/Q parity, verification and correction (§2.5) |
 | `src/subq.rs` | Q-channel synthesis and CRC-16, P channel (§2.6) |
@@ -445,8 +446,8 @@ disc.
 ## 3. The C API (`libdisc/libdisc.h`)
 
 One hand-written header for the crate, the block driver and `atapi.c`,
-like `d3dpt/d3dpt_proto.h`. Bump `LIBDISC_API_VERSION` (1) on any
-change; `cdimage_open` refuses a mismatch. Every function is thread-safe
+like `d3dpt/d3dpt_proto.h`. Bump `LIBDISC_API_VERSION` (2 since
+`hostcd`'s drive calls) on any change; `cdimage_open` refuses a mismatch. Every function is thread-safe
 on one handle, since the layout is immutable and the payload handle
 cache is behind a lock. `libdisc_open` also takes a directory (§8).
 
@@ -458,6 +459,7 @@ cache is behind a lock. `libdisc_open` also takes a directory (§8).
 | `libdisc_read_cooked` / `_read_raw` / `_read_sub` | 2048 L-EC-checked bytes / 2352 / 96 deinterleaved |
 | `libdisc_mmc_read_toc`, `_read_subchannel`, `_read_disc_information` | a reply into `out`, its length or an error; the caller truncates to the allocation length |
 | `libdisc_mmc_read_cd_length` / `_read_cd_sector` | bytes per sector for a READ CD CDB (or `EINVAL`), then one call per sector |
+| `libdisc_drive_ready` / `_drive_eject` | a host drive by device path (§9): 1 a readable disc, 0 none, `EIO` cannot ask; open the tray |
 
 | Code | Meaning | Sense |
 |---|---|---|
@@ -1022,3 +1024,80 @@ the guest). The `msf` selftest pins both ends of the clamp.
 - The stale-file rule is checked host-side only; in a guest it would
   race XP's read-ahead. There is no MSCDEX leg (the DOS tools' FreeDOS
   floppy has no CD driver); bsdtar with Joliet off stands in.
+
+## 9. A host's own drive: `hostcd`
+
+`hostcd:/dev/sr0` puts the disc in the host's real optical drive in the
+guest's drive (track M5h, `docs/tracks/m5-hostcd.md`). libdisc builds
+the model from the drive's TOC, like a CloneCD image's from its entries,
+and reads each sector from the drive when the guest asks for it, through
+SCSI pass-through (`libdisc/src/drive.rs`). Everything above the model
+is unchanged: the responders, patch 51, CD-DA, the shelf.
+
+### What comes from the drive
+
+| | CD | DVD (profile 0x10 and up) |
+|---|---|---|
+| layout | READ TOC format 2 (every session, kept as `raw_toc`), a data track's mode from its first sector's header | one Mode 1 track, READ CAPACITY |
+| sectors | READ CD, the raw 2352 (`Source::Drive { raw: true }`), 32 a command | READ(10), 2048 synthesized raw (`raw: false`) |
+| subchannel | raw P-W when the drive gives it with a good Q CRC; otherwise synthesized from the TOC | synthesized |
+| errors | the drive's own: MEDIUM / HARDWARE ERROR, NOT READY and UNIT ATTENTION are `EMEDIUM` (03/11/05 to the guest) | the same |
+
+- **Pregaps.** A TOC has index 1 only. Where a data track meets an audio
+  one (the Red Book's mandatory pregap), the opener finds index 0 in the
+  drive's Q subchannel, a binary search by the address *inside* each Q
+  frame: the first drive (an LG GT50N on USB) returns the next frame's Q
+  for a sector, not its own. Between two audio tracks there is no
+  search, since each seeks the drive (about a second on a portable one)
+  and a gap there only decides which track its sound is counted in.
+- **Formatted Q is not served.** The same drive refuses raw P-W and
+  returns formatted Q one frame ahead, some frames with bits flipped
+  under a CRC that does not match them. Synthesized Q is what a good
+  drive reads, so the guest gets that, and the drive's Q only finds
+  pregaps.
+- **A read that crosses from data into audio fails whole**, after the
+  drive retries it for about 10 s. The read-ahead never leaves a track,
+  so it never crosses once the pregap is known; the pregap search reads
+  one sector at a time. A failed run is read again as the one sector, so
+  a bad sector fails alone, at its LBA.
+- **Parity.** In a long run that drive returns the odd data sector with
+  its P/Q parity wrong and the EDC intact (a different sector each run;
+  the same sector read alone is right, and an immediate re-read comes
+  from its buffer with the same bytes). A cooked read is unaffected,
+  since the EDC decides (§2.5); a raw READ CD can return those parity
+  bytes.
+- **Speed.** About 750 sectors a second (10x, 1.5 MB/s) through that
+  drive; opening the Moto Racer CD (1 data and 12 audio tracks) takes
+  2 s, most of it the drive spinning up.
+
+### The QEMU driver: a removable medium
+
+`hostcd` is the third driver in `cdimage.c`, a protocol driver with the
+prefix syntax of `isodir` (§5.1), plus what a medium that comes and goes
+needs:
+
+- **It opens with the drive empty.** Only a drive that cannot be asked at
+  all (no such device, no permission) fails the open.
+  `bdrv_co_is_inserted` is "a disc is open", `bdrv_co_getlength` follows
+  it and `has_variable_length` makes the block layer ask.
+- **A thread watches the drive**: TEST UNIT READY once a second
+  (`libdisc_drive_ready`, API v2). A disc that becomes ready is opened on
+  that thread (seconds, off the main loop) and handed to a bottom half;
+  one that goes away hands over NULL. The bottom half swaps the model
+  and calls `change_media` up the graph to the BlockBackend (the raw
+  format node above a prefix-resolved protocol node has no
+  `change_media` of its own, so the walk goes through BDS parents). A
+  swap is out, then in, as `blockdev-change-medium` does it: the guest
+  sees its tray open, then NOT READY, then UNIT ATTENTION, and QEMU
+  emits `DEVICE_TRAY_MOVED`, which the launcher's shelf and the player's
+  Disc menu follow. A disc that does not open (a blank) is warned about
+  once and retried only after it comes out.
+- **The guest's eject opens the real tray** (`bdrv_co_eject`,
+  `libdisc_drive_eject`). The guest's tray lock is not passed on.
+- Reads stay synchronous on the main loop, and atapi.c never caches the
+  handle, so the bottom half closes the old disc with nothing holding it.
+
+Linux only so far (`SG_IO`); elsewhere `libdisc_open` refuses
+`hostcd:`. Windows is `IOCTL_SCSI_PASS_THROUGH_DIRECT` on `\\.\D:`;
+macOS needs IOKit's SCSITask and the disc unmounted from Finder, and
+the App Store sandbox may not allow it at all.

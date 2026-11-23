@@ -58,6 +58,7 @@ pub mod firstrun;
 // security-scoped bookmark per picked file.
 pub mod grants;
 // What this host's GPU can do for the Direct3D executor (ADR-013).
+pub mod host_drive;
 pub mod host_gpu;
 pub mod library;
 pub mod licenses;

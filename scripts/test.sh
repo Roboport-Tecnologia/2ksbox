@@ -338,6 +338,28 @@ dirdisc_check() { # a host directory served as a disc, read back by someone else
   return $rc
 }
 
+hostcd_check() { # the disc in a host's drive (M5h): the model, the dump it should match, SeaBIOS probing it
+  local dev="$1" rc=0 l
+  $DISCX info "hostcd:$dev" >"$OUT/hostcd-info.txt" 2>&1 || { echo "discx could not open the disc in $dev"; cat "$OUT/hostcd-info.txt"; return 1; }
+  grep -q "^  track 01 " "$OUT/hostcd-info.txt" || { echo "no track 1 in the drive's model"; return 1; }
+  if [ -n "${HOSTCD_REF:-}" ]; then
+    # same layout (the pregap search included), same data sectors
+    $DISCX info "$HOSTCD_REF" >"$OUT/hostcd-ref.txt" 2>&1 || { echo "discx could not open $HOSTCD_REF"; return 1; }
+    diff <(grep -v "^    extent" "$OUT/hostcd-info.txt") <(grep -v "^    extent" "$OUT/hostcd-ref.txt") >"$OUT/hostcd-layout.diff" \
+      || { echo "the drive's layout differs from $HOSTCD_REF:"; cat "$OUT/hostcd-layout.diff"; rc=1; }
+    for l in 0 16 17 1000 5000; do
+      [ "$($DISCX dump "hostcd:$dev" readraw $l | md5sum)" = "$($DISCX dump "$HOSTCD_REF" readraw $l | md5sum)" ] \
+        || { echo "raw sector $l differs from $HOSTCD_REF"; rc=1; }
+    done
+  fi
+  if [ -x $QSYS ]; then
+    local n
+    n="$(atapi_disc_packets "hostcd:$dev" "$OUT/hostcd-probe.log")"
+    [ "${n:-0}" -gt 0 ] || { echo "the drive saw no disc model for hostcd:$dev (cdimage_disc found nothing)"; rc=1; }
+  fi
+  return $rc
+}
+
 atapi_disc_packets() { # disc, log -> packets the cdimage disc path saw while SeaBIOS probed the drive
   local disc="$1" out="$2" pid i
   # Both logs are markers this function waits on: a stale one from an
@@ -2588,6 +2610,17 @@ host_stage() {
   if [ -x $DISCX ]; then
     run_check dirdisc dirdisc.log dirdisc_check || true
   else skip dirdisc "needs $DISCX"; fi
+  # A host drive with a disc in it: HOSTCD=/dev/sr0 picks one, else the
+  # first drive that has a disc. Nothing to check without one.
+  hostcd_dev="${HOSTCD:-}"
+  if [ -z "$hostcd_dev" ] && [ -x $DISCX ] && want hostcd; then
+    for d in /dev/sr[0-9]*; do
+      [ -r "$d" ] && $DISCX info "hostcd:$d" >/dev/null 2>&1 && { hostcd_dev="$d"; break; }
+    done
+  fi
+  if [ -x $DISCX ] && [ -n "$hostcd_dev" ]; then
+    run_check hostcd hostcd.log hostcd_check "$hostcd_dev" || true
+  else skip hostcd "no host drive with a disc in it (HOSTCD=/dev/srN)"; fi
   if [ -x $LAUNCHERX ]; then
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true

@@ -175,6 +175,7 @@ fn kind_icon(kind: DiscKind) -> &'static str {
         DiscKind::Disc => icons::DISCS,
         DiscKind::Folder => icons::FOLDER,
         DiscKind::GuestTools => icons::TOOLS,
+        DiscKind::Drive => icons::DRIVE,
     }
 }
 
@@ -190,6 +191,20 @@ pub fn DiscShelfWindow() -> impl View {
             MenuItem::new("Disc image…").on_select(move || discs.pick(false)),
             MenuItem::new("Folder as disc…").on_select(move || discs.pick(true)),
             MenuSeparator::new(),
+            // The host's own drives, the disc in each whichever it is (M5h).
+            discs
+                .read(Shelf::host_drives)
+                .into_iter()
+                .map(|(drive, on_shelf)| {
+                    let path = drive.path;
+                    MenuItem::new(format!("Drive: {}", drive.name))
+                        .checked(on_shelf)
+                        .on_select(move || {
+                            let path = path.clone();
+                            discs.edit(move |s| s.add_host_drive(&path))
+                        })
+                })
+                .collect::<Vec<_>>(),
             MenuItem::new("Guest tools ISO")
                 .enabled(has_guest_tools)
                 .checked(move || discs.read(Shelf::has_guest_tools))

@@ -315,9 +315,13 @@ fn medium_path(file: &str) -> PathBuf {
     if let Some(dir) = file.strip_prefix("isodir:") {
         return dir.into();
     }
+    if let Some(dev) = file.strip_prefix(crate::host_drive::PREFIX) {
+        return dev.into();
+    }
     if let Some(json) = file.strip_prefix("json:") {
         let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
         let dir = v["dir"].as_str().or_else(|| v["file"]["dir"].as_str());
+        let dir = dir.or_else(|| v["dev"].as_str()).or_else(|| v["file"]["dev"].as_str());
         let name = v["filename"].as_str().or_else(|| v["file"]["filename"].as_str());
         if let Some(path) = dir.or(name) {
             return path.into();

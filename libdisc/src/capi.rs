@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::{Disc, Error, SectorKind};
 
-pub const LIBDISC_API_VERSION: u32 = 1;
+pub const LIBDISC_API_VERSION: u32 = 2;
 
 pub const LIBDISC_OK: i32 = 0;
 pub const LIBDISC_ERANGE: i32 = -1;
@@ -133,6 +133,43 @@ pub unsafe extern "C" fn libdisc_open(path: *const c_char, err: *mut c_char, err
             std::ptr::null_mut()
         }
     }
+}
+
+fn drive_path(path: *const c_char) -> Option<String> {
+    if path.is_null() {
+        return None;
+    }
+    // SAFETY: the caller passes a NUL-terminated string.
+    let p = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
+    Some(p.strip_prefix(crate::drive::PREFIX).map(str::to_owned).unwrap_or(p))
+}
+
+/// 1 when the host drive at `path` (`/dev/sr0`, with or without `hostcd:`)
+/// has a readable disc, 0 when it has none (or is still spinning one up),
+/// `LIBDISC_EIO` when the drive cannot be opened or asked.
+///
+/// # Safety
+/// `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_drive_ready(path: *const c_char) -> i32 {
+    guard(|| match drive_path(path).map(|p| crate::drive::ready(&p)) {
+        Some(Ok(r)) => r as i32,
+        Some(Err(e)) => code(&e),
+        None => LIBDISC_EINVAL,
+    })
+}
+
+/// Open the tray of the host drive at `path`.
+///
+/// # Safety
+/// `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_drive_eject(path: *const c_char) -> i32 {
+    guard(|| match drive_path(path).map(|p| crate::drive::eject(&p)) {
+        Some(Ok(())) => LIBDISC_OK,
+        Some(Err(e)) => code(&e),
+        None => LIBDISC_EINVAL,
+    })
 }
 
 /// # Safety

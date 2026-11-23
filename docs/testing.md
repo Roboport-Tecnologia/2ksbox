@@ -161,6 +161,7 @@ What differs from Linux, so a failure there reads right:
 | `x87-fast` | patch 05's x87 fast path equals the real x87 (`tools/x87-fast-test.c`; x86 hosts only) |
 | `libdisc` | `discx selftest`: synthetic cue/bin, CCD, ISO; reads, EDC/ECC, Q synthesis, MMC responders (doc 17) |
 | `cdimage` | the `cdimage` block driver (patch 50) through QEMU's block layer |
+| `hostcd` | the disc in a host drive (`hostcd:`, M5h): libdisc's model from the drive's TOC, SeaBIOS's ATAPI probe finding it through the raw node; with `HOSTCD_REF=<dump>` the same layout and raw data sectors as the dump. Runs only with a disc in a drive (`HOSTCD=/dev/srN`, else the first that has one) |
 | `dirdisc` | a folder served as `isodir:` reads back identical through xorriso/bsdtar, qemu-img and SeaBIOS's ATAPI probe (M5g) |
 | `dirshelf`, `shelforder`, `drive` | a folder on the disc shelf and on the boot drive; the shelf is one list in one order; the shelf's one drive: Insert and Eject set the boot disc, and on a running machine (a paused QEMU here) also swap the tray, which the card reads back through `query-block`, a folder disc included; the player's Disc menu (`--disc-menu`): the drive's disc checked, a boot disc off the shelf listed first, and a disc picked there on the shelf and in the running tray |
 | `accel-choices` | the acceleration picker offers hardware acceleration only where the host has it (`launcherx --kvm`), checked on this host and under `bwrap` with a `/dev` that has no `/dev/kvm`; a machine already set to it keeps the entry (doc 07) |

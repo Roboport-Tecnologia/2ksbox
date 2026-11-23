@@ -85,6 +85,10 @@ and `GET CONFIGURATION` and mode page 0x2A describing a period drive
   snapshotted when the tray closes: a CD while it fits on one, a DVD-ROM
   up to a dual-layer DVD-9 above that. It gets files into a guest with
   no image to burn and no network stack.
+- A **host's own drive** can be the drive (`hostcd:/dev/sr0`, doc 17
+  §9): the original disc, read through SCSI pass-through, its audio
+  and its unreadable sectors included. A disc swapped in the real drive
+  is a disc change in the guest.
 
 ## Acceptance tests (M5 exit criteria)
 

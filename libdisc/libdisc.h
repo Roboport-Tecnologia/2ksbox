@@ -10,14 +10,15 @@
  * names one file per shared file) is behind a lock.
  *
  * libdisc_open also takes a *directory*: it is then served as a generated
- * ISO 9660 + Joliet volume over that tree (isodir, docs/17-cdrom-implementation.md §8).
+ * ISO 9660 + Joliet volume over that tree (isodir, docs/17-cdrom-implementation.md §8),
+ * and `hostcd:<device>`: the disc in a host's optical drive (§9).
  */
 #ifndef LIBDISC_H
 #define LIBDISC_H
 #include <stddef.h>
 #include <stdint.h>
 
-#define LIBDISC_API_VERSION 1
+#define LIBDISC_API_VERSION 2
 
 typedef struct libdisc libdisc;                /* opaque */
 
@@ -55,6 +56,15 @@ int      libdisc_probe(const uint8_t *head, size_t len, const char *filename);
 /* opens the image and every payload file; on failure returns NULL and writes a message into err */
 libdisc *libdisc_open(const char *path, char *err, size_t errlen);
 void     libdisc_close(libdisc *d);
+
+/*
+ * A host's optical drive (`hostcd:`, §9), by device path with or without
+ * the prefix. ready: 1 a readable disc, 0 none (or spinning up),
+ * LIBDISC_EIO the drive cannot be opened or asked. eject opens the tray.
+ * Neither needs an open disc; the hostcd driver's watch thread polls ready.
+ */
+int      libdisc_drive_ready(const char *path);
+int      libdisc_drive_eject(const char *path);
 
 uint32_t libdisc_sector_count(const libdisc *d);          /* lead-out LBA of the last session */
 uint8_t  libdisc_session_count(const libdisc *d);

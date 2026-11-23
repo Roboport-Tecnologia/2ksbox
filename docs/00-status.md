@@ -18,6 +18,7 @@ is the index.
 | **M4** paravirtual Direct3D device | `tracks/m4-d3d-device.md` | `d3dpt/exec/`, `scripts/test.sh`, doc 14 | Done; its guest DLLs and SysBus device retired by M16 step 7 (2026-09-27). The executor and its host harness stay |
 | **M5** CD-ROM backend | `tracks/m5-cdrom-backend.md` | `libdisc/`, patches 50–59, `tools/atapi-guest-test.py`, `guest-tools/src/cdtest.c`, docs 05, 17 | Done (steps 1–8) · FIFA 2002's no-match, a second SafeDisc 2 title, SecuROM, multisession, CHD |
 | **M5g** a host folder as a CD (`isodir:`) | `tracks/m5-dirdisc.md` | `libdisc/src/isodir.rs`, `libdisc/qemu/cdimage.c` | Done |
+| **M5h** the host's own optical drive (`hostcd:`) | `tracks/m5-hostcd.md` | `libdisc/src/drive.rs`, the `hostcd` driver in `libdisc/qemu/cdimage.c`, `launcher-core/src/host_drive.rs` | Opened 2026-11-23 on `track/m5-hostcd`: on Linux the disc in a real drive is the guest's disc (the model from the drive's TOC, sectors through `SG_IO`; the Moto Racer CD matches its `.mds`), and a disc taken out of the drive reaches the guest as its tray opening (`hostcd` check) · a disc put in by hand, a guest playing from it, Windows and macOS hosts |
 | **M6** launcher and packaging | `tracks/m6-launcher.md` | `launcher-core/`, `launcher-capi/`, `shader-chain/`, `scripts/package-*.sh`, doc 07 | Shipped (the front end is M19's since 2026-10-02, ADR-023), continues on `main`; the AppImage and an installer dropped (ADR-028) · a snapshot from the player (its menus have pause, the disc and the shader since M22), thumbnails, bundle import/export, `CDSHELF.EXE`'s Win98 run |
 | **M7** XP display driver | `tracks/m7-display-driver.md` | `d3dpt/hw/d3dpt_vga.c`, `d3dpt/hw/d3dpt_exec_load.[ch]`, `d3dpt/d3dpt_fb.h`, `d3dpt/exec/d3dpt_exec_ddi.cpp`, `guest-tools/src/d3dptvid/nt/`, `tools/xp-*.sh`, `tools/d3dpt-dp2-test.cpp`, doc 15 | Done through protocol v13 · a title for each probe-only DX8 feature, more 8 bpp titles, a driver stage in `scripts/test.sh` |
 | **M8** x87 / SSE fast paths | `tracks/m8-tcg-fastpaths.md` | patches 05, 06, 11, 12, `tools/x87-*`, `tools/sse-guest-test.py`, docs 13, 16 | Done · a real Direct3D workload with and without `*-fast=off` |
@@ -352,6 +353,9 @@ tracks, plus the items no track owns.
     as a second SafeDisc 2 title. SecuROM (needs DPM in `mds.rs`).
     Multisession. CHD. Win98's CD Player by ear. M5g: an MSCDEX run and El Torito
     (the stale-file rule is checked on the host only; a guest check would be flaky).
+    M5h: a disc put into the drive by hand reaching a running guest, a
+    game installed and played from the drive (CD audio, a SafeDisc
+    original), then Windows hosts (`tracks/m5-hostcd.md`).
 10a. **M20 step 5, our WDDM driver on Windows 11** (`tracks/m20-win11.md`,
     "Resumed with M24's lessons", 2026-10-10; the video driver on hold,
     user 2026-10-10: "forget the video driver for now", and carried on

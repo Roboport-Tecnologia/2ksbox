@@ -71,7 +71,7 @@ index 2f39dfbdee..c0cef9c65b 100644
  #ifdef CONFIG_CDIMAGE
  /* win98-xp-virt (patch 51, doc 17 §5.3): the disc model behind a cdimage medium */
  #include "block/cdimage.h"
-@@ -2161,6 +2166,286 @@ enum {
+@@ -2161,6 +2166,294 @@ enum {
      CONDDATA = 0x08,
  };
  
@@ -169,12 +169,20 @@ index 2f39dfbdee..c0cef9c65b 100644
 + * directory, so the prefix comes off before anything asks about it —
 + * otherwise every shared folder lists as MISSING and every LOAD of one
 + * is refused, which is exactly what happens if you forget.
++ * `hostcd:<device>` (a host's optical drive, M5h) is the same: the
++ * device must exist.
 + */
 +static const char *cdshelf_host_path(const char *entry)
 +{
-+    static const char prefix[] = "isodir:";
++    static const char *const prefixes[] = { "isodir:", "hostcd:" };
++    size_t i;
 +
-+    return strncmp(entry, prefix, sizeof(prefix) - 1) == 0 ? entry + sizeof(prefix) - 1 : entry;
++    for (i = 0; i < G_N_ELEMENTS(prefixes); i++) {
++        if (g_str_has_prefix(entry, prefixes[i])) {
++            return entry + strlen(prefixes[i]);
++        }
++    }
++    return entry;
 +}
 +
 +/*
@@ -358,7 +366,7 @@ index 2f39dfbdee..c0cef9c65b 100644
  static const struct AtapiCmd {
      void (*handler)(IDEState *s, uint8_t *buf);
      int flags;
-@@ -2192,6 +2477,15 @@ static const struct AtapiCmd {
+@@ -2192,6 +2485,15 @@ static const struct AtapiCmd {
      [ 0xbd ] = { cmd_mechanism_status,              0 },
      [ 0xb9 ] = { cmd_read_cd_msf,                   CHECK_READY | CONDDATA },
      [ 0xbe ] = { cmd_read_cd,                       CHECK_READY | CONDDATA },
