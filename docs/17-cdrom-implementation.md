@@ -1071,6 +1071,40 @@ is unchanged: the responders, patch 51, CD-DA.
 - **Speed.** About 750 sectors a second (10x, 1.5 MB/s) through that
   drive; opening the Moto Racer CD (1 data and 12 audio tracks) takes
   2 s, most of it the drive spinning up.
+- **One command moves at most the block queue's `max_sectors`**
+  (`BLKSECTGET`; 120 KiB on that USB drive, 51 raw sectors). A larger
+  transfer fails with EIO before it reaches the drive, so `read_window`
+  splits a run into commands of that size.
+- **Seeks.** Going from audio to data costs that drive about 0.18 s each
+  way, and the first data read after a stretch of audio up to 2.7 s
+  while it spins back up to data speed. SET CD SPEED would pin the speed,
+  but the kernel refuses it to an unprivileged `SG_IO`.
+
+### Reading ahead, and CD audio off the main loop
+
+The sectors read are kept as up to 16 windows, most recently used first,
+so the music and the game's data reads do not evict each other: with one
+shared window, as at first, each switch was a seek back. A data-track
+run is 32 sectors (a guest's 64 KiB read), an audio run 150 (two
+seconds).
+
+**CD audio never waits for the drive.** QEMU plays it from the audio
+callback on its main loop, and a read there that waited out a seek froze
+the whole machine with the music (XP, Moto Racer: input 7.5 s late, the
+music stopping and coming back). `libdisc_read_raw_nowait` (API v3)
+answers from the cache or `LIBDISC_EAGAIN`, and queues the run for a
+worker thread the drive starts on first use; once playback is past the
+middle of a window the next one is fetched, so the music stays a window
+ahead. Patch 55's callback returns on `EAGAIN` (a dropout, not a stall),
+and a fetch that failed is reported once as `LIBDISC_EIO`, which it
+already plays as silence. Measured on the host (music in real time, a
+64 KiB data read every second): every sector played in time, the longest
+call 0.08 ms, against 2.7 s through `libdisc_read_raw`.
+
+**Data reads still wait on the main loop**: a guest's READ(10) or READ CD
+on a cache miss blocks QEMU for that read, up to the 2.7 s of a speed
+change. Moving them to a thread means deferring the ATAPI transfer's
+completion (patch 51), not done yet.
 
 ### The QEMU driver: a removable medium
 
@@ -1095,8 +1129,10 @@ needs:
   once and retried only after it comes out.
 - **The guest's eject opens the real tray** (`bdrv_co_eject`,
   `libdisc_drive_eject`). The guest's tray lock is not passed on.
-- Reads stay synchronous on the main loop, and atapi.c never caches the
-  handle, so the bottom half closes the old disc with nothing holding it.
+- Data reads stay synchronous on the main loop, and atapi.c never caches
+  the handle, so the bottom half closes the old disc with nothing holding
+  it. The read-ahead worker holds the drive's handle and cache through
+  `Arc`s and ends when the disc is closed.
 
 Linux only so far (`SG_IO`); elsewhere `libdisc_open` refuses
 `hostcd:`. Windows is `IOCTL_SCSI_PASS_THROUGH_DIRECT` on `\\.\D:`;

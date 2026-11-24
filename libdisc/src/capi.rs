@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::{Disc, Error, SectorKind};
 
-pub const LIBDISC_API_VERSION: u32 = 2;
+pub const LIBDISC_API_VERSION: u32 = 3;
 
 pub const LIBDISC_OK: i32 = 0;
 pub const LIBDISC_ERANGE: i32 = -1;
@@ -17,6 +17,8 @@ pub const LIBDISC_EMEDIUM: i32 = -2;
 pub const LIBDISC_EMODE: i32 = -3;
 pub const LIBDISC_EINVAL: i32 = -4;
 pub const LIBDISC_EIO: i32 = -5;
+/// `libdisc_read_raw_nowait`: a host drive is still fetching the sector.
+pub const LIBDISC_EAGAIN: i32 = -6;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -274,6 +276,27 @@ pub unsafe extern "C" fn libdisc_read_raw(d: *const Disc, lba: u32, out: *mut u8
         let buf = &mut *(out as *mut [u8; 2352]);
         match d.read_raw(lba as i32, buf) {
             Ok(()) => LIBDISC_OK,
+            Err(e) => code(&e),
+        }
+    })
+}
+
+/// `libdisc_read_raw` that never waits for a host drive: `LIBDISC_EAGAIN`
+/// while the drive is still fetching the sector (asked for now; call again).
+///
+/// # Safety
+/// `d` is an open handle; `out` points to 2352 writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_read_raw_nowait(d: *const Disc, lba: u32, out: *mut u8) -> i32 {
+    guard(|| {
+        let (Some(d), false) = (disc(d), out.is_null()) else { return LIBDISC_EINVAL };
+        if lba > i32::MAX as u32 {
+            return LIBDISC_ERANGE;
+        }
+        let buf = &mut *(out as *mut [u8; 2352]);
+        match d.read_raw_nowait(lba as i32, buf) {
+            Ok(true) => LIBDISC_OK,
+            Ok(false) => LIBDISC_EAGAIN,
             Err(e) => code(&e),
         }
     })

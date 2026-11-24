@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LIBDISC_API_VERSION 2
+#define LIBDISC_API_VERSION 3
 
 typedef struct libdisc libdisc;                /* opaque */
 
@@ -29,6 +29,7 @@ enum {
     LIBDISC_EMODE   = -3,   /* wrong sector kind for the request       → sense 05/64/00 */
     LIBDISC_EINVAL  = -4,   /* bad parameter / CDB field               → sense 05/24/00 */
     LIBDISC_EIO     = -5,   /* host file read failed                   → sense 04/xx: report and fail */
+    LIBDISC_EAGAIN  = -6,   /* read_raw_nowait: a host drive is still fetching it; call again */
 };
 
 /* sector kinds, as LibdiscSectorInfo.kind */
@@ -74,6 +75,9 @@ int      libdisc_sector_info(const libdisc *d, uint32_t lba, LibdiscSectorInfo *
 
 int      libdisc_read_cooked(const libdisc *d, uint32_t lba, uint8_t out[2048]);  /* L-EC verified user data */
 int      libdisc_read_raw(const libdisc *d, uint32_t lba, uint8_t out[2352]);
+/* read_raw that never waits for a host drive (hostcd:, §9): LIBDISC_EAGAIN
+ * while the drive fetches the sector; CD audio calls it from QEMU's main loop */
+int      libdisc_read_raw_nowait(const libdisc *d, uint32_t lba, uint8_t out[2352]);
 int      libdisc_read_sub(const libdisc *d, uint32_t lba, uint8_t out[96]);      /* deinterleaved P..W */
 
 /* MMC responders: write the reply into out (capacity cap), return its length or a LIBDISC_E* code.

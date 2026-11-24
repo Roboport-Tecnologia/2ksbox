@@ -20,7 +20,7 @@ diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
 index 5e6da0003f..6c638266d2 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -321,11 +321,32 @@ static void atapi_audio_cb(void *opaque, int avail)
+@@ -321,11 +321,38 @@ static void atapi_audio_cb(void *opaque, int avail)
              libdisc *disc = atapi_disc(s);
              uint8_t raw[2352];
              LibdiscSectorInfo info;
@@ -30,7 +30,13 @@ index 5e6da0003f..6c638266d2 100644
 -                info.kind != LIBDISC_KIND_AUDIO ||
 -                libdisc_read_raw(disc, s->atapi_play_lba, raw) < 0) {
 +            if (rc >= 0 && info.kind == LIBDISC_KIND_AUDIO) {
-+                rc = libdisc_read_raw(disc, s->atapi_play_lba, raw);
++                /* 2ksbox (M5h): a host drive reads ahead off this thread;
++                 * a sector it has not brought in yet is a dropout, never a
++                 * main loop waiting seconds on a seek (doc 17 §9) */
++                rc = libdisc_read_raw_nowait(disc, s->atapi_play_lba, raw);
++                if (rc == LIBDISC_EAGAIN) {
++                    return;
++                }
 +            }
 +            if (rc == LIBDISC_EIO) {
 +                /*

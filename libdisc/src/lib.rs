@@ -648,6 +648,20 @@ impl Disc {
         Ok(())
     }
 
+    /// `read_raw` that never waits for a host drive (`hostcd:`): `Ok(false)`
+    /// when the drive is still fetching the sector, which it now is. Every
+    /// other medium reads at once and answers `Ok(true)`. For CD audio,
+    /// which QEMU plays from its main loop (doc 17 §9).
+    pub fn read_raw_nowait(&self, lba: i32, out: &mut [u8; 2352]) -> Result<bool> {
+        self.check_range(lba)?;
+        if let (Some((_, t, _)), Some(d)) = (self.locate(lba), self.drive.as_ref()) {
+            if self.extent_at(t, lba).is_some_and(|e| e.source == Source::Drive { raw: true }) {
+                return d.try_read_raw(t, lba, out);
+            }
+        }
+        self.read_raw(lba, out).map(|()| true)
+    }
+
     /// The kind of the sector at `lba` without verifying L-EC (reads the
     /// sector only for tracks whose form is per sector).
     pub fn classify(&self, lba: i32) -> Result<(SectorKind, u8, u8)> {

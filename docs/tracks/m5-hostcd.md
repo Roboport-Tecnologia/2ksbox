@@ -54,7 +54,15 @@ two drives.
 ## State
 
 - Step 1, libdisc reads a drive: done (Linux).
-- Step 2, the QEMU driver with the swap: written; a guest run pending.
+- Step 2, the QEMU driver with the swap: the disc is seen at boot on XP
+  and plays (user, 2026-11-24). The music froze the machine for seconds
+  at a time: fixed for CD audio (a read-ahead worker and
+  `libdisc_read_raw_nowait`, doc 17 §9), user's retest pending. Win98's
+  CD Player lists no audio tracks until a swap (user, 2026-11-24; parked
+  by the user, the cause not found: not a late disc, not the model, not
+  the audio status).
+- Step 2b, data reads off the main loop: open. A cache miss during
+  music still blocks QEMU up to 2.7 s (the drive's speed change).
 - Step 3, the machine setting: done headless (`--wizard-edit`, the QEMU
   arguments of a 98 and a Windows 11 machine, both drives in one QEMU);
   a click test of the picker pending.
@@ -66,6 +74,14 @@ two drives.
   frame, never by the LBA asked for; serve synthesized Q.
 - A READ CD that crosses from a data track into an audio pregap fails
   whole after ~10 s of retries. Never let the read-ahead leave a track.
+- One command moves at most `max_sectors` (120 KiB over USB); more fails
+  with EIO and looks like a bad sector. `read_window` splits runs.
+- Drive I/O on QEMU's main loop freezes the guest for the whole seek.
+- The host's own probes (blkid / udisks reading UDF anchors near the end
+  of a mixed-mode disc) show in dmesg as READ(10) "Illegal mode for this
+  track" on audio sectors. They are not ours, and harmless.
+- Testing seeks makes the drive loud (spin-speed changes); the user
+  asked if it was defective. Keep drive-hammering runs short.
 - `/dev/sr0` must be readable by the user: logind's `uaccess` ACL gives
   it to the seat's user, otherwise the `optical` group.
 

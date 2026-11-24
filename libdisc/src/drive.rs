@@ -18,16 +18,28 @@
 //! on `\\.\D:`) and macOS (IOKit's SCSITask, which needs the disc
 //! unmounted) answer `Error::Invalid` until they are written.
 
-use std::sync::Mutex;
+use std::collections::VecDeque;
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::{msf, Disc, Error, Extent, Result, Session, Source, TocEntry, Track, TrackMode};
 
 /// The prefix a host drive is named with, everywhere a medium is a string.
 pub const PREFIX: &str = "hostcd:";
 
-/// Sectors one READ CD asks for: 75 KiB of audio, a guest's 64 KiB read
-/// in one command. Every command is a USB round trip on a portable drive.
+/// Sectors one read asks for on a data track: a guest's 64 KiB read in one
+/// command. Every command is a USB round trip on a portable drive.
 const READ_AHEAD: u32 = 32;
+
+/// Sectors one read asks for on an audio track: two seconds of CD audio.
+/// Music is read at 75 sectors a second, and each read can cost a seek back
+/// from the game's data track (0.2 s on the first drive) and a change of
+/// spin speed (2.7 s). `read_window` splits it into commands the host takes.
+const AUDIO_AHEAD: u32 = 150;
+
+/// Windows the sector cache keeps, most recently used first: the music's
+/// and the game's reads must not evict each other (each eviction is a seek
+/// back, seconds on a slim USB drive, which froze the VM with the music).
+const CACHE_WINDOWS: usize = 16;
 
 /// A sector read's timeout. A weak sector makes a drive retry for seconds
 /// before it gives up, and that failure is the answer the guest wants.
@@ -112,6 +124,7 @@ mod sys {
     const SG_DXFER_FROM_DEV: i32 = -3;
     const O_NONBLOCK: i32 = 0o4000;
     const CDROMEJECT: std::ffi::c_ulong = 0x5309;
+    const BLKSECTGET: std::ffi::c_ulong = 0x1267;
 
     extern "C" {
         fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
@@ -175,6 +188,18 @@ mod sys {
             Err(CmdError::Host(format!("status {:#x}, host {:#x}, driver {:#x}", h.status, h.host_status, h.driver_status)))
         }
 
+        /// The most bytes one command may move: the block queue's
+        /// `max_sectors`, 120 KiB on the first drive (USB). A larger
+        /// transfer fails with EIO before it reaches the drive.
+        pub fn max_transfer(&self) -> usize {
+            let mut sectors: u16 = 0;
+            // SAFETY: BLKSECTGET writes one unsigned short.
+            if unsafe { ioctl(self.0.as_raw_fd(), BLKSECTGET, &mut sectors as *mut u16) } < 0 || sectors == 0 {
+                return 64 * 1024;
+            }
+            sectors as usize * 512
+        }
+
         pub fn eject(&self) -> Result<(), String> {
             // SAFETY: CDROMEJECT takes no argument.
             if unsafe { ioctl(self.0.as_raw_fd(), CDROMEJECT, 0usize) } < 0 {
@@ -197,6 +222,9 @@ mod sys {
         }
         pub fn command(&self, _cdb: &[u8], _buf: &mut [u8], _timeout_ms: u32) -> Result<(), CmdError> {
             Err(CmdError::Host("not supported".into()))
+        }
+        pub fn max_transfer(&self) -> usize {
+            64 * 1024
         }
         pub fn eject(&self) -> Result<(), String> {
             Err("not supported".into())
@@ -234,13 +262,53 @@ enum Sub {
     None,
 }
 
+/// The sectors read ahead: windows most recently used first, and the
+/// ranges the worker is fetching.
+#[derive(Default)]
+struct Cache {
+    windows: VecDeque<Window>,
+    pending: Vec<(i32, u32)>,
+    /// First sectors of fetches that failed, for `try_read_raw` to report once.
+    failed: Vec<i32>,
+}
+
+impl Cache {
+    fn get(&mut self, lba: i32) -> Option<&Window> {
+        let at = self.windows.iter().position(|w| w.get(lba).is_some())?;
+        if at > 0 {
+            let w = self.windows.remove(at).unwrap();
+            self.windows.push_front(w);
+        }
+        self.windows.front()
+    }
+
+    fn insert(&mut self, w: Window) {
+        self.windows.push_front(w);
+        self.windows.truncate(CACHE_WINDOWS);
+    }
+
+    fn pending(&self, lba: i32) -> bool {
+        self.pending.iter().any(|&(f, n)| lba >= f && lba < f + n as i32)
+    }
+}
+
+/// A read for the worker thread: `count` sectors from `first`, all one track's.
+struct Fetch {
+    first: i32,
+    count: u32,
+    audio: bool,
+}
+
 /// The drive behind a disc: the handle, what it can do, and the sectors read ahead.
 pub struct Drive {
-    handle: sys::Handle,
+    handle: Arc<sys::Handle>,
     /// What READ CD gives of the subchannel on this drive.
     sub: Sub,
-    sectors: Mutex<Option<Window>>,
+    sectors: Arc<Mutex<Cache>>,
     subs: Mutex<Option<Window>>,
+    /// The worker that reads ahead for `try_read_raw` (CD audio), started on
+    /// its first use; it ends when the drive is dropped and this goes with it.
+    worker: Mutex<Option<mpsc::Sender<Fetch>>>,
 }
 
 impl std::fmt::Debug for Drive {
@@ -267,52 +335,158 @@ fn read_cd_cdb(lba: i32, count: u32, audio: bool, sub: u8) -> [u8; 12] {
     cdb
 }
 
-impl Drive {
-    fn read_window(&self, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> std::result::Result<Window, CmdError> {
-        let sub_len = match self.sub { Sub::Raw => 96, _ => 16 };
-        let stride = if sub { sub_len } else if cooked { 2048 } else { 2352 };
-        let mut data = vec![0u8; count as usize * if sub { 2352 + sub_len } else { stride }];
+/// `count` sectors from `lba` in one command: READ CD's raw 2352 (or the
+/// subchannel alone, `sub`), or READ(10)'s 2048 (`cooked`).
+fn read_window(handle: &sys::Handle, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> std::result::Result<Window, CmdError> {
+    let sub_len = match sub_mode { Sub::Raw => 96, _ => 16 };
+    let stride = if sub { sub_len } else if cooked { 2048 } else { 2352 };
+    /* what one sector moves over the wire, and how many fit in a command */
+    let wire = if sub { 2352 + sub_len } else { stride };
+    let per_cmd = (handle.max_transfer() / wire).max(1) as u32;
+    let mut data = vec![0u8; count as usize * stride];
+    let mut done = 0u32;
+    while done < count {
+        let n = per_cmd.min(count - done);
+        let at = lba + done as i32;
+        let mut buf = vec![0u8; n as usize * wire];
         if cooked {
             let mut cdb = [0u8; 10];
             cdb[0] = 0x28;
-            cdb_lba(&mut cdb, 2, lba);
-            cdb[7..9].copy_from_slice(&(count as u16).to_be_bytes());
-            self.handle.command(&cdb, &mut data, READ_TIMEOUT_MS)?;
+            cdb_lba(&mut cdb, 2, at);
+            cdb[7..9].copy_from_slice(&(n as u16).to_be_bytes());
+            handle.command(&cdb, &mut buf, READ_TIMEOUT_MS)?;
         } else {
-            let code = if !sub { 0 } else if self.sub == Sub::Raw { 1 } else { 2 };
-            self.handle.command(&read_cd_cdb(lba, count, audio, code), &mut data, READ_TIMEOUT_MS)?;
+            let code = if !sub { 0 } else if sub_mode == Sub::Raw { 1 } else { 2 };
+            handle.command(&read_cd_cdb(at, n, audio, code), &mut buf, READ_TIMEOUT_MS)?;
         }
-        if sub {
-            /* keep only the subchannel bytes after each sector */
-            let from = 2352 + sub_len;
-            let mut subs = vec![0u8; count as usize * sub_len];
-            for i in 0..count as usize {
-                subs[i * sub_len..(i + 1) * sub_len].copy_from_slice(&data[i * from + 2352..(i + 1) * from]);
-            }
-            data = subs;
+        for i in 0..n as usize {
+            /* the subchannel bytes after each sector, or the sector itself */
+            let from = if sub { i * wire + 2352 } else { i * wire };
+            let to = (done as usize + i) * stride;
+            data[to..to + stride].copy_from_slice(&buf[from..from + stride]);
         }
-        Ok(Window { first: lba, count, stride, data })
+        done += n;
+    }
+    Ok(Window { first: lba, count, stride, data })
+}
+
+/// `read_window`, and a run that fails retried as its first sector alone, so
+/// a bad sector fails alone, at its LBA.
+fn read_run(handle: &sys::Handle, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> Result<Window> {
+    match read_window(handle, sub_mode, lba, count, audio, sub, cooked) {
+        Ok(w) => Ok(w),
+        Err(_) if count > 1 => read_window(handle, sub_mode, lba, 1, audio, sub, cooked).map_err(|e| e.error(&format!("sector {lba}"))),
+        Err(e) => Err(e.error(&format!("sector {lba}"))),
+    }
+}
+
+/// How many sectors to read from `lba` of track `t` in one command.
+fn run_length(t: &Track, lba: i32) -> u32 {
+    let ahead = if t.mode == TrackMode::Audio { AUDIO_AHEAD } else { READ_AHEAD };
+    ahead.min((t.end_lba - lba) as u32).max(1)
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Drive {
+    fn new(handle: sys::Handle) -> Drive {
+        Drive {
+            handle: Arc::new(handle),
+            sub: Sub::None,
+            sectors: Arc::default(),
+            subs: Mutex::new(None),
+            worker: Mutex::new(None),
+        }
     }
 
-    /// One sector of track `t` into `out` (`stride` bytes), through the read-ahead window.
-    /// A run that fails is retried as the one sector, so a bad sector fails alone, at its LBA.
+    fn read_window(&self, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> std::result::Result<Window, CmdError> {
+        read_window(&self.handle, self.sub, lba, count, audio, sub, cooked)
+    }
+
+    /// One sector of track `t` into `out` (`stride` bytes), through the cache.
+    /// The drive is asked without the cache's lock held, so the worker's
+    /// reads and this one only wait for each other at the drive.
     fn read(&self, t: &Track, lba: i32, out: &mut [u8], sub: bool, cooked: bool) -> Result<()> {
-        let cache = if sub { &self.subs } else { &self.sectors };
-        let mut win = cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(s) = win.as_ref().and_then(|w| w.get(lba)) {
-            out.copy_from_slice(s);
+        let audio = t.mode == TrackMode::Audio;
+        if sub {
+            let mut win = lock(&self.subs);
+            if let Some(s) = win.as_ref().and_then(|w| w.get(lba)) {
+                out.copy_from_slice(s);
+                return Ok(());
+            }
+            let w = read_run(&self.handle, self.sub, lba, READ_AHEAD.min((t.end_lba - lba) as u32).max(1), audio, true, false)?;
+            out.copy_from_slice(w.get(lba).unwrap());
+            *win = Some(w);
             return Ok(());
         }
-        let audio = t.mode == TrackMode::Audio;
-        let count = READ_AHEAD.min((t.end_lba - lba) as u32).max(1);
-        let w = match self.read_window(lba, count, audio, sub, cooked) {
-            Ok(w) => w,
-            Err(_) if count > 1 => self.read_window(lba, 1, audio, sub, cooked).map_err(|e| e.error(&format!("sector {lba}")))?,
-            Err(e) => return Err(e.error(&format!("sector {lba}"))),
-        };
+        if let Some(w) = lock(&self.sectors).get(lba).filter(|w| w.stride == out.len()) {
+            out.copy_from_slice(w.get(lba).unwrap());
+            return Ok(());
+        }
+        let w = read_run(&self.handle, self.sub, lba, run_length(t, lba), audio, false, cooked)?;
         out.copy_from_slice(w.get(lba).unwrap());
-        *win = Some(w);
+        lock(&self.sectors).insert(w);
         Ok(())
+    }
+
+    /// Queue a read of the run from `first` for the worker, unless it is
+    /// being fetched already. Starts the worker on first use.
+    fn fetch(&self, cache: &mut Cache, t: &Track, first: i32) {
+        if cache.pending(first) {
+            return;
+        }
+        let f = Fetch { first, count: run_length(t, first), audio: t.mode == TrackMode::Audio };
+        let mut worker = lock(&self.worker);
+        let tx = worker.get_or_insert_with(|| {
+            let (tx, rx) = mpsc::channel::<Fetch>();
+            let (handle, sub, cache) = (self.handle.clone(), self.sub, self.sectors.clone());
+            std::thread::Builder::new()
+                .name("libdisc-drive".into())
+                .spawn(move || {
+                    for f in rx {
+                        let r = read_run(&handle, sub, f.first, f.count, f.audio, false, false);
+                        let mut c = lock(&cache);
+                        c.pending.retain(|&(p, _)| p != f.first);
+                        match r {
+                            Ok(w) => c.insert(w),
+                            Err(_) => c.failed.push(f.first),
+                        }
+                    }
+                })
+                .expect("start the drive's read-ahead thread");
+            tx
+        });
+        if tx.send(Fetch { ..f }).is_ok() {
+            cache.pending.push((f.first, f.count));
+        }
+    }
+
+    /// The raw sector at `lba` of track `t` if it is read already: `Ok(true)`
+    /// with it in `out`, `Ok(false)` when the drive is still fetching it (a
+    /// fetch is queued). Never waits for the drive, so CD audio, which
+    /// QEMU plays from its main loop, never stalls the machine: past the
+    /// middle of a window the next one is fetched, so music stays a window
+    /// ahead. A fetch that failed is reported once, as an I/O error (CD
+    /// audio plays it as silence and goes on).
+    pub(crate) fn try_read_raw(&self, t: &Track, lba: i32, out: &mut [u8; 2352]) -> Result<bool> {
+        let mut c = lock(&self.sectors);
+        if let Some(w) = c.get(lba).filter(|w| w.stride == 2352) {
+            out.copy_from_slice(w.get(lba).unwrap());
+            let (first, count) = (w.first, w.count);
+            let next = first + count as i32;
+            if lba - first >= count as i32 / 2 && next < t.end_lba && c.windows.iter().all(|w| w.get(next).is_none()) {
+                self.fetch(&mut c, t, next);
+            }
+            return Ok(true);
+        }
+        if let Some(at) = c.failed.iter().position(|&f| f == lba) {
+            c.failed.swap_remove(at);
+            return Err(Error::Io(format!("sector {lba}: the drive could not read it")));
+        }
+        self.fetch(&mut c, t, lba);
+        Ok(false)
     }
 
     pub(crate) fn read_raw(&self, t: &Track, lba: i32, out: &mut [u8; 2352]) -> Result<()> {
@@ -447,12 +621,12 @@ pub fn open(path: &str) -> Result<Disc> {
             }],
             leadout_lba: end,
         });
-        disc.drive = Some(Drive { handle, sub: Sub::None, sectors: Mutex::new(None), subs: Mutex::new(None) });
+        disc.drive = Some(Drive::new(handle));
         return Ok(disc);
     }
 
     let entries = full_toc(&handle).map_err(|e| e.error(&format!("{path}: READ TOC")))?;
-    let mut drive = Drive { handle, sub: Sub::None, sectors: Mutex::new(None), subs: Mutex::new(None) };
+    let mut drive = Drive::new(handle);
     probe_raw_sub(&mut drive, &entries);
     let mut sessions: Vec<Session> = Vec::new();
     let mut session_numbers: Vec<u8> = entries.iter().map(|e| e.session).collect();
@@ -529,7 +703,7 @@ pub fn open(path: &str) -> Result<Disc> {
         return Err(Error::Invalid(format!("{path}: the TOC lists no session")));
     }
     *drive.subs.get_mut().unwrap() = None;
-    *drive.sectors.get_mut().unwrap() = None;
+    *lock(&drive.sectors) = Cache::default();
     disc.sessions = sessions;
     disc.raw_toc = Some(entries);
     disc.drive = Some(drive);
