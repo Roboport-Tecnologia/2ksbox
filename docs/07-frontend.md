@@ -472,9 +472,10 @@ The fields, and why each is what it is:
   (`--machine`, `player::machine_args`), and the menu (Machine > Disc
   since 2026-10-20, user; a menu of its own in the bar before) lists
   `Shelf::menu_discs` (the shelf in its order, the disc in the drive
-  checked, one off the shelf first), with Eject, Insert Disc Image… and
+  checked, one off the shelf first), with Eject, Insert Disc Image…,
   Insert Folder as Disc… (`add_and_insert`: on the shelf and in the
-  drive at once, the shelf republished to the drive). The two Inserts
+  drive at once, the shelf republished to the drive) and Insert Game
+  Installer… (below). The Inserts
   are left out in the App Sandbox (`Shelf::menu_can_pick`, 2026-10-26,
   user): the player inherits the launcher's sandbox, which allows it no
   user-selected files entitlement, and AppKit's `openPanel` returns nil
@@ -492,6 +493,33 @@ The fields, and why each is what it is:
   prints its rows; the `drive` check covers it. The player links
   `launcher-core` without its `download` feature, so no TLS stack
   (ADR-009, ADR-010).
+- **A game's installer, unpacked on the host** (2026-11-23, user: GOG's
+  installers need a recent Windows, so a 98 / XP / DOS guest cannot run
+  them). Add > Game installer… (or an `.exe` dropped on the shelf) reads
+  the Inno Setup installer in `launcher-core` (`installer.rs`, the
+  `installer` feature; the player builds without it), writes the game's
+  `{app}` files into `games/<name>/` beside `discs.toml`, and puts that
+  folder on the shelf under the game's name, where it goes in the drive
+  as a folder disc, and any cue sheet inside it (a GOG CD game's
+  `game.ins` or `.cue`, by content; `installer::disc_images`) beside it
+  as "<game> (CD)", the disc the game wants in the drive. The player's Disc
+  menu has it too (Insert Game Installer…, 2026-11-26, user;
+  `Shelf::unpack_and_insert`): unpacked, onto the shelf, and that disc
+  in the drive, the item reading "Unpacking Game Installer…" meanwhile;
+  left out in the App Sandbox with the two Inserts. The player links
+  `launcher-core` with `installer` (no TLS comes with it). Nothing in the installer runs. GOG's newer
+  installers keep each file as zlib parts named in the entries'
+  `BeforeInstall` / `AfterInstall` strings (the Galaxy layout); they are
+  joined and checked against GOG's MD5, as innoextract's `--gog-galaxy`
+  does. Redistributables (`*_dependency`) and every root but `{app}` are
+  left out; where two entries name one path, English and then 32-bit
+  wins; a path that would leave the folder is skipped, and a file that
+  inflates past the size its entry declares is refused there. It runs on a
+  thread that outlives the window (`Shelf::poll_unpack`), and a failed
+  run removes its folder. The format is the `inno` crate, vendored in
+  `third_party/inno` with the entries' conditions kept
+  (`third_party/inno/README-2ksbox.md`). `launcherx --unpack-installer
+  [--plan]` drives it; the `installer` check runs it (`GAME_INSTALLER`).
 - **Sorted by label**, case-insensitively, with **digit runs compared as
   numbers** (`disc 10` after `disc 2`). It is an invariant of
   `DiscLibrary`, not a sort each view does, because the flat file the

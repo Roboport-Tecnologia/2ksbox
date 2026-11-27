@@ -29,7 +29,8 @@ use std::path::{Path, PathBuf};
 /// What a file dialog should offer when picking a disc, as a (label,
 /// extensions) pair. It is the shelf's definition of a disc image, so it
 /// lives here, shared, rather than in a front end's file picker.
-pub const DISC_FILTER: (&str, &[&str]) = ("Disc images", &["iso", "cue", "ccd", "mds"]);
+/// `ins` / `inst`: what GOG calls a DOSBox game's cue sheet.
+pub const DISC_FILTER: (&str, &[&str]) = ("Disc images", &["iso", "cue", "ccd", "mds", "ins", "inst"]);
 
 /// How QEMU is told to open a shelf entry.
 ///

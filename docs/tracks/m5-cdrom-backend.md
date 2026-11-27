@@ -19,7 +19,8 @@ items. The design is elsewhere:
 ## Scope and files
 
 - `libdisc/`:
-  - `src/`: the model in `lib.rs`; `cue.rs`, `ccd.rs`, `mds.rs`, `iso.rs`,
+  - `src/`: the model in `lib.rs`; `cue.rs`, `audio.rs` (compressed audio
+    tracks, 2026-11-24), `ccd.rs`, `mds.rs`, `iso.rs`,
     `sector.rs`, `ecc.rs`, `subq.rs`, `msf.rs`, `mmc.rs`, `capi.rs`;
   - `src/bin/discx.rs`;
   - the C header `libdisc/libdisc.h` (bump `LIBDISC_API_VERSION` on any

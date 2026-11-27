@@ -89,6 +89,8 @@ COMPONENTS = [
     ("dxvk", ["third_party/dxvk/LICENSE"], ALL),
     ("qemu-3dfx", ["third_party/qemu-3dfx/LICENSE"], ALL),
     ("uide", ["third_party/uide/uide.lsm", "third_party/uide/UPSTREAM"], ALL),
+    # vendored, so cargo lists it as ours (a path dependency)
+    ("inno", ["third_party/inno/LICENSE-MIT.md", "third_party/inno/LICENSE-APACHE.md"], ALL),
     # mingw-w64's runtime, static in what mingw builds: the guest
     # programs, the agent and the executor's Wine pair
     ("mingw-w64", ["packaging/licenses/mingw-w64-runtime.txt",

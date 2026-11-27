@@ -11,6 +11,8 @@
 //!   discx repair <image> <outdir>      a copy whose failing sectors verify: the negative control for a
 //!                                      protection check (user data untouched, only EDC/ECC regenerated)
 //!   discx convert <in.iso> <out.cue> [--audio a.wav ...]   cooked ISO → MODE1/2352 cue/bin (+ audio tracks)
+//!   discx audio <image> <track> <out.pcm> [--shuffled]   an audio track's raw sectors from index 1, in
+//!                                      order or read in a scrambled order (a compressed track's seeks)
 //!   discx export <image> <out.iso>     the cooked 2048-byte view, sector by sector: what a folder disc
 //!                                      (`isodir:<dir>`) looks like to an ISO 9660 reader
 //!   discx mktree <dir>                 write the fixture tree the `dirdisc` check and scripts/test.sh share
@@ -1539,7 +1541,7 @@ fn convert(input: &Path, out_cue: &Path, wavs: &[PathBuf]) -> Result<(), String>
 }
 
 fn usage() -> i32 {
-    eprintln!("usage: discx selftest <outdir> | info <image> | scan <image> [first] [count] | subscan <image> [first] [count] | repair <image> <outdir> | dump <image> <what> [args] | convert <in.iso> <out.cue> [--audio a.wav ...]");
+    eprintln!("usage: discx selftest <outdir> | info <image> | scan <image> [first] [count] | subscan <image> [first] [count] | repair <image> <outdir> | dump <image> <what> [args] | convert <in.iso> <out.cue> [--audio a.wav ...] | audio <image> <track> <out.pcm> [--shuffled]");
     2
 }
 
@@ -1554,6 +1556,34 @@ fn export(disc: &Disc, out: &Path) -> Result<(), String> {
         f.write_all(&buf).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Track `number`'s audio sectors, index 1 to its end, raw, into `out`:
+/// in order, or with `shuffled` each sector read in a scrambled order and
+/// put back in its place, so a compressed track's seeks (`audio.rs`) can be
+/// compared with its play from the start.
+fn audio(disc: &Disc, number: u8, out: &Path, shuffled: bool) -> Result<u32, String> {
+    let (_, t) = disc.track(number).ok_or_else(|| format!("no track {number}"))?;
+    if t.mode.is_data() {
+        return Err(format!("track {number} is a data track"));
+    }
+    let count = (t.end_lba - t.start_lba) as usize;
+    let mut order: Vec<usize> = (0..count).collect();
+    if shuffled {
+        let mut st = 0x2b5c_0d15u32;
+        for i in (1..count).rev() {
+            order.swap(i, xorshift(&mut st) as usize % (i + 1));
+        }
+    }
+    let mut pcm = vec![0u8; count * 2352];
+    let mut sector = [0u8; 2352];
+    for i in order {
+        let lba = t.start_lba + i as i32;
+        disc.read_raw(lba, &mut sector).map_err(|e| format!("sector {lba}: {e}"))?;
+        pcm[i * 2352..(i + 1) * 2352].copy_from_slice(&sector);
+    }
+    fs::write(out, &pcm).map_err(|e| format!("{}: {}", out.display(), e))?;
+    Ok(count as u32)
 }
 
 /// The fixture tree for the folder-disc checks: everything that makes an
@@ -1941,6 +1971,26 @@ fn main() {
             },
             Err(e) => {
                 eprintln!("{e}");
+                1
+            }
+        },
+        "audio" if args.len() >= 5 => match (Disc::open(Path::new(&args[2])), args[3].parse::<u8>()) {
+            (Ok(d), Ok(track)) => match audio(&d, track, Path::new(&args[4]), args.get(5).is_some_and(|a| a == "--shuffled")) {
+                Ok(n) => {
+                    outln!("{}: track {track}, {n} sectors", args[4]);
+                    0
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    1
+                }
+            },
+            (Err(e), _) => {
+                eprintln!("{e}");
+                1
+            }
+            (_, Err(_)) => {
+                eprintln!("bad track number {}", args[3]);
                 1
             }
         },

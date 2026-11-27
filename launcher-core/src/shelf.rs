@@ -63,18 +63,30 @@ pub struct Shelf {
     live: Option<Option<PathBuf>>,
     status: Option<String>,
     error: Option<String>,
+    /// A game installer being unpacked (`installer.rs`), and the shelf
+    /// file its folder goes on. It outlives the window: reopening the
+    /// shelf keeps it, and it lands on the shelf it was started from.
+    #[cfg(feature = "installer")]
+    unpacking: Option<(crate::installer::Job, PathBuf)>,
+    /// The disc the last unpacked game wants in the drive: its CD when it
+    /// keeps one as a cue sheet, else its folder (`unpack_and_insert`).
+    #[cfg(feature = "installer")]
+    unpacked: Option<PathBuf>,
 }
 
 impl Shelf {
     /// Open on the shared shelf alone, with no machine context.
     pub fn open_library(&mut self, library_path: &Path) {
+        let kept = self.keep_jobs();
         *self = Shelf { open: true, ..Default::default() };
+        self.restore_jobs(kept);
         self.load(library_path);
     }
 
     /// Open for one machine: the same shelf, plus its boot-disc choice
     /// and (while running) live insert.
     pub fn open_for(&mut self, machine: &Machine, bundle_path: PathBuf, library_path: &Path) {
+        let kept = self.keep_jobs();
         *self = Shelf {
             open: true,
             machine: Some(MachineContext {
@@ -84,6 +96,7 @@ impl Shelf {
             }),
             ..Default::default()
         };
+        self.restore_jobs(kept);
         self.load(library_path);
         self.refresh_live();
     }
@@ -102,6 +115,22 @@ impl Shelf {
             }
         }
     }
+
+    #[cfg(feature = "installer")]
+    fn keep_jobs(&mut self) -> Option<(crate::installer::Job, PathBuf)> {
+        self.unpacking.take()
+    }
+
+    #[cfg(feature = "installer")]
+    fn restore_jobs(&mut self, kept: Option<(crate::installer::Job, PathBuf)>) {
+        self.unpacking = kept;
+    }
+
+    #[cfg(not(feature = "installer"))]
+    fn keep_jobs(&mut self) {}
+
+    #[cfg(not(feature = "installer"))]
+    fn restore_jobs(&mut self, _: ()) {}
 
     fn load(&mut self, library_path: &Path) {
         self.library_path = library_path.to_path_buf();
@@ -406,6 +435,141 @@ impl Shelf {
     /// shelf already, for a check mark on its menu item.
     pub fn has_guest_tools(&self) -> bool {
         disc_library::guest_tools_iso().is_some_and(|iso| self.library.position(&iso).is_some())
+    }
+
+    /// Add > Game installer…: unpack it into a new folder beside the
+    /// shelf, on a thread (`installer.rs`). The folder goes on the shelf
+    /// when `poll_unpack` sees it finish.
+    #[cfg(feature = "installer")]
+    pub fn unpack_installer(&mut self, installer: &Path) {
+        if self.unpacking.is_some() {
+            self.error = Some("An installer is already being unpacked.".into());
+            return;
+        }
+        self.error = None;
+        let games = crate::installer::games_dir(&self.library_path);
+        match crate::installer::Job::start(installer, &games) {
+            Ok(job) => {
+                self.status = Some(format!("unpacking {}", job.name));
+                self.unpacking = Some((job, self.library_path.clone()));
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    #[cfg(feature = "installer")]
+    pub fn unpacking(&self) -> bool {
+        self.unpacking.is_some()
+    }
+
+    /// Written so far and in all, while an installer is unpacked.
+    #[cfg(feature = "installer")]
+    pub fn unpack_progress(&self) -> Option<(u64, u64)> {
+        self.unpacking.as_ref().map(|(job, _)| job.progress())
+    }
+
+    /// The line under the progress bar.
+    #[cfg(feature = "installer")]
+    pub fn unpack_label(&self) -> String {
+        match &self.unpacking {
+            Some((job, _)) => {
+                let (done, total) = job.progress();
+                format!(
+                    "Unpacking {}\u{2026} {} of {}",
+                    job.name,
+                    crate::clone_machine::size_label(done),
+                    crate::clone_machine::size_label(total)
+                )
+            }
+            None => String::new(),
+        }
+    }
+
+    /// Ask the unpacking whether it has finished; true on the call that
+    /// saw it end. A finished game's folder goes on the shelf it was
+    /// started from, which is this one unless the shelf was reopened on
+    /// another library meanwhile.
+    #[cfg(feature = "installer")]
+    pub fn poll_unpack(&mut self) -> bool {
+        let Some((job, _)) = &self.unpacking else { return false };
+        let Some(result) = job.poll() else { return false };
+        self.finish_unpack(result);
+        true
+    }
+
+    /// Block until the unpacking ends, for a caller with no timer (`cli`).
+    #[cfg(feature = "installer")]
+    pub fn wait_unpack(&mut self) {
+        if let Some((job, _)) = &self.unpacking {
+            let result = job.wait();
+            self.finish_unpack(result);
+        }
+    }
+
+    #[cfg(feature = "installer")]
+    fn finish_unpack(&mut self, result: Result<(), String>) {
+        let Some((job, shelf_file)) = self.unpacking.take() else { return };
+        if let Err(e) = result {
+            self.error = Some(e);
+            return;
+        }
+        // The folder, and any CD the game keeps as a cue sheet inside it
+        // (GOG's CD games), which is what goes in the drive to play.
+        let mut discs = vec![(job.dest.clone(), job.name.clone())];
+        discs.extend(crate::installer::disc_images(&job.dest, &job.name));
+        self.unpacked = discs.get(1).or(discs.first()).map(|(p, _)| p.clone());
+        let status = match discs.len() {
+            1 => format!("unpacked {}", job.name),
+            2 => format!("unpacked {} and its CD", job.name),
+            n => format!("unpacked {} and its {} CDs", job.name, n - 1),
+        };
+        if shelf_file == self.library_path {
+            for (path, label) in &discs {
+                self.add(path.clone());
+                self.set_label_of(path, label);
+            }
+            self.status = Some(status);
+            return;
+        }
+        // Started from another library's shelf: it goes there.
+        let mut other = Shelf::default();
+        other.load(&shelf_file);
+        for (path, label) in &discs {
+            other.add(path.clone());
+            other.set_label_of(path, label);
+        }
+        match other.flush() {
+            Ok(()) => self.status = Some(status),
+            Err(e) => self.error = Some(format!("{}: {e}", shelf_file.display())),
+        }
+    }
+
+    /// The player's Disc menu > Insert Game Installer…: unpack it (on the
+    /// caller's thread, to its end), then put in the drive the disc the
+    /// game wants, its CD if it keeps one, else its folder, as
+    /// `add_and_insert` does for a picked image.
+    #[cfg(feature = "installer")]
+    pub fn unpack_and_insert(&mut self, installer: &Path) {
+        self.unpack_installer(installer);
+        self.wait_unpack();
+        if self.error.is_some() {
+            return;
+        }
+        let unpacked_status = self.status.take();
+        if let Some(disc) = self.unpacked.take() {
+            self.insert(&disc);
+        }
+        if self.error.is_none() {
+            self.status = unpacked_status;
+        }
+    }
+
+    /// The label of the disc at `path`, set by path.
+    #[cfg(feature = "installer")]
+    fn set_label_of(&mut self, path: &Path, label: &str) {
+        if let Some(row) = self.library.position(path) {
+            self.set_label(row, label);
+        }
     }
 
     pub fn remove(&mut self, path: &Path) {

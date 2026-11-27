@@ -57,14 +57,19 @@ Decisions (consistent with doc 05 and ADR-004; do not reopen):
 ## 2. The libdisc crate
 
 `libdisc/` is a workspace member (`crate-type = ["rlib", "staticlib"]`)
-with **no dependencies**. Keep it that way, because the staticlib is
-linked into QEMU.
+with **one dependency**, symphonia, for audio tracks stored compressed
+(§2.3, `audio.rs`; 2026-11-24, GOG's CD games). Keep it that short,
+because the staticlib is linked into QEMU: a dependency must be pure
+Rust (the MSVC QEMU links it like the rest) and under a licence GPLv2
+takes (symphonia is MPL-2.0, which names GPLv2 as a secondary licence).
+libsynth, the other staticlib in QEMU, set the precedent.
 
 | File | Contents |
 |---|---|
 | `src/lib.rs` | the model (§2.1), `Disc::open` dispatching on extension, content, or a directory |
 | `src/msf.rs` | `Msf` ⇄ LBA (LBA 0 = MSF 00:02:00) |
 | `src/cue.rs`, `ccd.rs`, `mds.rs`, `iso.rs` | the image formats (§2.3–2.4b) |
+| `src/audio.rs` | audio tracks stored compressed, decoded as read (§2.3) |
 | `src/isodir.rs` | a host folder as an ISO 9660 + Joliet volume (§8) |
 | `src/sector.rs` | raw ⇄ cooked: sync, header, subheader, EDC placement, sector-kind detection |
 | `src/ecc.rs` | EDC and RSPC P/Q parity, verification and correction (§2.5) |
@@ -148,7 +153,8 @@ Rules:
 - CD-DA: 16-bit little-endian, left then right, 588 stereo frames per
   sector. `FILE … MOTOROLA` is big-endian (swap). For `FILE … WAVE`
   the parser walks the RIFF chunks and uses the `data` chunk's offset
-  (not a fixed 44), and refuses anything but 44100 Hz / 16-bit / stereo.
+  (not a fixed 44) when it is 44100 Hz / 16-bit / stereo PCM; any other
+  WAVE is decoded (§2.3).
 - Raw sectors in dumps are already **descrambled**. We never scramble.
 - Sync: `00 FF×10 00`. Header: `MIN SEC FRAME MODE` (BCD ×3, then 1 or
   2). Mode 2 subheader: bytes 16..24; form 2 = bit 5 of byte 18.
@@ -160,7 +166,7 @@ ignored, CRLF or LF):
 
 ```
 CATALOG 1234567890123
-FILE "name" BINARY|MOTOROLA|WAVE
+FILE "name" BINARY|MOTOROLA|WAVE|MP3|OGG|FLAC|AIFF|…
   TRACK nn AUDIO|MODE1/2048|MODE1/2352|MODE2/2336|MODE2/2352|CDI/2336|CDI/2352
     FLAGS [DCP] [4CH] [PRE] [SCMS]
     ISRC XXXXXXXXXXXX
@@ -184,6 +190,10 @@ Where cue parsers go wrong:
 - Several `FILE`s concatenate, and the running LBA carries over.
 - Track 1 starts at LBA 0. `INDEX 00 00:00:00` + `INDEX 01 00:02:00`
   (pregap in the file) is accepted as is.
+- A track with only an `INDEX 00` starts there: it becomes index 01
+  (GOG's cue sheets give every track just `INDEX 0 00:00:00`, and
+  DOSBox, which they are written for, reads them so). A track with
+  neither is an error.
 - Control: AUDIO 0x0, +0x1 `PRE`, +0x2 `DCP`, +0x8 `4CH`; data 0x4.
 - Payloads resolve relative to the cue, then case-insensitively (dumps
   made on Windows), then fail naming the path tried. A name that leaves
@@ -191,6 +201,28 @@ Where cue parsers go wrong:
   only (`resolve_payload`, cue, ccd and mds alike): a downloaded image
   must not hand the guest a host file.
 - Single session only. A declared second session is named in the error.
+- **Audio stored compressed** (`audio.rs`, 2026-11-24, user: GOG's CD
+  games ship a `.gog` / `.bin` data track and each music track as an
+  `.ogg`, for DOSBox). A `FILE` that is not stored sectors is decoded as
+  the guest reads it: OGG Vorbis, FLAC, MP3, AIFF, or a WAVE that is not
+  CD PCM. The declared type does not decide: DOSBox reads by content, so
+  cue sheets written for it say `WAVE` or `MP3` for an `.ogg`, or
+  `BINARY`, which is sniffed for container magic (`OggS`, `fLaC`, `ID3`,
+  RIFF WAVE, AIFF) before it is taken as raw sectors. A decoded file
+  holds only AUDIO tracks; it is 44.1 kHz, mono (played on both
+  channels) or stereo; its length is the container's frame count with
+  the encoder's delay and padding trimmed (an OGG or MP3 of a CD track
+  comes back exactly the track's length), counted by a decode at open
+  when the container does not say; a last sector it does not fill ends
+  in silence. Reads that follow on keep decoding; one that jumps seeks
+  to 8192 frames before the target and decodes up to it, each packet
+  placed by where it ends, so a sector reads the same bytes in or out of
+  order (the first packet after a Vorbis reset gives no output, and
+  MP3 needs a few frames to settle). Two decoders stay open per disc.
+  The file is a download, so its numbers are bounded: one longer than a
+  whole CD (99:59:74) is refused at open, and a damaged packet claiming
+  more than 65536 frames fails the read instead of becoming silence.
+  `Source::Audio` holds the decoded file's index and byte offset.
 
 ### 2.4 CloneCD (`ccd.rs`)
 
@@ -452,7 +484,7 @@ cache is behind a lock. `libdisc_open` also takes a directory (§8).
 
 | Call | Does |
 |---|---|
-| `libdisc_api_version`, `libdisc_probe(head, len, filename)` | 0..100 confidence: `.cue` that parses, `.ccd` with `[CloneCD]`, `.mds` → 100; `.iso` → 0 (stays on `raw`) |
+| `libdisc_api_version`, `libdisc_probe(head, len, filename)` | 0..100 confidence: `.cue` (or GOG's `.ins` / `.inst`) that parses, `.ccd` with `[CloneCD]`, `.mds` → 100; `.iso` → 0 (stays on `raw`) |
 | `libdisc_open(path, err, errlen)` / `libdisc_close` | NULL and a message on failure |
 | `libdisc_sector_count`, `_session_count`, `_track_count`, `_track_info`, `_sector_info` | the layout; `LibdiscTrackInfo` has number, session, control, mode, `start_lba` (index 1), `pregap_lba`, `end_lba`; `LibdiscSectorInfo` kind, track, index, `lec` as stored |
 | `libdisc_read_cooked` / `_read_raw` / `_read_sub` | 2048 L-EC-checked bytes / 2352 / 96 deinterleaved |
@@ -789,6 +821,10 @@ Built by `cargo build --release -p libdisc`.
 - **`discx convert <in.iso> <out.cue> [--audio tone.wav …]`** writes an
   ISO as MODE1/2352 cue/bin with synthesized EDC/ECC and appended audio
   tracks. Guest test discs are made from the guest-tools ISO this way.
+- **`discx audio <image> <track> <out.pcm> [--shuffled]`** writes an
+  audio track's raw sectors from index 01, read in order or in a
+  scrambled order: the `cueaudio` check compares the two, and FLAC's
+  with the PCM it was made from.
 - **`discx export <image> <out.iso>`** writes the cooked view out, so
   readers that are not ours can check a folder disc (§8).
 - **`discx mktree <dir>`** writes the folder-disc fixture tree (§8).

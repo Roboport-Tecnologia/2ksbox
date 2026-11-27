@@ -582,6 +582,43 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
                 println!("{}\t{}", disc.label, disc.path.display());
             }
         }
+        #[cfg(feature = "installer")]
+        "--unpack-installer" => {
+            // Headless equivalent of the shelf's Add > Game installer…:
+            // the same job, run to its end, its folder put on the shelf.
+            // `--plan` lists what would be written instead, as
+            // `<bytes>\t<path>`, and writes nothing.
+            let usage = "usage: --unpack-installer [--plan] <installer.exe>";
+            let mut installer = args.next().expect(usage);
+            if installer == "--plan" {
+                let plan = crate::installer::plan(Path::new(&args.next().expect(usage)));
+                let plan = match plan {
+                    Ok(plan) => plan,
+                    Err(e) => {
+                        eprintln!("[installer] {e}");
+                        return Some(1);
+                    }
+                };
+                for (size, path) in plan.listing() {
+                    println!("{size}\t{path}");
+                }
+                println!("{}: {} files, {} bytes, {} unsafe paths skipped", plan.name, plan.files(), plan.total, plan.unsafe_paths);
+                return Some(0);
+            }
+            installer = installer.trim().to_string();
+            let mut shelf = shelf::Shelf::default();
+            shelf.open_library(&disc_library::default_path());
+            shelf.unpack_installer(Path::new(&installer));
+            shelf.wait_unpack();
+            shelf.flush().expect("save the shelf");
+            match shelf.last_result() {
+                Ok(status) => println!("{}", status.unwrap_or("(nothing happened)")),
+                Err(e) => {
+                    eprintln!("[installer] {e}");
+                    return Some(1);
+                }
+            }
+        }
         "--insert-disc" => {
             // Headless equivalent of the shelf's live "Insert"/"Eject"
             // buttons, against the machine's running monitor.
@@ -638,13 +675,17 @@ pub fn run(verb: &str, args: &mut impl Iterator<Item = String>) -> Option<i32> {
             // Headless equivalent of the player's Disc menu (M22): each
             // disc it lists, checked when it is the one in the drive.
             // `add <disc>` is its Insert Disc Image… / Insert Folder…,
-            // which put the disc on the shelf and in the drive.
-            let usage = "usage: --disc-menu <machine.toml> [add <disc>]";
+            // which put the disc on the shelf and in the drive;
+            // `installer <setup.exe>` its Insert Game Installer…, which
+            // unpacks it and puts the game's disc in the drive.
+            let usage = "usage: --disc-menu <machine.toml> [add <disc> | installer <setup.exe>]";
             let path: PathBuf = args.next().expect(usage).into();
             let mut shelf = shelf::Shelf::default();
             shelf.open_for_path(path, &disc_library::default_path());
             match (args.next().as_deref(), args.next()) {
                 (Some("add"), Some(disc)) => shelf.add_and_insert(disc.into()),
+                #[cfg(feature = "installer")]
+                (Some("installer"), Some(setup)) => shelf.unpack_and_insert(Path::new(&setup)),
                 (None, _) => {}
                 _ => panic!("{usage}"),
             }

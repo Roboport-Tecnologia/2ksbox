@@ -1,4 +1,5 @@
-//! Cue sheet parser (doc 17 §2.3): `CATALOG`, `FILE … BINARY|MOTOROLA|WAVE`,
+//! Cue sheet parser (doc 17 §2.3): `CATALOG`, `FILE … BINARY|MOTOROLA|WAVE`
+//! (and any compressed audio file, `audio.rs`),
 //! `TRACK`, `FLAGS`, `ISRC`, `PREGAP`, `INDEX`, `POSTGAP`; `REM` ignored.
 //! INDEX times are file-relative; PREGAP/POSTGAP sectors are not in the
 //! file; files are concatenated; track 1 starts at LBA 0.
@@ -26,6 +27,9 @@ struct CueFile {
     data_offset: u64,
     data_len: u64,
     swap: bool,
+    /// Decoded from a compressed audio file (`Source::Audio`); `payload`
+    /// is then that file's index among the disc's audio files.
+    audio: bool,
     tracks: Vec<usize>,
 }
 
@@ -158,17 +162,33 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
                 let name = arg(1)?;
                 let kind = tk.get(2).map(|s| s.to_ascii_uppercase()).unwrap_or_else(|| "BINARY".into());
                 let path = crate::resolve_payload(cue_path, name)?;
-                let payload = disc.add_file(&path)?;
-                let (data_offset, data_len, swap) = match kind.as_str() {
-                    "BINARY" => (0, disc.file(payload).len, false),
-                    "MOTOROLA" => (0, disc.file(payload).len, true),
-                    "WAVE" => {
-                        let (o, l) = wave_data(&path)?;
-                        (o, l, false)
-                    }
-                    other => return Err(Error::Invalid(format!("line {line}: FILE type {other} not supported (BINARY, MOTOROLA, WAVE)"))),
+                // Stored as CD sectors: a raw image, or a WAVE of CD PCM.
+                // Anything else is an audio file to decode (`audio.rs`):
+                // `MP3`, `OGG`, `FLAC`, `AIFF`, a WAVE at another depth,
+                // and a `BINARY` that is really an `.ogg` (DOSBox reads
+                // these by content, so cue sheets written for it get the
+                // type wrong; GOG's do).
+                let wave = if kind == "WAVE" { wave_data(&path).ok() } else { None };
+                let stored = match kind.as_str() {
+                    "BINARY" => !crate::audio::sniff(&path),
+                    "MOTOROLA" => true,
+                    "WAVE" => wave.is_some(),
+                    _ => false,
                 };
-                files.push(CueFile { payload, data_offset, data_len, swap, tracks: Vec::new() });
+                let file = if stored {
+                    let payload = disc.add_file(&path)?;
+                    let (data_offset, data_len, swap) = match (kind.as_str(), wave) {
+                        ("MOTOROLA", _) => (0, disc.file(payload).len, true),
+                        (_, Some((o, l))) => (o, l, false),
+                        _ => (0, disc.file(payload).len, false),
+                    };
+                    CueFile { payload, data_offset, data_len, swap, audio: false, tracks: Vec::new() }
+                } else {
+                    let audio = disc.add_audio(&path).map_err(|e| Error::Invalid(format!("line {line}: FILE {kind}: {e}")))?;
+                    let data_len = disc.audio_file(audio).pcm_len();
+                    CueFile { payload: audio, data_offset: 0, data_len, swap: false, audio: true, tracks: Vec::new() }
+                };
+                files.push(file);
             }
             "TRACK" => {
                 if files.is_empty() {
@@ -242,9 +262,15 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
     if tracks.is_empty() {
         return Err(Error::Invalid("no TRACK in cue sheet".into()));
     }
-    for t in &tracks {
+    for t in &mut tracks {
         if !t.indices.iter().any(|i| i.0 == 1) {
-            return Err(Error::Invalid(format!("track {} has no INDEX 01", t.number)));
+            // GOG's cue sheets give each track only `INDEX 0 00:00:00`;
+            // DOSBox, which they are written for, starts a track with no
+            // index 01 at its index 00, so the track is all index 01.
+            match t.indices.as_slice() {
+                [(0, frame)] => t.indices = vec![(1, *frame)],
+                _ => return Err(Error::Invalid(format!("track {} has no INDEX 01", t.number))),
+            }
         }
     }
 
@@ -253,8 +279,12 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
     let mut out_tracks: Vec<Track> = Vec::new();
     let mut running: i32 = 0; // absolute LBA of the next sector to place
     for (fi, f) in files.iter().enumerate() {
+        let fname = if f.audio { &disc.audio_file(f.payload).path } else { &disc.file(f.payload).path }.display().to_string();
         if f.tracks.is_empty() {
-            return Err(Error::Invalid(format!("FILE {} has no tracks", disc.file(f.payload).path.display())));
+            return Err(Error::Invalid(format!("FILE {fname} has no tracks")));
+        }
+        if let Some(&ti) = f.tracks.iter().find(|&&ti| f.audio && tracks[ti].mode.is_data()) {
+            return Err(Error::Invalid(format!("{fname}: track {} is a data track in an audio file", tracks[ti].number)));
         }
         // file-relative first sector of each track in this file; the first
         // track of the first file owns everything from frame 0
@@ -278,21 +308,26 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
             } else {
                 let Some(rest) = (f.data_offset + f.data_len).checked_sub(byte_off) else {
                     return Err(Error::Invalid(format!(
-                        "{}: track {} starts past the end of the file",
-                        disc.file(f.payload).path.display(),
+                        "{fname}: track {} starts past the end of the file",
                         t.number
                     )));
                 };
-                if rest % stride != 0 {
-                    return Err(Error::Invalid(format!(
-                        "{}: size {} is not a multiple of {} bytes per sector for track {}",
-                        disc.file(f.payload).path.display(),
-                        f.data_len,
-                        stride,
-                        t.number
-                    )));
+                if f.audio {
+                    // A decoded file is whatever length its encoder
+                    // left; its last sector ends in silence
+                    // (`AudioFiles::read` pads past the end).
+                    rest.div_ceil(stride) as u32
+                } else {
+                    if rest % stride != 0 {
+                        return Err(Error::Invalid(format!(
+                            "{fname}: size {} is not a multiple of {} bytes per sector for track {}",
+                            f.data_len,
+                            stride,
+                            t.number
+                        )));
+                    }
+                    (rest / stride) as u32
                 }
-                (rest / stride) as u32
             };
             let mut extents = Vec::new();
             let mut indices: Vec<(u8, i32)> = Vec::new();
@@ -321,7 +356,11 @@ pub fn parse(text: &str, cue_path: &Path) -> Result<Disc> {
                 extents.push(Extent {
                     lba: in_file_lba,
                     count,
-                    source: Source::File { file: f.payload, offset: byte_off, layout: t.layout, swap: f.swap, eof_pad: false },
+                    source: if f.audio {
+                        Source::Audio { audio: f.payload, offset: byte_off }
+                    } else {
+                        Source::File { file: f.payload, offset: byte_off, layout: t.layout, swap: f.swap, eof_pad: false }
+                    },
                     sub: None,
                 });
             }

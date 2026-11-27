@@ -259,6 +259,79 @@ exec_wine_check() ( # the host test through the remote executor, its frame again
   python3 tools/bmpdiff.py "$OUT/dp2-test.bmp" "$OUT/dp2-wine.bmp" --tolerance 8 || rc=1
   return $rc
 )
+cueaudio_check() { # a cue sheet's audio tracks as OGG, FLAC and MP3 files, decoded as read (libdisc audio.rs)
+  # GOG's CD games ship each music track as an .ogg beside a .bin, with a
+  # cue sheet written for DOSBox. ffmpeg makes the tracks (needed only
+  # here); `discx audio` reads them back in order and in a scrambled order.
+  command -v ffmpeg >/dev/null || { echo "needs ffmpeg"; return 77; }
+  local d="$OUT/cueaudio" rc=0 fmt t
+  rm -rf "$d"; mkdir -p "$d"
+  head -c $((2048 * 300)) /dev/zero >"$d/data.iso"
+  # Track 2: 30 s of stereo (2250 sectors); track 3: 12 s of mono (900).
+  ffmpeg -loglevel error -f lavfi -i "aevalsrc=0.4*sin(2*PI*440*t)|0.3*sin(2*PI*997*t)+0.1*sin(2*PI*31*t*t):d=30:s=44100" \
+    -f s16le -ac 2 "$d/t2.pcm" || { echo "ffmpeg failed"; return 1; }
+  ffmpeg -loglevel error -f lavfi -i "aevalsrc=0.5*sin(2*PI*660*t)*sin(2*PI*0.5*t):d=12:s=44100" \
+    -f s16le -ac 1 "$d/t3.pcm" || { echo "ffmpeg failed"; return 1; }
+  local enc
+  for fmt in flac ogg mp3; do
+    case $fmt in ogg) enc=(-c:a libvorbis -q:a 4);; mp3) enc=(-b:a 192k);; *) enc=();; esac
+    ffmpeg -loglevel error -f s16le -ar 44100 -ac 2 -i "$d/t2.pcm" "${enc[@]}" "$d/t2.$fmt" || { echo "ffmpeg $fmt failed"; return 1; }
+    ffmpeg -loglevel error -f s16le -ar 44100 -ac 1 -i "$d/t3.pcm" "${enc[@]}" "$d/t3.$fmt" || { echo "ffmpeg $fmt failed"; return 1; }
+    # The types as cue sheets in the wild give them: the format's own
+    # name, WAVE for anything, and BINARY for an .ogg (DOSBox reads by
+    # content).
+    local t2type=WAVE; [ $fmt = ogg ] && t2type=BINARY
+    printf 'FILE "data.iso" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\nFILE "t2.%s" %s\n  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\nFILE "t3.%s" %s\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n' \
+      $fmt $t2type $fmt "$(echo $fmt | tr a-z A-Z)" >"$d/$fmt.cue"
+    for t in 2 3; do
+      $DISCX audio "$d/$fmt.cue" $t "$d/$fmt-$t.pcm" >/dev/null || { echo "$fmt track $t does not read"; rc=1; continue; }
+      $DISCX audio "$d/$fmt.cue" $t "$d/$fmt-$t-shuffled.pcm" --shuffled >/dev/null || { echo "$fmt track $t does not read out of order"; rc=1; continue; }
+      # A seek lands sample-exact: out of order is the same bytes.
+      cmp -s "$d/$fmt-$t.pcm" "$d/$fmt-$t-shuffled.pcm" || { echo "$fmt track $t: out-of-order reads differ from a play"; rc=1; }
+    done
+    # Exactly as long as the PCM it was made from, after the encoder's delay
+    # and padding are trimmed: track 2 from its index 01 (150 sectors in).
+    [ "$(wc -c <"$d/$fmt-2.pcm")" -eq $(( (2250 - 150) * 2352 )) ] || { echo "$fmt track 2 is $(wc -c <"$d/$fmt-2.pcm") bytes"; rc=1; }
+    [ "$(wc -c <"$d/$fmt-3.pcm")" -eq $(( 900 * 2352 )) ] || { echo "$fmt track 3 is $(wc -c <"$d/$fmt-3.pcm") bytes"; rc=1; }
+  done
+  # FLAC is lossless: the very samples, and mono on both channels.
+  python3 - "$d" <<'PY' || rc=1
+import array, os, sys
+d = sys.argv[1]
+def pcm(name):
+    a = array.array("h"); a.frombytes(open(os.path.join(d, name), "rb").read()); return a
+ok = True
+if pcm("flac-2.pcm").tobytes() != pcm("t2.pcm")[150 * 588 * 2:].tobytes():
+    print("flac track 2 is not the samples it was made from"); ok = False
+mono, got = pcm("t3.pcm"), pcm("flac-3.pcm")
+if got[0::2].tobytes() != mono.tobytes() or got[1::2].tobytes() != mono.tobytes():
+    print("flac track 3 (mono) is not its samples on both channels"); ok = False
+sys.exit(0 if ok else 1)
+PY
+  # GOG's own form (Mortal Kombat 3's MK3.cue): CRLF, a cooked data track,
+  # each .ogg typed MP3, and only `INDEX 0 00:00:00` per track, which
+  # DOSBox takes as the track's start.
+  printf 'FILE "data.iso" BINARY\r\n  TRACK 01 MODE1/2048\r\n    INDEX 0 00:00:00\r\nFILE "t2.ogg" MP3\r\n  TRACK 02 AUDIO\r\n    INDEX 0 00:00:00\r\n' >"$d/gog.cue"
+  if $DISCX audio "$d/gog.cue" 2 "$d/gog-2.pcm" >/dev/null; then
+    [ "$(wc -c <"$d/gog-2.pcm")" -eq $(( 2250 * 2352 )) ] || { echo "GOG-form track 2 is $(wc -c <"$d/gog-2.pcm") bytes"; rc=1; }
+  else echo "GOG's cue form does not open"; rc=1; fi
+  # A file cut short (a broken download): FLAC's header still claims the
+  # whole 30 s, so the track is that long and reads silence past the cut,
+  # not an error.
+  head -c $(( $(wc -c <"$d/t2.flac") / 2 )) "$d/t2.flac" >"$d/cut.flac"
+  printf 'FILE "cut.flac" FLAC\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n' >"$d/cut.cue"
+  if $DISCX audio "$d/cut.cue" 1 "$d/cut-1.pcm" >/dev/null; then
+    [ "$(wc -c <"$d/cut-1.pcm")" -eq $(( 2250 * 2352 )) ] || { echo "the cut-short track is $(wc -c <"$d/cut-1.pcm") bytes"; rc=1; }
+    [ -z "$(tail -c $(( 200 * 2352 )) "$d/cut-1.pcm" | tr -d '\000' | head -c 1)" ] || { echo "past the cut is not silence"; rc=1; }
+  else echo "a cut-short file does not read"; rc=1; fi
+  # A rate a CD cannot have is refused at open, with the reason.
+  ffmpeg -loglevel error -f s16le -ar 44100 -ac 2 -i "$d/t2.pcm" -ar 22050 -c:a libvorbis "$d/slow.ogg"
+  printf 'FILE "slow.ogg" OGG\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n' >"$d/slow.cue"
+  if o="$($DISCX info "$d/slow.cue" 2>&1)"; then echo "a 22050 Hz track was accepted"; rc=1
+  else case "$o" in *44100*) ;; *) echo "refused without the reason: $o"; rc=1;; esac; fi
+  return $rc
+}
+
 dirdisc_check() { # a host directory served as a disc, read back by someone else's ISO 9660 reader
   # discx's own dirdisc case (the libdisc check) proves the model reads
   # the tree back; this one proves the *volume* is one, by handing it to
@@ -1116,6 +1189,49 @@ mitsuami_check() ( # the launcher's window, driven through its probes (doc 07, t
   if [ -n "$broadway" ]; then kill "$broadway" 2>/dev/null; wait "$broadway" 2>/dev/null; fi
   return $rc
 )
+
+installer_check() { # a game's installer unpacked on the host onto the shelf (installer.rs)
+  local rc=0 dir="$OUT/installer" o n
+  rm -rf "$dir"; mkdir -p "$dir"
+  export LAUNCHER_DISC_LIBRARY="$dir/discs.toml"
+  # Anything that is not an Inno Setup installer is refused, and leaves
+  # neither a folder nor a shelf entry behind.
+  head -c 65536 /dev/urandom >"$dir/notsetup.exe"
+  if o="$($LAUNCHERX --unpack-installer "$dir/notsetup.exe" 2>&1)"; then
+    echo "a file that is no installer was unpacked: $o"; rc=1
+  fi
+  [ -z "$(ls -A "$dir/games" 2>/dev/null)" ] || { echo "a refused installer left a folder"; ls "$dir/games"; rc=1; }
+  [ -z "$($LAUNCHERX --discs)" ] || { echo "a refused installer reached the shelf"; rc=1; }
+  # A real one, when given (none can be in the repo): GAME_INSTALLER=<a
+  # GOG setup_*.exe>. Every Galaxy file is checked against its MD5 as it
+  # is written, so a clean run is the installer's own say-so.
+  if [ -n "${GAME_INSTALLER:-}" ]; then
+    n="$($LAUNCHERX --unpack-installer --plan "$GAME_INSTALLER" | tail -1)" || { echo "--plan failed"; rc=1; }
+    echo "plan: $n"
+    o="$($LAUNCHERX --unpack-installer "$GAME_INSTALLER")" || { echo "unpacking failed: $o"; rc=1; }
+    case "$o" in unpacked\ *) ;; *) echo "unexpected status: $o"; rc=1;; esac
+    o="$($LAUNCHERX --discs)"
+    case "$o" in *"	$dir/games/"*) ;; *) echo "the folder is not on the shelf"; echo "$o"; rc=1;; esac
+    local folder; folder="$(ls -d "$dir/games/"* 2>/dev/null | head -1)"
+    [ -n "$folder" ] && [ -n "$(ls -A "$folder")" ] || { echo "no files were written"; rc=1; }
+    if [ -x $DISCX ] && [ -n "$folder" ]; then
+      $DISCX info "isodir:$folder" >"$dir/discx.log" 2>&1 || { echo "the folder does not open as a disc"; tail -3 "$dir/discx.log"; rc=1; }
+    fi
+    # The player's Disc menu > Insert Game Installer…: unpacked again, and
+    # the game's disc (its CD when it keeps one, else its folder) checked
+    # in the drive of a stopped machine, which then boots with it.
+    mkdir -p "$dir/library"; : >"$dir/disk.qcow2"
+    local bundle; bundle="$(LAUNCHER_LIBRARY_DIR="$dir/library" $LAUNCHERX --new dos game "$dir/disk.qcow2")"
+    o="$(LAUNCHER_LIBRARY_DIR="$dir/library" $LAUNCHERX --disc-menu "$bundle" installer "$GAME_INSTALLER" 2>&1)" \
+      || { echo "--disc-menu installer failed: $o"; rc=1; }
+    [ "$(grep -c $'^checked\t' <<<"$o")" = 1 ] && grep -q $'^checked\t[^\t]*\t'"$dir/games/" <<<"$o" \
+      || { echo "the unpacked game's disc is not the one in the drive: $o"; rc=1; }
+  else
+    echo "(no GAME_INSTALLER: only the refusal was checked)"
+  fi
+  unset LAUNCHER_DISC_LIBRARY
+  return $rc
+}
 
 dirshelf_check() { # a shared folder as a disc, from the shelf to a real QEMU (M5g)
   local rc=0 dir="$OUT/dirshelf" bundle args o spaced comma plain shelf_file
@@ -2587,20 +2703,22 @@ host_stage() {
   else skip cdimage "needs $QIMG and the libdisc check's images"; fi
   if [ -x $DISCX ]; then
     run_check dirdisc dirdisc.log dirdisc_check || true
-  else skip dirdisc "needs $DISCX"; fi
+    run_check cueaudio cueaudio.log cueaudio_check || true
+  else skip dirdisc "needs $DISCX"; skip cueaudio "needs $DISCX"; fi
   if [ -x $LAUNCHERX ]; then
     run_check dirshelf dirshelf.log dirshelf_check || true
     run_check shelforder shelforder.log shelforder_check || true
     run_check drive drive.log drive_check || true
     run_check machine-details machine-details.log machinedetails_check || true
     run_check cpus cpus.log cpus_check || true
+    run_check installer installer.log installer_check || true
     if command -v bwrap >/dev/null; then
       run_check accel-choices accel-choices.log accelchoices_check || true
     else skip accel-choices "needs bwrap, for a /dev with no /dev/kvm"; fi
   else
     skip dirshelf "needs $LAUNCHERX"; skip shelforder "needs $LAUNCHERX"
     skip machine-details "needs $LAUNCHERX"; skip accel-choices "needs $LAUNCHERX"
-    skip cpus "needs $LAUNCHERX"
+    skip cpus "needs $LAUNCHERX"; skip installer "needs $LAUNCHERX"
   fi
   if [ -x $LAUNCHERX ] && [ -x $QIMG ] && [ -x $QIO ]; then
     run_check clone clone.log clone_check || true
@@ -3064,6 +3182,9 @@ guest_stage() {
       if [ "$OS" = Linux ]; then
         run_check atapi-read-error atapi-read-error.log env ATAPI_READ_ERROR=1 python3 tools/atapi-guest-test.py || true
       else skip atapi-read-error "Linux only (an LD_PRELOAD over glibc's pread64)"; fi
+      if command -v ffmpeg >/dev/null; then
+        run_check atapi-cueaudio atapi-cueaudio.log env ATAPI_AUDIO=ogg python3 tools/atapi-guest-test.py || true
+      else skip atapi-cueaudio "needs ffmpeg"; fi
       run_check midi-guest midi-guest.log python3 tools/midi-guest-test.py || true
       run_check pit-guest pit-guest.log python3 tools/pit-guest-test.py || true
       run_check voodoo-guest voodoo-guest.log python3 tools/voodoo-guest-test.py || true
@@ -3088,10 +3209,10 @@ guest_stage() {
     # the main checkout's "42 passed, 0 skipped", which reads as two
     # different suites. The missing ones include `atapi-guest`, the only
     # check that reads a disc from inside a guest at all.
-    else for c in x87-guest rep-guest smc-guest sse-guest atapi-guest atapi-read-error midi-guest pit-guest voodoo-guest voodoo-guest-d3dpt voodoo-guest-mmiofifo voodoo-guest-undither vbe-palette pad-guest; do
+    else for c in x87-guest rep-guest smc-guest sse-guest atapi-guest atapi-read-error atapi-cueaudio midi-guest pit-guest voodoo-guest voodoo-guest-d3dpt voodoo-guest-mmiofifo voodoo-guest-undither vbe-palette pad-guest; do
       skip "$c" "no FreeDOS floppy yet: run tools/x87-guest-test.py once to fetch it"
     done; fi
-  else for c in x87-guest rep-guest smc-guest sse-guest atapi-guest atapi-read-error midi-guest pit-guest voodoo-guest voodoo-guest-d3dpt voodoo-guest-mmiofifo voodoo-guest-undither vbe-palette pad-guest; do
+  else for c in x87-guest rep-guest smc-guest sse-guest atapi-guest atapi-read-error atapi-cueaudio midi-guest pit-guest voodoo-guest voodoo-guest-d3dpt voodoo-guest-mmiofifo voodoo-guest-undither vbe-palette pad-guest; do
     skip "$c" "needs nasm, mtools and build/qemu"
   done; fi
   # A new Windows 11 machine starts setup from its disc with no key

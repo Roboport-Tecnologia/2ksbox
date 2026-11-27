@@ -544,6 +544,9 @@ in `player-mitsuami/target/release`; `LAUNCHER_PLAYER_BIN` overrides).
 The toolkit-free debug verbs (`launcher_core::cli`: `--print-args`,
 `--print-player-args`, `--prepare` (a Windows 11 machine's firmware
 variables, made before a hand-run QEMU starts it), `--new`, `--discs`,
+`--unpack-installer [--plan] <setup.exe>` (the shelf's Game installer…),
+`--disc-menu <machine.toml> [add <disc> | installer <setup.exe>]` (the
+player's Disc menu),
 `--host-check`, `--paths`, `--diagnose`, `--wizard-edit`, …) answer
 identically from `launcher-mitsuami` and from `launcherx`, a binary
 with no toolkit that `scripts/test.sh` and the guest tools drive:

@@ -10,10 +10,13 @@ license = "GPL-2.0-or-later"
 description = "Everything the launcher does that is not drawing: bundles, the library, the disc shelf, snapshots, shader profiles, the window models and the debug verbs (doc 07)."
 
 [features]
-default = ["download"]
+default = ["download", "installer"]
 # The shader collection's download (`shader_source::fetch`); the player
 # builds without it (track M22, its Disc menu).
 download = ["dep:ureq"]
+# Unpacking a game's installer on the host (`installer.rs`, the shelf's
+# "Game installer…"); the player builds without it.
+installer = ["dep:inno", "dep:md-5"]
 
 [dependencies]
 # The Vulkan probe (`host_gpu.rs`, ADR-013), loaded dynamically, so a host
@@ -49,6 +52,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 ureq = { version = "3", optional = true }
 flate2 = "1"
 tar = "0.4"
+# Inno Setup's format (`installer.rs`). Vendored with one change, the
+# file entries' conditions kept, which name GOG's Galaxy parts
+# (`third_party/inno/README-2ksbox.md`).
+inno = { path = "../third_party/inno", features = ["extract"], optional = true }
+# GOG's checksum of each file put back together; the version `inno` uses.
+md-5 = { version = "=0.11.0", optional = true }
 # `preview.rs` opens a windowless device of its own (`Preview::headless`,
 # for the Qt build and the `--preview-shader` verb). Must stay on the
 # version `shader-chain` pins, or the two see different `wgpu::Device`

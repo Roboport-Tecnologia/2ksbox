@@ -12,7 +12,7 @@ can use it.
 
 | Format | Files |
 |---|---|
-| CUE/BIN | `.cue` with its `.bin` files |
+| CUE/BIN | `.cue` with its `.bin` files. The music tracks can also be `.ogg`, `.flac`, `.mp3` or `.wav` files, as in GOG's CD games |
 | CloneCD | `.ccd` with its `.img` and `.sub` |
 | Alcohol 120% | `.mds` with its `.mdf` |
 | ISO | `.iso` |
@@ -29,15 +29,55 @@ Open the **Disc Shelf**, or a machine's **Discs** window, and click
 
 - **Disc image…** picks an image file.
 - **Folder as disc…** picks a folder.
+- **Game installer…** unpacks a game you downloaded, such as one from
+  GOG. See below.
 - **Guest tools ISO** adds the disc with 2ksbox's drivers.
 
-You can also drag disc images or folders from your file manager onto the
-window.
+You can also drag disc images, folders or game installers from your file
+manager onto the window.
 
 Click the pencil next to a disc to rename it (on macOS, double-click the
 name). Enter keeps the new name; Escape leaves the name as it was. The
 trash button takes it off the shelf, and leaves the files on your disk
 where they are.
+
+## Games from GOG
+
+GOG's installers only run on recent versions of Windows, so Windows 98,
+XP and DOS can't start them. 2ksbox unpacks them for you instead:
+
+<Steps>
+
+1. In the **Disc Shelf**, click **Add** > **Game installer…** and pick
+   the installer (`setup_….exe`). If it came with `.bin` files, keep
+   them in the same folder.
+2. Wait for the progress bar to finish.
+3. The game's files are now on the shelf as a folder disc with the
+   game's name. Insert it in a machine and copy the game's folder to
+   the hard disk.
+
+</Steps>
+
+2ksbox copies only the game's own files. It leaves out the installer's
+extras for modern Windows, such as DirectX and Visual C++ installers.
+The files are kept in the `games` folder next to your disc shelf.
+
+<Aside type="caution">
+Some GOG releases are built for today's Windows: a 64-bit remaster, or
+a game set up to run through DOSBox or a Glide wrapper. Their files
+unpack fine, but those parts won't run in an old Windows. The game's
+original files are usually there too.
+</Aside>
+
+### GOG games with CD music
+
+Many GOG releases of CD games keep the game's CD as a cue sheet
+(`game.ins` or a `.cue` file), a `.gog` or `.bin` file and one `.ogg`
+file per music track. When you unpack such a game with **Game
+installer…**, its CD lands on the shelf too, as *Game name (CD)*: put
+that in the drive, and the game plays its CD music from the `.ogg`
+files. A cue sheet you have from elsewhere can be added like any disc
+image. The music files must be 44.1 kHz, which GOG's are.
 
 ## Put a disc in the drive
 
@@ -58,9 +98,11 @@ to empty the drive. As in the **Discs** window, the machine also starts
 with that disc next time.
 
 **Insert Disc Image…** and **Insert Folder as Disc…** add a disc to the
-shelf and put it in the drive in one step. The Mac App Store version
-doesn't have these two: add the disc in the **Discs** window, then
-choose it here.
+shelf and put it in the drive in one step. **Insert Game Installer…**
+does the same for a game you downloaded, such as one from GOG: it
+unpacks the game onto the shelf and puts its CD in the drive, or the
+game's folder when it has no CD. The Mac App Store version doesn't have
+these three: add the disc in the **Discs** window, then choose it here.
 
 ## Swap discs from inside the machine
 

@@ -1,7 +1,8 @@
 //! The machine's CD drive from the player's Disc menu (track M22 step 5):
 //! the shared disc shelf, the disc in the drive checked, Eject, and a disc
 //! image or folder picked here, which goes on the shelf and in the drive
-//! at once. The model is `launcher_core::shelf`, the launcher's shelf
+//! at once, or a game's installer, unpacked onto the shelf and its disc
+//! put in the drive (`launcher_core::installer`). The model is `launcher_core::shelf`, the launcher's shelf
 //! window's, opened for the bundle the launcher named (`--machine`): an
 //! insert swaps the tray through the machine's monitor (the `-qmp` socket
 //! the launcher started it with) and sets the disc it boots with.
@@ -19,6 +20,7 @@ use crate::wake::Wake;
 use crate::watch;
 use launcher_core::browse;
 use launcher_core::disc_library::{self, DISC_FILTER};
+use launcher_core::installer;
 use launcher_core::shelf::Shelf;
 use mitsuami::prelude::*;
 use std::path::{Path, PathBuf};
@@ -28,6 +30,8 @@ use std::sync::Arc;
 pub struct Discs {
     bundle: Signal<PathBuf>,
     model: Signal<Shelf>,
+    /// Insert Game Installer… is unpacking one.
+    unpacking: Signal<bool>,
 }
 
 /// The shelf opened for the machine, its drive asked of the monitor.
@@ -41,7 +45,7 @@ impl Discs {
     /// The shelf for `bundle`, followed for as long as the window is up,
     /// and what to call when the tray moves.
     pub fn open(bundle: PathBuf) -> (Discs, Arc<dyn Fn() + Send + Sync>) {
-        let discs = Discs { model: signal(Shelf::default()), bundle: signal(bundle.clone()) };
+        let discs = Discs { model: signal(Shelf::default()), bundle: signal(bundle.clone()), unpacking: signal(false) };
         let changed = Arc::new(Wake::default());
         let watch = watch::watch(&[bundle, disc_library::default_path()], &[], &changed);
         let tray = changed.notifier();
@@ -68,26 +72,29 @@ impl Discs {
     /// guest's `CDSHELF` lists a disc added here as soon as the shelf is
     /// written.
     fn change(self, f: impl FnOnce(&mut Shelf) + Send + 'static) {
+        spawn_local(self.apply(f));
+    }
+
+    /// `change`, for a caller that waits for it to end.
+    async fn apply(self, f: impl FnOnce(&mut Shelf) + Send + 'static) {
         let bundle = self.bundle.get_untracked();
-        spawn_local(async move {
-            let shelf = spawn_blocking(move || {
-                let mut s = load(&bundle);
-                f(&mut s);
-                s.flush_reporting();
-                if s.take_saved() {
-                    if let Some(dir) = s.bundle_dir() {
-                        s.publish_to(dir);
-                    }
+        let shelf = spawn_blocking(move || {
+            let mut s = load(&bundle);
+            f(&mut s);
+            s.flush_reporting();
+            if s.take_saved() {
+                if let Some(dir) = s.bundle_dir() {
+                    s.publish_to(dir);
                 }
-                s
-            })
-            .await;
-            let error = shelf.error().map(str::to_owned);
-            self.model.set(shelf);
-            if let Some(error) = error {
-                crate::report("The disc was not changed", error);
             }
-        });
+            s
+        })
+        .await;
+        let error = shelf.error().map(str::to_owned);
+        self.model.set(shelf);
+        if let Some(error) = error {
+            crate::report("The disc was not changed", error);
+        }
     }
 
     /// A disc image or a folder, picked in the platform's dialog, on the
@@ -109,6 +116,27 @@ impl Discs {
             let path = browse::picked(&path);
             browse::remember(&path);
             self.change(move |s| s.add_and_insert(path));
+        });
+    }
+
+    /// A game's installer, picked in the platform's dialog: unpacked on a
+    /// thread, onto the shelf, its disc in the drive when it is done. The
+    /// menu item says so meanwhile, and refuses a second one.
+    fn pick_installer(self) {
+        let mut request = OpenFile::new()
+            .title(installer::PICK_TITLE)
+            .filter(FileFilter::new(installer::FILTER.0, browse::extensions(installer::FILTER)))
+            .filter(FileFilter::all("All files"));
+        if let Some(start) = browse::browse_start("", None) {
+            request = request.start_folder(start);
+        }
+        spawn_local(async move {
+            let Some(path) = open_file(request).await.and_then(|p| p.into_iter().next()) else { return };
+            let path = browse::picked(&path);
+            browse::remember(&path);
+            self.unpacking.set(true);
+            self.apply(move |s| s.unpack_and_insert(&path)).await;
+            self.unpacking.set(false);
         });
     }
 
@@ -143,5 +171,12 @@ impl Discs {
         menu.separator()
             .item(MenuItem::new("Insert Disc Image…").on_select(move || self.pick(false)))
             .item(MenuItem::new("Insert Folder as Disc…").on_select(move || self.pick(true)))
+            .item(
+                MenuItem::new(move || {
+                    if self.unpacking.get() { installer::UNPACKING_ITEM } else { installer::INSERT_ITEM }.to_owned()
+                })
+                .enabled(move || !self.unpacking.get())
+                .on_select(move || self.pick_installer()),
+            )
     }
 }
