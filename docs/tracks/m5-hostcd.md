@@ -69,6 +69,11 @@ two drives.
   arguments of a 98 and a Windows 11 machine, both drives in one QEMU);
   a click test of the picker pending.
 
+- Step 4, from PR #4 (2026-11-26): the drive speed (read-write open,
+  SET CD SPEED, the machine's Drive speed), the raw-read probe, the MCN,
+  the simulated drive and the `hostcd-sim` check (swaps end to end with
+  no drive). Windows' transport is next, ported from that PR's.
+
 ## Traps
 
 - The first drive returns the *next* frame's Q, and some Q frames with

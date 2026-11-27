@@ -740,6 +740,16 @@ fn StoragePage() -> impl View {
                         @choose=move |i| wiz.edit(|f| f.choose_host_drive(i))
                     />
                     <Note text=get(wiz, |f| f.host_drive_note().to_owned())/>
+                    <Show when=get(wiz, Form::host_drive_speed_applies)>
+                        <Picker
+                            label="Drive speed"
+                            resettable=false
+                            options=get(wiz, Form::host_drive_speed_labels)
+                            selected=get(wiz, Form::host_drive_speed_index)
+                            @choose=move |i| wiz.edit(|f| f.choose_host_drive_speed(i))
+                        />
+                        <Note text=get(wiz, |f| f.host_drive_speed_note().to_owned())/>
+                    </Show>
                 </Column>
             </Show>
             <Show when=get(wiz, Form::floppy_applies)>

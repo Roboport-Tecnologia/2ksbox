@@ -275,6 +275,7 @@ pub struct Form {
     /// The host's own drive as a second CD-ROM (`Machine::host_drive`),
     /// and the drives this host has, read once when the form opens.
     host_drive: Option<PathBuf>,
+    host_drive_speed: Option<u16>,
     host_drives: Vec<host_drive::HostDrive>,
 
     /// Whether this host can give a guest KVM. Read once when the form
@@ -339,6 +340,7 @@ impl Default for Form {
             cpu_speed_chosen: false,
             optimizations: Optimizations::default(),
             host_drive: None,
+            host_drive_speed: None,
             host_drives: host_drive::list(),
             have_kvm: player::hw_accel_available(),
             host_gpu: host_gpu::cached().gpu,
@@ -389,6 +391,7 @@ impl Form {
             cpu_speed_chosen: true,
             optimizations: machine.optimizations.clone(),
             host_drive: machine.host_drive.clone(),
+            host_drive_speed: machine.host_drive_speed,
             floppy: machine.floppy.as_ref().map(|f| f.display().to_string()).unwrap_or_default(),
             boot: machine.effective_boot(),
             // An existing machine's adapter, card, MIDI port and pad are
@@ -978,6 +981,33 @@ impl Form {
             }
             None => false,
         }
+    }
+
+    /// Whether the speed picker is: a real drive is chosen.
+    pub fn host_drive_speed_applies(&self) -> bool {
+        self.host_drive.is_some()
+    }
+
+    /// The speed picker's rows: Fastest, then `host_drive::SPEEDS`.
+    pub fn host_drive_speed_labels(&self) -> Vec<String> {
+        std::iter::once(None)
+            .chain(host_drive::SPEEDS.iter().map(|&x| Some(x)))
+            .map(host_drive::speed_label)
+            .collect()
+    }
+
+    pub fn host_drive_speed_index(&self) -> usize {
+        self.host_drive_speed.and_then(|x| host_drive::SPEEDS.iter().position(|&s| s == x)).map_or(0, |i| i + 1)
+    }
+
+    /// Row `index` of `host_drive_speed_labels`.
+    pub fn choose_host_drive_speed(&mut self, index: usize) {
+        self.host_drive_speed = index.checked_sub(1).and_then(|i| host_drive::SPEEDS.get(i).copied());
+    }
+
+    /// Under the speed picker.
+    pub fn host_drive_speed_note(&self) -> &'static str {
+        "Slower is quieter and reads scratched discs better."
     }
 
     /// Under the picker.
@@ -1769,6 +1799,7 @@ impl Form {
                 mt32_roms: None,
                 shared_folder: None,
                 host_drive: None,
+                host_drive_speed: None,
                 clipboard: false,
                 pad: None,
                 board: edit.board.clone(),
@@ -1837,6 +1868,7 @@ impl Form {
             Some(self.shared_folder.trim()).filter(|d| modern && !d.is_empty()).map(PathBuf::from);
         machine.clipboard = modern && self.clipboard;
         machine.host_drive = self.host_drive.clone();
+        machine.host_drive_speed = self.host_drive.as_ref().and(self.host_drive_speed);
         machine.shader_profile = self.shader_profile.clone();
         machine.shader_off = self.shader_off;
         // The single slot this form has is the machine's boot disc;

@@ -1389,6 +1389,10 @@ pub struct Machine {
     /// is a disc change in the guest (doc 17 §9). Absent = none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_drive: Option<PathBuf>,
+    /// The real drive's read speed in CD x (`hostcd:<n>x:`); absent = its
+    /// fastest. A slower drive is quieter and reads a scratched disc better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_drive_speed: Option<u16>,
     /// Windows 11 (M23): the clipboard shared with the host, through
     /// QEMU's `qemu-vdagent` and our agent in the guest (doc 24 §3-4).
     #[serde(default)]
@@ -1635,6 +1639,7 @@ impl Machine {
             mt32_roms: None,
             shared_folder: None,
             host_drive: None,
+            host_drive_speed: None,
             clipboard: family.is_modern(),
             pad: Some(default_pad(family)),
             extra_qemu_args: Vec::new(),
@@ -2242,7 +2247,10 @@ impl Machine {
     /// is whatever is in the real drive.
     fn host_drive_args(&self) -> Vec<String> {
         let Some(dev) = &self.host_drive else { return Vec::new() };
-        let medium = format!("{}{}", crate::host_drive::PREFIX, dev.display());
+        let medium = match self.host_drive_speed {
+            Some(x) => format!("{}{x}x:{}", crate::host_drive::PREFIX, dev.display()),
+            None => format!("{}{}", crate::host_drive::PREFIX, dev.display()),
+        };
         let bus = if self.family.is_modern() { "bus=ide.3" } else { "bus=ide.1,unit=1" };
         vec![
             "-drive".into(),

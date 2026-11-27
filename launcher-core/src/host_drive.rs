@@ -14,6 +14,15 @@ use std::path::PathBuf;
 /// The prefix QEMU's `hostcd` driver is named with (libdisc's `drive::PREFIX`).
 pub const PREFIX: &str = "hostcd:";
 
+/// The read speeds the form offers, in CD x, fastest first; before them
+/// the drive's own fastest (`None`). A drive takes the nearest it has.
+pub const SPEEDS: [u16; 7] = [48, 32, 24, 16, 8, 4, 2];
+
+/// How a speed reads in the form and the machine's details.
+pub fn speed_label(x: Option<u16>) -> String {
+    x.map_or_else(|| "Fastest".to_string(), |x| format!("{x}x"))
+}
+
 /// A drive the host has.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostDrive {

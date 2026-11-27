@@ -133,14 +133,15 @@ mod sys {
     pub struct Handle(File);
 
     impl Handle {
-        /// O_NONBLOCK: an empty drive opens instead of failing with ENOMEDIUM.
+        /// O_NONBLOCK: an empty drive opens instead of failing with
+        /// ENOMEDIUM. Read-write when this user may: the kernel passes
+        /// SET CD SPEED only on a writable handle (EPERM on a read-only
+        /// one; learnt from PR #4). Nothing is ever written to the disc.
         pub fn open(path: &str) -> Result<Handle, String> {
-            std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(O_NONBLOCK)
-                .open(path)
-                .map(Handle)
-                .map_err(|e| format!("{path}: {e}"))
+            let open = |write: bool| {
+                std::fs::OpenOptions::new().read(true).write(write).custom_flags(O_NONBLOCK).open(path)
+            };
+            open(true).or_else(|_| open(false)).map(Handle).map_err(|e| format!("{path}: {e}"))
         }
 
         pub fn command(&self, cdb: &[u8], buf: &mut [u8], timeout_ms: u32) -> Result<(), CmdError> {
@@ -232,6 +233,161 @@ mod sys {
     }
 }
 
+/// The drive a disc is read from: the host's (`sys`), or a simulated one
+/// answering the same commands from an image (`sim:<image>`).
+pub(crate) enum Dev {
+    Os(sys::Handle),
+    Sim(sim::Sim),
+}
+
+impl Dev {
+    fn open(path: &str) -> std::result::Result<Dev, String> {
+        match path.strip_prefix("sim:") {
+            Some(image) => Ok(Dev::Sim(sim::Sim::open(image))),
+            None => sys::Handle::open(path).map(Dev::Os),
+        }
+    }
+
+    fn command(&self, cdb: &[u8], buf: &mut [u8], timeout_ms: u32) -> std::result::Result<(), CmdError> {
+        match self {
+            Dev::Os(h) => h.command(cdb, buf, timeout_ms),
+            Dev::Sim(s) => s.command(cdb, buf),
+        }
+    }
+
+    fn max_transfer(&self) -> usize {
+        match self {
+            Dev::Os(h) => h.max_transfer(),
+            Dev::Sim(_) => sim::MAX_TRANSFER,
+        }
+    }
+
+    fn eject(&self) -> std::result::Result<(), String> {
+        match self {
+            Dev::Os(h) => h.eject(),
+            Dev::Sim(_) => Ok(()),
+        }
+    }
+}
+
+/// A simulated drive (`hostcd:sim:<image>`, learnt from PR #4): the SCSI
+/// commands `Drive` sends, answered by `mmc` from an image, so the whole
+/// path (TOC parsing, raw reads in runs split at the transfer limit, the
+/// pregap search, the read-ahead worker, and in QEMU the watch's swaps)
+/// runs on a host with no drive. The disc is in the drive while the image
+/// file exists: renaming it away is taking the disc out, and back is
+/// putting it in (the `hostcd-sim` check).
+mod sim {
+    use super::{CmdError, Sense};
+    use crate::{mmc, Disc, Error};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    /// What one command may move: a USB drive's 120 KiB, a little less,
+    /// so long runs are split as on the first real drive.
+    pub const MAX_TRANSFER: usize = 64 * 1024;
+
+    pub struct Sim {
+        image: PathBuf,
+        disc: Mutex<Option<Arc<Disc>>>,
+    }
+
+    fn sense(key: u8, asc: u8, ascq: u8) -> CmdError {
+        CmdError::Sense(Sense { key, asc, ascq })
+    }
+
+    fn error(e: Error) -> CmdError {
+        match e {
+            Error::Range => sense(5, 0x21, 0),
+            Error::Medium => sense(3, 0x11, 5),
+            Error::Mode => sense(5, 0x64, 0),
+            Error::Invalid(_) => sense(5, 0x24, 0),
+            Error::Io(_) => sense(4, 0x08, 0),
+        }
+    }
+
+    fn put(buf: &mut [u8], v: &[u8]) {
+        let n = v.len().min(buf.len());
+        buf[..n].copy_from_slice(&v[..n]);
+    }
+
+    fn be32(b: &[u8]) -> u32 {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    }
+
+    impl Sim {
+        pub fn open(image: &str) -> Sim {
+            Sim { image: PathBuf::from(image), disc: Mutex::new(None) }
+        }
+
+        /// The disc while the image is there, opened once per insertion.
+        fn disc(&self) -> Result<Arc<Disc>, CmdError> {
+            let mut d = self.disc.lock().unwrap_or_else(|e| e.into_inner());
+            if !Path::new(&self.image).exists() {
+                *d = None;
+                return Err(sense(2, 0x3A, 0));
+            }
+            if d.is_none() {
+                *d = Some(Arc::new(Disc::open(&self.image).map_err(|_| sense(3, 0x30, 0))?));
+            }
+            Ok(d.clone().unwrap())
+        }
+
+        pub fn command(&self, cdb: &[u8], buf: &mut [u8]) -> Result<(), CmdError> {
+            let d = match cdb[0] {
+                0xBB | 0x1B => return Ok(()), /* SET CD SPEED, START STOP UNIT */
+                _ => self.disc()?,
+            };
+            let mut out = Vec::new();
+            match cdb[0] {
+                0x00 => {}
+                0x46 => {
+                    /* GET CONFIGURATION: the current profile, a CD or a DVD-ROM */
+                    let profile: u16 = if d.sector_count() > 360_000 { 0x10 } else { 0x08 };
+                    let mut r = [0u8; 8];
+                    r[6..8].copy_from_slice(&profile.to_be_bytes());
+                    put(buf, &r);
+                }
+                0x25 => {
+                    let mut r = [0u8; 8];
+                    r[..4].copy_from_slice(&d.sector_count().saturating_sub(1).to_be_bytes());
+                    r[4..].copy_from_slice(&2048u32.to_be_bytes());
+                    put(buf, &r);
+                }
+                0x43 => {
+                    mmc::read_toc(&d, cdb[2] & 0x0F, cdb[1] & 2 != 0, cdb[6], &mut out).map_err(error)?;
+                    put(buf, &out);
+                }
+                0x42 => {
+                    mmc::read_subchannel(&d, 0, cdb[1] & 2 != 0, cdb[2] & 0x40 != 0, cdb[3], cdb[6], 0x15, &mut out)
+                        .map_err(error)?;
+                    put(buf, &out);
+                }
+                0x28 => {
+                    let (lba, n) = (be32(&cdb[2..6]) as i32, u16::from_be_bytes([cdb[7], cdb[8]]) as usize);
+                    for i in 0..n {
+                        let mut c = [0u8; 2048];
+                        d.read_cooked(lba + i as i32, &mut c).map_err(error)?;
+                        buf[i * 2048..(i + 1) * 2048].copy_from_slice(&c);
+                    }
+                }
+                0xBE => {
+                    let lba = be32(&cdb[2..6]) as i32;
+                    let n = u32::from_be_bytes([0, cdb[6], cdb[7], cdb[8]]) as usize;
+                    let (ty, b9, b10) = ((cdb[1] >> 2) & 7, cdb[9], cdb[10]);
+                    let len = mmc::read_cd_length(ty, b9, b10).map_err(error)?;
+                    for i in 0..n {
+                        mmc::read_cd_sector(&d, lba + i as i32, ty, b9, b10, &mut buf[i * len..(i + 1) * len])
+                            .map_err(error)?;
+                    }
+                }
+                _ => return Err(sense(5, 0x20, 0)),
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Sectors read ahead, all from one track: `first..first + count`.
 struct Window {
     first: i32,
@@ -301,7 +457,7 @@ struct Fetch {
 
 /// The drive behind a disc: the handle, what it can do, and the sectors read ahead.
 pub struct Drive {
-    handle: Arc<sys::Handle>,
+    handle: Arc<Dev>,
     /// What READ CD gives of the subchannel on this drive.
     sub: Sub,
     sectors: Arc<Mutex<Cache>>,
@@ -337,7 +493,7 @@ fn read_cd_cdb(lba: i32, count: u32, audio: bool, sub: u8) -> [u8; 12] {
 
 /// `count` sectors from `lba` in one command: READ CD's raw 2352 (or the
 /// subchannel alone, `sub`), or READ(10)'s 2048 (`cooked`).
-fn read_window(handle: &sys::Handle, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> std::result::Result<Window, CmdError> {
+fn read_window(handle: &Dev, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> std::result::Result<Window, CmdError> {
     let sub_len = match sub_mode { Sub::Raw => 96, _ => 16 };
     let stride = if sub { sub_len } else if cooked { 2048 } else { 2352 };
     /* what one sector moves over the wire, and how many fit in a command */
@@ -372,7 +528,7 @@ fn read_window(handle: &sys::Handle, sub_mode: Sub, lba: i32, count: u32, audio:
 
 /// `read_window`, and a run that fails retried as its first sector alone, so
 /// a bad sector fails alone, at its LBA.
-fn read_run(handle: &sys::Handle, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> Result<Window> {
+fn read_run(handle: &Dev, sub_mode: Sub, lba: i32, count: u32, audio: bool, sub: bool, cooked: bool) -> Result<Window> {
     match read_window(handle, sub_mode, lba, count, audio, sub, cooked) {
         Ok(w) => Ok(w),
         Err(_) if count > 1 => read_window(handle, sub_mode, lba, 1, audio, sub, cooked).map_err(|e| e.error(&format!("sector {lba}"))),
@@ -391,7 +547,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Drive {
-    fn new(handle: sys::Handle) -> Drive {
+    fn new(handle: Dev) -> Drive {
         Drive {
             handle: Arc::new(handle),
             sub: Sub::None,
@@ -518,11 +674,39 @@ impl Drive {
     }
 }
 
+/// What follows `hostcd:` in a medium's name: an optional read speed
+/// (`8x:`, `max:`), then the device. `(None, name)` when there is no speed,
+/// which reads at the drive's fastest.
+pub fn split_speed(name: &str) -> (Option<u16>, &str) {
+    if let Some((speed, dev)) = name.split_once(':') {
+        if speed == "max" {
+            return (None, dev);
+        }
+        if let Some(x) = speed.strip_suffix(['x', 'X']).and_then(|n| n.parse::<u16>().ok()).filter(|&x| x > 0) {
+            return (Some(x), dev);
+        }
+    }
+    (None, name)
+}
+
+/// SET CD SPEED: `x` times 1x (176 kB/s), or the drive's fastest. A
+/// drive takes the nearest speed it has; one that refuses, or a host that
+/// will not pass the command (a read-only handle), keeps its own.
+fn set_speed(h: &Dev, x: Option<u16>) {
+    let kbps = x.map_or(0xFFFF, |x| x.saturating_mul(176));
+    let mut cdb = [0u8; 12];
+    cdb[0] = 0xBB;
+    cdb[2..4].copy_from_slice(&kbps.to_be_bytes());
+    cdb[4..6].copy_from_slice(&[0xFF, 0xFF]);
+    let _ = h.command(&cdb, &mut [], 10_000);
+}
+
 /// Is there a readable disc in the drive at `path` (TEST UNIT READY)?
 /// `Err` when the drive cannot be opened or asked at all. The QEMU
 /// driver's watch calls it once a second.
 pub fn ready(path: &str) -> Result<bool> {
-    let h = sys::Handle::open(path).map_err(Error::Io)?;
+    let (_, path) = split_speed(path);
+    let h = Dev::open(path).map_err(Error::Io)?;
     match h.command(&[0u8; 6], &mut [], 10_000) {
         Ok(()) => Ok(true),
         Err(CmdError::Sense(_)) => Ok(false),
@@ -532,11 +716,12 @@ pub fn ready(path: &str) -> Result<bool> {
 
 /// Open the tray of the drive at `path`.
 pub fn eject(path: &str) -> Result<()> {
-    sys::Handle::open(path).map_err(Error::Io)?.eject().map_err(Error::Io)
+    let (_, path) = split_speed(path);
+    Dev::open(path).map_err(Error::Io)?.eject().map_err(Error::Io)
 }
 
 /// The drive's current profile (GET CONFIGURATION): 0x08-0x0A a CD, 0x10 and up a DVD or above.
-fn current_profile(h: &sys::Handle) -> Option<u16> {
+fn current_profile(h: &Dev) -> Option<u16> {
     let mut buf = [0u8; 8];
     let mut cdb = [0u8; 10];
     cdb[0] = 0x46;
@@ -546,7 +731,7 @@ fn current_profile(h: &sys::Handle) -> Option<u16> {
     Some(u16::from_be_bytes([buf[6], buf[7]]))
 }
 
-fn read_capacity(h: &sys::Handle) -> Result<u32> {
+fn read_capacity(h: &Dev) -> Result<u32> {
     let mut buf = [0u8; 8];
     let mut cdb = [0u8; 10];
     cdb[0] = 0x25;
@@ -555,7 +740,7 @@ fn read_capacity(h: &sys::Handle) -> Result<u32> {
 }
 
 /// READ TOC format 2: the raw Q entries of every session, binary MSF.
-fn full_toc(h: &sys::Handle) -> std::result::Result<Vec<TocEntry>, CmdError> {
+fn full_toc(h: &Dev) -> std::result::Result<Vec<TocEntry>, CmdError> {
     let mut buf = vec![0u8; 4 + 11 * 300];
     let mut cdb = [0u8; 10];
     cdb[0] = 0x43;
@@ -587,9 +772,13 @@ fn entry_lba(e: &TocEntry) -> i32 {
     msf::Msf { m: e.pmin, s: e.psec, f: e.pframe }.to_lba()
 }
 
-/// Open the disc in the drive at `path` (`hostcd:` already stripped).
+/// Open the disc in the drive at `path` (`hostcd:` already stripped; an
+/// optional speed before the device, `split_speed`). The speed is set on
+/// every open, so a disc swapped in keeps it and choosing the fastest
+/// again undoes a slower one.
 pub fn open(path: &str) -> Result<Disc> {
-    let handle = sys::Handle::open(path).map_err(Error::Invalid)?;
+    let (speed, path) = split_speed(path);
+    let handle = Dev::open(path).map_err(Error::Invalid)?;
     match handle.command(&[0u8; 6], &mut [], 30_000) {
         Ok(()) => {}
         Err(CmdError::Sense(s)) if s.key == 0x6 => {
@@ -599,6 +788,7 @@ pub fn open(path: &str) -> Result<Disc> {
         Err(CmdError::Sense(_)) => return Err(Error::Invalid(format!("{path}: no disc in the drive"))),
         Err(CmdError::Host(m)) => return Err(Error::Invalid(format!("{path}: {m}"))),
     }
+    set_speed(&handle, speed);
     let mut disc = Disc::new();
     if current_profile(&handle).is_some_and(|p| p >= 0x10) {
         /* A DVD or above: one data track of 2048-byte sectors. READ CD is a CD's command. */
@@ -668,8 +858,19 @@ pub fn open(path: &str) -> Result<Disc> {
                 /* a data track's mode is in its sectors' headers, not the TOC */
                 t.mode = TrackMode::Mode1;
                 let mut raw = [0u8; 2352];
-                if drive.read_raw(&t, start, &mut raw).is_ok() && raw[15] == 2 {
-                    t.mode = TrackMode::Mode2;
+                match drive.read_raw(&t, start, &mut raw) {
+                    Ok(()) if raw[15] == 2 => t.mode = TrackMode::Mode2,
+                    Ok(()) => {}
+                    Err(_) => {
+                        /* A drive that refuses a raw read of a data sector it
+                           reads cooked: the track is read cooked (READ(10)),
+                           its raw bytes synthesized as for an .iso (PR #4's
+                           probe). Mode 1, which every PC disc is. */
+                        let mut cooked = [0u8; 2048];
+                        if drive.read_cooked(&t, start, &mut cooked).is_ok() {
+                            t.extents[0].source = Source::Drive { raw: false };
+                        }
+                    }
                 }
             }
             tracks.push(t);
@@ -704,10 +905,23 @@ pub fn open(path: &str) -> Result<Disc> {
     }
     *drive.subs.get_mut().unwrap() = None;
     *lock(&drive.sectors) = Cache::default();
+    disc.mcn = read_mcn(&drive.handle);
     disc.sessions = sessions;
     disc.raw_toc = Some(entries);
     disc.drive = Some(drive);
     Ok(disc)
+}
+
+/// The disc's catalogue number (MCN, READ SUB-CHANNEL format 2), when it
+/// has one: instant on the first drive (PR #4 reads it, and each track's
+/// ISRC too). ISRCs are not read: format 3 took that drive 0.65 s a track,
+/// eight seconds added to every swap of a 12-track disc, for codes a game
+/// CD seldom carries.
+fn read_mcn(h: &Dev) -> Option<[u8; 13]> {
+    let mut buf = [0u8; 24];
+    h.command(&[0x42, 0, 0x40, 2, 0, 0, 0, 0, 24, 0], &mut buf, 10_000).ok()?;
+    let mcn: [u8; 13] = buf[9..22].try_into().ok()?;
+    (buf[8] & 0x80 != 0 && mcn.iter().all(u8::is_ascii_digit) && mcn != [b'0'; 13]).then_some(mcn)
 }
 
 /// Raw P-W if this drive returns it for track 1 with a good Q CRC, else formatted Q, else none.

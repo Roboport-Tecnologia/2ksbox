@@ -362,6 +362,71 @@ hostcd_check() { # the disc in a host's drive (M5h): the model, the dump it shou
   return $rc
 }
 
+hostcd_sim_check() { # the whole hostcd path on a simulated drive (no real one needed): model, probe, swaps
+  local d="$OUT/hostcd-sim" rc=0 w
+  rm -rf "$d"; mkdir -p "$d"
+  cp "$OUT/disc/lec.cue" "$OUT/disc/lec.bin" "$d/" || { echo "no selftest disc to simulate"; return 1; }
+  local img="$d/lec.cue" sim="hostcd:sim:$d/lec.cue"
+  # the model: the TOC, sectors and subchannel the drive commands bring back
+  # are the image's; the pregap after the data track is found, and the
+  # unreadable sector fails through the drive as on a real one
+  for w in "toc 0" "toc 1" "toc 2" "readraw 16" "readraw 2500" "readcooked 1010" "subq 2200" "discinfo"; do
+    # shellcheck disable=SC2086
+    [ "$($DISCX dump "$img" $w 2>&1 | md5sum)" = "$($DISCX dump "$sim" $w 2>&1 | md5sum)" ] || { echo "$w differs from the image's"; rc=1; }
+  done
+  $DISCX info "$sim" | grep -q "^  track 02 audio .*indices 00@2000 01@2150" || { echo "the pregap of track 2 was not found"; $DISCX info "$sim"; rc=1; }
+  $DISCX dump "$sim" readcooked 1000 >/dev/null 2>&1 && { echo "the unreadable sector 1000 read"; rc=1; }
+  [ -x $QSYS ] || return $rc
+  local n
+  n="$(atapi_disc_packets "$sim" "$OUT/hostcd-sim-probe.log")"
+  [ "${n:-0}" -gt 0 ] || { echo "SeaBIOS saw no disc model through $sim"; rc=1; }
+  # the watch: the image renamed away is the disc taken out, back is put in
+  rm -f "$d/q.sock"
+  $QSYS -L qemu/pc-bios -machine pc -m 64 -display none -net none \
+    -drive "if=none,id=cd0,media=cdrom,readonly=on,file=$sim" -device ide-cd,bus=ide.1,id=ide1-cd0,drive=cd0 \
+    -qmp "unix:$d/q.sock,server=on,wait=off" >"$d/qemu.log" 2>&1 &
+  local pid=$!
+  python3 - "$d/q.sock" "$img" >"$d/swap.log" 2>&1 <<'PY' || rc=1
+import json, os, socket, sys, time
+sock, img = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX)
+for _ in range(100):
+    try:
+        s.connect(sock); break
+    except OSError:
+        time.sleep(0.1)
+f = s.makefile("rw"); f.readline()
+def q(c):
+    f.write(json.dumps({"execute": c}) + "\n"); f.flush()
+    while True:
+        r = json.loads(f.readline())
+        if "return" in r or "error" in r:
+            return r
+q("qmp_capabilities")
+def state():
+    d = [b for b in q("query-block")["return"] if "cd0" in b.get("qdev", "")][0]
+    ins = d.get("inserted") or {}
+    return d.get("tray_open"), ins.get("image", {}).get("virtual-size", 0)
+def wait(want, what):
+    for _ in range(100):
+        if state() == want:
+            print("ok:", what); return True
+        time.sleep(0.1)
+    print("FAIL:", what, "is", state(), "not", want); return False
+ok = wait((False, 6800 * 2048), "the disc in at start")
+os.rename(img, img + ".out")
+ok &= wait((True, 0), "taken out: the tray opens, no medium")
+os.rename(img + ".out", img)
+ok &= wait((False, 6800 * 2048), "put back: the tray closes on the disc")
+sys.exit(0 if ok else 1)
+PY
+  kill $pid 2>/dev/null; wait $pid 2>/dev/null
+  cat "$d/swap.log"
+  grep -q "the disc was taken out" "$d/qemu.log" && grep -q "a disc was put in" "$d/qemu.log" \
+    || { echo "QEMU's log does not report the swap"; cat "$d/qemu.log"; rc=1; }
+  return $rc
+}
+
 atapi_disc_packets() { # disc, log [polls] -> packets the cdimage disc path saw while SeaBIOS probed the drive
   local disc="$1" out="$2" polls="${3:-40}" pid i
   # Both logs are markers this function waits on: a stale one from an
@@ -2612,6 +2677,9 @@ host_stage() {
   if [ -x $DISCX ]; then
     run_check dirdisc dirdisc.log dirdisc_check || true
   else skip dirdisc "needs $DISCX"; fi
+  if [ -x $DISCX ] && [ -f "$OUT/disc/lec.cue" ]; then
+    run_check hostcd-sim hostcd-sim.log hostcd_sim_check || true
+  else skip hostcd-sim "needs $DISCX and the libdisc check's images"; fi
   # A host drive with a disc in it: HOSTCD=/dev/sr0 picks one, else the
   # first drive that has a disc. Nothing to check without one.
   hostcd_dev="${HOSTCD:-}"

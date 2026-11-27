@@ -1081,8 +1081,30 @@ is unchanged: the responders, patch 51, CD-DA.
   splits a run into commands of that size.
 - **Seeks.** Going from audio to data costs that drive about 0.18 s each
   way, and the first data read after a stretch of audio up to 2.7 s
-  while it spins back up to data speed. SET CD SPEED would pin the speed,
-  but the kernel refuses it to an unprivileged `SG_IO`.
+  while it spins back up to data speed. Pinning one speed (max, 16x, 8x)
+  did not make the switch cheaper (0.25 s each way at all three).
+- **Speed.** `hostcd:<n>x:<device>` (or `max:`) sets the read speed with
+  SET CD SPEED on every open, so a swapped disc keeps it; no speed is the
+  fastest. The kernel passes SET CD SPEED only on a handle opened
+  read-write (EPERM on a read-only one), so the device opens read-write
+  where the user may, read-only otherwise. Read at 8x the Moto Racer data
+  took 8.2 s for 3,000 sectors, 3.4 s at max. The machine's Drive speed
+  setting writes it (`Machine::host_drive_speed`): slower is quieter.
+- **A drive that refuses raw data reads** is found at open: the raw read of
+  a data track's first sector fails and a cooked one works, and that track
+  is read with READ(10), its raw bytes synthesized as for an `.iso`.
+- **MCN** (READ SUB-CHANNEL format 2) is read at open, at no cost. ISRCs
+  (format 3) are not: 0.65 s a track on the first drive, eight seconds on
+  every swap of a 12-track disc.
+- **A simulated drive**, `hostcd:sim:<image>`, answers the same commands
+  from an image through `mmc`, its disc in while the image file exists
+  (the `hostcd-sim` check). Its model differs from the image's only where
+  the drive path chooses to: no ISRC, and no index 0 found between two
+  audio tracks.
+
+Speed, the raw-read probe, the MCN and the simulated drive came from PR
+#4 (an implementation of the same feature by `twitchplayskh`, not
+merged): its read-write open is what lets SET CD SPEED through.
 
 ### Reading ahead, and CD audio off the main loop
 

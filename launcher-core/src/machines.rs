@@ -341,9 +341,17 @@ pub fn details(machine: &Machine, shader: String) -> Vec<DetailGroup> {
                     },
                 )
                     .into(),
+            ]
+            .into_iter()
+            // the speed only where there is a real drive to read at it
+            .chain(machine.host_drive.as_ref().map(|_| {
+                ("Drive speed", crate::host_drive::speed_label(machine.host_drive_speed)).into()
+            }))
+            .chain([
                 file("Floppy", machine.floppy.as_ref()),
                 ("Boot from", machine.effective_boot().label().to_owned()).into(),
-            ],
+            ])
+            .collect(),
         },
         DetailGroup { title: Section::Display.label(), rows: rows(display) },
         DetailGroup { title: Section::Audio.label(), rows: audio },
