@@ -29,6 +29,8 @@
 #                       one command per line, embedded \n if you need two.
 #   CDS="a.cue:b.mds"   discs after the disk, colon-separated. .cue/.mds/.ccd
 #                       go through our own cdimage driver (doc 17).
+#   HOSTCD=/dev/sr0     the host's real drive as the second CD-ROM (track M5h),
+#                       as the launcher's Real CD/DVD drive gives it
 #   RUN_SECS=n          how long to let it run after the desktop is up (180)
 #   UNTIL="text"        end the run early once COM1 (OUT/com1.log) prints this
 #                       text; RUN_SECS is then the cap. A guest program of
@@ -339,6 +341,17 @@ for cd in "${CDLIST[@]}"; do
            -device "ide-cd,bus=ide.1,unit=$n,id=ide-cd$n,drive=cd$n,audiodev=snd0")
   n=$((n + 1))
 done
+# HOSTCD=/dev/sr0[ or 8x:/dev/sr0]: the host's real drive as the machine's
+# second CD-ROM, as the launcher's Real CD/DVD drive setting gives it (track
+# M5h): the secondary channel's slave, after the shelf's drive, an empty one
+# when CDS names no disc. The disc is whatever is in the real drive.
+if [ -n "${HOSTCD:-}" ]; then
+  if [ $n = 0 ]; then
+    DRIVES+=(-drive "if=none,id=cd0,media=cdrom" -device "ide-cd,bus=ide.1,unit=0,id=ide-cd0,drive=cd0,audiodev=snd0")
+  fi
+  DRIVES+=(-drive "if=none,id=hostcd0,media=cdrom,readonly=on,file=hostcd:$HOSTCD"
+           -device "ide-cd,bus=ide.1,unit=1,id=hostcd,drive=hostcd0,audiodev=snd0")
+fi
 VGAARGS=(-vga none -device "d3dpt-vga,addr=0x02${DDFLAGS:+,ddflags=$DDFLAGS}${FBVER:+,fb-version=$FBVER}")
 [ "${VGA:-d3dpt}" = d3dpt ] || VGAARGS=(-vga "${VGA}")
 USBARGS=(); [ "${TABLET:-0}" = 1 ] && USBARGS=(-usb -device usb-tablet)

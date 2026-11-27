@@ -73,6 +73,12 @@ two drives.
   SET CD SPEED, the machine's Drive speed), the raw-read probe, the MCN,
   the simulated drive and the `hostcd-sim` check (swaps end to end with
   no drive). Windows' transport is next, ported from that PR's.
+- Moto Racer's race music from the drive (2026-11-27): reproduced headless
+  on a raw copy of the user's base98-br (`HOSTCD=/dev/sr0 MOTO=none
+  MOTO_DIR='\ARQUIV~1\MOTORA~1' CDIMAGE_TRACE=1 tools/w98-moto.sh <name>`,
+  `RAW=` a converted copy); fixed by the split audio cache and patch 54's
+  data seek. The race PLAY is sent once and track 2 plays to its end
+  through 73 SEEKs and 810 data reads.
 - Step 5, Windows (2026-11-26): libdisc's `sys` for Windows (SPTI, or
   the CD-ROM IOCTLs without an administrator) and the launcher's drive
   list, ported from PR #4; type-checked for MSVC, not built or run on the

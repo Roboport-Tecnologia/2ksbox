@@ -727,8 +727,13 @@ STOP → 0x15. A play starting on a data sector is 05/64/00, and
   is the stop.** MCI seeks to where playback should end and reports
   "stopped" on its own authority, so a drive that treats the seek as
   advisory plays the disc out behind a stopped MCI (11 MB of wav for a
-  4-second play). A SEEK therefore ends playback and moves the head
-  (patch 54).
+  4-second play). A SEEK into the audio therefore ends playback and moves
+  the head (patch 54). A SEEK to a data sector does not (2026-11-27): it is
+  the CD file system's, before a read of that sector, and a game reading
+  its disc during the music lost it at every read (Moto Racer's race on
+  Win98 from a real drive, whose slower reads land during the music;
+  `CDIMAGE_TRACE` showed the music advancing for 8 s, a SEEK to LBA 75553
+  and a READ(10) of it, status 0x15, and the game's PLAY again).
 - A **data read** does not stop audio, although real drives abandon
   playback for one: Win98's CDFS re-reads the volume descriptors several
   times a second during a play (532 READ(10)s in one session).
@@ -1113,6 +1118,11 @@ so the music and the game's data reads do not evict each other: with one
 shared window, as at first, each switch was a seek back. A data-track
 run is 32 sectors (a guest's 64 KiB read), an audio run 150 (two
 seconds).
+
+Music and data windows are kept apart (4 audio windows, 16 data): a game
+reading its disc in small scattered READ(10)s fills sixteen windows in
+moments, and in one shared cache that pushed the music's next window out
+before it was played.
 
 **CD audio never waits for the drive.** QEMU plays it from the audio
 callback on its main loop, and a read there that waited out a seek froze

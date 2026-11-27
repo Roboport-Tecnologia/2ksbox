@@ -658,7 +658,11 @@ SEEKs for a whole play/pause/stop session, so a SEEK now ends playback
 (data reads do not: Win98's CDFS re-reads the volume descriptors
 throughout a play). Position replies no longer fall back to the last data
 sector read after a stop. Symptom: on Win98 the disc played on behind a
-stopped MCI (doc 17 §5.4). **Test:** `tools/cdaudio-guest-test.sh`.
+stopped MCI (doc 17 §5.4). Only a SEEK into the audio stops it (since
+2026-11-27, M5h): MCI seeks inside the tracks it plays, the CD file
+system to the data sector it is about to read, and Moto Racer's race music
+from a real drive stopped at every one of the game's reads. **Test:**
+`tools/cdaudio-guest-test.sh`; the DOS battery's two seek cases (`atapi-guest`).
 **Drop:** never.
 
 ### 055-atapi-audio-read-error

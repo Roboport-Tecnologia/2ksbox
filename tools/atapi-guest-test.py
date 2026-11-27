@@ -263,6 +263,15 @@ TESTS = [
     ("subq playing track 3 again", read_sub(1), ("pos", "track3again")),
     ("start stop unit: stop", pkt(0x1B), ("len", 0)),
     ("subq stopped by start stop unit", read_sub(1), ("pos", "sspstopped")),
+    # A SEEK into the audio is how Win9x's mcicda stops a play (patch 54);
+    # a SEEK to a data sector is the CD file system's, before it reads, and
+    # the play goes on (M5h: a game reading its disc during the music, as
+    # Moto Racer does from a real drive on Win98)
+    ("play track 3 for seeks", pkt(0x48, 0, 0, 0, 3, 1, 0, 3, 1), ("len", 0)),
+    ("seek to data while playing", pkt(0x2B, 0, *be32(16)), ("len", 0)),
+    ("subq after a data seek", read_sub(1), ("pos", "dataseek")),
+    ("seek into the audio while playing", pkt(0x2B, 0, *be32(5400)), ("len", 0)),
+    ("subq after an audio seek", read_sub(1), ("pos", "audioseek")),
     # MODE SELECT(10) page 0E: port 0 <- right at half volume, port 1 <- both muted; read back
     ("mode select 0e", (pkt(0x55, 0x10, 0, 0, 0, 0, 0, 0, 24), [0, 22, 0, 0, 0, 0, 0, 0, 0x0E, 14, 4, 0, 0, 0, 0, 0, 2, 128, 3, 0, 0, 0, 0, 0]), ("len", 0)),
     ("mode sense 0e after select", pkt(0x5A, 0, 0x0E, 0, 0, 0, 0, 0, 64), ("bytes-at", 16, [2, 128, 3, 0, 0, 0, 0, 0])),
@@ -974,6 +983,13 @@ def check(bcl, entries):
     if st != 0x15 or z2 is None or not (5300 <= z2 < 6800):
         failures.append("stopped by start stop unit: status %s position %s "
                         "(want 0x15 with the head in track 3, 5300..6800)" % (st, z2))
+    st, d = pos("dataseek")
+    if st != 0x11 or d is None or not (5300 <= d < 6800):
+        failures.append("after a seek to data: status %s position %s (want 0x11, still "
+                        "playing track 3)" % (st, d))
+    st, a = pos("audioseek")
+    if st != 0x15:
+        failures.append("after a seek into the audio: status %s (want 0x15, stopped)" % st)
     return failures
 
 

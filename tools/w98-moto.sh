@@ -35,6 +35,8 @@ mkdir -p "$ROOT/build/w98game"
 cd "$ROOT"
 MOTO=${MOTO:-$HOME/isos/Moto.Racer.1997.DSI.CD/MOTO_RACER.mds}
 DIR=${MOTO_DIR:-'\PROGRA~1\MOTORA~1'}
+# MOTO=none: no image; the disc is the real drive's (HOSTCD=/dev/sr0, M5h)
+[ "$MOTO" = none ] && MOTO=
 FRESH=${FRESH:-1} GUEST_CMD="cd $DIR"$'\nMOTO.EXE' CDS="$MOTO" TABLET=0 RUN_SECS=${RUN_SECS:-500} SHOTS=${SHOTS:-5} \
   OUT=$O tools/win98-game-test.sh "${IMG:-$HOME/Library/Application Support/2ksbox/machines/base98-us/disk.qcow2}" "$NAME" >"$LOG" 2>&1 &
 H=$!

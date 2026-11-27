@@ -61,7 +61,7 @@ index 97adb48268..5e6da0003f 100644
  }
  
  /*
-@@ -1732,6 +1741,31 @@ static void cmd_seek(IDEState *s, uint8_t* buf)
+@@ -1732,6 +1741,41 @@ static void cmd_seek(IDEState *s, uint8_t* buf)
          return;
      }
  
@@ -86,7 +86,17 @@ index 97adb48268..5e6da0003f 100644
 +     * on a read would never play a note under it.
 +     */
 +    if (atapi_disc(s)) {
-+        atapi_audio_stop_play(s);
++        /*
++         * 2ksbox (M5h): only a seek into the audio is the stop. MCI seeks
++         * to where its play should end, always inside the tracks it plays;
++         * the CD file system seeks to a data sector and reads it at once,
++         * and a game reading its disc in a race (Moto Racer on Win98 from
++         * a real drive, whose reads land during the music) lost the music
++         * at every read. As for a data read above, the music plays on.
++         */
++        if (libdisc_sector_kind(atapi_disc(s), lba) == LIBDISC_KIND_AUDIO) {
++            atapi_audio_stop_play(s);
++        }
 +        s->atapi_last_lba = lba;
 +    }
 +#endif

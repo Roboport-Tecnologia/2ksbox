@@ -36,10 +36,15 @@ const READ_AHEAD: u32 = 32;
 /// spin speed (2.7 s). `read_window` splits it into commands the host takes.
 const AUDIO_AHEAD: u32 = 150;
 
-/// Windows the sector cache keeps, most recently used first: the music's
-/// and the game's reads must not evict each other (each eviction is a seek
-/// back, seconds on a slim USB drive, which froze the VM with the music).
+/// Data windows the sector cache keeps, most recently used first.
 const CACHE_WINDOWS: usize = 16;
+
+/// Audio windows, kept apart from the data ones: a game loading a level
+/// reads more than sixteen data windows, which pushed the music's out of
+/// one shared cache before it was played, and its fetch again, and the
+/// music never played while the game read its disc (Moto Racer's race on
+/// Win98, user 2026-11-26). Four is eight seconds of music.
+const AUDIO_WINDOWS: usize = 4;
 
 /// A sector read's timeout. A weak sector makes a drive retry for seconds
 /// before it gives up, and that failure is the answer the guest wants.
@@ -682,6 +687,8 @@ struct Window {
     first: i32,
     count: u32,
     stride: usize,
+    /// Read from an audio track: kept in the cache's own audio list.
+    audio: bool,
     data: Vec<u8>,
 }
 
@@ -707,11 +714,12 @@ enum Sub {
     None,
 }
 
-/// The sectors read ahead: windows most recently used first, and the
-/// ranges the worker is fetching.
+/// The sectors read ahead: data and audio windows apart, each most
+/// recently used first, and the ranges the worker is fetching.
 #[derive(Default)]
 struct Cache {
     windows: VecDeque<Window>,
+    audio: VecDeque<Window>,
     pending: Vec<(i32, u32)>,
     /// First sectors of fetches that failed, for `try_read_raw` to report once.
     failed: Vec<i32>,
@@ -719,17 +727,26 @@ struct Cache {
 
 impl Cache {
     fn get(&mut self, lba: i32) -> Option<&Window> {
-        let at = self.windows.iter().position(|w| w.get(lba).is_some())?;
-        if at > 0 {
-            let w = self.windows.remove(at).unwrap();
-            self.windows.push_front(w);
+        for list in [&mut self.audio, &mut self.windows] {
+            if let Some(at) = list.iter().position(|w| w.get(lba).is_some()) {
+                if at > 0 {
+                    let w = list.remove(at).unwrap();
+                    list.push_front(w);
+                }
+                return list.front();
+            }
         }
-        self.windows.front()
+        None
+    }
+
+    fn contains(&self, lba: i32) -> bool {
+        self.audio.iter().chain(&self.windows).any(|w| w.get(lba).is_some())
     }
 
     fn insert(&mut self, w: Window) {
-        self.windows.push_front(w);
-        self.windows.truncate(CACHE_WINDOWS);
+        let (list, max) = if w.audio { (&mut self.audio, AUDIO_WINDOWS) } else { (&mut self.windows, CACHE_WINDOWS) };
+        list.push_front(w);
+        list.truncate(max);
     }
 
     fn pending(&self, lba: i32) -> bool {
@@ -812,7 +829,7 @@ fn read_window(handle: &Dev, sub_mode: Sub, lba: i32, count: u32, audio: bool, s
         }
         done += n;
     }
-    Ok(Window { first: lba, count, stride, data })
+    Ok(Window { first: lba, count, stride, audio, data })
 }
 
 /// `read_window`, and a run that fails retried as its first sector alone, so
@@ -921,7 +938,7 @@ impl Drive {
             out.copy_from_slice(w.get(lba).unwrap());
             let (first, count) = (w.first, w.count);
             let next = first + count as i32;
-            if lba - first >= count as i32 / 2 && next < t.end_lba && c.windows.iter().all(|w| w.get(next).is_none()) {
+            if lba - first >= count as i32 / 2 && next < t.end_lba && !c.contains(next) {
                 self.fetch(&mut c, t, next);
             }
             return Ok(true);
