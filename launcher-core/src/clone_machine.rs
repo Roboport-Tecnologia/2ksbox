@@ -608,7 +608,7 @@ fn monitor_listening(dir: &Path) -> bool {
     crate::control::listening(&crate::control::socket_path(dir))
 }
 
-fn size_label(bytes: u64) -> String {
+pub(crate) fn size_label(bytes: u64) -> String {
     let mb = bytes as f64 / (1024.0 * 1024.0);
     if mb >= 1024.0 {
         format!("{:.1} GB", mb / 1024.0)

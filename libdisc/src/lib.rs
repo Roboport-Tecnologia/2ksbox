@@ -8,6 +8,7 @@
 //! are synchronous `pread`s on immutable files; a `Disc` is immutable once
 //! opened and every method is safe to call from several threads.
 
+pub mod audio;
 #[allow(non_camel_case_types)]
 pub mod capi;
 pub mod ccd;
@@ -211,6 +212,13 @@ pub enum Source {
     Drive {
         raw: bool,
     },
+    /// Raw audio sectors decoded from a compressed file (`audio.rs`):
+    /// `audio` indexes the disc's audio files, `offset` is the byte offset
+    /// of this extent's first sector in the decoded PCM.
+    Audio {
+        audio: usize,
+        offset: u64,
+    },
     /// Audio pregap / postgap: digital silence.
     Silence,
     /// Data pregap / postgap: zero-filled sectors of the track's mode with valid EDC/ECC.
@@ -310,7 +318,7 @@ const FD_CACHE: usize = 8;
 /// code, and CD audio as a play that stops, with nothing anywhere to say
 /// which file or why: "CD music sometimes doesn't work, especially off a
 /// Samba share" was all there was to go on.
-fn report_file_error(msg: &str) {
+pub(crate) fn report_file_error(msg: &str) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static SAID: AtomicU32 = AtomicU32::new(0);
     if SAID.fetch_add(1, Ordering::Relaxed) < 32 {
@@ -330,6 +338,8 @@ pub struct Disc {
     /// Generated sectors held in memory (`Source::Mem`): `isodir`'s
     /// volume descriptors, path tables and directory records.
     blobs: Vec<Vec<u8>>,
+    /// Compressed audio track files (`Source::Audio`).
+    audio: audio::AudioFiles,
     /// Open handles for `files`, most recently used first. The lock is
     /// the only mutable state on a disc; it is held to take a handle,
     /// never across the read itself.
@@ -357,6 +367,7 @@ impl Disc {
             raw_toc: None,
             files: Vec::new(),
             blobs: Vec::new(),
+            audio: audio::AudioFiles::default(),
             fds: std::sync::Mutex::new(Vec::new()),
             drive: None,
         }
@@ -375,6 +386,17 @@ impl Disc {
         }
         self.files.push(Payload { path: path.to_path_buf(), len: md.len(), mtime: md.modified().ok() });
         Ok(self.files.len() - 1)
+    }
+
+    /// Register a compressed audio file; returns its index for
+    /// `Source::Audio`.
+    pub(crate) fn add_audio(&mut self, path: &Path) -> Result<usize> {
+        self.audio.add(path)
+    }
+
+    /// A compressed audio file, by its `Source::Audio` index.
+    pub fn audio_file(&self, index: usize) -> &audio::AudioFile {
+        self.audio.file(index)
     }
 
     /// Register generated sectors; returns their index for `Source::Mem`.
@@ -609,6 +631,9 @@ impl Disc {
                 }
             }
             Source::Silence => out.fill(0),
+            Source::Audio { audio, offset } => {
+                self.audio.read(audio, offset + (lba - e.lba) as u64 * 2352, out)?;
+            }
             Source::ZeroData => synth_from_cooked(t.mode, lba, &[0u8; 2048], out),
             Source::Mem { blob, offset } => {
                 let off = (offset + (lba - e.lba) as u64 * 2048) as usize;

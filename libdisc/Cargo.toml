@@ -9,3 +9,8 @@ description = "Raw optical disc model for the QEMU CD backend: formats, subchann
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+# Audio tracks a cue sheet names as OGG Vorbis, FLAC, MP3, AIFF or a WAV
+# that is not CD PCM (`audio.rs`; GOG's CD games). MPL-2.0, which GPLv2
+# takes (its Secondary Licence clause); pure Rust, so the MSVC QEMU links
+# it as it links the rest.
+symphonia = { version = "=0.6.1", default-features = false, features = ["ogg", "vorbis", "flac", "mp3", "wav", "pcm", "aiff"] }

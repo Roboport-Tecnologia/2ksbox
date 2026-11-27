@@ -23,7 +23,7 @@ use crate::shaders::{ShaderEditorWindow, ShaderProfilesWindow, Shaders};
 use crate::discs::{DiscShelfWindow, Discs};
 use crate::snaps::{Snaps, SnapshotsWindow};
 use crate::wizard::{Wizard, WizardWindow};
-use launcher_core::machines::{DetailGroup, Machines};
+use launcher_core::machines::{DetailGroup, Machines, Stopped};
 use launcher_core::{browse, library};
 use mitsuami::core::{CurrentWindow, Ui};
 use mitsuami::prelude::*;
@@ -187,11 +187,42 @@ impl Library {
     }
 
     /// Reap any player that exited. A child process cannot push that news,
-    /// so the window polls.
+    /// so the window polls. One that ended badly is told as the platform's
+    /// notification (`Machines::take_stopped`): its window is gone, and
+    /// the launcher may be behind other windows or minimized.
     async fn poll(self) {
         loop {
             sleep(Duration::from_millis(500)).await;
             self.write(|m| !m.reap().is_empty());
+            let stopped = self.model.with_untracked(|m| m.borrow_mut().take_stopped());
+            for stopped in stopped {
+                self.tell_stopped(stopped).await;
+            }
+        }
+    }
+
+    /// A machine that didn't start or crashed, as a notification whose id is
+    /// its bundle directory (a click selects it); where notifications are
+    /// off or there is nothing to show them, the window's alert. A headless
+    /// probe (`LAUNCHER_SHOT`) only prints it.
+    async fn tell_stopped(&self, stopped: Stopped) {
+        eprintln!("[launcher] stopped: {} | {}", stopped.title, stopped.body);
+        if std::env::var_os("LAUNCHER_SHOT").is_some() {
+            return;
+        }
+        let id = stopped.dir.display().to_string();
+        let notification = Notification::new(stopped.title.clone()).body(stopped.body.clone()).id(id);
+        if let Err(e) = notify(notification).await {
+            eprintln!("[launcher] notification not shown ({e}); the alert instead");
+            self.failure.set(Some((stopped.title, stopped.body)));
+        }
+    }
+
+    /// A click on a stopped machine's notification: that machine, selected.
+    fn select_notified(&self, id: &str) {
+        let dir = PathBuf::from(id);
+        if self.dirs().contains(&dir) {
+            self.selected.set(vec![dir]);
         }
     }
 }
@@ -214,7 +245,8 @@ pub fn MachinesWindow() -> impl View {
     crate::about::app_menu(about, library, command_menus(stores));
     // The window's task, which ends with it.
     spawn_local(library.poll());
-    crate::shot::arm(&["", "select", "create", "clonego", "firstrun"]);
+    on_notification_activated(move |id| library.select_notified(&id));
+    crate::shot::arm(&["", "select", "create", "clonego", "firstrun", "play"]);
     // The first-run offer (and the machines folder's question) asks on a
     // real start, and on `firstrun[:<answers>]` with scripted answers;
     // every other headless screen, and a packager's bare `LAUNCHER_SHOT`,
@@ -295,6 +327,17 @@ pub fn MachinesWindow() -> impl View {
     if let Some(arg) = crate::shot::screen("create") {
         wizard.create_for_screen(&arg, library);
     }
+    if let Some(arg) = crate::shot::screen("invalid") {
+        wizard.invalid_for_screen(&arg, library);
+    }
+    // `play:<machine.toml>`: that machine started, as its Start button
+    // does; a player that ends badly prints the notification's words
+    // (`stopped: …`) once the poll reaps it (LAUNCHER_SHOT_DELAY_MS long
+    // enough for that).
+    if let Some(bundle) = crate::shot::screen("play") {
+        let dir = Path::new(&bundle).parent().map(Path::to_path_buf).unwrap_or_default();
+        library.play(&dir);
+    }
     // `select:<machine.toml>`: the window with that machine chosen, as a
     // click on its row would.
     if let Some(bundle) = crate::shot::screen("select") {
@@ -308,9 +351,13 @@ pub fn MachinesWindow() -> impl View {
     // An empty library has no sidebar, and the window's size is the
     // details' alone, which the sidebar adds to: so it opens the sidebar's
     // width wider, and gives that width back to the sidebar when the first
-    // machine comes. The last machine gone, the window keeps its width.
+    // machine comes. The last machine gone, the window keeps its width. A
+    // window opened at its remembered frame is already as wide as it was
+    // left.
     #[cfg(sidebar)]
-    if let Some(window) = window {
+    if let Some(window) = window
+        && !crate::OPENED_REMEMBERED.load(std::sync::atomic::Ordering::Relaxed)
+    {
         let (ui, was_empty) = (ui.clone(), std::cell::Cell::new(None));
         effect(move || {
             let empty = library.read(Machines::is_empty);

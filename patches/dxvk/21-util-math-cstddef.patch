@@ -1,0 +1,11 @@
+diff --git a/src/util/util_math.h b/src/util/util_math.h
+--- a/src/util/util_math.h
++++ b/src/util/util_math.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <cmath>
++#include <cstddef>
+ 
+ namespace dxvk {
+   

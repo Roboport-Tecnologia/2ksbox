@@ -40,6 +40,15 @@ were played as silence. Without patch 55 the play stopped at 2152 with
 status 0x14 and the music was off for good (a disc on a Samba share).
 The shelf stage is skipped in this mode.
 
+**ATAPI_AUDIO=ogg|flac|mp3** (the `atapi-cueaudio` check) runs the same
+battery on the selftest disc with its audio stored compressed, as GOG's
+CD games store theirs: lec.bin split into data.bin (track 1) and one
+audio file holding tracks 2 and 3, made with ffmpeg, under a cue sheet
+that types it WAVE as DOSBox cue sheets do. Every LBA is where it was, so
+every check holds, and each audio reply the guest gets through QEMU must
+equal libdisc's own decode of the same file (libdisc's audio.rs). The
+shelf stage is skipped in this mode.
+
 The FreeDOS 1.3 boot floppy (build/images/144m/x86BOOT.img, git-ignored)
 is fetched by tools/x87-guest-test.py (same harness).
 """
@@ -147,6 +156,10 @@ SHELF_FLAG_LOADED = 0x01
 SHELF_FLAG_MISSING = 0x02
 LONG_LABEL = "A label longer than the protocol's sixty-four bytes, which must come back truncated"
 BOOT_DISC = os.path.join(DISC_DIR, "lec.cue") if qemuhost.WINDOWS else os.path.join(DISC_DIR, ".", "lec.cue")
+AUDIO = os.environ.get("ATAPI_AUDIO", "")
+if AUDIO:
+    # (made by make_audio_disc before the guest starts)
+    DISC = BOOT_DISC = os.path.join(OUT, "cueaudio", "lec-%s.cue" % AUDIO)
 SHELF_DISCS = [
     ("Selftest disc", DISC),
     ("Mixed disc", TOC_DISC),
@@ -1073,9 +1086,35 @@ def run_cdshelf_stage():
     return check_cdshelf(open(log, "r", errors="replace").read()), log
 
 
+def make_audio_disc():
+    """The selftest disc with tracks 2 and 3 in one compressed file."""
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit("ATAPI_AUDIO needs ffmpeg")
+    d = os.path.dirname(DISC)
+    os.makedirs(d, exist_ok=True)
+    raw = open(os.path.join(DISC_DIR, "lec.bin"), "rb").read()
+    split = 2000 * 2352                      # track 1 is sectors 0..2000 of lec.bin
+    with open(os.path.join(d, "data.bin"), "wb") as f:
+        f.write(raw[:split])
+    pcm = os.path.join(d, "audio.pcm")
+    with open(pcm, "wb") as f:
+        f.write(raw[split:])
+    enc = {"ogg": ["-c:a", "libvorbis", "-q:a", "4"], "mp3": ["-b:a", "192k"], "flac": []}[AUDIO]
+    audio = os.path.join(d, "audio." + AUDIO)
+    sh("ffmpeg", "-loglevel", "error", "-y", "-f", "s16le", "-ar", "44100", "-ac", "2", "-i", pcm, *enc, audio)
+    # lec.cue's track 2 index 0 at file frame 2000 and index 1 at 2150, track
+    # 3's PREGAP and index 1 at 5150: the same, 2000 frames into the new file.
+    with open(DISC, "w") as f:
+        f.write('CATALOG 1234567890123\nFILE "data.bin" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n'
+                'FILE "audio.%s" WAVE\n  TRACK 02 AUDIO\n    ISRC USABC0912345\n    INDEX 00 00:00:00\n'
+                '    INDEX 01 00:02:00\n  TRACK 03 AUDIO\n    PREGAP 00:02:00\n    INDEX 01 00:42:00\n' % AUDIO)
+
+
 def main():
     ensure_prereqs()
     os.makedirs(OUT, exist_ok=True)
+    if AUDIO:
+        make_audio_disc()
     write_shelf()
     asm = os.path.join(OUT, "atapitst.asm")
     com = os.path.join(OUT, "ATAPITST.COM")
@@ -1111,6 +1150,9 @@ def main():
             print("  " + f)
         return 1
     print("atapi guest test: %d replies over two byte-count limits identical to discx; audio positions consistent" % n)
+    if AUDIO:
+        print("atapi cue-audio test: the selftest disc's audio as one .%s file, every reply as above" % AUDIO)
+        return 0
     if READ_ERROR:
         qlog = open(os.path.join(OUT, "qemu.log"), errors="replace").read()
         silent = ["ide-cd: CD audio sector %d unreadable: played as silence" % lba

@@ -22,6 +22,7 @@ use crate::machines::Library;
 use crate::machines::icons;
 use launcher_core::browse;
 use launcher_core::disc_library::{self, DISC_FILTER, DiscKind};
+use launcher_core::installer;
 use launcher_core::shelf::Shelf;
 use mitsuami::prelude::*;
 use std::path::{Path, PathBuf};
@@ -91,6 +92,51 @@ impl Discs {
                 self.model.update(|s| s.apply_live(probe));
             }
         }
+    }
+
+    /// Pick a game's installer in the platform's dialog and unpack it.
+    fn pick_installer(&self, library: Library) {
+        let mut request = OpenFile::new()
+            .title(installer::PICK_TITLE)
+            .filter(FileFilter::new(installer::FILTER.0, browse::extensions(installer::FILTER)))
+            .filter(FileFilter::all("All files"));
+        if let Some(start) = browse::browse_start("", None) {
+            request = request.start_folder(start);
+        }
+        let discs = *self;
+        spawn_local(async move {
+            if let Some(path) = open_file(request).await.unwrap_or_default().into_iter().next() {
+                let path = browse::picked(&path);
+                browse::remember(&path);
+                crate::path_field::grant_companions(&path).await;
+                discs.unpack(&path, library);
+            }
+        });
+    }
+
+    /// Unpack an installer into a folder on the shelf (`installer.rs`),
+    /// polling its thread until it ends. The window may close meanwhile;
+    /// the folder still lands on the shelf, and a running machine's drive
+    /// hears of it.
+    fn unpack(&self, path: &Path, library: Library) {
+        self.model.update(|s| s.unpack_installer(path));
+        if !self.model.with_untracked(Shelf::unpacking) {
+            return;
+        }
+        let discs = *self;
+        spawn_local(async move {
+            loop {
+                sleep(Duration::from_millis(300)).await;
+                let mut ended = false;
+                discs.edit(|s| ended = s.poll_unpack());
+                if ended {
+                    break;
+                }
+            }
+            if !discs.model.with_untracked(|s| s.open) {
+                library.republish_shelf();
+            }
+        });
     }
 
     /// Turn a disc's label into a field, filled with the label.
@@ -189,6 +235,9 @@ pub fn DiscShelfWindow() -> impl View {
         (
             MenuItem::new("Disc image…").on_select(move || discs.pick(false)),
             MenuItem::new("Folder as disc…").on_select(move || discs.pick(true)),
+            MenuItem::new(installer::MENU_ITEM)
+                .enabled(move || !discs.read(Shelf::unpacking))
+                .on_select(move || discs.pick_installer(library)),
             MenuSeparator::new(),
             MenuItem::new("Guest tools ISO")
                 .enabled(has_guest_tools)
@@ -223,6 +272,17 @@ pub fn DiscShelfWindow() -> impl View {
                             </Text>
                             <MenuButton icon=icons::NEW menu=add_menu()>"Add"</MenuButton>
                         </Row>
+                        <Show when=move || discs.read(Shelf::unpacking)>
+                            <Column margin_x=Spacing::Xl gap=Spacing::Xs>
+                                <Progress
+                                    label="Unpacking"
+                                    value=move || discs.read(|s| s.unpack_progress().map_or(0.0, |(done, total)| {
+                                        if total == 0 { 1.0 } else { done as f64 / total as f64 }
+                                    }))
+                                />
+                                <Text text_style=TextStyle::Caption>{move || discs.read(Shelf::unpack_label)}</Text>
+                            </Column>
+                        </Show>
                     </Column>
                     <Show when=move || !cfg!(target_os = "macos") && !discs.read(|s| s.discs().is_empty())>
                         <Separator/>
@@ -238,11 +298,19 @@ pub fn DiscShelfWindow() -> impl View {
                     <Group
                         margin_x=Spacing::Xl
                         shrink=0.0
-                        file_drop={FileDrop::extensions(DISC_FILTER.1.iter().copied()).and_folders()}
+                        file_drop={FileDrop::extensions(DISC_FILTER.1.iter().chain(installer::FILTER.1).copied()).and_folders()}
                         @drop={move |paths: Vec<PathBuf>| {
                             discs.drop_over.set(false);
                             for path in paths {
-                                discs.add(&path);
+                                if installer::looks_like_installer(&path) {
+                                    // As a pick does: its slices granted first.
+                                    spawn_local(async move {
+                                        crate::path_field::grant_companions(&path).await;
+                                        discs.unpack(&path, library);
+                                    });
+                                } else {
+                                    discs.add(&path);
+                                }
                             }
                         }}
                         @drop_hover={move |over: bool| discs.drop_over.set(over)}
@@ -253,7 +321,7 @@ pub fn DiscShelfWindow() -> impl View {
                                 {move || if discs.drop_over.get() {
                                     "Release to add"
                                 } else {
-                                    "Drop disc images or folders here"
+                                    "Drop disc images, folders or game installers here"
                                 }.to_owned()}
                             </Text>
                         </Row>

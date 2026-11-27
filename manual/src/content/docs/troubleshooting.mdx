@@ -7,7 +7,12 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## The machine won't start
 
-The launcher shows an alert that says why. The usual reasons:
+The launcher says why: in an alert, or, when the machine's window
+opened and closed again at once, in a notification ("Couldn't start"
+with the reason, for example a disc image that isn't there). A machine
+that crashes later is reported the same way. Clicking the notification
+brings the launcher forward with that machine selected. The usual
+reasons:
 
 - **The disk or a disc image moved.** Check the paths on the
   machine's **Storage** page. A disk that was deleted from a folder

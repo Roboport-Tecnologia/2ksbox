@@ -29,10 +29,11 @@ mod shaders;
 mod wake;
 mod watch;
 
-use mitsuami::core::{CurrentWindow, Ui};
+use mitsuami::core::{CurrentWindow, Placement, Point, Ui, WindowFrame};
 use mitsuami::prelude::*;
 use player_core::cursor_shape::{self, CursorKind};
 use player_core::qemu_vm::CursorImage;
+use launcher_core::window_state::{Keeper, WindowState};
 use player_core::{Gpu, Input, MinSize, Qemu, Session};
 use render::Render;
 use std::cell::RefCell;
@@ -76,13 +77,9 @@ struct Player {
     asking: bool,
     /// The window, for sizing it to the picture (`fit_window`).
     window: Option<(Ui, NodeId)>,
-    /// The content size in points the window opened at or last
-    /// remembered (`--window-state`): a resize to another one is the
-    /// user's, and is written (`remember_size`).
-    remembered: Option<(f32, f32)>,
-    /// When the surface first had a real size: the sizes of the next
-    /// moments are the platform's opening, not the user's.
-    opened_at: Option<std::time::Instant>,
+    /// The window's frame on its way to `--window-state`
+    /// (`remember_frame`).
+    frame: Option<Keeper>,
     /// The surface, for the refresh rate of the screen it is on
     /// (`tell_refresh`), and the guest's rate last told (mHz).
     surface: Option<SurfaceHandle>,
@@ -146,11 +143,16 @@ struct Window_ {
     /// doesn't take the window's size; kept by `draw`, since neither is a
     /// signal the menu could follow
     fits: Signal<bool>,
+    /// the window's restored frame and whether it's maximized, which the
+    /// platform keeps and the machine's `--window-state` remembers
+    frame: Signal<Option<WindowFrame>>,
+    maximized: Signal<bool>,
 }
 
 fn main() {
     let args = player_core::startup();
     let guest = !args.qemu.is_empty() && args.sweep.is_none() && args.calib.is_none();
+    let frame = args.window_state.clone().map(Keeper::new);
     PLAYER.with(|p| {
         *p.borrow_mut() = Some(Player {
             args,
@@ -169,8 +171,7 @@ fn main() {
             motion_rest: (0.0, 0.0),
             asking: false,
             window: None,
-            remembered: None,
-            opened_at: None,
+            frame,
             surface: None,
             guest_mhz: 0,
             vblank: None,
@@ -187,18 +188,12 @@ fn main() {
     // The menu bar in the title bar, rather than on a row of its own that
     // the picture sits under (user, 2026-10-08), at its start, before the
     // title (user, 2026-10-09).
-    // ... and every machine's window opening in the middle of the screen,
-    // not a step further down Windows' cascade each time; in full screen
-    // the menus drop over the picture while the released pointer is at the
-    // top edge (user, 2026-10-08).
+    // ... and in full screen the menus drop over the picture while the
+    // released pointer is at the top edge (user, 2026-10-08).
     #[cfg(windows)]
     {
-        use mitsuami::winui::{
-            FullScreenMenuBar, MenuBarPlace, WindowPlacement, set_full_screen_menu_bar, set_menu_bar_place,
-            set_window_placement,
-        };
+        use mitsuami::winui::{FullScreenMenuBar, MenuBarPlace, set_full_screen_menu_bar, set_menu_bar_place};
         set_menu_bar_place(MenuBarPlace::InTitleBarStart);
-        set_window_placement(WindowPlacement::Centred);
         set_full_screen_menu_bar(FullScreenMenuBar::AtTopEdge);
     }
     App::new()
@@ -238,6 +233,8 @@ fn player_window(guest: bool) -> Window {
         scale: signal(None),
         backing: signal(1.0),
         fits: signal(false),
+        frame: signal(None),
+        maximized: signal(false),
     };
     let title = move || {
         let mut notes = Vec::new();
@@ -253,12 +250,30 @@ fn player_window(guest: bool) -> Window {
         }
         title
     };
-    // the machine's remembered size (M22), else 1280x960 points
-    let remembered = with(|p| p.args.window_state.as_deref().and_then(player_core::window_state::load)).flatten();
-    let (width, height) = remembered.unwrap_or((1280.0, 960.0));
-    eprintln!("[window] opens at {width}x{height} points{}", if remembered.is_some() { " (remembered)" } else { "" });
+    // The machine's window as it was left (M22), else 1280x960 points in
+    // the middle of the screen, not a step further down Windows' cascade
+    // each time (user, 2026-10-08).
+    let remembered = with(|p| p.frame.as_ref().and_then(Keeper::load)).flatten();
+    w.frame.set(remembered.map(|s| WindowFrame {
+        position: s.position.map(|(x, y)| Point::new(x, y)),
+        size: Size::new(s.size.0, s.size.1),
+    }));
+    w.maximized.set(remembered.is_some_and(|s| s.maximized));
+    match remembered {
+        Some(s) => eprintln!(
+            "[window] opens at {}x{} points{}{} (remembered)",
+            s.size.0,
+            s.size.1,
+            s.position.map_or(String::new(), |(x, y)| format!(" at {x},{y}")),
+            if s.maximized { ", maximized" } else { "" },
+        ),
+        None => eprintln!("[window] opens at 1280x960 points"),
+    }
     Window::new(title)
-        .size(Size::new(width, height))
+        .size(Size::new(1280.0, 960.0))
+        .placement(Placement::Centred)
+        .frame(w.frame)
+        .maximized(w.maximized)
         .min_size(w.min)
         .full_screen(w.full)
         .open(w.open)
@@ -270,6 +285,14 @@ fn content(w: Window_) -> impl View {
     let ui = inject::<Ui>().expect("a window's content");
     if let Some(CurrentWindow(id)) = inject::<CurrentWindow>() {
         with(|p| p.window = Some((ui.clone(), id)));
+    }
+    // The frame the platform keeps, remembered as the user leaves it.
+    {
+        let ui = ui.clone();
+        effect(move || {
+            let (frame, maximized) = (w.frame.get(), w.maximized.get());
+            with(|p| remember_frame(p, &ui, frame, maximized));
+        });
     }
     // the machine's drive and shader profile, when the launcher named the
     // machine
@@ -365,10 +388,8 @@ fn content(w: Window_) -> impl View {
         if w.backing.get_untracked() != backing {
             w.backing.set(backing);
         }
-        let full = w.full.get_untracked();
         with(|p| {
             p.scale = backing;
-            remember_size(p, (size.width as f32 / p.scale, size.height as f32 / p.scale), full);
             // drawn at the new size before this returns, never the old
             // frame stretched
             if let Some(render) = &p.render {
@@ -386,29 +407,23 @@ fn content(w: Window_) -> impl View {
     }
 }
 
-/// A new content size, in points, written to the machine's
-/// `--window-state` file when it is the user's: not a size of the first
-/// two seconds (0x0 comes first, then the size asked for, then, on macOS,
-/// that size shrunk to fit a screen too small for it), not full screen's,
-/// and not the size it already had (a move to a screen of another scale
-/// reports the same points).
-const OPENING: Duration = Duration::from_secs(2);
-
-fn remember_size(p: &mut Player, size: (f32, f32), full: bool) {
-    let Some(path) = p.args.window_state.as_deref() else { return };
-    if size.0 < 1.0 || size.1 < 1.0 {
-        return;
-    }
-    let opened = *p.opened_at.get_or_insert_with(std::time::Instant::now);
-    let Some((w, h)) = p.remembered.filter(|_| opened.elapsed() >= OPENING) else {
-        p.remembered = Some(size);
-        return;
+/// The window's frame, written to the machine's `--window-state` file
+/// when it is the user's (`Keeper`).
+fn remember_frame(p: &mut Player, ui: &Ui, frame: Option<WindowFrame>, maximized: bool) {
+    let (Some(keeper), Some(frame)) = (p.frame.as_mut(), frame) else { return };
+    let state = WindowState {
+        position: frame.position.map(|pt| (pt.x, pt.y)),
+        size: (frame.size.width, frame.size.height),
+        maximized,
     };
-    if full || ((w - size.0).abs() < 1.0 && (h - size.1).abs() < 1.0) {
+    if !keeper.changed(state) {
         return;
     }
-    player_core::window_state::save(path, size.0, size.1);
-    p.remembered = Some(size);
+    let waiter = ui.clone();
+    ui.spawn_local(async move {
+        waiter.sleep(Keeper::SETTLE).await;
+        with(|p| p.frame.as_mut().map(Keeper::settled));
+    });
 }
 
 /// The menu bar. The window takes its chords first, and while the
@@ -606,7 +621,8 @@ fn close_request(w: Window_) {
         .message(player_core::CLOSE_DETAIL)
         .style(AlertStyle::Warning)
         .button("Cancel")
-        .button("Close");
+        // the guest's unsaved work goes with it
+        .destructive_button("Close");
     let asker = ui.clone();
     ui.spawn_local(async move {
         let answer = asker.alert(window, alert).await;
@@ -949,7 +965,8 @@ fn on_input(w: Window_, input: SurfaceInput) {
                 MouseButton::Secondary => 2,
                 MouseButton::Back => 5,
                 MouseButton::Forward => 6,
-                MouseButton::Other(_) => return,
+                // Other, and any button a later mitsuami adds
+                _ => return,
             };
             vm.mouse_btn(b, pressed);
             vm.input_flush();
@@ -992,6 +1009,8 @@ fn on_input(w: Window_, input: SurfaceInput) {
                 relative(w, dx, dy);
             }
         }
+        // input kinds a later mitsuami adds (non-exhaustive since 2.0)
+        _ => {}
     }
 }
 

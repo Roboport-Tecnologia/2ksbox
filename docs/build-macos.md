@@ -135,6 +135,11 @@ Mac specifics of the stages:
   without an `@available` check fails the build instead of dying on the
   floor's macOS (`strchrnul`, declared from 15.4 and found by meson
   anyway, was patch 46 until QEMU 10.1 fixed it upstream).
+- `configure-qemu.sh` pins `--disable-pvg` (2026-11-26): Xcode's macOS
+  27 SDK no longer exports `PGNewDeviceWithDescriptor`, which QEMU's
+  `apple-gfx` (a macOS guest's display, nothing of ours) calls, and the
+  aarch64 link failed with it undefined. `no-optionals` checks that the
+  aarch64 library links no ParavirtualizedGraphics.
 - `configure-qemu.sh` uses uv's Python only; a Python complaint means uv
   is not on `PATH`. Under Rosetta (`--x86_64`) it takes uv's x86_64
   build of the same version, because meson takes the machine its

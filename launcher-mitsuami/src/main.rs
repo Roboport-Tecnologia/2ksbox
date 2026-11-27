@@ -35,7 +35,8 @@ fn main() {
     // First: a windowed program on Windows has no stderr, so the log's
     // milestones are what say how far a start that vanished got
     // (`launcher_core::fatal`).
-    launcher_core::fatal::install("mitsuami");
+    // On Windows the last words also go in a message box, mitsuami's.
+    launcher_core::fatal::install("mitsuami", cfg!(windows).then_some(mitsuami::fatal_error as fn(&str, &str)));
     // The package's own Vulkan driver, named to the loader before a thread
     // exists (`host_gpu::announce_driver`'s one rule).
     launcher_core::host_gpu::announce_driver();
@@ -84,18 +85,64 @@ fn main() {
         // wider and taller on Windows and GTK (user). On macOS and GTK the
         // list is the window's sidebar (250 on macOS), which the window adds
         // to the details' size.
-        .window(
-            "2ksbox",
-            if cfg!(target_os = "macos") {
-                Size::new(540.0, 560.0)
-            } else if cfg!(sidebar) {
-                Size::new(machines::GTK_CONTENT_W, 610.0)
-            } else if cfg!(windows) {
-                Size::new(820.0, 610.0)
-            } else {
-                Size::new(770.0, 560.0)
-            },
-            || view! { <machines::MachinesWindow/> },
-        )
+        .open(main_window)
         .run();
+}
+
+/// Whether the machines window opened at its remembered frame, which an
+/// empty library's wider window (`machines`) already is.
+pub static OPENED_REMEMBERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The machines window, opened as it was left (where, how large, maximized
+/// or not; `launcher_core::window_state`), else at its first size where
+/// the platform puts a new window. A headless shot neither reads nor
+/// writes the remembered frame, so a photograph is the same on every
+/// machine.
+fn main_window() -> Window {
+    use launcher_core::window_state::{Keeper, WindowState};
+    use std::{cell::RefCell, rc::Rc};
+    let headless = std::env::var_os("LAUNCHER_SHOT").is_some() || std::env::var_os("LAUNCHER_SCREEN").is_some();
+    let keeper = launcher_core::window_state::launcher_file().filter(|_| !headless).map(Keeper::new);
+    let remembered = keeper.as_ref().and_then(Keeper::load);
+    let frame = signal(remembered.map(|s| WindowFrame {
+        position: s.position.map(|(x, y)| Point::new(x, y)),
+        size: Size::new(s.size.0, s.size.1),
+    }));
+    let maximized = signal(remembered.is_some_and(|s| s.maximized));
+    OPENED_REMEMBERED.store(remembered.is_some(), std::sync::atomic::Ordering::Relaxed);
+    let keeper = Rc::new(RefCell::new(keeper));
+    Window::new("2ksbox")
+        .size(if cfg!(target_os = "macos") {
+            Size::new(540.0, 560.0)
+        } else if cfg!(sidebar) {
+            Size::new(machines::GTK_CONTENT_W, 610.0)
+        } else if cfg!(windows) {
+            Size::new(820.0, 610.0)
+        } else {
+            Size::new(770.0, 560.0)
+        })
+        .frame(frame)
+        .maximized(maximized)
+        .bind(signal(true))
+        .content(move || {
+            let ui = inject::<Ui>().expect("a window's content");
+            let keeper = keeper.clone();
+            effect(move || {
+                let (Some(f), maximized) = (frame.get(), maximized.get()) else { return };
+                let state = WindowState {
+                    position: f.position.map(|pt| (pt.x, pt.y)),
+                    size: (f.size.width, f.size.height),
+                    maximized,
+                };
+                if !keeper.borrow_mut().as_mut().is_some_and(|k| k.changed(state)) {
+                    return;
+                }
+                let (waiter, keeper) = (ui.clone(), keeper.clone());
+                ui.spawn_local(async move {
+                    waiter.sleep(Keeper::SETTLE).await;
+                    keeper.borrow_mut().as_mut().map(Keeper::settled);
+                });
+            });
+            view! { <machines::MachinesWindow/> }
+        })
 }

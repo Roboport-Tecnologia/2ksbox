@@ -98,7 +98,10 @@ pub unsafe extern "C" fn libdisc_probe(head: *const u8, len: usize, filename: *c
         let head = if head.is_null() { &[][..] } else { std::slice::from_raw_parts(head, len) };
         let name = if filename.is_null() { String::new() } else { CStr::from_ptr(filename).to_string_lossy().to_ascii_lowercase() };
         let sniffed = crate::sniff(head);
-        if name.ends_with(".cue") && sniffed == Some("cue") {
+        // GOG names a DOSBox game's cue sheet `game.ins` (or `.inst`),
+        // beside its `game.gog` data track.
+        let cue_name = name.ends_with(".cue") || name.ends_with(".ins") || name.ends_with(".inst");
+        if cue_name && sniffed == Some("cue") {
             100
         } else if name.ends_with(".ccd") && sniffed == Some("ccd") {
             100

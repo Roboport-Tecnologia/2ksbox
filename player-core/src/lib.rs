@@ -34,7 +34,6 @@ pub mod share;
 pub mod sweep;
 #[cfg(target_os = "linux")]
 pub mod vkring;
-pub mod window_state;
 
 pub use gpu::{Gpu, GpuView, MinSize};
 pub use input::Input;
@@ -68,7 +67,8 @@ pub struct Args {
     pub pad_mode: pad::Mode,
     pub sweep: Option<std::path::PathBuf>,
     pub calib: Option<std::path::PathBuf>,
-    /// The window's remembered size (`--window-state`, `window_state`),
+    /// The window's remembered frame (`--window-state`,
+    /// `launcher_core::window_state`),
     /// one file per machine in its bundle.
     pub window_state: Option<std::path::PathBuf>,
     /// The machine's `machine.toml` (`--machine`), for the mitsuami
@@ -140,7 +140,7 @@ pub fn startup() -> Args {
         share = Some(std::path::PathBuf::from(args[1].clone()));
         args.drain(0..2);
     }
-    // the window's remembered size (M22), a file in the machine's bundle
+    // the window as it was left (M22), a file in the machine's bundle
     let mut window_state = None;
     if args.first().map(String::as_str) == Some("--window-state") && args.len() >= 2 {
         window_state = Some(std::path::PathBuf::from(args[1].clone()));

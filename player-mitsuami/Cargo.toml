@@ -35,11 +35,12 @@ qemu-embed = { path = "../qemu-embed" }
 # The crates.io release, exact (ADR-023), the launcher's version: bump
 # both together. For work on both repositories at once, a `[patch]` in a
 # local, uncommitted `.cargo/config.toml` (docs/tracks/m19-mitsuami-launcher.md).
-mitsuami = { version = "=1.3.6", default-features = false }
+mitsuami = { version = "=2.5.1", default-features = false }
 # The disc shelf's model, the launcher's (doc 07), for the Disc menu: the
-# machine's drive (track M22 step 5). Without `download`, so no TLS stack
-# comes with it (ADR-009/010).
-launcher-core = { path = "../launcher-core", default-features = false }
+# machine's drive (track M22 step 5), and Insert Game Installer… (the
+# `installer` feature, `installer.rs`). Without `download`, so no TLS
+# stack comes with it (ADR-009/010).
+launcher-core = { path = "../launcher-core", default-features = false, features = ["installer"] }
 # The files those menus follow (the shelf, the bundle, the shader
 # profiles), through the platform's own notifications rather than a timer
 # (`watch.rs`).

@@ -72,7 +72,9 @@ pub fn bookmark_now(path: &Path) -> Result<(), String> {
 /// qcow2's backing chain. Named by the descriptor, not looked for, since
 /// a sandboxed process may not list their folder; libdisc's lookup
 /// (`resolve_payload`) then finds a differently cased name once the
-/// folder is open. Empty for anything else.
+/// folder is open. A game installer's `<name>-<n>.bin` slices are the
+/// exception: nothing in the name says how many, so they are looked for
+/// one by one. Empty for anything else.
 pub fn companions(path: &Path) -> Vec<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -83,6 +85,8 @@ pub fn companions(path: &Path) -> Vec<PathBuf> {
             .unwrap_or_default(),
         "ccd" => vec![dir.join(format!("{stem}.img")), dir.join(format!("{stem}.sub"))],
         "mds" => vec![dir.join(format!("{stem}.mdf"))],
+        // A game installer's data slices (`installer.rs`), when it is split.
+        "exe" => (1..100).map(|n| dir.join(format!("{stem}-{n}.bin"))).take_while(|p| p.exists()).collect(),
         _ => {
             let mut chain = Vec::new();
             let mut at = path.to_path_buf();

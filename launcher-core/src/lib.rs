@@ -60,6 +60,8 @@ pub mod grants;
 // What this host's GPU can do for the Direct3D executor (ADR-013).
 pub mod host_drive;
 pub mod host_gpu;
+#[cfg(feature = "installer")]
+pub mod installer;
 pub mod library;
 pub mod licenses;
 pub mod machines;
@@ -72,4 +74,5 @@ pub mod shader_source;
 pub mod shelf;
 pub mod snapshots;
 pub mod snaps;
+pub mod window_state;
 pub mod wizard;

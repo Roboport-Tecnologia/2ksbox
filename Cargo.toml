@@ -9,6 +9,10 @@ members = ["player-core", "libdisc", "libsmb", "libsynth", "gamepad", "launcher-
 # itself is `launcher-mitsuami/`, its own workspace so that nothing here
 # needs GTK (ADR-023); the egui front end that used to be a member here
 # was retired on 2026-09-13 (ADR-017), and the Qt one on 2026-10-02.
+# `third_party/inno` is a vendored dependency (`launcher-core`'s
+# installer), not one of ours: left out so its own tests stay out of
+# the workspace's.
+exclude = ["third_party/inno"]
 default-members = ["player-core", "libdisc", "libsmb", "libsynth", "gamepad", "launcher-core", "qemu-embed", "shader-chain"]
 
 [workspace.package]
