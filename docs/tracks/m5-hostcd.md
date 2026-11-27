@@ -61,8 +61,10 @@ two drives.
   CD Player lists no audio tracks until a swap (user, 2026-11-24; parked
   by the user, the cause not found: not a late disc, not the model, not
   the audio status).
-- Step 2b, data reads off the main loop: open. A cache miss during
-  music still blocks QEMU up to 2.7 s (the drive's speed change).
+- Step 2b, data reads off the main loop: done (patch 102, 2026-11-26),
+  checked on XP (a whole-disc copy, the main loop never held more than
+  3 ms, 2.0 s on the old path); the user's retest with the game
+  pending.
 - Step 3, the machine setting: done headless (`--wizard-edit`, the QEMU
   arguments of a 98 and a Windows 11 machine, both drives in one QEMU);
   a click test of the picker pending.
@@ -77,6 +79,8 @@ two drives.
 - One command moves at most `max_sectors` (120 KiB over USB); more fails
   with EIO and looks like a bad sector. `read_window` splits runs.
 - Drive I/O on QEMU's main loop freezes the guest for the whole seek.
+  `LIBDISC_DRIVE_SYNC=1` brings the old synchronous reads back as the A/B;
+  a probe that asks QMP every 100 ms during the run measures the freeze.
 - The host's own probes (blkid / udisks reading UDF anchors near the end
   of a mixed-mode disc) show in dmesg as READ(10) "Illegal mode for this
   track" on audio sectors. They are not ours, and harmless.

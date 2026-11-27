@@ -1272,6 +1272,23 @@ under WHPX at 3840x2160: `flips show their ring slot (zero-copy)` in the
 log, every present a slot, `screendump` of `d3dpt0` current. **Drop:**
 never upstream; the ops are the embed library's contract.
 
+### 102-atapi-disc-async-read
+A host drive's sectors (`hostcd:`, track M5h, doc 17 §9) are read off
+the main loop. Patch 51's model reads were synchronous, and on a real
+drive one waits out a seek (2.7 s when a USB drive spins up from audio to
+data speed), which froze the whole machine whenever a game loaded data.
+For a disc `libdisc_is_host_drive` names, READ(10) and READ CD, PIO and
+DMA, read on the thread pool into the request's own buffer with its own
+reference to the disc (`libdisc_ref`: the disc can be swapped meanwhile);
+the completion carries on on the main loop, and a reset in between
+(`atapi_disc_pending` cleared) drops it. READ(10) and PLAY AUDIO check the
+first sector with `libdisc_sector_kind`, from the layout, not
+`libdisc_sector_info`, which reads it. Images keep the synchronous path.
+`LIBDISC_DRIVE_SYNC=1` is the A/B. **Test:** XP copying the Moto Racer CD
+from the drive with QMP answered every 100 ms (the longest reply 3 ms,
+against 2.0 s with `LIBDISC_DRIVE_SYNC=1`); the `hostcd` check (SeaBIOS'
+probe through the async PIO path). **Drop:** never; with patch 51.
+
 ## Dropped in M21
 
 Patches the move to QEMU 11.1 (track M21) retired. The files are gone;

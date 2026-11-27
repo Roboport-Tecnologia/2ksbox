@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::{Disc, Error, SectorKind};
 
-pub const LIBDISC_API_VERSION: u32 = 3;
+pub const LIBDISC_API_VERSION: u32 = 4;
 
 pub const LIBDISC_OK: i32 = 0;
 pub const LIBDISC_ERANGE: i32 = -1;
@@ -121,7 +121,7 @@ pub unsafe extern "C" fn libdisc_open(path: *const c_char, err: *mut c_char, err
         }
         let p = CStr::from_ptr(path).to_string_lossy().into_owned();
         match Disc::open(Path::new(&p)) {
-            Ok(d) => Box::into_raw(Box::new(d)),
+            Ok(d) => std::sync::Arc::into_raw(std::sync::Arc::new(d)) as *mut Disc,
             Err(e) => {
                 put_err(err, errlen, &e.to_string());
                 std::ptr::null_mut()
@@ -174,13 +174,66 @@ pub unsafe extern "C" fn libdisc_drive_eject(path: *const c_char) -> i32 {
     })
 }
 
+/// Drop one reference to the disc (`libdisc_open`'s or a `libdisc_ref`'s);
+/// the last one closes it.
+///
 /// # Safety
-/// `d` is a handle from `libdisc_open` (or NULL), closed at most once.
+/// `d` is a handle from `libdisc_open` (or NULL), and the caller drops a
+/// reference it holds.
 #[no_mangle]
 pub unsafe extern "C" fn libdisc_close(d: *mut Disc) {
     if !d.is_null() {
-        let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(d))));
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(std::sync::Arc::from_raw(d as *const Disc))));
     }
+}
+
+/// One more reference to the disc, for a read that may outlive the
+/// caller's: QEMU reads a host drive on a worker thread while the disc can
+/// be swapped out of the drive (doc 17 §9). `libdisc_close` drops it.
+///
+/// # Safety
+/// `d` is an open handle.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_ref(d: *const Disc) -> *const Disc {
+    if !d.is_null() {
+        std::sync::Arc::increment_strong_count(d);
+    }
+    d
+}
+
+/// 1 when the disc is a host's drive (`hostcd:`), whose reads can take
+/// seconds and belong off QEMU's main loop. `LIBDISC_DRIVE_SYNC=1` answers
+/// 0, so QEMU reads the drive on its main loop as before patch 102: the
+/// A/B for a freeze.
+///
+/// # Safety
+/// `d` is an open handle or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_is_host_drive(d: *const Disc) -> i32 {
+    static SYNC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let sync = *SYNC.get_or_init(|| std::env::var_os("LIBDISC_DRIVE_SYNC").is_some_and(|v| v == "1"));
+    (!sync && disc(d).is_some_and(|d| d.is_host_drive())) as i32
+}
+
+/// The sector's kind from the layout alone (`LIBDISC_KIND_*`; a data
+/// track's own mode, gap between sessions), never reading it: what a
+/// command checks before it starts, where a host drive's read would wait
+/// out a seek on QEMU's main loop.
+///
+/// # Safety
+/// `d` is an open handle.
+#[no_mangle]
+pub unsafe extern "C" fn libdisc_sector_kind(d: *const Disc, lba: u32) -> i32 {
+    guard(|| {
+        let Some(d) = disc(d) else { return LIBDISC_EINVAL };
+        if lba > i32::MAX as u32 {
+            return LIBDISC_ERANGE;
+        }
+        match d.layout_kind(lba as i32) {
+            Ok(k) => k.code() as i32,
+            Err(e) => code(&e),
+        }
+    })
 }
 
 /// # Safety

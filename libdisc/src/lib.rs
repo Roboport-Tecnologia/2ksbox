@@ -648,6 +648,19 @@ impl Disc {
         Ok(())
     }
 
+    /// Whether the disc is a host's drive (`hostcd:`, `drive.rs`).
+    pub fn is_host_drive(&self) -> bool {
+        self.drive.is_some()
+    }
+
+    /// The kind of the sector at `lba` from the layout alone, never read:
+    /// the track's own mode (a Mode 2 track's form is not known), a gap
+    /// outside every track.
+    pub fn layout_kind(&self, lba: i32) -> Result<SectorKind> {
+        self.check_range(lba)?;
+        Ok(self.locate(lba).map_or(SectorKind::Gap, |(_, t, _)| t.mode.default_kind()))
+    }
+
     /// `read_raw` that never waits for a host drive (`hostcd:`): `Ok(false)`
     /// when the drive is still fetching the sector, which it now is. Every
     /// other medium reads at once and answers `Ok(true)`. For CD audio,

@@ -1,0 +1,289 @@
+2ksbox (M5h, doc 17 §9): a host drive's sectors are read off the main loop.
+
+A guest's read of the real CD drive (`hostcd:`) ran on QEMU's main loop,
+and a read there waits out the drive's seek: 0.18 s on the first drive
+(USB), 2.7 s when it spins up from audio to data speed. The whole machine
+froze with it whenever a game loaded data during its CD music (XP, Moto
+Racer; the user).
+
+For a disc libdisc says is a host drive (`libdisc_is_host_drive`), the
+model's sector reads of READ(10) and READ CD, PIO and DMA alike, go to the
+thread pool into a buffer of the request's own, holding a reference to the
+disc of its own (`libdisc_ref`), since the disc can be swapped out of the
+drive meanwhile. The completion runs on the main loop and carries on where
+the synchronous loop would have: the burst handed to the guest, the next
+DMA chunk, or the failed sector's sense. A reset in between clears
+`atapi_disc_pending` and the result is dropped. Images keep the
+synchronous path.
+
+READ(10) and PLAY AUDIO check the first sector's kind with
+`libdisc_sector_kind`, from the layout, instead of `libdisc_sector_info`,
+which reads a drive's sector to verify it.
+
+diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
+index 51cb932..fba8554 100644
+--- a/hw/ide/atapi.c
++++ b/hw/ide/atapi.c
+@@ -40,6 +40,7 @@
+ /* win98-xp-virt (patch 51, doc 17 §5.3): the disc model behind a cdimage medium */
+ #include "block/cdimage.h"
+ #include "block/libdisc.h"
++#include "block/thread-pool.h"
+ #include "system/replay.h"
+ #endif
+ 
+@@ -390,7 +391,6 @@ static void atapi_play_range(IDEState *s, libdisc *disc, int64_t start,
+                              int64_t end)
+ {
+     uint32_t total = libdisc_sector_count(disc);
+-    LibdiscSectorInfo info;
+     int rc;
+ 
+     if (start < 0 || start > total || end > total || end < start) {
+@@ -403,12 +403,13 @@ static void atapi_play_range(IDEState *s, libdisc *disc, int64_t start,
+         ide_atapi_cmd_ok(s);
+         return;
+     }
+-    rc = libdisc_sector_info(disc, start, &info);
++    /* patch 102: from the layout, never a read of a host drive's sector */
++    rc = libdisc_sector_kind(disc, start);
+     if (rc < 0) {
+         atapi_disc_error(s, rc);
+         return;
+     }
+-    if (info.kind != LIBDISC_KIND_AUDIO) {
++    if (rc != LIBDISC_KIND_AUDIO) {
+         ide_atapi_cmd_error(s, ILLEGAL_REQUEST, ASC_ILLEGAL_MODE_FOR_THIS_TRACK);
+         return;
+     }
+@@ -533,6 +534,117 @@ static void cd_read_sector_done(IDEState *s)
+     }
+ }
+ 
++#ifdef CONFIG_CDIMAGE
++/*
++ * 2ksbox (patch 102, M5h, doc 17 §9): a host drive's sectors are read off
++ * the main loop. A read there can wait out a seek, 2.7 s on a USB drive
++ * changing spin speed, and on the main loop that froze the whole machine.
++ * The sectors go to the thread pool into a buffer of the request's own,
++ * with a reference to the disc of its own (the disc can be swapped out of
++ * the drive meanwhile); the completion runs on the main loop and carries
++ * on where the synchronous read would have. A reset in between clears
++ * atapi_disc_pending and the result is dropped. Images keep the
++ * synchronous path: their reads are a file's.
++ */
++typedef struct AtapiDiscRead AtapiDiscRead;
++typedef void AtapiDiscReadFinish(IDEState *s, AtapiDiscRead *r);
++
++struct AtapiDiscRead {
++    IDEState *s;
++    libdisc *disc;
++    uint32_t lba;
++    int n, size;
++    uint8_t type, b9, b10;
++    uint8_t *buf;
++    int done;                   /* sectors read before rc */
++    int rc;                     /* 0, a LIBDISC_E* code, or 1: a short sector */
++    AtapiDiscReadFinish *finish;
++};
++
++/* the thread pool's worker: no IDEState, no BQL */
++static int atapi_disc_read_worker(void *opaque)
++{
++    AtapiDiscRead *r = opaque;
++
++    for (r->done = 0; r->done < r->n; r->done++) {
++        int got = libdisc_mmc_read_cd_sector(r->disc, r->lba + r->done,
++                                             r->type, r->b9, r->b10,
++                                             r->buf + r->done * r->size,
++                                             r->size);
++        if (got != r->size) {
++            r->rc = got < 0 ? got : 1;
++            break;
++        }
++    }
++    return 0;
++}
++
++static void atapi_disc_read_done(void *opaque, int ret)
++{
++    AtapiDiscRead *r = opaque;
++    IDEState *s = r->s;
++
++    if (s->atapi_disc_pending == r) {
++        s->atapi_disc_pending = NULL;
++        r->finish(s, r);
++    }
++    libdisc_close(r->disc);
++    g_free(r->buf);
++    g_free(r);
++}
++
++static void atapi_disc_read_async(IDEState *s, libdisc *disc, uint32_t lba,
++                                  int n, AtapiDiscReadFinish *finish)
++{
++    AtapiDiscRead *r = g_new0(AtapiDiscRead, 1);
++
++    r->s = s;
++    r->disc = libdisc_ref(disc);
++    r->lba = lba;
++    r->n = n;
++    r->size = s->cd_sector_size;
++    r->type = s->atapi_rc_type;
++    r->b9 = s->atapi_rc_b9;
++    r->b10 = s->atapi_rc_b10;
++    r->buf = g_malloc((size_t)n * r->size);
++    r->finish = finish;
++    s->atapi_disc_pending = r;
++    s->status |= BUSY_STAT;
++    thread_pool_submit_aio(atapi_disc_read_worker, r, atapi_disc_read_done, r);
++}
++
++/*
++ * What atapi_disc_read_sector did per sector, for the whole read: the
++ * position of the last sector read, and the sense of a failed one (which
++ * ends the command). -1 when it failed.
++ */
++static int atapi_disc_read_result(IDEState *s, AtapiDiscRead *r)
++{
++    if (r->done > 0) {
++        s->atapi_last_lba = r->lba + r->done - 1;
++    }
++    if (r->rc == 1) {
++        ide_atapi_cmd_error(s, HARDWARE_ERROR, ASC_LUN_COMMUNICATION_FAILURE);
++        return -1;
++    }
++    if (r->rc < 0) {
++        atapi_disc_error(s, r->rc);
++        return -1;
++    }
++    return 0;
++}
++
++/* PIO: the burst is in; hand it over as cd_read_sector's synchronous path does */
++static void cd_disc_read_finish(IDEState *s, AtapiDiscRead *r)
++{
++    if (!s->atapi_disc_read || atapi_disc_read_result(s, r) < 0) {
++        return;
++    }
++    memcpy(s->io_buffer, r->buf, (size_t)r->n * r->size);
++    cd_read_sector_done(s);
++}
++#endif
++
+ /*
+  * Read the whole elementary transfer (one DRQ burst) in a single async
+  * request. No read is issued mid-burst, so unlike the old synchronous
+@@ -546,6 +658,14 @@ static int cd_read_sector(IDEState *s)
+ 
+ #ifdef CONFIG_CDIMAGE
+     if (s->atapi_disc_read) {
++        libdisc *disc = atapi_disc(s);
++
++        if (disc && libdisc_is_host_drive(disc)) {
++            /* patch 102: off the main loop; BUSY until it is in */
++            assert(nsec * s->cd_sector_size <= s->io_buffer_total_len);
++            atapi_disc_read_async(s, disc, s->lba, nsec, cd_disc_read_finish);
++            return 0;
++        }
+         /*
+          * The model fills synchronously, in the READ CD shape the command
+          * asked for, so there is nothing to unpack. atapi_disc_read_sector
+@@ -845,6 +965,29 @@ eot:
+ #ifdef CONFIG_CDIMAGE
+ static void ide_atapi_disc_read_dma_cb(void *opaque, int ret);
+ 
++/*
++ * patch 102: a chunk read off the main loop is in. Into io_buffer and on
++ * through the bus-master engine, or the failed sector's sense and the
++ * end of the command, as the synchronous loop below does.
++ */
++static void ide_atapi_disc_read_dma_finish(IDEState *s, AtapiDiscRead *r)
++{
++    /* a bus reset in between drops the transfer, as in the bottom half */
++    if (!s->atapi_disc_read || s->lba == -1) {
++        return;
++    }
++    s->lba += r->done;
++    if (atapi_disc_read_result(s, r) < 0) {
++        block_acct_failed(blk_get_stats(s->blk), &s->acct);
++        ide_set_inactive(s, false);
++        return;
++    }
++    memcpy(s->io_buffer, r->buf, (size_t)r->n * r->size);
++    s->io_buffer_index = 0;
++    s->io_buffer_size = r->n * s->cd_sector_size;
++    ide_atapi_disc_read_dma_cb(s, 0);
++}
++
+ static void ide_atapi_disc_read_dma_bh(void *opaque)
+ {
+     IDEState *s = opaque;
+@@ -864,6 +1007,7 @@ static void ide_atapi_disc_read_dma_bh(void *opaque)
+ static void ide_atapi_disc_read_dma_cb(void *opaque, int ret)
+ {
+     IDEState *s = opaque;
++    libdisc *disc;
+     int per_chunk, n, i;
+ 
+     if (s->io_buffer_size > 0) {
+@@ -885,6 +1029,12 @@ static void ide_atapi_disc_read_dma_cb(void *opaque, int ret)
+     if (n > per_chunk) {
+         n = per_chunk;
+     }
++    disc = atapi_disc(s);
++    if (disc && libdisc_is_host_drive(disc)) {
++        /* patch 102: off the main loop; the finish carries on from here */
++        atapi_disc_read_async(s, disc, s->lba, n, ide_atapi_disc_read_dma_finish);
++        return;
++    }
+     for (i = 0; i < n; i++) {
+         if (atapi_disc_read_sector(s, s->io_buffer + i * s->cd_sector_size,
+                                    s->cd_sector_size) < 0) {
+@@ -1680,14 +1830,15 @@ static void cmd_read(IDEState *s, uint8_t* buf)
+     if (atapi_disc(s)) {
+         /* a cooked read of the model: user data only, L-EC verified per
+          * sector; starting on an audio sector is what a drive refuses */
+-        LibdiscSectorInfo info;
+-        int rc = libdisc_sector_info(atapi_disc(s), lba, &info);
++        /* 2ksbox (patch 102): from the layout, never a read, which on a
++         * host drive would wait out a seek here on the main loop */
++        int kind = libdisc_sector_kind(atapi_disc(s), lba);
+ 
+-        if (rc < 0) {
+-            atapi_disc_error(s, rc);
++        if (kind < 0) {
++            atapi_disc_error(s, kind);
+             return;
+         }
+-        if (info.kind == LIBDISC_KIND_AUDIO || info.kind == LIBDISC_KIND_GAP) {
++        if (kind == LIBDISC_KIND_AUDIO || kind == LIBDISC_KIND_GAP) {
+             ide_atapi_cmd_error(s, ILLEGAL_REQUEST,
+                                 ASC_ILLEGAL_MODE_FOR_THIS_TRACK);
+             return;
+diff --git a/hw/ide/core.c b/hw/ide/core.c
+index 5ca27f7..b931107 100644
+--- a/hw/ide/core.c
++++ b/hw/ide/core.c
+@@ -1398,6 +1398,7 @@ static void ide_reset(IDEState *s)
+     s->cd_sector_size = 0;
+     s->atapi_dma = 0;
+     s->atapi_disc_read = false;
++    s->atapi_disc_pending = NULL; /* patch 102: its completion is dropped */
+     s->tray_locked = 0;
+     s->tray_open = 0;
+     /* ATA DMA state */
+diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
+index 086994f..87346fd 100644
+--- a/include/hw/ide/ide-dev.h
++++ b/include/hw/ide/ide-dev.h
+@@ -148,6 +148,9 @@ struct IDEState {
+      * snapshots with a cdimage medium are unsupported.
+      */
+     bool atapi_disc_read;
++    /* 2ksbox (patch 102): the off-loop read of a host drive in flight, its
++     * completion dropped when a reset has cleared this */
++    struct AtapiDiscRead *atapi_disc_pending;
+     uint8_t atapi_rc_type, atapi_rc_b9, atapi_rc_b10;
+     uint8_t atapi_ascq;
+     uint32_t atapi_last_lba;

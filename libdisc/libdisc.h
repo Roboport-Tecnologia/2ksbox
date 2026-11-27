@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LIBDISC_API_VERSION 3
+#define LIBDISC_API_VERSION 4
 
 typedef struct libdisc libdisc;                /* opaque */
 
@@ -56,7 +56,13 @@ uint32_t libdisc_api_version(void);
 int      libdisc_probe(const uint8_t *head, size_t len, const char *filename);
 /* opens the image and every payload file; on failure returns NULL and writes a message into err */
 libdisc *libdisc_open(const char *path, char *err, size_t errlen);
-void     libdisc_close(libdisc *d);
+void     libdisc_close(libdisc *d);          /* drops one reference; the last closes */
+/* One more reference, for a read on another thread that may outlive the
+ * medium (a host drive's disc swapped meanwhile); libdisc_close drops it. */
+libdisc *libdisc_ref(libdisc *d);
+int      libdisc_is_host_drive(const libdisc *d); /* 1: reads can take seconds */
+/* the sector's kind from the layout alone (the track's mode), never read */
+int      libdisc_sector_kind(const libdisc *d, uint32_t lba);
 
 /*
  * A host's optical drive (`hostcd:`, §9), by device path with or without

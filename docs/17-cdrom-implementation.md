@@ -446,8 +446,8 @@ disc.
 ## 3. The C API (`libdisc/libdisc.h`)
 
 One hand-written header for the crate, the block driver and `atapi.c`,
-like `d3dpt/d3dpt_proto.h`. Bump `LIBDISC_API_VERSION` (2 since
-`hostcd`'s drive calls) on any change; `cdimage_open` refuses a mismatch. Every function is thread-safe
+like `d3dpt/d3dpt_proto.h`. Bump `LIBDISC_API_VERSION` (4 since
+`hostcd`, §9) on any change; `cdimage_open` refuses a mismatch. Every function is thread-safe
 on one handle, since the layout is immutable and the payload handle
 cache is behind a lock. `libdisc_open` also takes a directory (§8).
 
@@ -460,6 +460,9 @@ cache is behind a lock. `libdisc_open` also takes a directory (§8).
 | `libdisc_mmc_read_toc`, `_read_subchannel`, `_read_disc_information` | a reply into `out`, its length or an error; the caller truncates to the allocation length |
 | `libdisc_mmc_read_cd_length` / `_read_cd_sector` | bytes per sector for a READ CD CDB (or `EINVAL`), then one call per sector |
 | `libdisc_drive_ready` / `_drive_eject` | a host drive by device path (§9): 1 a readable disc, 0 none, `EIO` cannot ask; open the tray |
+| `libdisc_ref` | one more reference to a handle; `libdisc_close` drops one and the last closes (v4) |
+| `libdisc_is_host_drive`, `libdisc_sector_kind` | whether reads can take seconds; a sector's kind from the layout, never read (§9) |
+| `libdisc_read_raw_nowait` | `read_raw` or `LIBDISC_EAGAIN` while a host drive fetches it (§9) |
 
 | Code | Meaning | Sense |
 |---|---|---|
@@ -468,6 +471,7 @@ cache is behind a lock. `libdisc_open` also takes a directory (§8).
 | `LIBDISC_EMODE` −3 | wrong sector kind for the request | 05/64/00 |
 | `LIBDISC_EINVAL` −4 | bad parameter or CDB field | 05/24/00 |
 | `LIBDISC_EIO` −5 | host file read failed, or a caught panic | 04/xx |
+| `LIBDISC_EAGAIN` −6 | `read_raw_nowait` only: a host drive is still fetching the sector | none, call again |
 
 `capi.rs` holds a `Box<Disc>` behind the opaque pointer, fills `err` as
 NUL-terminated ASCII, and wraps every body in `catch_unwind`, so a panic
@@ -1101,10 +1105,18 @@ already plays as silence. Measured on the host (music in real time, a
 64 KiB data read every second): every sector played in time, the longest
 call 0.08 ms, against 2.7 s through `libdisc_read_raw`.
 
-**Data reads still wait on the main loop**: a guest's READ(10) or READ CD
-on a cache miss blocks QEMU for that read, up to the 2.7 s of a speed
-change. Moving them to a thread means deferring the ATAPI transfer's
-completion (patch 51), not done yet.
+**Data reads go off the main loop too** (patch 102): for a host drive,
+READ(10) and READ CD, PIO and DMA, read on QEMU's thread pool into the
+request's own buffer, holding a reference to the disc of their own
+(`libdisc_ref`: handles are reference-counted since API v4, and the disc
+can be swapped out of the drive meanwhile). The completion runs on the
+main loop and carries on as the synchronous loop did; a reset in between
+drops it. The commands' checks of the first sector use
+`libdisc_sector_kind`, from the layout, never a read. XP copying the
+Moto Racer CD (479 files) with QMP asked every 100 ms: the longest reply
+3 ms; with `LIBDISC_DRIVE_SYNC=1` (the old path, the A/B) 2.0 s and
+1.6 s, p99 85 ms, with no music playing. Images keep the synchronous
+path, a file's read.
 
 ### The QEMU driver: a removable medium
 
@@ -1129,10 +1141,11 @@ needs:
   once and retried only after it comes out.
 - **The guest's eject opens the real tray** (`bdrv_co_eject`,
   `libdisc_drive_eject`). The guest's tray lock is not passed on.
-- Data reads stay synchronous on the main loop, and atapi.c never caches
-  the handle, so the bottom half closes the old disc with nothing holding
-  it. The read-ahead worker holds the drive's handle and cache through
-  `Arc`s and ends when the disc is closed.
+- atapi.c never caches the handle, and a read on the thread pool holds a
+  reference of its own, so the bottom half drops its reference to the old
+  disc whatever is in flight; the last reference closes it. The
+  read-ahead worker holds the drive's handle and cache through `Arc`s and
+  ends when the disc is closed.
 
 Linux only so far (`SG_IO`); elsewhere `libdisc_open` refuses
 `hostcd:`. Windows is `IOCTL_SCSI_PASS_THROUGH_DIRECT` on `\\.\D:`;
