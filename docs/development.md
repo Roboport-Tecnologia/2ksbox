@@ -348,18 +348,29 @@ and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
   guest wrote to a music device, for `synthx midilog` / `opllog` /
   `play` (doc 20 §7.2).
 
-### The window's size (M22)
+### The window's frame (M22)
 
-- `--window-state <file>` (after `--share`) opens the window at the
-  content size in `<file>` (`width = …`, `height = …`, in points; 1280x960
-  without it) and writes the new size there when the user resizes the
-  window (`player_core::window_state`). Sizes of the first two seconds are the
-  platform's opening (macOS shrinks a window too tall for its screen) and
-  full screen's are not written. The launcher passes `<bundle>/window.toml`
+- `--window-state <file>` (after `--share`) opens the window as it was
+  left: the restored content size in `<file>` (`width = …`, `height = …`,
+  in points), where it was (`x = …`, `y = …`, the platform's own
+  coordinates; never on GTK, which cannot place a window) and
+  `maximized = true|false`; without it, 1280x960 centred on the screen.
+  mitsuami keeps the frame (`Window::frame`, since 2.5.0): a frame on a
+  screen unplugged since comes back onto one, and a maximized or
+  full-screen window keeps the frame it goes back to. The player writes
+  the file half a second after the user stops moving, resizing or
+  maximizing the window (`launcher_core::window_state`'s `Keeper`, which
+  the launcher's machines window uses too, its file
+  `launcher-window.toml` in the data directory, read and written by no
+  headless `LAUNCHER_SHOT` / `LAUNCHER_SCREEN` run). Frames of the first
+  two seconds are the platform's opening (macOS shrinks a window too tall
+  for its screen) and are not written. A file with only a size (before
+  2026-11-20) still opens at that size. The launcher passes `<bundle>/window.toml`
   (`player::window_args`), so each machine keeps its own; a Windows 11
   guest takes its screen from the window when it boots, so that is its
   resolution too (viogpudo offers nothing else above 1920 wide).
-  `[window] opens at WxH points (remembered)` is logged.
+  `[window] opens at WxH points at X,Y, maximized (remembered)` is logged
+  (the position and maximized only when kept).
 
 ### The shared folder and the clipboard (M23)
 

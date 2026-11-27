@@ -376,12 +376,13 @@ fn ProfileTable() -> impl View {
                         });
                         let (headline, detail) = shader_library::delete_question(&name);
                         // Cancel first: the first is the default, and Return
-                        // should not delete.
+                        // should not delete. Delete is the platform's
+                        // destructive button (red in AppKit's alert).
                         let alert = Alert::new(headline)
                             .message(detail)
                             .style(AlertStyle::Critical)
                             .button("Cancel")
-                            .button("Delete");
+                            .destructive_button("Delete");
                         let asker = ui.clone();
                         ui.spawn_local(async move {
                             if asker.alert(window, alert).await != 1 {

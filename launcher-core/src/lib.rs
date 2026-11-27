@@ -73,4 +73,5 @@ pub mod shader_source;
 pub mod shelf;
 pub mod snapshots;
 pub mod snaps;
+pub mod window_state;
 pub mod wizard;

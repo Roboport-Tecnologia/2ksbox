@@ -13,7 +13,7 @@ use crate::path_field::PathField;
 use launcher_core::bundle::{Accel, Boot, CpuSpeed, Family, Optimization};
 use launcher_core::shader_library::{self, ProfileEntry};
 use launcher_core::wizard::{
-    AccelNote, DISK_FILTER, FLOPPY_FILTER, Form, MEDIA_FILTER, SOUNDFONT_FILTER, Section,
+    AccelNote, DISK_FILTER, FLOPPY_FILTER, Field, Form, MEDIA_FILTER, SOUNDFONT_FILTER, Section,
     VOODOO2_LABEL, VOODOO2_UNDITHER_LABEL,
 };
 use launcher_core::library;
@@ -132,6 +132,17 @@ impl Wizard {
         eprintln!("[launcher] create: saved {saved:?}, error {error:?}, open {}", self.read(|f| f.open));
     }
 
+    /// `LAUNCHER_SCREEN=invalid[:<family>]`: a fresh form saved with no
+    /// name, which stays open on its General page with the Name field
+    /// marked invalid (`Form::field_error`), for the shot.
+    pub fn invalid_for_screen(&self, arg: &str, library: Library) {
+        self.open_for_screen(arg);
+        self.edit(|f| f.name.clear());
+        self.submit(library);
+        let name = self.read(|f| f.field_error(Field::Name));
+        eprintln!("[launcher] invalid: name field error {name:?}, open {}", self.read(|f| f.open));
+    }
+
     fn close(&self) {
         let last = self.read(|f| (f.bundle_path().map(PathBuf::from), f.section));
         self.last.set(last);
@@ -191,7 +202,7 @@ pub fn WizardWindow() -> impl View {
             // title bar and what scrolls shows through it, as in System
             // Settings (mitsuami does that only for a scroll view at the top).
             <Column grow=1.0 min_height=0>
-                {crate::shot::arm(&["wizard", "edit"])}
+                {crate::shot::arm(&["wizard", "edit", "invalid"])}
                 <Sections/>
                 <ScrollView grow=1.0 min_height=0>
                     <Column padding=Spacing::Lg>
@@ -372,6 +383,7 @@ fn GeneralPage() -> impl View {
             <Row gap=Spacing::Sm align=Align::Center>
                 <Text width=LABEL_W>"Name"</Text>
                 <TextInput grow=1.0 a11y_label="Name" value=get(wiz, |f| f.name.clone())
+                    error=get(wiz, |f| f.field_error(Field::Name))
                     @input=move |s| wiz.edit(|f| f.name = s)/>
             </Row>
         </Column>
@@ -490,6 +502,7 @@ fn SystemPage() -> impl View {
                 <TextInput grow=1.0 a11y_label="Extra QEMU arguments"
                     placeholder="-global d3dpt-vga.ddflags=32768"
                     value=get(wiz, |f| f.extra_qemu_args.clone())
+                    error=get(wiz, |f| f.field_error(Field::ExtraQemuArgs))
                     @input=move |s| wiz.edit(|f| f.extra_qemu_args = s)/>
             </Row>
             <AccelLine note=get(wiz, |f| accel(f.extra_qemu_args_note()))/>
@@ -624,6 +637,7 @@ fn AudioPage() -> impl View {
                     folder=true
                     placeholder="Folder with your CM-32L control and PCM ROMs"
                     value=get(wiz, |f| f.mt32_roms.clone())
+                    error=get(wiz, |f| f.field_error(Field::Mt32Roms))
                     @edit=move |p| wiz.edit(|f| f.mt32_roms = p)
                 />
             </Show>
@@ -708,6 +722,7 @@ fn StoragePage() -> impl View {
                     label="Disk path"
                     filter=DISK_FILTER
                     value=get(wiz, |f| f.disk_path.clone())
+                    error=get(wiz, |f| f.field_error(Field::DiskPath))
                     @edit=move |p| wiz.edit(|f| f.disk_path = p)
                 />
             </Show>

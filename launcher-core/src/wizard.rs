@@ -51,6 +51,16 @@ pub const SOUNDFONT_FILTER: Filter<'static> = ("SoundFont banks", &["sf2"]);
 /// three file fields; the constant itself belongs to the shelf.
 pub const MEDIA_FILTER: Filter<'static> = DISC_FILTER;
 
+/// The fields a failed `submit` can be about (`Form::field_error`), so
+/// the view marks that one invalid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Name,
+    Mt32Roms,
+    ExtraQemuArgs,
+    DiskPath,
+}
+
 /// The pages the form is shown on, as a settings window's sidebar like
 /// VirtualBox's and UTM's (one long form had outgrown its window). Which
 /// field sits on which page is the view's business. The pages, their
@@ -218,6 +228,8 @@ pub struct Form {
     pub shader_off: bool,
     /// What the last `submit` failed with, for the form to show.
     pub error: Option<String>,
+    /// The field `error` is about, when it is about one (`field_error`).
+    error_field: Option<Field>,
     /// The bundle the last successful `submit` wrote.
     saved_path: Option<PathBuf>,
 
@@ -316,6 +328,7 @@ impl Default for Form {
             shader_profile: None,
             shader_off: false,
             error: None,
+            error_field: None,
             saved_path: None,
             family: Family::Win98,
             ram_mb: bundle::default_ram_mb(Family::Win98),
@@ -432,6 +445,7 @@ impl Form {
             Err(e) => {
                 self.open = false;
                 self.error = Some(format!("{}: {e}", bundle_path.display()));
+                self.error_field = None;
             }
         }
     }
@@ -1789,12 +1803,14 @@ impl Form {
         match self.write(library_dir) {
             Ok(path) => {
                 self.error = None;
+                self.error_field = None;
                 self.saved_path = Some(path.clone());
                 self.open = false;
                 Some(path)
             }
             Err(e) => {
                 self.error = Some(e.to_string());
+                self.error_field = self.check().err().map(|(field, _)| field);
                 None
             }
         }
@@ -1805,30 +1821,42 @@ impl Form {
         self.saved_path.as_deref()
     }
 
-    fn write(&self, library_dir: &Path) -> std::io::Result<PathBuf> {
+    /// What the last failed `submit` said, when it was about `field`: for
+    /// the field to show itself invalid, the platform's way, beside the
+    /// form's own error line (which says it on every page).
+    pub fn field_error(&self, field: Field) -> Option<String> {
+        self.error.clone().filter(|_| self.error_field == Some(field))
+    }
+
+    /// The fields' own checks, before anything is written: the first
+    /// field that is wrong, and why.
+    fn check(&self) -> Result<(), (Field, String)> {
         if self.name.trim().is_empty() {
-            return Err(std::io::Error::other("A name is required."));
+            return Err((Field::Name, "A name is required.".into()));
         }
         // The one field with no default and no fallback: an MT-32
         // machine with no ROMs fails to start, and failing here says so
         // while there is still a form to fix it in (doc 20 §4).
         if self.music == Music::Mt32 && self.mt32_roms.trim().is_empty() {
-            return Err(std::io::Error::other(
-                "The Roland MT-32 needs a folder with your own CM-32L ROM images.",
-            ));
+            return Err((Field::Mt32Roms, "The Roland MT-32 needs a folder with your own CM-32L ROM images.".into()));
         }
         if let Err(e) = bundle::split_args(&self.extra_qemu_args) {
-            return Err(std::io::Error::other(e));
+            return Err((Field::ExtraQemuArgs, e.to_string()));
         }
         // an empty disk path loads back as the bundle's own folder
         if (self.existing_disk || self.editing.is_some()) && self.disk_path.trim().is_empty() {
-            return Err(std::io::Error::other("Choose a disk image."));
+            return Err((Field::DiskPath, "Choose a disk image.".into()));
         }
         // a device (Windows' NUL) has no metadata there, but opens
         let disk = Path::new(&self.disk_path);
         if self.existing_disk && self.editing.is_none() && !disk.exists() && std::fs::File::open(disk).is_err() {
-            return Err(std::io::Error::other("That disk image doesn't exist."));
+            return Err((Field::DiskPath, "That disk image doesn't exist.".into()));
         }
+        Ok(())
+    }
+
+    fn write(&self, library_dir: &Path) -> std::io::Result<PathBuf> {
+        self.check().map_err(|(_, why)| std::io::Error::other(why))?;
         if let Some(edit) = &self.editing {
             let bundle_path = edit.bundle_path.clone();
             let mut machine = self.build_machine(PathBuf::from(&self.disk_path));

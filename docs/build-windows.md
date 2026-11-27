@@ -109,7 +109,7 @@ double-click opens a black terminal. So the package provides:
   launcher's first call, writes `launcher.log` beside `player.log` with a
   milestone per start-up step (the last line names the step that died),
   and a panic hook files message, location and backtrace and shows a
-  message box. `--diagnose` writes `--paths` and `--host-check` there.
+  message box (mitsuami's `fatal_error`, handed to `fatal::install`). `--diagnose` writes `--paths` and `--host-check` there.
 
 Every Play writes the player command line, quoted for a shell, into
 `launcher.log` as `[player] …`, into the head of `player.log`, and to a

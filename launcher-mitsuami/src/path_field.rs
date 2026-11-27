@@ -39,6 +39,10 @@ pub fn PathField(
     /// preset field has one: the preset collection.
     #[prop(default = Value::Static(None))]
     empty_dir: Value<Option<PathBuf>>,
+    /// What's wrong with the path, shown on the text box the platform's
+    /// way (`Form::field_error`).
+    #[prop(default = Value::Static(None))]
+    error: Value<Option<String>>,
     on_edit: Callback<String>,
 ) -> impl View {
     // Decided when it opens: the value, and the last folder any dialog was
@@ -107,6 +111,7 @@ pub fn PathField(
                 a11y_label=label
                 value=value
                 placeholder=placeholder
+                error=error
                 @input=move |s| on_edit.call(s)
             />
             <Button @click=browse>"Browse…"</Button>

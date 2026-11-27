@@ -388,9 +388,15 @@ embed library, into a target dir of its own:
    its VIC table has no 2560-wide mode). The 1280x960-point window gave
    2560x1920 on the LG 4K and less on the Air's screen. Now the launcher
    passes `--window-state <bundle>/window.toml` and the player opens at
-   the size the user last gave the machine's window (`window_state.rs`;
-   `docs/development.md`). mitsuami has no window position, so the
-   screen is the platform's choice.
+   the size the user last gave the machine's window
+   (`launcher-core/src/window_state.rs` since 2026-11-26, shared with the
+   launcher's own window; before, player-core's;
+   `docs/development.md`). Since mitsuami 2.5.0 (2026-11-20) the file
+   also keeps where the window was and whether it was maximized
+   (`Window::frame`, `maximized`), so it reopens on the screen it was
+   left on (but on GTK, which cannot place a window); a first window is
+   centred (`Placement::Centred`, which replaced WinUI's own
+   `set_window_placement`).
    **x64 Windows 11 follows the window too (2026-10-08, user: "here on
    linux, win11 is not working like in the mac").** It had only the
    standard VGA, where Windows' Basic Display keeps the mode the firmware

@@ -412,8 +412,10 @@ pub fn spawn(
     if crate::grants::sandboxed() && std::env::var_os("PLAYER_SHOT_DIR").is_none() {
         cmd.env("PLAYER_SHOT_DIR", crate::library::default_dir());
     }
-    // Never the windowless launcher's own handles, which may be stale
-    // (`console.rs`)
+    // Where no terminal reads it (started from the desktop, Finder, a
+    // Flatpak; and never a windowless Windows launcher's own handles,
+    // which may be stale, `console.rs`), the log: it is also where
+    // `Machines::reap` reads why a machine didn't start
     if !crate::console::inherits_output() {
         let log = open_log(&machine.name, &line);
         let dup = log.as_ref().and_then(|f| f.try_clone().ok());
@@ -450,7 +452,7 @@ fn quote(s: &str) -> String {
     }
 }
 
-/// Where a windowless launcher puts the player's output: one file beside
+/// Where a launcher with no terminal puts the player's output: one file beside
 /// the machine library, appended to, so the run before last is still
 /// there when someone thinks to look.
 pub fn log_path() -> Option<PathBuf> {

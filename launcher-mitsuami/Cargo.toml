@@ -28,7 +28,7 @@ launcher-core = { path = "../launcher-core" }
 # version to take a newer mitsuami. For work on both at once, a `[patch]`
 # in a local, uncommitted `.cargo/config.toml` points it at a checkout
 # (docs/tracks/m19-mitsuami-launcher.md).
-mitsuami = { version = "=1.3.6", default-features = false }
+mitsuami = { version = "=2.5.1", default-features = false }
 # The headless screenshot (`LAUNCHER_SHOT`), the one image encoding this
 # crate does itself.
 png = "0.18"

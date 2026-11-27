@@ -30,6 +30,23 @@ commands `docs/development.md` and `docs/build-macos.md` /
   of the guest's frame, Ctrl+Alt+Shift+S for one of the window's). Alt+F4 asks first, in the
   platform's alert. A gamepad (M13, `docs/tracks/m13-gamepads.md`)
   works whether or not the pointer is grabbed and never changes the grab.
+- **A player that ends badly** (it didn't start, or it crashed) is told
+  by the launcher as the platform's notification, since its window is
+  gone (M19, 2026-11-20, user). The core decides it and its words
+  (`Machines::take_stopped`, from `reap`): exit 0 is a normal end;
+  otherwise QEMU's first error in this run's part of `player.log` (read
+  from where the file ended at the spawn) gives "Couldn't start “X”" and
+  the reason, else a Windows exception or a Unix signal gives "“X”
+  crashed", else "“X” stopped unexpectedly" with the code (and a panic's
+  message). Every launcher with no terminal keeps the player's output in
+  `player.log` (started from the desktop, Finder, a Flatpak, or a
+  windowless Windows one; `console::inherits_output`, since 2026-11-20 on
+  Linux and macOS too, whose stderr went to the journal or nowhere); run
+  from a terminal, the output stays there and the reason is the crash
+  or the code. The notification's id
+  is the bundle directory, and a click selects that machine; where
+  notifications are off or unavailable the window's alert says it
+  instead. Every exit is also a line in `launcher.log`.
 - **Audio.** QEMU's mixer writes f32 into a lock-free ring drained by
   cpal (CoreAudio / WASAPI / PipeWire), and the player limits the sum
   rather than letting it clip. Pacing is doc 11 ("The audio driver and
@@ -135,8 +152,8 @@ player line runs a machine with nothing else.
 - **The launcher has no Stop or Kill**, on purpose. A killed guest
   leaves a dirty FAT, so a run ends from the guest or the player window.
 - **Every Start is logged with the line it ran**, quoted to paste back
-  into a shell, as `[player] …` in `launcher.log`, at the head of
-  `player.log`, and on the terminal. The line is derived at spawn
+  into a shell, as `[player] …` in `launcher.log`, and at the head of
+  `player.log` or on the terminal, whichever gets the player's output. The line is derived at spawn
   (family devices, shelf, QMP socket, shader profile), so a bundle alone
   does not say what ran.
 - **The player is found** at `LAUNCHER_PLAYER_BIN`, else the installed
@@ -480,7 +497,8 @@ The fields, and why each is what it is:
   user): the player inherits the launcher's sandbox, which allows it no
   user-selected files entitlement, and AppKit's `openPanel` returns nil
   without one (mitsuami 1.3.6 panicked on it and the TestFlight player
-  closed). It reaches the
+  closed; 2.0 answers it as a cancel, and the items stay out because the
+  panel can never show). It reaches the
   tray through the launcher's monitor socket, as the window does. It
   follows changes as they happen, never on a timer (user, 2026-10-19):
   the launcher writing `discs.toml` or the bundle (file notifications,

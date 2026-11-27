@@ -1149,6 +1149,28 @@ mitsuami_check() ( # the launcher's window, driven through its probes (doc 07, t
   o="$(probe "create:xp:Probe box" create)"
   printf '%s' "$o" | grep -q "create: saved Some(" || { echo "the form saved nothing: $o"; rc=1; }
   [ -f "$dir/library/probe-box/machine.toml" ] || { echo "no probe-box/machine.toml in the library"; rc=1; }
+  # The form saved with no name stays open with its Name field marked
+  # invalid, the platform's way (Form::field_error, mitsuami's `error`).
+  o="$(probe invalid:xp invalid)"
+  printf '%s' "$o" | grep -q 'invalid: name field error Some("A name is required."), open true' \
+    || { echo "an unnamed save did not mark the Name field: $o"; rc=1; }
+  [ -s "$dir/invalid.png" ] || { echo "the form with the invalid field drew nothing"; rc=1; }
+  # A machine whose disc image isn't there: its player ends at once, and
+  # the launcher says so as a notification (Machines::take_stopped), with
+  # QEMU's own reason from the player's log (the probe has no terminal,
+  # so the player's output goes there on every OS). Its own data folder,
+  # so the log is this run's.
+  # A real (raw, 1 MiB) disk beside it: the probe's own `NUL` would be a
+  # file of that name in this folder, which the launcher can't make.
+  mkdir -p "$dir/library/no-disc" "$dir/data"
+  head -c 1048576 /dev/zero > "$dir/library/no-disc/disk.img"
+  { echo "disc = 'no-such-disc.cue'"
+    sed -e "s/^name = .*/name = 'No disc'/" -e "s/^disk = .*/disk = 'disk.img'/" -e "s/^disk_size = .*/disk_size = 1048576/" \
+      "$dir/library/probe-box/machine.toml"; } > "$dir/library/no-disc/machine.toml"
+  o="$(LAUNCHER_DATA_DIR="$dir/data" LAUNCHER_SHOT_DELAY_MS=15000 probe "play:$dir/library/no-disc/machine.toml" play)"
+  printf '%s\n' "$o" | grep '^\[launcher\] stopped' | sed 's/^/  /'
+  printf '%s' "$o" | grep -q "stopped: Couldn.t start .No disc. | Could not open" \
+    || { echo "the launcher did not tell why the player didn't start: $o"; rc=1; }
   # The first-run offer on a launcher with no presets, answered No
   # through the platform's own alert: asked with the shared model's words,
   # and never again (the marker).
@@ -2588,11 +2610,12 @@ no_optionals_check() { # the artefacts link only what we chose
   # reached for SDL3 through LoadLibrary on a user's PC, where no
   # import-table walk could have seen it.
   local rc=0 f
-  local names="build/qemu/libqemu-embed-i386.$SO $QSYS $QIMG"
+  local names="build/qemu/libqemu-embed-i386.$SO build/qemu/libqemu-embed-aarch64.$SO $QSYS $QIMG"
   names="$names build/dxvk/src/d3d9/libdxvk_d3d9.$SO$([ "$SO" = so ] && echo .0)"
   names="$names $QDIR/libqemu-embed-i386.dll $QDIR/qemu-system-i386.exe"
   # displays (Cocoa is a framework, matched by name in the same list)
-  local linked='libSDL|libgtk-|libgdk-|libvte|libspice-server|libncurses|Cocoa\.framework'
+  # (and ParavirtualizedGraphics, a macOS guest's display)
+  local linked='libSDL|libgtk-|libgdk-|libvte|libspice-server|libncurses|Cocoa\.framework|ParavirtualizedGraphics\.framework'
   # host audio
   linked="$linked"'|libasound|libpulse|libjack|libpipewire|libsndio'
   # network backends and network-storage block drivers

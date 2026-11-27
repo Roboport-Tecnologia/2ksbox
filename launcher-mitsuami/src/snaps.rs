@@ -190,7 +190,10 @@ fn ask(
     yes: &str,
     then: impl FnOnce() + 'static,
 ) {
-    let alert = Alert::new(headline).message(detail).style(style).button("Cancel").button(yes);
+    // A critical question's yes destroys something (Delete): the
+    // platform's destructive button, red in AppKit's alert.
+    let alert = Alert::new(headline).message(detail).style(style).button("Cancel");
+    let alert = if style == AlertStyle::Critical { alert.destructive_button(yes) } else { alert.button(yes) };
     let asker = ui.clone();
     ui.spawn_local(async move {
         if asker.alert(window, alert).await == 1 {

@@ -337,7 +337,10 @@ CFG+=(--enable-spice-protocol)
 # write is `screendump`'s `format: png`, and every tool here takes the
 # PPM and converts it itself (tools/qmpc.py), while VNC's JPEG encoding
 # serves a viewer nothing scripted opens. Both were two more libraries in
-# every package for nothing.
+# every package for nothing. pvg (ParavirtualizedGraphics, `apple-gfx`)
+# is the display of a macOS guest on an HVF target; no machine here has
+# one, and the macOS 27 SDK no longer exports its PGNewDeviceWithDescriptor,
+# so with it on the aarch64 link fails.
 # The targets: i386 for the era's machines, x86_64 for Windows 11, and on
 # an Arm host aarch64 too, Windows 11 on Arm under the host's hypervisor
 # (HVF on a Mac, KVM on Linux; track M20 step 4). An x86 host has no use
@@ -377,6 +380,7 @@ case "$(uname -m)" in arm64|aarch64) TARGETS="$TARGETS,aarch64-softmmu" ;; esac
   --disable-blkio \
   --disable-png \
   --disable-vnc-jpeg \
+  --disable-pvg \
   --extra-cflags="$EXTRA_CFLAGS" \
   ${CFG[@]+"${CFG[@]}"} \
   --target-list="$TARGETS" \

@@ -5,7 +5,10 @@
 //! `bundle directory -> Child` map, where absence means "not running".
 //! `reap` removes an entry the moment its child exits. A player process
 //! cannot push that news, so the front end polls (`launcher-mitsuami`
-//! from a task on the window, every half second).
+//! from a task on the window, every half second). A player that ended
+//! badly (it didn't start, it crashed) is kept for `take_stopped`, with
+//! what to tell the user, since its window is gone and nothing else says
+//! so (`Stopped`).
 //!
 //! `play` publishes the shared shelf to the machine's drive before
 //! spawning, so a disc added since the last run is on it. It derives the
@@ -29,7 +32,25 @@ pub struct Machines {
     pub profiles_dir: PathBuf,
     entries: Vec<library::LibraryEntry>,
     profiles: Vec<shader_library::ProfileEntry>,
-    running: HashMap<PathBuf, Child>,
+    running: HashMap<PathBuf, Running>,
+    stopped: Vec<Stopped>,
+}
+
+/// A player the launcher started: its process, its machine's name, and
+/// where its run starts in the player log (`player::log_path`).
+struct Running {
+    child: Child,
+    name: String,
+    log_from: Option<u64>,
+}
+
+/// A machine whose player ended badly, and what the user is told: a
+/// notification's title and text, since the player's window is gone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stopped {
+    pub dir: PathBuf,
+    pub title: String,
+    pub body: String,
 }
 
 impl Default for Machines {
@@ -41,6 +62,7 @@ impl Default for Machines {
             entries: Vec::new(),
             profiles: Vec::new(),
             running: HashMap::new(),
+            stopped: Vec::new(),
         }
     }
 }
@@ -173,7 +195,7 @@ impl Machines {
         let dir = entry.dir.clone();
         // A second player would take the first one's monitor socket (and
         // fail on the disk's lock anyway), whoever started the first.
-        let alive = self.running.get_mut(&dir).map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false);
+        let alive = self.running.get_mut(&dir).map(|r| matches!(r.child.try_wait(), Ok(None))).unwrap_or(false);
         if alive || control::listening(&control::socket_path(&dir)) {
             return Err(format!("“{}” is already running", entry.machine.name));
         }
@@ -191,9 +213,12 @@ impl Machines {
         let socket = control::socket_path(&dir);
         let shelf = control::shelf_path(&dir);
         publish_shelf(&self.disc_library_path, &shelf);
+        // This run's part of the shared log starts where the file ends now.
+        let log_from = player::log_path().map(|p| std::fs::metadata(p).map_or(0, |m| m.len()));
         match player::spawn(&machine, &dir.join(library::BUNDLE_FILE), Some(&socket), Some(&shelf)) {
             Ok(child) => {
-                self.running.insert(dir, child);
+                let name = machine.name.clone();
+                self.running.insert(dir, Running { child, name, log_from });
                 Ok(format!("started {}", machine.name))
             }
             Err(e) => Err(format!("{}: {e}", dir.display())),
@@ -205,10 +230,15 @@ impl Machines {
     /// which ones moved; one that redraws everything can ignore it).
     pub fn reap(&mut self) -> Vec<usize> {
         let mut ended: Vec<PathBuf> = Vec::new();
-        self.running.retain(|dir, child| match child.try_wait() {
+        let stopped = &mut self.stopped;
+        self.running.retain(|dir, run| match run.child.try_wait() {
             Ok(None) => true,
             Ok(Some(status)) => {
                 eprintln!("[launcher] {} exited: {status}", dir.display());
+                crate::fatal::entry(&format!("[player] {} exited: {status}", run.name));
+                if let Some((title, body)) = stopped_notice(&run.name, status, run.log_from) {
+                    stopped.push(Stopped { dir: dir.clone(), title, body });
+                }
                 ended.push(dir.clone());
                 false
             }
@@ -222,6 +252,12 @@ impl Machines {
             .iter()
             .filter_map(|dir| self.entries.iter().position(|e| &e.dir == dir))
             .collect()
+    }
+
+    /// The machines whose player ended badly since the last call, each
+    /// with what to tell the user, oldest first.
+    pub fn take_stopped(&mut self) -> Vec<Stopped> {
+        std::mem::take(&mut self.stopped)
     }
 
     /// Republish the shared shelf to every running machine's drive, so a
@@ -386,5 +422,92 @@ pub fn import_legacy_discs(entries: &[library::LibraryEntry], library_path: &Pat
             }
         }
         Err(e) => eprintln!("[discs] {}: {e}", library_path.display()),
+    }
+}
+
+/// What to tell the user about a player that ended, or `None` when it
+/// ended as it should (exit 0: the guest shut down, or the user closed
+/// it). QEMU's own complaint, read from this run's part of the player
+/// log, says why a machine didn't start (a disc image that isn't there,
+/// a disk another program holds); without one, a crash says so, and
+/// anything else gives the exit code. A launcher run from a terminal
+/// leaves the player's output there, not in the log, so it is the crash
+/// or the code then (`console::inherits_output`).
+fn stopped_notice(name: &str, status: std::process::ExitStatus, log_from: Option<u64>) -> Option<(String, String)> {
+    if status.success() {
+        return None;
+    }
+    let log = log_from.and_then(run_log);
+    if let Some(reason) = log.as_deref().and_then(qemu_error) {
+        return Some((Machines::start_failed(name), reason));
+    }
+    if let Some(crash) = crash(status) {
+        return Some((format!("“{name}” crashed"), crash));
+    }
+    let code = status.code().map_or_else(|| status.to_string(), |c| format!("code {c}"));
+    let body = match log.as_deref().and_then(panic_message) {
+        Some(why) => format!("{why} (the player exited with {code})"),
+        None => format!("The player exited with {code}."),
+    };
+    Some((format!("“{name}” stopped unexpectedly"), body))
+}
+
+/// The player log from `from` on: this run's part, and whatever other
+/// players wrote meanwhile.
+fn run_log(from: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(player::log_path()?).ok()?;
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// QEMU's first error in a log, without its program name or the option
+/// it echoes: "Could not open 'Z:\gta\FLT-VCB.CUE': The system cannot
+/// find the path specified." Its `info:` and `warning:` lines aren't errors.
+fn qemu_error(log: &str) -> Option<String> {
+    log.lines().find_map(|line| {
+        let rest = line.strip_prefix("qemu-system-")?;
+        let (_, message) = rest.split_once(": ")?;
+        if message.starts_with("info:") || message.contains("warning:") {
+            return None;
+        }
+        // "-drive if=none,…,file=Z:\x.cue: Could not open …": the option
+        // as given, then the message
+        let message = match message.strip_prefix('-') {
+            Some(option) => option.split_once(": ").map_or(message, |(_, m)| m),
+            None => message,
+        };
+        let message = message.trim();
+        (!message.is_empty()).then(|| message.to_string())
+    })
+}
+
+/// A Rust panic's message: the line after "panicked at <place>:".
+fn panic_message(log: &str) -> Option<String> {
+    let mut lines = log.lines();
+    lines.find(|l| l.contains("panicked at"))?;
+    lines.next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
+}
+
+/// A status that says the player crashed: an exception on Windows (an
+/// NTSTATUS error code, such as 0xC0000005, an access violation), a
+/// signal on Unix.
+fn crash(status: std::process::ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal().map(|s| format!("The player was stopped by signal {s}."))
+    }
+    #[cfg(windows)]
+    {
+        let code = status.code()? as u32;
+        (code >= 0xC000_0000).then(|| format!("The player stopped with exception 0x{code:08X}."))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = status;
+        None
     }
 }

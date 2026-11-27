@@ -27,7 +27,7 @@ cargo build --no-default-features --features kde # Kirigami
 ```
 
 mitsuami comes from crates.io, its release pinned exact
-(`version = "=1.3.6"` in `Cargo.toml`; ADR-023's 2026-10-16
+(`version = "=2.5.1"` in `Cargo.toml`; ADR-023's 2026-10-16
 amendment, before that a git `rev`). To work on both
 repositories at once, override it in an uncommitted
 `launcher-mitsuami/.cargo/config.toml`:
@@ -42,7 +42,7 @@ committing here (the launcher and the player together). A dependency
 change, a new mitsuami version included, means regenerating
 `packaging/flatpak/cargo-sources.json`
 with `scripts/gen-flatpak-cargo-sources.sh` (it runs on macOS too).
-The pin is mitsuami 1.3.6 from crates.io since 2026-10-20 (below): 1.0.0 (`0e21f20`, pinned
+The pin is mitsuami 2.5.1 from crates.io since 2026-11-24 (below; 2.5.0 from 2026-11-20, 1.3.6 from 2026-10-20): 1.0.0 (`0e21f20`, pinned
 2026-10-04, 53 commits past `48e4801`: 1.0.0 and three security and
 performance passes) plus three, of which one is code: an AppKit surface
 that grabs the keyboard turns the system's shortcuts off for the grab
@@ -132,6 +132,38 @@ and on AppKit Escape closes a dialog when nothing has focus or a
 field's `on_key` takes it (`13c1767`). The Flatpak's sources were
 regenerated with it, which also brought in the player's `notify`
 (track M22).
+Then 2.5.0 (2026-11-20, user: "do all the direct replacements"), with
+the player (M22). What it let us stop doing by hand:
+- the player's window frame (2.5's `Window::frame`, `maximized`,
+  `Placement::Centred`; track M22), and then the machines window's
+  (2026-11-26, user: "it saves the player position, but the launcher it
+  doesn't"): `main_window` opens it through `App::open` as a `Window`
+  with both signals, and `launcher_core::window_state::Keeper` writes
+  `launcher-window.toml` in the data directory as the player's keeper
+  writes its machine's `window.toml`. A headless shot neither reads nor
+  writes it, and on macOS and GTK a window opened at its remembered
+  frame skips the empty library's widening (`OPENED_REMEMBERED`), which
+  that frame already has;
+- the Windows message box in `launcher_core::fatal`: the front end hands
+  `fatal::install` mitsuami's `fatal_error` (2.2), DPI aware and with
+  current controls; Unix still shows none, since a toolkit dialog there
+  runs a nested loop inside the launcher that just panicked;
+- the delete questions' Delete (shader profiles, snapshots) and the
+  player's Close are `Alert::destructive_button` (2.0), red in AppKit;
+- the machine form's field errors: `Form::field_error` names the field
+  a failed save is about (name, MT-32 ROMs, extra QEMU arguments, disk
+  path), which shows itself invalid the platform's way (2.0's `error` on
+  a text input, `PathField`'s `error`), beside the form's error line,
+  which stays because the field may be on another page;
+- a sandboxed file dialog AppKit won't show is a cancel, not a panic
+  (2.0).
+On Windows, 2.5.0 reported a new window's creation rect as its frame
+(so the player, maximized, kept the cascade's); mitsuami `4183ec2`
+fixes it, released in 2.5.1, the pin since 2026-11-24.
+Not taken: 2.0's `Tree` for the snapshots, because it has no columns
+and the snapshots are a `Table` with Taken and VM state (user,
+2026-10-01). Clone's and the shader editor's errors are I/O failures
+about no field, so they stay lines.
 
 Windows builds natively with MSVC (WinUI 3) and needs the Windows App
 Runtime 2.4+, so the launcher is built only on a PC:
@@ -271,6 +303,8 @@ and photograph the screen it is on:
 | `saveprofile:<preset>` | a new profile "Probe profile" on a preset, saved through the core, and the list; prints `saveprofile: saved …` (writes into the profile directory) |
 | `editor:<preset>[;<image>[;<param>=<value>]]` | the editor on a preset and a picture, the preview rendered, with one parameter overridden as its box and slider would, or `scale=<n>` the preview's scale slider at `n` (`LAUNCHER_SHOT_DELAY_MS=2500`: the first render makes a device) |
 | `firstrun[:<answers>]` | the first-run offer with scripted answers (`yes`, `no`, `retry`, `cancel`, `ok`, comma-separated) in place of the platform's alerts: each prints `firstrun <Step>: <headline> \| <detail> [<buttons>]`, and a run ends with `firstrun settled: open=…`. With `LAUNCHER_SHADERS_DIR` on an empty folder it asks; `/proc/nowhere/shaders` makes the download fail at once, with no network |
+| `play:<machine.toml>` | starts the machine as Start does; a player that ends badly prints the notification's words, `stopped: <title> \| <text>`, once the poll reaps it (give it `LAUNCHER_SHOT_DELAY_MS`), and posts nothing, only prints (M19, 2026-11-20) |
+| `invalid[:<family>]` | a fresh form saved with no name: prints `invalid: name field error Some(…)`, and photographs the form open on General with its Name field marked invalid (`Form::field_error`, mitsuami's `error`; M19, 2026-11-20) |
 | `create:<family>:<name>` | fills a fresh form on an existing disk (`/dev/null`), submits it, prints `create: saved …`, and shows the machine window with the new row; writes into the library, so point `LAUNCHER_LIBRARY_DIR` at a scratch one |
 
 The machine window starts 820 × 610 on Windows and GTK, 770 × 560 on

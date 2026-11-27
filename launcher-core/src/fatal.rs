@@ -13,15 +13,23 @@
 //!   with a header and a milestone per start-up step. A log that stops
 //!   after "data dir" names the step that died.
 //! * A **message box** on Windows for the last words, because a user who
-//!   double-clicked an icon will not find a log file on their own.
+//!   double-clicked an icon will not find a log file on their own. The
+//!   front end hands [`install`] the toolkit's call for it (mitsuami's
+//!   `fatal_error`, a Win32 message box that needs no toolkit running,
+//!   DPI aware and with current controls), since this crate has none.
 //!
 //! The front end calls [`install`] first thing in `main`, so any panic
 //! after it is reported. On Unix the log is written too (it costs
-//! nothing, and a Flatpak's stderr is just as invisible) and the message
-//! box is not compiled.
+//! nothing, and a Flatpak's stderr is just as invisible) and no box is
+//! shown: there the toolkit's error dialog runs a nested event loop, which
+//! would re-enter a launcher that has just panicked inside its own.
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// The front end's message box (`install`), when it shows one.
+static SHOW: OnceLock<fn(&str, &str)> = OnceLock::new();
 
 /// Where the launcher's own start-up log goes: beside the library, like
 /// `player.log`. Falls back to the temporary directory when the data
@@ -68,8 +76,12 @@ pub fn fatal(what: &str) {
 /// in `main`, before anything that can fail.
 ///
 /// `front_end` names the binary in the header, because every front end
-/// writes to the same file.
-pub fn install(front_end: &str) {
+/// writes to the same file. `show` is the message box for the last
+/// words, `None` for none (off Windows, see the module's note).
+pub fn install(front_end: &str, show: Option<fn(&str, &str)>) {
+    if let Some(show) = show {
+        let _ = SHOW.set(show);
+    }
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -103,27 +115,13 @@ pub fn install(front_end: &str) {
     }));
 }
 
-/// A modal box with an OK button, or nothing at all off Windows.
-#[cfg(windows)]
+/// The front end's message box, if `install` was given one.
 fn box_up(title: &str, body: &str) {
-    use std::ffi::c_void;
-    const MB_OK: u32 = 0;
-    const MB_ICONERROR: u32 = 0x10;
-    #[link(name = "user32")]
-    extern "system" {
-        fn MessageBoxW(owner: *mut c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
-    }
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let Some(show) = SHOW.get() else { return };
     // The log's path is in the box because the box holds one message and
     // the log holds the milestones that lead up to it.
-    let body = format!("{body}\n\nThe log is at\n{}", log_path().display());
-    unsafe {
-        MessageBoxW(std::ptr::null_mut(), wide(&body).as_ptr(), wide(title).as_ptr(), MB_OK | MB_ICONERROR);
-    }
+    show(title, &format!("{body}\n\nThe log is at\n{}", log_path().display()));
 }
-
-#[cfg(not(windows))]
-fn box_up(_title: &str, _body: &str) {}
 
 /// File a whole block of text in the log. `--diagnose` answers this way,
 /// because a windowed program cannot answer on stdout and the verb's job

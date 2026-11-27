@@ -116,9 +116,12 @@ pub fn attach_parent() {
 }
 
 /// Whether a subprocess started by [`command`] inherits somewhere to
-/// print. False only for a windowless Windows process, whose children
-/// get no console. A caller with output worth keeping (the player's
-/// start-up diagnostics) then redirects it to a file.
+/// print that someone reads: a console on Windows (a windowless process's
+/// children get none), a terminal elsewhere. A launcher started from the
+/// desktop, Finder or a Flatpak has a stderr that goes to the journal or
+/// nowhere. A caller with output worth keeping (the player's start-up
+/// diagnostics, which also say why a machine didn't start) then
+/// redirects it to a file.
 pub fn inherits_output() -> bool {
     #[cfg(windows)]
     {
@@ -126,7 +129,8 @@ pub fn inherits_output() -> bool {
     }
     #[cfg(not(windows))]
     {
-        true
+        use std::io::IsTerminal;
+        std::io::stderr().is_terminal()
     }
 }
 
