@@ -1167,10 +1167,37 @@ mitsuami_check() ( # the launcher's window, driven through its probes (doc 07, t
   { echo "disc = 'no-such-disc.cue'"
     sed -e "s/^name = .*/name = 'No disc'/" -e "s/^disk = .*/disk = 'disk.img'/" -e "s/^disk_size = .*/disk_size = 1048576/" \
       "$dir/library/probe-box/machine.toml"; } > "$dir/library/no-disc/machine.toml"
-  o="$(LAUNCHER_DATA_DIR="$dir/data" LAUNCHER_SHOT_DELAY_MS=15000 probe "play:$dir/library/no-disc/machine.toml" play)"
-  printf '%s\n' "$o" | grep '^\[launcher\] stopped' | sed 's/^/  /'
-  printf '%s' "$o" | grep -q "stopped: Couldn.t start .No disc. | Could not open" \
-    || { echo "the launcher did not tell why the player didn't start: $o"; rc=1; }
+  # On Linux the player can't draw on Broadway (no GPU surface: it panics
+  # before QEMU starts), so it gets a private headless sway of its own
+  # through a LAUNCHER_PLAYER_BIN wrapper; the launcher stays on Broadway.
+  local sway="" player_bin=""
+  if [ "$OS" = Linux ]; then
+    if command -v sway >/dev/null; then
+      printf 'output HEADLESS-1 resolution 1280x960@60Hz\n' > "$dir/sway.conf"
+      WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -c "$dir/sway.conf" > "$dir/sway.log" 2>&1 &
+      sway=$!
+      local sock=""
+      for _ in $(seq 100); do
+        sock="$(ls "$dir/run" | grep -m1 '^wayland-[0-9]*$')" && break
+        sleep 0.1
+      done
+      [ -n "$sock" ] || { echo "sway did not start ($dir/sway.log)"; rc=1; }
+      printf '#!/bin/sh\nunset DISPLAY\nGDK_BACKEND=wayland WAYLAND_DISPLAY=%s exec "%s" "$@"\n' \
+        "$sock" "$PWD/$PLAYER" > "$dir/player.sh"
+      chmod +x "$dir/player.sh"
+      player_bin="$dir/player.sh"
+    else
+      echo "  skip play: needs sway (the player can't draw on Broadway)"
+    fi
+  fi
+  if [ "$OS" != Linux ] || [ -n "$player_bin" ]; then
+    o="$( [ -z "$player_bin" ] || export LAUNCHER_PLAYER_BIN="$player_bin"
+      LAUNCHER_DATA_DIR="$dir/data" LAUNCHER_SHOT_DELAY_MS=15000 probe "play:$dir/library/no-disc/machine.toml" play)"
+    printf '%s\n' "$o" | grep '^\[launcher\] stopped' | sed 's/^/  /'
+    printf '%s' "$o" | grep -q "stopped: Couldn.t start .No disc. | Could not open" \
+      || { echo "the launcher did not tell why the player didn't start: $o"; rc=1; }
+  fi
+  if [ -n "$sway" ]; then kill "$sway" 2>/dev/null; wait "$sway" 2>/dev/null; fi
   # The first-run offer on a launcher with no presets, answered No
   # through the platform's own alert: asked with the shared model's words,
   # and never again (the marker).
