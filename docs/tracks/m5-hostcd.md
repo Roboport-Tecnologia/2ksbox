@@ -81,6 +81,12 @@ two drives.
 - Drive I/O on QEMU's main loop freezes the guest for the whole seek.
   `LIBDISC_DRIVE_SYNC=1` brings the old synchronous reads back as the A/B;
   a probe that asks QMP every 100 ms during the run measures the freeze.
+- A CD voice that writes nothing holds back the sound card's own voices
+  (QEMU's mixer goes as far as its slowest voice): write silence when the
+  drive has not delivered yet.
+- The first Q read after a spin-up can fail its CRC; the pregap search
+  tries a few frames. A cold open can take more than 10 s; the `hostcd`
+  check's SeaBIOS probe waits 30.
 - The host's own probes (blkid / udisks reading UDF anchors near the end
   of a mixed-mode disc) show in dmesg as READ(10) "Illegal mode for this
   track" on audio sectors. They are not ours, and harmless.

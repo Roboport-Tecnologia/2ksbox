@@ -1099,8 +1099,12 @@ music stopping and coming back). `libdisc_read_raw_nowait` (API v3)
 answers from the cache or `LIBDISC_EAGAIN`, and queues the run for a
 worker thread the drive starts on first use; once playback is past the
 middle of a window the next one is fetched, so the music stays a window
-ahead. Patch 55's callback returns on `EAGAIN` (a dropout, not a stall),
-and a fetch that failed is reported once as `LIBDISC_EIO`, which it
+ahead. On `EAGAIN` patch 55's callback writes silence for what the mixer
+asked and keeps its position: a dropout, as a drive's analog out plays
+while it seeks. Writing nothing, as at first, held back every voice mixed
+with the CD's, because QEMU's mixer plays only as far as its slowest
+voice has written: on Win98, Moto Racer's sound effects came late at the
+start of a race (user, 2026-11-26). A fetch that failed is reported once as `LIBDISC_EIO`, which it
 already plays as silence. Measured on the host (music in real time, a
 64 KiB data read every second): every sector played in time, the longest
 call 0.08 ms, against 2.7 s through `libdisc_read_raw`.

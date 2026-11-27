@@ -20,7 +20,7 @@ diff --git a/hw/ide/atapi.c b/hw/ide/atapi.c
 index 5e6da0003f..6c638266d2 100644
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -321,11 +321,38 @@ static void atapi_audio_cb(void *opaque, int avail)
+@@ -321,11 +321,53 @@ static void atapi_audio_cb(void *opaque, int avail)
              libdisc *disc = atapi_disc(s);
              uint8_t raw[2352];
              LibdiscSectorInfo info;
@@ -32,9 +32,24 @@ index 5e6da0003f..6c638266d2 100644
 +            if (rc >= 0 && info.kind == LIBDISC_KIND_AUDIO) {
 +                /* 2ksbox (M5h): a host drive reads ahead off this thread;
 +                 * a sector it has not brought in yet is a dropout, never a
-+                 * main loop waiting seconds on a seek (doc 17 §9) */
++                 * main loop waiting seconds on a seek (doc 17 §9). The
++                 * dropout is silence written, as a drive's analog out
++                 * plays while it seeks: a voice that writes nothing holds
++                 * back every voice mixed with it (the sound card's own,
++                 * the game's effects, late). The position stays put. */
 +                rc = libdisc_read_raw_nowait(disc, s->atapi_play_lba, raw);
 +                if (rc == LIBDISC_EAGAIN) {
++                    static const uint8_t quiet[2352];
++
++                    while (avail > 0) {
++                        int n = audio_be_write(s->atapi_be, s->atapi_voice,
++                                               (void *)quiet, MIN(avail, (int)sizeof(quiet)));
++                        if (n <= 0) {
++                            break;
++                        }
++                        avail -= n;
++                    }
++                    s->atapi_audio_starved++;
 +                    return;
 +                }
 +            }
@@ -66,11 +81,12 @@ diff --git a/include/hw/ide/ide-dev.h b/include/hw/ide/ide-dev.h
 index da4aa1bf60..086994f721 100644
 --- a/include/hw/ide/ide-dev.h
 +++ b/include/hw/ide/ide-dev.h
-@@ -152,6 +152,7 @@ struct IDEState {
+@@ -152,6 +152,8 @@ struct IDEState {
      uint8_t atapi_ascq;
      uint32_t atapi_last_lba;
      uint8_t atapi_audio_status;     /* 0x11 playing 0x12 paused 0x13 completed 0x14 error 0x15 none */
 +    uint32_t atapi_audio_read_errors; /* 2ksbox: unreadable audio sectors played as silence (logged) */
++    uint32_t atapi_audio_starved;   /* 2ksbox (M5h): callbacks a host drive left silent */
      uint32_t atapi_play_lba, atapi_play_end, atapi_play_start_lba;
      int64_t atapi_play_start_ns;
      uint8_t atapi_audio_port[4], atapi_audio_vol[4];

@@ -354,14 +354,16 @@ hostcd_check() { # the disc in a host's drive (M5h): the model, the dump it shou
   fi
   if [ -x $QSYS ]; then
     local n
-    n="$(atapi_disc_packets "hostcd:$dev" "$OUT/hostcd-probe.log")"
+    # 30 s, not 10: QEMU opens the disc before the machine starts, and a
+    # drive that has spun down takes seconds to read its TOC and pregaps
+    n="$(atapi_disc_packets "hostcd:$dev" "$OUT/hostcd-probe.log" 120)"
     [ "${n:-0}" -gt 0 ] || { echo "the drive saw no disc model for hostcd:$dev (cdimage_disc found nothing)"; rc=1; }
   fi
   return $rc
 }
 
-atapi_disc_packets() { # disc, log -> packets the cdimage disc path saw while SeaBIOS probed the drive
-  local disc="$1" out="$2" pid i
+atapi_disc_packets() { # disc, log [polls] -> packets the cdimage disc path saw while SeaBIOS probed the drive
+  local disc="$1" out="$2" polls="${3:-40}" pid i
   # Both logs are markers this function waits on: a stale one from an
   # earlier run reads as "already finished" and the machine gets killed
   # before it has probed anything.
@@ -374,7 +376,7 @@ atapi_disc_packets() { # disc, log -> packets the cdimage disc path saw while Se
   pid=$!
   # SeaBIOS says this once it has probed every drive; it takes well under
   # a second, and the machine would otherwise sit there with no disk.
-  for i in $(seq 1 40); do
+  for i in $(seq 1 "$polls"); do
     grep -q "No bootable device" "$out.bios" 2>/dev/null && break
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.25

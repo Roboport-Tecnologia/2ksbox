@@ -763,7 +763,10 @@ fn q_at(drive: &Drive, t: &Track, lba: i32) -> Option<(u8, u8, i32)> {
 /// drive gives no subchannel.
 fn find_pregap(drive: &Drive, prev: &Track, n: u8, start: i32) -> Option<i32> {
     let in_gap = |q: Option<(u8, u8, i32)>| q.is_some_and(|(t, i, _)| t == n && i == 0);
-    let at_end = q_at(drive, prev, start - 2);
+    /* The first Q read after a spin-up can fail its CRC: a cold open of the
+       first drive missed the pregap that the next open found. A few frames
+       back, a few tries. */
+    let at_end = [2, 3, 4].into_iter().find_map(|back| q_at(drive, prev, start - back));
     if drive.sub == Sub::None || !in_gap(at_end) {
         return None;
     }
