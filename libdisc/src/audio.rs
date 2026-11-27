@@ -271,24 +271,34 @@ impl AudioFiles {
             // `start` is set by the first packet that gives output.
             d.start = u64::MAX;
         }
-        while !d.ended && (d.start == u64::MAX || d.end() <= frame) {
-            decode_packet(d, info.mono, &info.path)?;
-            if d.start != u64::MAX && d.end() < frame {
-                // All before the target: drop it as it comes.
-                d.start = d.end();
-                d.pcm.clear();
-            }
-        }
-        if d.start == u64::MAX {
-            d.start = frame;
-        }
+        decode_up_to(d, frame, info)?;
         if d.start > frame {
             // The seek landed past the target, which an accurate seek
-            // never should: start over and decode up to it.
+            // never should: start over and decode up to it, dropping as
+            // it goes, so no more than a packet is ever held before it.
             *d = self.start(d.file)?;
+            decode_up_to(d, frame, info)?;
         }
         Ok(())
     }
+}
+
+/// Decode until the PCM reaches past `frame`, dropping what comes before
+/// it as it arrives; `d.start` is where the kept PCM begins (or `frame`
+/// when the file ended first).
+fn decode_up_to(d: &mut Decoding, frame: u64, info: &AudioFile) -> Result<()> {
+    while !d.ended && (d.start == u64::MAX || d.end() <= frame) {
+        decode_packet(d, info.mono, &info.path)?;
+        if d.start != u64::MAX && d.end() < frame {
+            // All before the target: drop it as it comes.
+            d.start = d.end();
+            d.pcm.clear();
+        }
+    }
+    if d.start == u64::MAX {
+        d.start = frame;
+    }
+    Ok(())
 }
 
 /// Decode the next packet onto `d.pcm`, or mark the end.
