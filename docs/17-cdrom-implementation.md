@@ -1173,7 +1173,19 @@ needs:
   read-ahead worker holds the drive's handle and cache through `Arc`s and
   ends when the disc is closed.
 
-Linux only so far (`SG_IO`); elsewhere `libdisc_open` refuses
-`hostcd:`. Windows is `IOCTL_SCSI_PASS_THROUGH_DIRECT` on `\\.\D:`;
-macOS needs IOKit's SCSITask and the disc unmounted from Finder, and
-the App Store sandbox may not allow it at all.
+Linux (`SG_IO`) and Windows. On Windows the device is the drive
+letter's, `\\.\D:` (`D:` is taken too). SCSI pass-through
+(`IOCTL_SCSI_PASS_THROUGH_DIRECT`) when the device answers INQUIRY
+through it, which on most installs takes an administrator: everything
+as on Linux. Otherwise the CD-ROM class driver's IOCTLs, which any user
+may send, with `Drive`'s commands translated onto them (TEST UNIT READY
+`CHECK_VERIFY2`, GET CONFIGURATION, READ TOC `READ_TOC_EX`, READ
+CAPACITY `DISK_GET_LENGTH_INFO`, an audio READ CD `RAW_READ`, READ(10)
+`ReadFile`, SET CD SPEED, eject); a raw data read and the subchannel are
+refused there, so data is read cooked and the subchannel synthesized:
+data and CD audio, no protection band. Ported from PR #4; type-checked
+for `x86_64-pc-windows-msvc`, **not yet run on a PC**. The launcher lists
+the CD-ROM drive letters (`GetDriveTypeW`) by model
+(`IOCTL_STORAGE_QUERY_PROPERTY`). macOS needs IOKit's SCSITask and the
+disc unmounted from Finder, and the App Store sandbox may not allow it at
+all; there `libdisc_open` refuses `hostcd:`.

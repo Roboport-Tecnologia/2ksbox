@@ -14,9 +14,9 @@
 //! TOC once. A disc taken out and another put in is a new `Disc`; the
 //! QEMU driver watches the drive (`ready`) and swaps them (doc 17 §9).
 //!
-//! Linux only for now (`SG_IO`). Windows (`IOCTL_SCSI_PASS_THROUGH_DIRECT`
-//! on `\\.\D:`) and macOS (IOKit's SCSITask, which needs the disc
-//! unmounted) answer `Error::Invalid` until they are written.
+//! Linux (`SG_IO`) and Windows (SPTI, or the CD-ROM IOCTLs without an
+//! administrator). macOS (IOKit's SCSITask, which needs the disc
+//! unmounted) answers `Error::Invalid` until it is written.
 
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
@@ -211,7 +211,296 @@ mod sys {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Windows (ported from PR #4's `drive::win`): the drive letter's device,
+/// `\\.\D:`. SCSI pass-through (SPTI) when the device answers it, which on
+/// most installs takes an administrator: every command, as on Linux.
+/// Otherwise the CD-ROM class driver's own IOCTLs, which any user may
+/// send, with the commands `Drive` sends translated onto them: data and
+/// CD audio. A raw data read and the subchannel are refused there, so the
+/// opener's probes read data cooked and synthesize the subchannel.
+#[cfg(windows)]
+mod sys {
+    use super::{CmdError, Sense};
+    use std::ffi::c_void;
+
+    type H = *mut c_void;
+    const INVALID: H = -1isize as H;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateFileW(name: *const u16, access: u32, share: u32, sa: *const c_void, disposition: u32, flags: u32, template: H) -> H;
+        fn CloseHandle(h: H) -> i32;
+        fn DeviceIoControl(h: H, code: u32, inb: *const c_void, inlen: u32, outb: *mut c_void, outlen: u32, got: *mut u32, ov: *mut c_void) -> i32;
+        fn ReadFile(h: H, buf: *mut c_void, len: u32, got: *mut u32, ov: *mut c_void) -> i32;
+        fn SetFilePointerEx(h: H, to: i64, new: *mut i64, how: u32) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const SHARE_RW: u32 = 3;
+    const OPEN_EXISTING: u32 = 3;
+    const IOCTL_SCSI_PASS_THROUGH_DIRECT: u32 = 0x4D014;
+    const IOCTL_STORAGE_CHECK_VERIFY2: u32 = 0x2D0800;
+    const IOCTL_STORAGE_EJECT_MEDIA: u32 = 0x2D4808;
+    const IOCTL_CDROM_READ_TOC_EX: u32 = 0x24054;
+    const IOCTL_CDROM_RAW_READ: u32 = 0x2403E;
+    const IOCTL_CDROM_SET_SPEED: u32 = 0x24060;
+    const IOCTL_CDROM_GET_CONFIGURATION: u32 = 0x24058;
+    const IOCTL_DISK_GET_LENGTH_INFO: u32 = 0x7405C;
+
+    /// `SCSI_PASS_THROUGH_DIRECT` and its sense buffer.
+    #[repr(C)]
+    struct Sptd {
+        length: u16,
+        scsi_status: u8,
+        path_id: u8,
+        target_id: u8,
+        lun: u8,
+        cdb_length: u8,
+        sense_info_length: u8,
+        data_in: u8,
+        data_transfer_length: u32,
+        timeout_value: u32,
+        data_buffer: *mut c_void,
+        sense_info_offset: u32,
+        cdb: [u8; 16],
+    }
+    #[repr(C)]
+    struct SptdSense {
+        sptd: Sptd,
+        sense: [u8; 32],
+    }
+
+    pub struct Handle {
+        h: H,
+        /// SPTI answered; else the IOCTLs.
+        spti: bool,
+        path: String,
+    }
+
+    // SAFETY: a device handle; synchronous I/O on it is serialised by the system.
+    unsafe impl Send for Handle {}
+    unsafe impl Sync for Handle {}
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            // SAFETY: our own handle, closed once.
+            unsafe { CloseHandle(self.h) };
+        }
+    }
+
+    /// `D:`, `d`, `\\.\D:` all name the drive's device.
+    fn device(path: &str) -> String {
+        let p = path.trim_start_matches(r"\\.\").trim_end_matches(['\\', '/']);
+        let letter = p.trim_end_matches(':');
+        if letter.len() == 1 && letter.as_bytes()[0].is_ascii_alphabetic() {
+            format!(r"\\.\{}:", letter.to_ascii_uppercase())
+        } else {
+            path.to_string()
+        }
+    }
+
+    fn create(path: &str, access: u32) -> Option<H> {
+        let w: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: a NUL-terminated name, no security attributes or template.
+        let h = unsafe { CreateFileW(w.as_ptr(), access, SHARE_RW, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
+        (h != INVALID && !h.is_null()).then_some(h)
+    }
+
+    /// A transfer buffer aligned for any adapter's alignment mask.
+    fn aligned(len: usize) -> Vec<u128> {
+        vec![0u128; len.div_ceil(16).max(1)]
+    }
+
+    fn sense(key: u8, asc: u8, ascq: u8) -> CmdError {
+        CmdError::Sense(Sense { key, asc, ascq })
+    }
+
+    /// A failed IOCTL as the sense a drive would have answered.
+    fn win_error(path: &str, what: &str) -> CmdError {
+        // SAFETY: no arguments.
+        match unsafe { GetLastError() } {
+            21 => sense(2, 0x3A, 0),                          // ERROR_NOT_READY: no disc
+            1110 => sense(6, 0x28, 0),                        // ERROR_MEDIA_CHANGED
+            23 | 27 | 30 | 1117 => sense(3, 0x11, 0),         // CRC, sector not found, read fault, I/O device
+            1 | 50 | 87 => sense(5, 0x20, 0),                 // not supported, invalid parameter
+            e => CmdError::Host(format!("{path}: {what}: Windows error {e}")),
+        }
+    }
+
+    impl Handle {
+        pub fn open(path: &str) -> Result<Handle, String> {
+            let path = device(path);
+            if let Some(h) = create(&path, GENERIC_READ | GENERIC_WRITE) {
+                let mut handle = Handle { h, spti: true, path: path.clone() };
+                // INQUIRY answers with no disc in: SPTI works for this user
+                if handle.spti_command(&[0x12, 0, 0, 0, 36, 0], &mut [0u8; 36], 10).is_ok() {
+                    return Ok(handle);
+                }
+                handle.spti = false;
+                return Ok(handle);
+            }
+            match create(&path, GENERIC_READ) {
+                Some(h) => Ok(Handle { h, spti: false, path }),
+                // SAFETY: no arguments.
+                None => Err(format!("{path}: cannot open (Windows error {})", unsafe { GetLastError() })),
+            }
+        }
+
+        fn ioctl(&self, code: u32, inb: &[u8], out: &mut [u8], what: &str) -> Result<usize, CmdError> {
+            let mut got = 0u32;
+            // SAFETY: buffers of the lengths given, synchronous call.
+            let ok = unsafe {
+                DeviceIoControl(self.h, code, inb.as_ptr() as *const c_void, inb.len() as u32, out.as_mut_ptr() as *mut c_void, out.len() as u32, &mut got, std::ptr::null_mut())
+            };
+            if ok == 0 {
+                return Err(win_error(&self.path, what));
+            }
+            Ok(got as usize)
+        }
+
+        fn spti_command(&self, cdb: &[u8], buf: &mut [u8], timeout_s: u32) -> Result<(), CmdError> {
+            let mut data = aligned(buf.len());
+            let mut p = SptdSense {
+                sptd: Sptd {
+                    length: std::mem::size_of::<Sptd>() as u16,
+                    scsi_status: 0,
+                    path_id: 0,
+                    target_id: 0,
+                    lun: 0,
+                    cdb_length: cdb.len() as u8,
+                    sense_info_length: 32,
+                    data_in: if buf.is_empty() { 2 } else { 1 }, // SCSI_IOCTL_DATA_UNSPECIFIED / _IN
+                    data_transfer_length: buf.len() as u32,
+                    timeout_value: timeout_s.max(1),
+                    data_buffer: if buf.is_empty() { std::ptr::null_mut() } else { data.as_mut_ptr() as *mut c_void },
+                    sense_info_offset: std::mem::offset_of!(SptdSense, sense) as u32,
+                    cdb: [0; 16],
+                },
+                sense: [0; 32],
+            };
+            p.sptd.cdb[..cdb.len()].copy_from_slice(cdb);
+            let size = std::mem::size_of::<SptdSense>() as u32;
+            let pp = &mut p as *mut SptdSense as *mut c_void;
+            let mut got = 0u32;
+            // SAFETY: the request is read and written in place; its data buffer outlives the call.
+            if unsafe { DeviceIoControl(self.h, IOCTL_SCSI_PASS_THROUGH_DIRECT, pp, size, pp, size, &mut got, std::ptr::null_mut()) } == 0 {
+                return Err(win_error(&self.path, "SCSI pass-through"));
+            }
+            if p.sptd.scsi_status != 0 {
+                let s = &p.sense;
+                return Err(if s[0] & 0x7f >= 0x72 { sense(s[1] & 0xf, s[2], s[3]) } else { sense(s[2] & 0xf, s[12], s[13]) });
+            }
+            let n = (p.sptd.data_transfer_length as usize).min(buf.len());
+            // SAFETY: `data` holds at least `n` bytes.
+            let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, n) };
+            buf[..n].copy_from_slice(bytes);
+            Ok(())
+        }
+
+        /// The commands `Drive` sends, onto the CD-ROM IOCTLs.
+        fn ioctl_command(&self, cdb: &[u8], buf: &mut [u8]) -> Result<(), CmdError> {
+            let be32 = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+            match cdb[0] {
+                0x00 => self.ioctl(IOCTL_STORAGE_CHECK_VERIFY2, &[], &mut [], "TEST UNIT READY").map(|_| ()),
+                0x46 => {
+                    // GET_CONFIGURATION_IOCTL_INPUT: feature 0, request type ONE (2), two reserved pointers
+                    let mut input = [0u8; 8 + 2 * std::mem::size_of::<usize>()];
+                    input[4..8].copy_from_slice(&2u32.to_le_bytes());
+                    self.ioctl(IOCTL_CDROM_GET_CONFIGURATION, &input, buf, "GET CONFIGURATION").map(|_| ())
+                }
+                0x25 => {
+                    let mut len = [0u8; 8];
+                    self.ioctl(IOCTL_DISK_GET_LENGTH_INFO, &[], &mut len, "READ CAPACITY")?;
+                    let sectors = (i64::from_le_bytes(len) / 2048) as u32;
+                    buf[..4].copy_from_slice(&sectors.saturating_sub(1).to_be_bytes());
+                    buf[4..8].copy_from_slice(&2048u32.to_be_bytes());
+                    Ok(())
+                }
+                0x43 => {
+                    // CDROM_READ_TOC_EX: format in the low nibble, MSF in bit 7, session 1
+                    let format = cdb[2] & 0x0F;
+                    let tries: &[u8] = if format == 2 { &[0x82, 0x02] } else { &[format | (cdb[1] & 2) << 6] };
+                    let mut last = sense(5, 0x24, 0);
+                    for &b0 in tries {
+                        match self.ioctl(IOCTL_CDROM_READ_TOC_EX, &[b0, cdb[6].max(1), 0, 0], buf, "READ TOC") {
+                            Ok(_) => return Ok(()),
+                            Err(e) => last = e,
+                        }
+                    }
+                    Err(last)
+                }
+                0xBE if cdb[1] & 0x1C == 1 << 2 && cdb[9] == 0x10 && cdb[10] == 0 => {
+                    // CD audio: RAW_READ_INFO {DiskOffset as if cooked, SectorCount, TrackMode CDDA}
+                    let (lba, n) = (be32(&cdb[2..6]) as i64, u32::from_be_bytes([0, cdb[6], cdb[7], cdb[8]]));
+                    let mut info = [0u8; 16];
+                    info[..8].copy_from_slice(&(lba * 2048).to_le_bytes());
+                    info[8..12].copy_from_slice(&n.to_le_bytes());
+                    info[12..16].copy_from_slice(&2i32.to_le_bytes());
+                    let mut data = aligned(buf.len());
+                    // SAFETY: `data` is `buf.len()` bytes or more.
+                    let out = unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u8, buf.len()) };
+                    let got = self.ioctl(IOCTL_CDROM_RAW_READ, &info, out, "CD audio read")?;
+                    if got < buf.len() {
+                        return Err(sense(3, 0x11, 0));
+                    }
+                    buf.copy_from_slice(out);
+                    Ok(())
+                }
+                0x28 => {
+                    let lba = be32(&cdb[2..6]) as i64;
+                    let mut data = aligned(buf.len());
+                    let mut got = 0u32;
+                    // SAFETY: a synchronous read into `data`, at least `buf.len()` bytes.
+                    let ok = unsafe {
+                        SetFilePointerEx(self.h, lba * 2048, std::ptr::null_mut(), 0) != 0
+                            && ReadFile(self.h, data.as_mut_ptr() as *mut c_void, buf.len() as u32, &mut got, std::ptr::null_mut()) != 0
+                    };
+                    if !ok {
+                        return Err(win_error(&self.path, "READ(10)"));
+                    }
+                    if (got as usize) < buf.len() {
+                        return Err(sense(3, 0x11, 0));
+                    }
+                    // SAFETY: `data` holds `buf.len()` bytes.
+                    buf.copy_from_slice(unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, buf.len()) });
+                    Ok(())
+                }
+                0xBB => {
+                    // CDROM_SET_SPEED: CdromSetSpeed, read speed, write speed (max), default rotation
+                    let mut req = [0u8; 12];
+                    req[4..6].copy_from_slice(&u16::from_be_bytes([cdb[2], cdb[3]]).to_le_bytes());
+                    req[6..8].copy_from_slice(&0xFFFFu16.to_le_bytes());
+                    self.ioctl(IOCTL_CDROM_SET_SPEED, &req, &mut [], "SET CD SPEED").map(|_| ())
+                }
+                /* a raw data read, the subchannel, READ SUB-CHANNEL: not through
+                   the class driver; the opener reads cooked and synthesizes */
+                _ => Err(sense(5, 0x20, 0)),
+            }
+        }
+
+        pub fn command(&self, cdb: &[u8], buf: &mut [u8], timeout_ms: u32) -> Result<(), CmdError> {
+            if self.spti {
+                self.spti_command(cdb, buf, timeout_ms.div_ceil(1000))
+            } else {
+                self.ioctl_command(cdb, buf)
+            }
+        }
+
+        /// What one command may move. Windows' storage stack takes 64 KiB on
+        /// every adapter; many take more.
+        pub fn max_transfer(&self) -> usize {
+            64 * 1024
+        }
+
+        pub fn eject(&self) -> Result<(), String> {
+            self.ioctl(IOCTL_STORAGE_EJECT_MEDIA, &[], &mut [], "eject").map(|_| ()).map_err(|e| format!("{e:?}"))
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 mod sys {
     use super::CmdError;
 

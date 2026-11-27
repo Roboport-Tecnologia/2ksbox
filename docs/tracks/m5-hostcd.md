@@ -73,6 +73,11 @@ two drives.
   SET CD SPEED, the machine's Drive speed), the raw-read probe, the MCN,
   the simulated drive and the `hostcd-sim` check (swaps end to end with
   no drive). Windows' transport is next, ported from that PR's.
+- Step 5, Windows (2026-11-26): libdisc's `sys` for Windows (SPTI, or
+  the CD-ROM IOCTLs without an administrator) and the launcher's drive
+  list, ported from PR #4; type-checked for MSVC, not built or run on the
+  PC yet. Next: `build-windows.sh` there, then a disc in the PC's drive
+  with and without administrator.
 
 ## Traps
 
@@ -102,7 +107,7 @@ two drives.
 
 ## Open
 
-- Windows (`IOCTL_SCSI_PASS_THROUGH_DIRECT`), macOS (IOKit SCSITask,
+- Windows: a run on the PC (written, unrun). macOS (IOKit SCSITask,
   with the disc unmounted; the App Store sandbox may refuse it).
 - The Flatpak needs `--device=all` for `/dev/sr*`.
 - A copy-protected original (SafeDisc 1: Crimson Skies) through the
