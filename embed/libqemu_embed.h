@@ -132,6 +132,14 @@ QEMU_EMBED_API void qemu_embed_mouse_abs(qemu_embed_t *e, int x, int y, int w, i
 QEMU_EMBED_API void qemu_embed_mouse_btn(qemu_embed_t *e, uint32_t button, bool down);
 /* Whether the active guest pointer device wants absolute coordinates. */
 QEMU_EMBED_API bool qemu_embed_mouse_is_absolute(qemu_embed_t *e);
+/* v19: the pointer switch. Whether the machine has both an absolute mouse
+ * (the USB tablet) and a relative one (PS/2) to switch between; fixed once
+ * qemu_embed_new() returns. */
+QEMU_EMBED_API bool qemu_embed_mouse_can_switch(qemu_embed_t *e);
+/* v19: true sets the tablet aside and makes the relative mouse current
+ * (and qemu_embed_mouse_is_absolute() false) until called with false. Any
+ * thread; a no-op on a machine that cannot switch. */
+QEMU_EMBED_API void qemu_embed_mouse_set_relative(qemu_embed_t *e, bool relative);
 /* v8: the gamepad (M13 path A, `-device usb-gamepad`). One call carries
  * the *whole* pad, not one control. `axes` is four bytes (X, Y, Z, Rz,
  * two sticks, 0..255 with 0x80 centred), `hat` is 0..7 clockwise from
@@ -235,7 +243,7 @@ QEMU_EMBED_API void qemu_embed_clipboard_set_text(qemu_embed_t *e, const char *u
 
 /* Library version of the embed API, for the bindings to sanity-check. */
 QEMU_EMBED_API uint32_t qemu_embed_api_version(void);
-#define QEMU_EMBED_API_VERSION 18
+#define QEMU_EMBED_API_VERSION 19
 
 #ifdef __cplusplus
 }

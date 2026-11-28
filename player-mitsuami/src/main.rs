@@ -130,6 +130,11 @@ struct Window_ {
     /// ends the grab on every focus loss, and the next key or click takes
     /// it again
     want_grab: Signal<bool>,
+    /// Machine > Seamless Mouse: the USB tablet, or (off) the PS/2 mouse
+    /// taken on a click, switched while the machine runs (embed v19);
+    /// `switchable` when the machine has both
+    seamless: Signal<bool>,
+    switchable: Signal<bool>,
     cursor: Signal<Cursor>,
     paused: Signal<bool>,
     /// View > Scale: the picture held at a whole scale, in the screen's
@@ -228,6 +233,8 @@ fn player_window(guest: bool) -> Window {
         locked: signal(false),
         grabbed: signal(false),
         want_grab: signal(guest && player_core::keyboard_capture_at_start()),
+        seamless: signal(true),
+        switchable: signal(false),
         cursor: signal(Cursor::Default),
         paused: signal(false),
         scale: signal(None),
@@ -319,6 +326,18 @@ fn content(w: Window_) -> impl View {
             w.grabbed.set(want);
         }
     });
+    // Seamless Mouse switched: the tablet set aside or current again. A
+    // lock the PS/2 mouse took ends with it.
+    effect(move || {
+        let seamless = w.seamless.get();
+        if let Some(vm) = vm().filter(|v| v.mouse_can_switch()) {
+            vm.mouse_set_relative(!seamless);
+            if seamless && w.locked.get_untracked() {
+                w.locked.set(false);
+            }
+            apply_cursor(w);
+        }
+    });
     // A lock ended (by the platform, or Ctrl+Alt+G): the pointer is the
     // host's again, with the right shape.
     // And the frame carries the guest's cursor only while locked.
@@ -388,6 +407,10 @@ fn content(w: Window_) -> impl View {
         });
         if w.want_grab.get_untracked() {
             w.grabbed.set(true);
+        }
+        // the machine starts on its tablet (Seamless Mouse is on)
+        if vm().is_some_and(|v| v.mouse_can_switch()) {
+            w.switchable.set(true);
         }
     };
     let resized = move |size: SurfaceSize| {
@@ -501,6 +524,12 @@ fn menus(w: Window_, discs: Option<discs::Discs>, shaders: Option<shaders::Shade
                 .on_select(send_ctrl_alt_del),
         )
         .item(MenuItem::new("Send Shortcuts to Guest").bind(w.want_grab).shortcut(primary_alt('k')))
+        .item(
+            MenuItem::new("Seamless Mouse")
+                .bind(w.seamless)
+                .enabled(move || w.switchable.get())
+                .shortcut(primary_alt('m')),
+        )
         .item(
             MenuItem::new("Release Mouse")
                 .enabled(move || w.locked.get())
@@ -1049,7 +1078,8 @@ fn relative(w: Window_, dx: f32, dy: f32) {
 /// The menus' chords, for when the keyboard is grabbed and the
 /// menus' shortcuts reach the surface: Ctrl+Alt+G lets go of the mouse,
 /// Ctrl+Alt+S shoots the guest's frame (with Shift, the window's),
-/// Ctrl+Alt+K gives the host its shortcuts back, Ctrl+Alt+Shift+F is full
+/// Ctrl+Alt+K gives the host its shortcuts back, Ctrl+Alt+M switches
+/// Seamless Mouse, Ctrl+Alt+Shift+F is full
 /// screen, Ctrl+Alt+Shift+P pauses, Ctrl+Alt+1 to 4 hold the picture at
 /// that scale and Ctrl+Alt+0 lets it go back to the largest that fits,
 /// Ctrl+Alt+Shift+0 fits the window to the picture, and Ctrl+Alt+Shift+D
@@ -1073,6 +1103,7 @@ fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -
             with(|p| p.render.as_ref().map(|r| if m.shift { r.window_shot() } else { r.screenshot() }));
         }
         KeyCode::KeyK if !repeat => w.want_grab.set(!w.want_grab.get_untracked()),
+        KeyCode::KeyM if !repeat && w.switchable.get_untracked() => w.seamless.set(!w.seamless.get_untracked()),
         KeyCode::KeyF if m.shift && !repeat => w.full.set(!w.full.get_untracked()),
         KeyCode::KeyP if m.shift && !repeat => toggle_pause(w),
         KeyCode::Digit0 if m.shift && !repeat => fit_window(w),
@@ -1085,7 +1116,7 @@ fn chord(w: Window_, code: KeyCode, pressed: bool, repeat: bool, m: Modifiers) -
                 _ => 4,
             }))
         }
-        KeyCode::KeyS | KeyCode::KeyK => {}
+        KeyCode::KeyS | KeyCode::KeyK | KeyCode::KeyM => {}
         KeyCode::KeyF | KeyCode::KeyP if m.shift => {}
         KeyCode::Digit0 => {}
         KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 if !m.shift => {}

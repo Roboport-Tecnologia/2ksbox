@@ -2,7 +2,7 @@
 
 The library that puts QEMU inside the player: its shape, the QEMU entry
 points it uses, the patches it needs, the audio driver and the hazards.
-The API is **v18** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
+The API is **v19** (`QEMU_EMBED_API_VERSION` in `embed/libqemu_embed.h`
 and `API_VERSION` in the `qemu-embed` crate move together; rebuild the
 libraries before the players link). The 3D context provider is doc 12, the
 player's display pipeline doc 03. QEMU file:line references were taken
@@ -61,6 +61,7 @@ not block. Everything else may come from any thread.
 | 16 | `vblank`: a host vertical blank that starts a guest frame, to virtio-gpu's `host-vblank` (QEMU patch 90; M24, below) |
 | 17 | `on_scanout_ring`, `on_scanout_slot`: a scanout ring (Windows, track M26; macOS and Linux too since 2026-10-24, no version of its own): a display device asks the player for images on the host's GPU (shared Direct3D 12 resources and their NT handles; on macOS one placement `MTLHeap` each, the `id<MTLHeap>`; on Linux Vulkan images exported as opaque fds, each handle a `d3dpt_exec_ring_fd` pointer), fills them there and shows one by number, through QEMU patch 101's `qemu_scanout_ring` ops, which the library registers |
 | 18 | `scanout_hold`: the ring slots the player may still sample (the one on show, one just taken off show until the GPU has finished drawing from it), which the device's frames skip (patch 101's `held`; a frame with every slot held is read back) |
+| 19 | `mouse_can_switch`, `mouse_set_relative`: the pointer switch (the player's Machine > Seamless Mouse, 2026-11-27). A machine with the USB tablet keeps its PS/2 mouse, and the library makes the PS/2 one QEMU's current mouse (`qemu_mouse_set`, the HMP's `mouse_set`) while the player wants it, `mouse_is_absolute` saying false; re-asserted before each input drain, since a guest reset makes the tablet take over at its first poll. Back on, the tablet is current again only if it was |
 
 The OpenGL pass-through has no zero-copy slot on Windows; its 3D frames
 arrive through `on_3d_frame` (a DXGI shared handle is open, M11). The
@@ -129,7 +130,8 @@ Direct3D executor's flips do (v17, M26; doc 15).
   `qemu-embed: input:` lines on stderr (drain latency, zero-length
   presses, drops) only when something is off.
   `qemu_input_is_absolute()` plus the mouse-mode notifier say whether the
-  guest wants tablet or PS/2 semantics.
+  guest wants tablet or PS/2 semantics, unless the player switched the
+  tablet off (v19, above).
 - **The clipboard** (v11, track M23, doc 24 §3). The library is a peer
   of QEMU's clipboard (`ui/clipboard.c`), which `-chardev
   qemu-vdagent,clipboard=on` joins for a guest agent once the agent
