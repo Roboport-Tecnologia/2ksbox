@@ -376,9 +376,11 @@ and grab state, and `PLAYER_SURFACE_LOG=1` every size it reports.
 
 - `--share <dir>` (after `--pad`) serves `<dir>` to the guest as
   `\\10.0.2.4\host` (user `2ksbox`, password `2ksbox`): `libsmb` in the
-  player on a Unix socket in a 0700 directory under the temp dir, and
+  player on a Unix socket in a private directory under the temp dir
+  (Winsock's `AF_UNIX` on Windows), and
   `guestfwd=tcp:10.0.2.4:445-unix:<socket>` added to the machine's
-  `-netdev user` (QEMU patch 79). No user-mode network or a Windows host:
+  `-netdev user` (QEMU patch 79; on Windows also libslirp's
+  `03-windows-unix-guestfwd`). No user-mode network:
   `[share] not shared: …` and the machine runs without it.
   `PLAYER_SMB_LOG=1` prints every request.
 - The clipboard needs no option: a command line with `-chardev

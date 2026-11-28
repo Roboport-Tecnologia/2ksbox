@@ -33,12 +33,31 @@ foreach ($f in "d3dptkmd.sys", "d3dptumd.dll", "d3dptumd32.dll", "d3dpt11.dll", 
 # every build, and Windows keeps a device on the package it has over one
 # of the same version, so a new build installed over an old one never ran
 # (the Arm machine, track M25). Major and minor stay the INF's.
+#
+# Never older than the driver a d3dpt-vga device runs now: Windows ranks
+# packages of one rank by date, then version, and the guest's clock is
+# not the host's (a machine whose clock went back kept a package of the
+# same day stamped later, and this install silently did nothing; The
+# Witcher 3's machine, 2026-11-27). Past it by a minute when it is newer.
 $inf = Join-Path $work "d3dptkmd.inf"
 $now = Get-Date
 $build = [int]($now.Date - [datetime]"2026-01-01").TotalDays
 $rev = $now.Hour * 60 + $now.Minute
-(Get-Content $inf) -replace '^DriverVer=[^,]*,(\d+\.\d+)\.\d+\.\d+', `
-    "DriverVer=$($now.ToString('MM/dd/yyyy', [cultureinfo]::InvariantCulture)),`$1.$build.$rev" | Set-Content $inf -Encoding ascii
+$mm = [regex]::Match((Get-Content $inf -Raw), '(?m)^DriverVer=[^,]*,(\d+)\.(\d+)\.')
+$date = $now.Date
+$ver = [version]"$($mm.Groups[1].Value).$($mm.Groups[2].Value).$build.$rev"
+foreach ($d in Get-CimInstance Win32_PnPSignedDriver -Filter "DeviceID LIKE 'PCI\\VEN_1234&DEV_3D00%'" -ErrorAction SilentlyContinue) {
+    if (-not $d.DriverVersion) { continue }
+    $iv = [version]$d.DriverVersion
+    $idate = if ($d.DriverDate) { ([datetime]$d.DriverDate).Date } else { $date }
+    if ($idate -gt $date) { $date = $idate }
+    if ($iv -ge $ver) {
+        $ver = if ($iv.Revision -lt 65534) { [version]"$($iv.Major).$($iv.Minor).$($iv.Build).$($iv.Revision + 1)" }
+               else { [version]"$($iv.Major).$($iv.Minor).$($iv.Build + 1).0" }
+    }
+}
+(Get-Content $inf) -replace '^DriverVer=[^,]*,\d+\.\d+\.\d+\.\d+', `
+    "DriverVer=$($date.ToString('MM/dd/yyyy', [cultureinfo]::InvariantCulture)),$ver" | Set-Content $inf -Encoding ascii
 Select-String -Path $inf -Pattern '^DriverVer=' | ForEach-Object { Write-Host "wddm-install: $($_.Line)" }
 
 bcdedit /set testsigning on | Out-Host

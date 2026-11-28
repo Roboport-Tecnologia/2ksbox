@@ -67,6 +67,27 @@
  * name another's by writing its handle raw. Handles a context bound
  * earlier are not named again and stay usable.
  *
+ * v32 (M25): a GDI COPY's source may be A8B8G8R8 / X8B8G8R8 (an
+ * R8G8B8A8 swap chain's buffer presented into a blt-model window's
+ * STAGING surface): the host reads it with red and blue swapped, so the
+ * destination gets BGRA. Only a source, and only into VRAM.
+ *
+ * v33 (M25): the window's header carries an append's address, bytes and
+ * answer (register set v14's DMA_APPEND1: one register write per append
+ * where DMA_ADDR_LO / HI / BYTES / APPEND and the status read were five
+ * exits, ~0.5 ms of a submission under WHPX).
+ *
+ * v34 (M25, feature level 11_0 step 1): Direct3D 11's compute pipeline
+ * and unordered access. SHADER_CREATE takes a compute shader; UAV_CREATE,
+ * SET_UAV (the compute stage's), SET_TARGETS_UAV (the output merger's),
+ * DISPATCH, DISPATCH_INDIRECT, DRAW_INDIRECT, CLEAR_UAV and
+ * COPY_STRUCTURE_COUNT are new tokens, D3DPT_D11K_UAV a new kind.
+ *
+ * v35 (M25, feature level 11_0 step 2): tessellation. SHADER_CREATE takes
+ * a hull or domain shader, whose nso counts the patch-constant signature's
+ * entries (d3dpt_d11_sig, after the output signature's) instead of stream
+ * output; a signature's tessellation factors are D3D11_SB_NAME 11-22.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef D3DPT_PROTO_H
@@ -74,7 +95,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_PROTO_VERSION   31u
+#define D3DPT_PROTO_VERSION   35u
 
 #define D3DPT_SHM_SIZE        0x04000000u          /* 64 MiB */
 #define D3DPT_CMD_OFFSET      0x00001000u          /* records start after the header page */
@@ -95,6 +116,10 @@ typedef struct d3dpt_shm_hdr {
     uint32_t frames;        /* host: unused since v21 (the DLLs' presents) */
     uint32_t batches;       /* host: doorbells so far */
     uint32_t pad[2];
+    /* v33 (register set v14's DMA_APPEND1): an append's records, written
+     * by the guest before the one register write, and its D3DPT_FB_DMA_*
+     * answer, written by the device before the write returns */
+    uint32_t dma_addr_lo, dma_addr_hi, dma_bytes, dma_status;
 } d3dpt_shm_hdr;
 
 #define D3DPT_ERR_OK          0u
@@ -182,7 +207,8 @@ typedef struct d3dpt_query_get { uint32_t handle, ret_off, flags, size; } d3dpt_
 /* GDI (v27): the WDDM kernel driver's GDI acceleration (RenderKm) and its
  * presents into a window's redirection bitmap. Each side is an allocation:
  * its handle (0: none), its VRAM place and its size and D3DDDIFORMAT (32
- * bits a pixel only). A side the host has a Direct3D 11 object of is that
+ * bits a pixel only: A8R8G8B8 / X8R8G8B8, and a COPY's source A8B8G8R8 /
+ * X8B8G8R8 too, v32). A side the host has a Direct3D 11 object of is that
  * object (a redirection bitmap's, D3DPT_GDI_TEXTURE, made at its first
  * use); any other is its VRAM, the host's pixels put there first. COPY
  * copies each rectangle from its source corner (SRCCOPY); FILL fills it
@@ -470,6 +496,8 @@ enum d3dpt_d11_op {
     D3DPT_D11_SHADER_CREATE = 24,       /* d3dpt_d11_shader, the code, the signatures, the stream output */
     D3DPT_D11_LAYOUT_CREATE = 25,       /* d3dpt_d11_list {id, n} + n d3dpt_d11_element */
     D3DPT_D11_QUERY_CREATE = 26,        /* d3dpt_d11_query */
+    D3DPT_D11_UAV_CREATE = 27,          /* v34: d3dpt_d11_view, dim a D3D11_UAV_DIMENSION, u[] its union (a buffer's
+                                         * first, count, D3D11_BUFFER_UAV_FLAG_*) */
     /* bindings */
     D3DPT_D11_SET_SHADER = 32,          /* d3dpt_d11_ref {stage, id} */
     D3DPT_D11_SET_CB = 33,              /* d3dpt_d11_bind + n resources */
@@ -503,11 +531,21 @@ enum d3dpt_d11_op {
     D3DPT_D11_RES_SCANOUT = 60,         /* v28: d3dpt_d11_ref as RES_READBACK's, for a buffer a flip shows: the
                                          * host may finish it once its GPU is done, and does before anything
                                          * reads that VRAM (the display: d3dpt_exec_settle) */
+    /* v34: the compute pipeline and unordered access (feature level 11_0) */
+    D3DPT_D11_SET_UAV = 61,             /* d3dpt_d11_bind {CS, start, n} + n ids + n initial counts (~0: keep) */
+    D3DPT_D11_SET_TARGETS_UAV = 62,     /* d3dpt_d11_targets + nrtv rtv ids + nuav uav ids + nuav counts: the output
+                                         * merger's targets with UAVs from uav_start (nuav 0 and uav_start ~0: the
+                                         * UAVs bound stay) */
+    D3DPT_D11_DISPATCH = 63,            /* u32 [3] {x, y, z} */
+    D3DPT_D11_DISPATCH_INDIRECT = 64,   /* d3dpt_d11_ref {res, offset} */
+    D3DPT_D11_DRAW_INDIRECT = 65,       /* u32 [3] {res, offset, indexed} */
+    D3DPT_D11_CLEAR_UAV = 66,           /* d3dpt_d11_clear_uav */
+    D3DPT_D11_COPY_STRUCTURE_COUNT = 67, /* u32 [3] {dst res, offset, uav id} */
 };
 
 /* D3DPT_D11_DESTROY's kinds */
 enum { D3DPT_D11K_SRV = 1, D3DPT_D11K_RTV, D3DPT_D11K_DSV, D3DPT_D11K_BLEND, D3DPT_D11K_DEPTH, D3DPT_D11K_RASTER,
-       D3DPT_D11K_SAMPLER, D3DPT_D11K_SHADER, D3DPT_D11K_LAYOUT, D3DPT_D11K_QUERY };
+       D3DPT_D11K_SAMPLER, D3DPT_D11K_SHADER, D3DPT_D11K_LAYOUT, D3DPT_D11K_QUERY, D3DPT_D11K_UAV /* v34 */ };
 /* shader stages */
 enum { D3DPT_D11S_VS = 0, D3DPT_D11S_PS, D3DPT_D11S_GS, D3DPT_D11S_HS, D3DPT_D11S_DS, D3DPT_D11S_CS, D3DPT_D11S_COUNT };
 
@@ -515,6 +553,15 @@ typedef struct d3dpt_d11_ref { uint32_t a, b; } d3dpt_d11_ref;
 typedef struct d3dpt_d11_list { uint32_t id, n; } d3dpt_d11_list;
 typedef struct d3dpt_d11_bind { uint32_t stage, start, n; } d3dpt_d11_bind;
 typedef struct d3dpt_d11_cb1 { uint32_t res, first, num; } d3dpt_d11_cb1;       /* in 16-byte constants; num 0: the whole buffer */
+typedef struct d3dpt_d11_targets {     /* v34: SET_TARGETS_UAV */
+    uint32_t dsv, nrtv;
+    uint32_t uav_start, nuav;           /* the UAV slots set, from uav_start (the API's UAVStartSlot) */
+} d3dpt_d11_targets;
+typedef struct d3dpt_d11_clear_uav {    /* v34: CLEAR_UAV */
+    uint32_t id;
+    uint32_t is_float;                  /* 1: v as floats (ClearUnorderedAccessViewFloat) */
+    uint32_t v[4];
+} d3dpt_d11_clear_uav;
 typedef struct d3dpt_d11_clear_view {
     uint32_t kind, id;                  /* D3DPT_D11K_RTV (the one kind yet) */
     float color[4];
@@ -611,7 +658,8 @@ typedef struct d3dpt_d11_shader {
     uint32_t id, stage;
     uint32_t code_dwords;
     uint32_t nin, nout;                 /* d3dpt_d11_sig entries after the code */
-    uint32_t nso;                       /* d3dpt_d11_so entries after them (a geometry shader with stream output) */
+    uint32_t nso;                       /* d3dpt_d11_so entries after them (a geometry shader with stream output);
+                                         * v35: a hull or domain shader's patch-constant d3dpt_d11_sig entries */
     uint32_t so_strides[4], so_rast;    /* the buffers' strides; the rasterized stream (D3D11_SO_NO_RASTERIZED_STREAM: none) */
 } d3dpt_d11_shader;
 typedef struct d3dpt_d11_sig {

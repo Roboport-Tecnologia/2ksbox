@@ -13,6 +13,8 @@
 #     (a USB tablet and absolute clicks; off by default, see w98-3dmark.sh),
 #     TDM_DIR= (3DMark's folder as 8.3; a pt-BR machine's is
 #     C:\ARQUIV~1\MADONION.COM\3DMARK~1),
+#     TDM_EXE= (the executable's 8.3 name, 3DMARK~3.EXE; the PC's
+#     base98-br stops 3DMARK~3 at "needs DirectX 8.1" and runs 3DMARK~1),
 #     CAP= (seconds to wait for the score, 3000), passed through to
 #     win98-game-test.sh where it takes them.
 # Output: build/w98game/<name>/: score.png (the Overall Score dialog),
@@ -33,10 +35,10 @@ cd "$ROOT"
 TABLET=${TABLET:-0}
 CAP=${CAP:-3000}
 TDM_DIR=${TDM_DIR:-'C:\PROGRA~1\MADONION.COM\3DMARK~1'}
-GUEST_CMD="cd \"$TDM_DIR\""$'\n3DMARK~3.EXE' TABLET=$TABLET RUN_SECS=$((CAP + 120)) SHOTS=${SHOTS:-0} \
+GUEST_CMD="cd \"$TDM_DIR\""$'\n'"${TDM_EXE:-3DMARK~3.EXE}" TABLET=$TABLET RUN_SECS=$((CAP + 120)) SHOTS=${SHOTS:-0} \
   OUT=$O tools/win98-game-test.sh "${IMG:-$HOME/Library/Application Support/2ksbox/machines/base98-us/disk.qcow2}" "$NAME" >"$LOG" 2>&1 &
 H=$!
-q() { python3 tools/qmpc.py "$O/qmp.sock" "$@"; }
+q() { python3 tools/qmpc.py "$(cat "$O/qmp.addr" 2>/dev/null || echo "$O/qmp.sock")" "$@"; }
 c() { if [ "$TABLET" = 1 ]; then q click "$1" "$2" 800 600; else q relclick "$1" "$2"; fi; }
 # pixel probes on the last screendump's ppm: window | score | other
 probe() {

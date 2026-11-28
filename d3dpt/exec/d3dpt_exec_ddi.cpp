@@ -167,7 +167,22 @@ struct VramSurf {
      * readback resolves it into */
     uint32_t ms = 0;
     IDirect3DSurface9 *resolve = nullptr;
+    /* D3DPT_DDI_VBCACHE (track M25): a VRAM buffer drawn from with no
+     * write in between is kept as a host buffer, so a DRAW8 that names it
+     * draws from it instead of uploading its vertices again (UP). `dirty`
+     * is the write signal: every VRAM_DIRTY / VRAM_DIRTY_RANGE sets it,
+     * nothing else clears it for a buffer */
+    IDirect3DVertexBuffer9 *vbc = nullptr;
+    IDirect3DIndexBuffer9 *ibc = nullptr;
+    D3DFORMAT ibc_fmt = D3DFMT_UNKNOWN;
+    uint32_t cache_clean = 0;               /* draws since the last write */
+    uint32_t cache_off = 0, cache_size = 0; /* the VRAM range the copies were made from */
+    std::vector<uint8_t> cache_shadow;      /* what the host copy holds, compared with VRAM at each draw */
     void release() {
+        if (vbc) vbc->Release();
+        if (ibc) ibc->Release();
+        vbc = nullptr; ibc = nullptr; ibc_fmt = D3DFMT_UNKNOWN; cache_clean = 0;
+        cache_shadow.clear();
         if (tex) tex->Release();
         if (rt) rt->Release();
         if (cube) cube->Release();
@@ -274,6 +289,45 @@ constexpr size_t MAX_SBLOCKS = 16384;   /* a state block of everything is the de
 constexpr size_t MAX_PALETTES = 4096;   /* 1 KiB each, from a 12-byte token */
 
 } // namespace
+
+/* D3DPT_DP2_PROF set: the time per DP2 command (keys 0-255) and per
+ * record (256 + its op; a DP2 record's includes its commands), logged
+ * every 5 s as "key:count:us" (track M25: Heaven in Direct3D 9 kept the
+ * executor ~72% busy) */
+static struct DdiProf {
+    bool tried = false, on = false;
+    uint64_t ns[512] = {}, n[512] = {};
+    std::chrono::steady_clock::time_point t0;
+} g_dprof;
+
+static inline bool dprof_on()
+{
+    if (!g_dprof.tried) {
+        g_dprof.tried = true;
+        g_dprof.on = env("D3DPT_DP2_PROF") != nullptr;
+        g_dprof.t0 = std::chrono::steady_clock::now();
+    }
+    return g_dprof.on;
+}
+
+static void dprof_add(Exec &x, uint32_t key, std::chrono::steady_clock::time_point t0)
+{
+    auto now = std::chrono::steady_clock::now();
+    g_dprof.ns[key & 511] += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(now - t0).count();
+    g_dprof.n[key & 511]++;
+    auto span = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_dprof.t0).count();
+    if (span < 5000) return;
+    char line[2048];
+    size_t n = (size_t)snprintf(line, sizeof line, "ddi: prof %lld ms: key count us", (long long)span);
+    for (uint32_t i = 0; i < 512; i++)
+        if (g_dprof.ns[i] >= 2000000 && n < sizeof line - 40)
+            n += (size_t)snprintf(line + n, sizeof line - n, " %u:%llu:%llu", i, (unsigned long long)g_dprof.n[i],
+                                  (unsigned long long)(g_dprof.ns[i] / 1000));
+    x.log("%s", line);
+    memset(g_dprof.ns, 0, sizeof g_dprof.ns);
+    memset(g_dprof.n, 0, sizeof g_dprof.n);
+    g_dprof.t0 = now;
+}
 
 struct Ddi {
     std::unordered_map<uint32_t, VramSurf> surfs;
@@ -412,6 +466,9 @@ struct Ddi {
      * the GPU is short of work, so every flush_draws draws the recorded
      * commands go now. D3DPT_DDI_FLUSH_DRAWS=n sets it, 0 turns it off. */
     uint32_t flush_draws = 16, hint_draws = 0;
+    bool vbcache = true;                    /* D3DPT_DDI_VBCACHE=0 turns it off */
+    uint64_t vbc_hits = 0, vbc_misses = 0, vbc_fills = 0, vbc_refreshes = 0;
+    uint32_t vbc_seen = 0;
     /* D3DPT_DDI_FLUSH_AB=n: flush_draws and n by turns, one rate line
      * each, so an A/B is read within one run (a TCG run's own speed moves
      * by 5 % between launches, doc 22 §5.0); n = 0 is the hint off */
@@ -472,6 +529,7 @@ static Ddi &ddi(Exec &x) {
     if (!x.ddi) {
         x.ddi = new Ddi;
         if (const char *e = env("D3DPT_DDI_FLUSH_DRAWS")) x.ddi->flush_draws = (uint32_t)atoi(e);
+        if (const char *e = env("D3DPT_DDI_VBCACHE")) x.ddi->vbcache = atoi(e) != 0;
         if (const char *e = env("D3DPT_DDI_FLUSH_AB")) { x.ddi->flush_ab = true; x.ddi->flush_alt = (uint32_t)atoi(e); }
     }
     return *x.ddi;
@@ -1874,6 +1932,90 @@ struct Dp2 {
     /* the driver's self-contained DX8 draw: vertices and 16-bit indices
      * inline, or (v9) in VRAM buffers it names by handle and offset; (v10)
      * under a vertex shader, the other streams it had bound after them */
+    /* a buffer's host copy (D3DPT_DDI_VBCACHE): none while it is written
+     * (dirty: dropped, counted again from 0), made at its second clean
+     * draw from what VRAM holds then. A buffer written between draws (a
+     * dynamic one) never gets one and keeps the UP path */
+    bool cache_ok(VramSurf &s) {
+        /* a buffer moved or resized in VRAM (a DISCARD lock's rename, a
+         * new registration) is a write too */
+        if ((s.vbc || s.ibc) && (s.cache_off != s.d.offset || s.cache_size != s.d.width)) s.dirty = true;
+        if (s.dirty) {
+            if (s.vbc) { s.vbc->Release(); s.vbc = nullptr; }
+            if (s.ibc) { s.ibc->Release(); s.ibc = nullptr; s.ibc_fmt = D3DFMT_UNKNOWN; }
+            s.dirty = false;
+            s.cache_clean = 0;
+            return false;
+        }
+        return ++s.cache_clean >= 2;
+    }
+    IDirect3DVertexBuffer9 *cached_vb(VramSurf &s) {
+        if (!cache_ok(s)) return nullptr;
+        if (s.vbc) return s.vbc;
+        void *m = nullptr;
+        if (FAILED(x.dev->CreateVertexBuffer(s.d.width, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &s.vbc, nullptr)) || !s.vbc) return nullptr;
+        if (FAILED(s.vbc->Lock(0, 0, &m, 0)) || !m) { s.vbc->Release(); s.vbc = nullptr; return nullptr; }
+        memcpy(m, x.vram + s.d.offset, s.d.width);
+        s.vbc->Unlock();
+        s.cache_off = s.d.offset;
+        s.cache_size = s.d.width;
+        s.cache_shadow.assign(x.vram + s.d.offset, x.vram + s.d.offset + s.d.width);
+        d.vbc_fills++;
+        return s.vbc;
+    }
+    IDirect3DIndexBuffer9 *cached_ib(VramSurf &s, D3DFORMAT fmt) {
+        if (!cache_ok(s)) return nullptr;
+        if (s.ibc && s.ibc_fmt == fmt) return s.ibc;
+        if (s.ibc) { s.ibc->Release(); s.ibc = nullptr; }
+        void *m = nullptr;
+        if (FAILED(x.dev->CreateIndexBuffer(s.d.width & ~3u, D3DUSAGE_WRITEONLY, fmt, D3DPOOL_DEFAULT, &s.ibc, nullptr)) || !s.ibc) return nullptr;
+        if (FAILED(s.ibc->Lock(0, 0, &m, 0)) || !m) { s.ibc->Release(); s.ibc = nullptr; return nullptr; }
+        memcpy(m, x.vram + s.d.offset, s.d.width & ~3u);
+        s.ibc->Unlock();
+        s.cache_off = s.d.offset;
+        s.cache_size = s.d.width;
+        s.cache_shadow.assign(x.vram + s.d.offset, x.vram + s.d.offset + (s.d.width & ~3u));
+        s.ibc_fmt = fmt;
+        d.vbc_fills++;
+        return s.ibc;
+    }
+    /* the bytes a draw reads of a cached buffer, as VRAM holds them now:
+     * the write signals miss some writes (Windows 98's runtime puts an
+     * application's UP draws through a VRAM buffer of its own; Wine's
+     * visual tests drew stale vertices), so the range is compared with the
+     * copy's shadow and written into the copy where it differs */
+    bool cache_fresh(VramSurf &s, uint64_t off, uint64_t len, bool index) {
+        if (!len) return true;
+        if (off + len > s.cache_shadow.size()) return false;
+        const uint8_t *v = x.vram + s.d.offset + off;
+        uint8_t *sh = s.cache_shadow.data() + off;
+        if (!memcmp(v, sh, (size_t)len)) return true;
+        void *m = nullptr;
+        HRESULT hr = index ? s.ibc->Lock((UINT)off, (UINT)len, &m, 0) : s.vbc->Lock((UINT)off, (UINT)len, &m, 0);
+        if (FAILED(hr) || !m) return false;
+        memcpy(m, v, (size_t)len);
+        if (index) s.ibc->Unlock(); else s.vbc->Unlock();
+        memcpy(sh, v, (size_t)len);
+        d.vbc_refreshes++;
+        return true;
+    }
+    /* an indexed draw from a VRAM vertex and index buffer, from their host
+     * copies: the vertex the draw's indices call min_index is at voff */
+    bool cached_draw(D3DPRIMITIVETYPE t, const d3dpt_dp2_draw8 &h, uint32_t vh, uint32_t voff, uint32_t ih, uint32_t ioff,
+                     uint32_t isz) {
+        VramSurf *vs = surf_named(x, vh), *is = surf_named(x, ih);
+        uint64_t base = (uint64_t)h.min_index * h.stride;
+        if (!vs || !is || vs == is || !(vs->d.caps & D3DPT_VS_BUFFER) || !(is->d.caps & D3DPT_VS_BUFFER) || voff < base ||
+            ((voff - base) & 3) || (ioff % isz) || (uint64_t)ioff + (uint64_t)h.nindices * isz > (is->d.width & ~3u))
+            return false;
+        IDirect3DVertexBuffer9 *vb = cached_vb(*vs);
+        IDirect3DIndexBuffer9 *ib = cached_ib(*is, isz == 4 ? D3DFMT_INDEX32 : D3DFMT_INDEX16);
+        if (!vb || !ib) return false;
+        if (FAILED(x.dev->SetStreamSource(0, vb, (UINT)(voff - base), h.stride)) || FAILED(x.dev->SetIndices(ib))) return false;
+        x.dev->DrawIndexedPrimitive(t, 0, h.min_index, h.nverts, ioff / isz, h.prim_count);
+        d.vbc_hits++;
+        return true;
+    }
     bool draw8(const uint8_t *q, size_t left, size_t &need) {
         d3dpt_dp2_draw8 h;
         if (left < sizeof h) return fail("truncated DRAW8");
@@ -1976,7 +2118,7 @@ struct Dp2 {
             carried |= 1u << ext[i].stream;
         }
         if (inst) tr("  instanced: %u instances", inst);
-        uint32_t stride = h.stride, ilv_streams = 0;
+        uint32_t stride = h.stride, ilv_streams = 0, ilv_total = 0;
         IDirect3DVertexDeclaration9 *ilv = nullptr;
         if (shader) {
             /* the vertices are read through the shader's declaration: it
@@ -2016,10 +2158,9 @@ struct Dp2 {
                     return true;
                 }
                 if ((uint64_t)h.nverts * total > DRAW8_SCRATCH_MAX) return fail("DRAW8 interleave too big");
-                d.ilv.resize((size_t)h.nverts * total);
-                ilv_fill(s.streams, sd, ss, sdiv, h.nverts, 0);
-                vd = d.ilv.data();
-                stride = total;
+                /* the copy itself waits for the buffer cache to miss
+                 * (after the cache below): a draw from host copies needs none */
+                ilv_total = total;
                 ilv_streams = s.streams;
             }
         } else if (d.trace) trv(vd, h.nverts, h.stride, h.fvf);
@@ -2027,6 +2168,91 @@ struct Dp2 {
         if (ilv) x.dev->SetVertexDeclaration(ilv);  /* after apply_vs, which leaves the shader's own (and its constants) alone when it is current */
         if (!h.prim_count) return true;
         pre_draw();
+        if (d.vbcache && (d.vbc_hits + d.vbc_misses) % 100000 == 99999)
+            x.log("ddi: buffer cache: %llu draws from host copies, %llu through UP, %llu copies made", (unsigned long long)d.vbc_hits,
+                  (unsigned long long)d.vbc_misses, (unsigned long long)d.vbc_fills);
+        if (d.vbcache && ++d.vbc_seen % 5000 == 0)
+            x.log("ddi: buffer cache: draw flags 0x%x indices %u streams %u instances %u interleaved %d shader %d; %llu hits %llu misses %llu fills %llu refreshes",
+                  h.flags, h.nindices, next, inst, ilv != nullptr, shader, (unsigned long long)d.vbc_hits,
+                  (unsigned long long)d.vbc_misses, (unsigned long long)d.vbc_fills, (unsigned long long)d.vbc_refreshes);
+        if (d.vbcache && h.nindices && ext_vb && ext_ib) {
+            /* every stream from its buffer's host copy (cached_vb), at the
+             * vertex min_index names (a per-vertex stream) or its first
+             * element (an instance stream), under the shader's own
+             * declaration, the frequencies of an instanced draw set for it
+             * and reset after */
+            VShader8 *vsh = nullptr;
+            bool ok = true;
+            if (shader) {
+                auto it = c.vshaders.find(h.fvf);
+                vsh = it != c.vshaders.end() ? &it->second : nullptr;
+                ok = vsh && vsh->decl;
+            } else {
+                ok = !next && !inst;
+            }
+            IDirect3DVertexBuffer9 *bufs[D3DPT_DRAW8_MAX_STREAMS] = {};
+            UINT offs[D3DPT_DRAW8_MAX_STREAMS] = {}, strides[D3DPT_DRAW8_MAX_STREAMS] = {}, freqs[D3DPT_DRAW8_MAX_STREAMS] = {};
+            uint32_t carried_v = 1, voff = u32(q + sizeof h);
+            voff = u32(q + sizeof h + 4);
+            uint64_t base0 = (uint64_t)h.min_index * h.stride;
+            if (ok && (voff < base0 || ((voff - base0) & 3))) ok = false;
+            if (ok) {
+                VramSurf *s0 = surf_named(x, u32(q + sizeof h));
+                bufs[0] = s0 && (s0->d.caps & D3DPT_VS_BUFFER) ? cached_vb(*s0) : nullptr;
+                offs[0] = (UINT)(voff - base0);
+                strides[0] = h.stride;
+                freqs[0] = inst ? (D3DSTREAMSOURCE_INDEXEDDATA | inst) : 0;
+                ok = bufs[0] != nullptr && cache_fresh(*s0, voff, (uint64_t)h.nverts * h.stride, false);
+            }
+            for (uint32_t i = 0; ok && i < next; i++) {
+                const Ext &e = ext[i];
+                if (!(e.flags & D3DPT_DRAW8_VRAM_VB)) { ok = false; break; }
+                uint32_t eo = u32(e.p + 4);
+                uint64_t b = e.div ? 0 : (uint64_t)h.min_index * e.stride;
+                if (eo < b || ((eo - b) & 3)) { ok = false; break; }
+                VramSurf *es = surf_named(x, u32(e.p));
+                bufs[e.stream] = es && (es->d.caps & D3DPT_VS_BUFFER) ? cached_vb(*es) : nullptr;
+                if (!bufs[e.stream] ||
+                    !cache_fresh(*es, eo, (uint64_t)(e.elems ? e.elems : h.nverts) * e.stride, false)) { ok = false; break; }
+                offs[e.stream] = (UINT)(eo - b);
+                strides[e.stream] = e.stride;
+                freqs[e.stream] = e.div ? (D3DSTREAMSOURCE_INSTANCEDATA | e.div) : inst ? (D3DSTREAMSOURCE_INDEXEDDATA | inst) : 0;
+                carried_v |= 1u << e.stream;
+            }
+            if (ok && vsh && (vsh->streams & ~carried_v)) ok = false;
+            uint32_t ih = u32(q + sizeof h + vb), ioff = u32(q + sizeof h + vb + 4);
+            VramSurf *is = ok ? surf_named(x, ih) : nullptr;
+            IDirect3DIndexBuffer9 *ibuf = nullptr;
+            if (is && (is->d.caps & D3DPT_VS_BUFFER) && !(ioff % isz) && (uint64_t)ioff + (uint64_t)h.nindices * isz <= (is->d.width & ~3u))
+                ibuf = cached_ib(*is, isz == 4 ? D3DFMT_INDEX32 : D3DFMT_INDEX16);
+            if (ibuf && !cache_fresh(*is, ioff, (uint64_t)h.nindices * isz, true)) ibuf = nullptr;
+            if (ok && ibuf) {
+                if (vsh) x.dev->SetVertexDeclaration(vsh->decl);
+                for (uint32_t k = 0; k < D3DPT_DRAW8_MAX_STREAMS; k++)
+                    if (bufs[k]) {
+                        x.dev->SetStreamSource(k, bufs[k], offs[k], strides[k]);
+                        if (freqs[k]) x.dev->SetStreamSourceFreq(k, freqs[k]);
+                    }
+                x.dev->SetIndices(ibuf);
+                x.dev->DrawIndexedPrimitive(t, 0, h.min_index, h.nverts, ioff / isz, h.prim_count);
+                for (uint32_t k = 0; k < D3DPT_DRAW8_MAX_STREAMS; k++)
+                    if (freqs[k]) x.dev->SetStreamSourceFreq(k, 1);
+                if (!d.vbc_hits++) x.log("ddi: buffer cache: the first draw from host copies");
+                d.draws++;
+                snap();
+                return true;
+            }
+            d.vbc_misses++;
+            /* the UP path below draws through the interleaved declaration */
+            if (vsh && ilv) x.dev->SetVertexDeclaration(ilv);
+        }
+        if (ilv_streams) {
+            /* the interleaved vertex the UP path draws, made only now */
+            d.ilv.resize((size_t)h.nverts * ilv_total);
+            ilv_fill(ilv_streams, sd, ss, sdiv, h.nverts, 0);
+            vd = d.ilv.data();
+            stride = ilv_total;
+        }
         if (!h.nindices) {
             if (nv > h.nverts) { if (d.warn_once(0xa0000 | t)) x.log("ddi: dp2: draw8 primitive %u: %u vertices of %u", t, nv, h.nverts); return true; }
             x.dev->DrawPrimitiveUP(t, h.prim_count, vd, stride);
@@ -2565,6 +2791,8 @@ struct Dp2 {
             if (cmd_end - p < 4) return fail("truncated command");
             uint32_t op = p[0], count = u16(p + 2);
             const uint8_t *q = p + 4;
+            const bool prof = dprof_on();
+            const auto pt0 = prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
             hist[nhist++ % 24] = { pos, op, count };
             tr("op %u x%u", op, count);
             size_t left = cmd_end - q, need = 0;
@@ -3344,6 +3572,7 @@ struct Dp2 {
                 return fail_token(op, count);
             }
             watch_surfaces(x, 1000 + op, d.cur_ctx, pos);
+            if (prof) dprof_add(x, op, pt0);
             p = q + need;
         }
         return true;
@@ -3603,7 +3832,10 @@ static bool exec_ddi_op_(Batch &b, const d3dpt_cmd *c);
 
 bool exec_ddi_op(Batch &b, const d3dpt_cmd *c)
 {
+    const bool prof = dprof_on();
+    const auto t0 = prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
     bool r = exec_ddi_op_(b, c);
+    if (prof) dprof_add(b.x, 256 + (c->op & 255), t0);
     watch_surfaces(b.x, c->op, c->op == D3DPT_OP_DP2 || c->op == D3DPT_OP_CTX_CLEAR ? *(const uint32_t *)(c + 1) : 0, 0);
     return r;
 }

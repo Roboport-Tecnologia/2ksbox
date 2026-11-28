@@ -874,9 +874,11 @@ through libslirp's `slirp_add_unix()` (track M23, doc 24 §2.1). It is how
 the player's SMB server, libsmb, sees a Windows guest's `\\10.0.2.4\…`
 as ordinary per-connection streams; a chardev target carries one
 connection for the machine's life, and `cmd:` spawns a process per
-connection. libslirp 4.9.5 has it on Unix only, so on Windows the rule
-is refused until a `patches/deps/libslirp` patch turns on `AF_UNIX` there.
-**Test:** `tools/win11-spike.py` with `SMB=` (docs/testing.md).
+connection. libslirp 4.9.5 has it on Unix only; on Windows
+`patches/deps/libslirp/03-windows-unix-guestfwd` turns it on over
+Winsock's `AF_UNIX` (M23 step 7, 2026-11-27).
+**Test:** `tools/win11-spike.py` with `SMB=` (docs/testing.md); the
+`sharing` check has our QEMU take the rule on every host.
 **Drop:** upstream QEMU gains a Unix target for `guestfwd`.
 
 ### 080-win32-foreign-thread-exit
@@ -1234,7 +1236,14 @@ again with or without the flag, and `log_sync` takes the pages the guest
 wrote from `WHvQueryGpaRangeDirtyBitmap` (which clears them). A
 hypervisor without the call, or an unaligned section, keeps the old
 whole-section answer; `WHPX_DIRTY_TRACK=0` in the environment is the
-A/B. Applies after patch 89, the other `whpx-common.c` one. **Test:**
+A/B. Since 2026-11-27 (track M25) a region may name one range its
+accelerator leaves untracked and reports always dirty
+(`MemoryRegion`'s `dirty_track_skip_offset` / `_size`, a field this
+patch adds to `memory.h`): d3dpt-vga's command window, which no display
+scans and into which the host appends megabytes of records a frame;
+tracked, each host write there cost the hypervisor's tracking (an
+append ~0.4 ms, ~0.16 ms with `WHPX_DIRTY_TRACK=0`). Applies after patch
+89, the other `whpx-common.c` one. **Test:**
 `dwm-pace.ps1` (`guest-tools/viogpudo/`) on x64 Windows 11 on our
 adapter at 3840x2160 under WHPX: DwmFlush p95 18.3 ms and the animation's
 flips at the rate 1920x1080 gives (~27/s), against p95 26 ms, a 108 ms

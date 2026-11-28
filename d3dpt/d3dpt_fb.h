@@ -117,6 +117,24 @@
  * return to VGA; with it the VGA core's stale firmware mode was shown over
  * VRAM laid out for the driver's, a striped picture. A reset takes it to 0.
  *
+ * Version 14 (CAP_DMA1, M25): DMA_APPEND1, an append in one register
+ * write, its address and size and its answer in the command window's
+ * header (d3dpt_proto.h v33). The device serves it without the BQL under
+ * a hardware accelerator, from guest RAM only.
+ *
+ * Version 15 (CAP_ASYNC, with CAP_IRQ, M25): ASYNC_KICK takes the
+ * window's batch and a submission fence and returns at once; the device
+ * runs the batches in order on a thread of its own and then makes
+ * FENCE_DONE that fence (it only grows) and raises IRQ_DMA. ASYNC_DRAIN
+ * returns once every kicked batch has run; a doorbell drains first. The
+ * driver drains before any submission it does not kick. ASYNC_FLIP makes
+ * the next kick an immediate flip too: OFFSET changes after its batch.
+ *
+ * Version 16 (CAP_MSAA bits, M25): CAPS bits 16-23 carry the host's
+ * Direct3D 11 multisample counts (the executor's D3DPT_EXEC_FEAT_MSAA);
+ * the WDDM driver's Direct3D 11 half claims those and no others. No new
+ * register.
+ *
  * **Versions only add.** Every driver (the XP miniport, the 9x display
  * driver and mini-VDD) accepts any VERSION at or above the one it was
  * built with and refuses only an older one, because a newer register set is
@@ -137,7 +155,7 @@
 
 #include <stdint.h>
 
-#define D3DPT_FB_VERSION      13u
+#define D3DPT_FB_VERSION      17u
 #define D3DPT_FB_MAGIC        0x42463344u          /* "D3FB" at REG_MAGIC */
 
 /* PCI identity: QEMU/Bochs pseudo vendor, our device id ("3D00"). The INF
@@ -242,6 +260,19 @@
 #define D3DPT_FB_REG_PREF_H      0x124u
 #define D3DPT_FB_REG_BLANK       0x128u  /* RW (version 13): 1 = the source is off, shown black (ENABLE stays 1);
                                           * 0 at reset */
+#define D3DPT_FB_REG_ASYNC_KICK  0x130u  /* W (version 15, CAP_ASYNC): the window's batch to the device's thread,
+                                          * the value the fence FENCE_DONE takes (IRQ_DMA) once it ran; the
+                                          * window is empty again when the write returns */
+#define D3DPT_FB_REG_ASYNC_DRAIN 0x134u  /* W: returns once every kicked batch has run */
+#define D3DPT_FB_REG_ASYNC_FLIP  0x138u  /* W: the next ASYNC_KICK also flips: OFFSET takes this value once its
+                                          * batch ran, before its fence is done (an immediate flip) */
+#define D3DPT_FB_REG_SCAN_RGB    0x13cu  /* RW (version 17, CAP_SCAN_RGB): 1 = a 32 bpp mode's pixels are
+                                          * x8b8g8r8 (red in the low byte: DXGI's R8G8B8A8, a full-screen
+                                          * swap chain's flips), 0 = x8r8g8b8; 0 at reset */
+#define D3DPT_FB_REG_DMA_APPEND1 0x12cu  /* W (version 14, CAP_DMA1): DMA_APPEND's append in one write: the
+                                          * number of records, their address and bytes in the window header's
+                                          * dma_addr_lo / hi and dma_bytes (d3dpt_proto.h, v33); the answer
+                                          * (D3DPT_FB_DMA_*) in its dma_status before the write returns */
 #define D3DPT_FB_DMA_OK          0u
 #define D3DPT_FB_DMA_NO_ROOM     1u      /* the batch has no room for them: ring the doorbell first */
 #define D3DPT_FB_DMA_BAD         2u      /* no window, a size not a multiple of 8, or memory the device cannot read */
@@ -267,5 +298,13 @@
 #define D3DPT_FB_CAP_COPY        0x200u  /* version 9: the COPY registers */
 #define D3DPT_FB_CAP_D3D11       0x400u  /* version 10: the executor runs Direct3D 11 (the D11 records) */
 #define D3DPT_FB_CAP_FOLLOW      0x800u  /* version 12: FOLLOW, PREF_W / PREF_H and IRQ_DISPLAY (with CAP_IRQ) */
+#define D3DPT_FB_CAP_DMA1        0x1000u /* version 14: DMA_APPEND1 (with CAP_DMA) */
+#define D3DPT_FB_CAP_ASYNC       0x2000u /* version 15: ASYNC_KICK / ASYNC_DRAIN (with CAP_DMA and CAP_IRQ) */
+#define D3DPT_FB_CAP_SCAN_RGB    0x4000u /* version 17: SCAN_RGB */
+/* version 16: the host's Direct3D 11 multisampling, bits 16-23 (with
+ * CAP_D3D11): 16-19 the counts 2x, 4x, 8x, 16x for formats of up to 64
+ * bits a pixel, 20-23 for 128-bit ones; none set, none offered */
+#define D3DPT_FB_CAP_MSAA_SHIFT  16
+#define D3DPT_FB_CAP_MSAA_MASK   0xff0000u
 
 #endif

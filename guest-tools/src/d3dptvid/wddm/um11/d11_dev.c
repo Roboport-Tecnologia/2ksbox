@@ -46,11 +46,50 @@ static void APIENTRY d11_check_format(D3D10DDI_HDEVICE h, DXGI_FORMAT f, UINT *o
     }
 }
 
+/* a format's family, as the member multisampling is decided by: the
+ * runtime refuses every device unless a typeless format and each of its
+ * typed ones give the same quality levels ("MSAA quality for parent !=
+ * child" in its ETW journal, DRIVER_INTERNAL_ERROR) */
+static UINT ms_family(UINT f)
+{
+    if (f >= 1 && f <= 4) return 2;               /* R32G32B32A32 */
+    if (f >= 9 && f <= 14) return 10;             /* R16G16B16A16 */
+    if (f >= 15 && f <= 18) return 16;            /* R32G32 */
+    if (f >= 19 && f <= 22) return 20;            /* R32G8X24, D32_FLOAT_S8X24 */
+    if (f >= 23 && f <= 25) return 24;            /* R10G10B10A2 */
+    if (f >= 27 && f <= 32) return 28;            /* R8G8B8A8 */
+    if (f >= 33 && f <= 38) return 34;            /* R16G16 */
+    if (f >= 39 && f <= 43) return 41;            /* R32, D32_FLOAT */
+    if (f >= 44 && f <= 47) return 45;            /* R24G8, D24S8 */
+    if (f >= 48 && f <= 52) return 49;            /* R8G8 */
+    if (f >= 53 && f <= 59) return 54;            /* R16, D16 */
+    if (f >= 60 && f <= 64) return 61;            /* R8 */
+    if (f == 90 || f == 91) return 87;            /* B8G8R8A8 */
+    if (f == 92 || f == 93) return 88;            /* B8G8R8X8 */
+    return f;
+}
+
 static void APIENTRY d11_check_ms(D3D10DDI_HDEVICE h, DXGI_FORMAT f, UINT count, UINT *levels)
 { D11_TRACE_FEW("d11_check_ms");
+    /* One quality level at each count the host has for the format's size
+     * class (fmt_msaa_counts: register set v16, the executor asked its own
+     * device), in the pattern the host's own drivers answer in (WARP and
+     * NVIDIA's, read on the PC with a probe of the same calls; 2026-11-27):
+     * every format that can be a multisampled target (fmt_support), a
+     * typeless one as its family does, nothing for the others (a depth
+     * format's sampled and stencil views included, which still load
+     * multisampled). The runtime refused every device for other patterns:
+     * a typeless format at 0 ("MSAA quality for parent != child"), 8x short
+     * of a format ("MSAA quality reported to be 0") */
+    UINT fam = ms_family((UINT)f), of = (UINT)f, bit = count == 2 ? 1 : count == 4 ? 2 : count == 8 ? 4 : count == 16 ? 8 : 0;
+    BOOL typeless = fam != of && !fmt_support(of);   /* no support of its own (a typed one keeps its sample / target bits) */
+    BOOL ms;
+
+    of = typeless ? fam : of;
+    ms = (fmt_support(of) & D3D10_DDI_FORMAT_SUPPORT_MULTISAMPLE_RENDERTARGET) != 0;
     (void)h;
-    *levels = count == 1 ? 1 : 0;                 /* no multisampling yet (fmt_support) */
-    if (g_d11_verbose && (count <= 2 || *levels)) {
+    *levels = count == 1 ? 1 : ms && (fmt_msaa_counts(of) & bit) ? 1 : 0;
+    if (g_d11_verbose && count <= 8) {
         umd_log("d3d11: CheckMultisampleQualityLevels %u x%u -> %u", f, count, *levels);
     }
 }
@@ -151,7 +190,13 @@ static HRESULT APIENTRY dxgi_present(DXGI_DDI_ARG_PRESENT *p)
     pc.hDstAllocation = dst ? dst->kmt : 0;
     pc.pDXGIContext = p->pDXGIContext;
     pc.hContext = d->ctx;
-    hr = d->dxgi->pfnPresentCb(d->rt.handle, &pc);
+    {
+        ULONG64 t0 = D11_PROF_T0();
+
+        hr = d->dxgi->pfnPresentCb(d->rt.handle, &pc);
+        D11_PROF_ADD(D11P_PRESENT, t0, 0);
+    }
+    d11_prof_tick();
     if (FAILED(hr) || (g_d11_verbose && logged < 16)) {
         logged++;
         umd_log("d3d11: Present flags 0x%x src %p (%ux%u fmt %u) sub %u dst %p interval %u -> 0x%08x", p->Flags.Value, src,

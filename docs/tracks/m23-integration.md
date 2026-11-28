@@ -11,8 +11,8 @@ filesystem driver or a virtual disk).
 - `libsmb/` (root workspace, new): the SMB2 server, no QEMU dependency.
 - `guest-agent/` (new): the Windows 11 guest agent, x64 and ARM64.
 - A QEMU patch: `guestfwd=…-unix:<path>` → `slirp_add_unix`.
-- Then (all landed by 2026-10-04 except the first, step 7): a
-  `patches/deps/libslirp/` patch (`AF_UNIX` on Windows hosts),
+- Then (all landed by 2026-10-04 except the first, step 7, on
+  2026-11-27): a `patches/deps/libslirp/` patch (`AF_UNIX` on Windows hosts),
   spice-protocol in `scripts/build-deps.sh`, `--disable-spice-protocol`
   dropped in `scripts/configure-qemu.sh` (shared with M21), the embed
   API's clipboard peer (`embed/`, shared), the clipboard bridge in
@@ -57,8 +57,11 @@ filesystem driver or a virtual disk).
    (`player::share_args`), only with Networking on, which
    `player-core/src/share.rs` serves with `libsmb` and forwards to. The
    `sharing` host check, and `tools/clipboard-win11-test.sh` end to end.
-7. **Windows hosts.** The libslirp `AF_UNIX` patch, and the PC. The
-   clipboard's channel came first, with M20 step 5 (2026-10-09): the
+7. **Windows hosts.** The shared folder (2026-11-27):
+   `patches/deps/libslirp/03-windows-unix-guestfwd` builds
+   `slirp_add_unix` over Winsock's `AF_UNIX`, and `player-core/src/share.rs`
+   binds and accepts its socket through Winsock (`std` has none there);
+   libsmb's free space is `GetDiskFreeSpaceExW`'s. The clipboard's channel came first, with M20 step 5 (2026-10-09): the
    MSVC QEMU (the package's) builds `qemu-vdagent` with spice-protocol
    from `build-deps.sh`'s MSVC set, since a new Windows 11 machine always
    asks for it and did not start without it. Untested end to end there:

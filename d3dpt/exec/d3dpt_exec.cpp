@@ -599,6 +599,7 @@ uint32_t d3dpt_exec_features(d3dpt_exec_t *xp)
     if (!x) return 0;
     uint32_t f = 0;
     try { if (exec_d11_available(*x)) f |= D3DPT_EXEC_FEAT_D3D11; } catch (...) {}
+    try { if (f & D3DPT_EXEC_FEAT_D3D11) f |= (exec_d11_msaa(*x) << D3DPT_EXEC_FEAT_MSAA_SHIFT) & D3DPT_EXEC_FEAT_MSAA_MASK; } catch (...) {}
     return f;
 }
 

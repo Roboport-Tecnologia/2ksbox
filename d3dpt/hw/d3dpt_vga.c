@@ -38,6 +38,8 @@
 #include "qemu/timer.h"
 #include "qemu/thread.h"
 #include "qemu/main-loop.h"
+#include "qemu/rcu.h"
+#include "qemu/atomic.h"
 #include "system/tcg.h"
 #include "qapi/error.h"
 #include "hw/pci/pci_device.h"
@@ -56,16 +58,19 @@ OBJECT_DECLARE_SIMPLE_TYPE(D3dptVgaState, D3DPT_VGA)
 
 typedef struct D3dptLinearMode {
     uint32_t w, h, bpp, pitch, offset;
+    uint32_t rgb;               /* 32 bpp, x8b8g8r8 (SCAN_RGB, register set v17) */
 } D3dptLinearMode;
 
 struct D3dptVgaState {
     PCIDevice dev;
     VGACommonState vga;
     MemoryRegion regs;
+    MemoryRegion dma1;          /* DMA_APPEND1 alone, BQL-free (register set v14, d3dpt_dma1_write) */
 
     /* guest-programmed registers */
     uint32_t r_enable, r_w, r_h, r_bpp, r_pitch, r_offset, r_hz, r_sel;
     uint32_t r_blank;           /* BLANK (register set v13): the source is off */
+    uint32_t r_scan_rgb;        /* SCAN_RGB (register set v17): 32 bpp pixels are x8b8g8r8 */
     bool blank_shown;           /* the black surface is on the console */
     int64_t vbl_ns;             /* clock at the last ENABLE: the vblank counter's origin */
     uint32_t flips;
@@ -94,6 +99,7 @@ struct D3dptVgaState {
     uint32_t dma_lo, dma_hi, dma_bytes, dma_status; /* DMA_* (register set v7) */
     uint32_t fence_done;        /* FENCE_DONE */
     uint64_t dma_appends, dma_appended; /* appends and their bytes, for the rate line */
+    uint64_t dma_ns, dma_copy_ns;       /* ... their time in the handler, and in the copy alone */
     bool no_exec;              /* property: act as a host with no Vulkan 1.3 device
                                    (ADR-013's floor unmet); D3D_STATUS then reads
                                    NO_EXEC and the guest driver offers DirectDraw only */
@@ -162,9 +168,37 @@ struct D3dptVgaState {
     const D3dptExecLib *lib;
     d3dpt_exec_t *exec;
     bool d3d11;                 /* the executor runs Direct3D 11 (CAP_D3D11, M25) */
+    uint32_t msaa;              /* register set v16: the host's multisample counts (D3DPT_EXEC_FEAT_MSAA), and the
+                                 * property's mask of them (msaa=, all by default) */
+    uint32_t msaa_mask;
     bool exec_tried;
     uint32_t d3d_err;           /* last D3DPT_ERR_* of the doorbell */
     QemuMutex exec_lock;        /* the executor's calls: a batch runs without the BQL (d3d_doorbell) */
+    /* register set v15 (async, M25): batches the WDDM driver kicked, run by
+     * a worker thread in order (d3d_async_*); async_lock guards the queue */
+    bool async;                 /* property: CAP_ASYNC offered */
+    bool async_started;
+    QemuThread async_thread;
+    QemuMutex async_lock;
+    QemuCond async_cond;        /* the queue changed (work in, a slot free, idle) */
+    uint8_t *async_buf[3];      /* window-shaped copies of kicked batches */
+    uint32_t async_fence[3];
+    unsigned async_head, async_n;   /* the oldest queued slot, how many are queued */
+    bool async_busy;            /* the worker is running the head */
+    uint64_t async_kicks, async_waits, async_wait_ns; /* for the rate line: kicks, those that found no free slot */
+    QEMUBH *async_bh;           /* raises IRQ_DMA under the BQL after a completion */
+    /* DMA_APPEND1's appends not copied yet (pend_lock): where in the
+     * window's records each goes, and the guest memory it is in. Copied
+     * by the worker for a kicked batch, into the window at a doorbell */
+    QemuMutex pend_lock;
+    struct D3dChunk { uint32_t at, bytes, count; uint64_t gpa; } pend[64], slot_chunk[3][64];
+    unsigned pend_n, slot_nchunk[3];
+    uint32_t pend_bytes, pend_count;
+    uint32_t slot_win_bytes[3], slot_win_count[3];
+    uint64_t async_flip_next;   /* ASYNC_FLIP for the next kick, + 1 (0: none) */
+    uint64_t slot_flip[3];      /* each queued batch's flip, + 1 */
+    uint64_t bh_flip;           /* a ran batch's flip for the bottom half, + 1 (pend_lock) */
+    uint32_t bh_fence;          /* ... and its fence */
     /* the scanout ring (track M26): the front end's images on the host's
      * GPU, which the executor copies a flip's frame into instead of
      * reading it back, and which the console shows by number */
@@ -235,6 +269,7 @@ static bool fb_get_mode(D3dptVgaState *s, D3dptLinearMode *m)
     m->bpp = s->r_bpp;
     m->pitch = s->r_pitch ? s->r_pitch : m->w * bytepp;
     m->offset = s->r_offset;
+    m->rgb = s->r_bpp == 32 && s->r_scan_rgb;
     if (m->w < 64 || m->h < 64 || m->w > 8192 || m->h > 8192) {
         return false;
     }
@@ -304,8 +339,9 @@ static void fb_make_src(D3dptVgaState *s, const D3dptLinearMode *m)
         qemu_pixman_image_unref(s->src);
     }
     if (m->bpp == 32) {
-        /* a gamma ramp on (version 5), or flip-push: a copy */
-        s->src = pixman_image_create_bits(PIXMAN_x8r8g8b8, m->w, m->h,
+        /* a gamma ramp on (version 5), or flip-push: a copy; an x8b8g8r8
+         * page (SCAN_RGB) converted into the shadow's x8r8g8b8 */
+        s->src = pixman_image_create_bits(m->rgb ? PIXMAN_x8b8g8r8 : PIXMAN_x8r8g8b8, m->w, m->h,
                                           (uint32_t *)ptr, m->pitch);
     } else if (m->bpp == 16) {
         s->src = pixman_image_create_bits(PIXMAN_r5g6b5, m->w, m->h,
@@ -320,11 +356,12 @@ static void fb_make_src(D3dptVgaState *s, const D3dptLinearMode *m)
     }
 }
 
-/* A 32 bpp mode is shown straight from VRAM only with flip-push off and
- * no gamma ramp; everything else goes through the shadow. */
+/* A 32 bpp mode is shown straight from VRAM only with flip-push off, no
+ * gamma ramp and the console's own channel order; everything else goes
+ * through the shadow. */
 static bool fb_wants_shadow(D3dptVgaState *s, uint32_t bpp)
 {
-    return bpp != 32 || s->gamma_active || s->flip_push;
+    return bpp != 32 || s->gamma_active || s->flip_push || s->r_scan_rgb;
 }
 
 static void fb_switch(D3dptVgaState *s, const D3dptLinearMode *m)
@@ -616,9 +653,15 @@ static void fb_flip_rate(D3dptVgaState *s)
     }
     if (s->dma_appends) {
         /* register set v7: the records the WDDM driver had the device copy */
-        info_report("d3dpt-vga: %" PRIu64 " DMA appends, %" PRIu64 " KiB of records, fence %u",
-                    s->dma_appends, s->dma_appended >> 10, s->fence_done);
+        info_report("d3dpt-vga: %" PRIu64 " DMA appends, %" PRIu64 " KiB of records, fence %u; %.1f ms in the handler, %.1f copying",
+                    s->dma_appends, s->dma_appended >> 10, s->fence_done, s->dma_ns / 1e6, s->dma_copy_ns / 1e6);
         s->dma_appends = s->dma_appended = 0;
+        s->dma_ns = s->dma_copy_ns = 0;
+    }
+    if (s->async_kicks) {
+        info_report("d3dpt-vga: %" PRIu64 " batches kicked, %" PRIu64 " waited for a slot (%.1f ms)",
+                    s->async_kicks, s->async_waits, s->async_wait_ns / 1e6);
+        s->async_kicks = s->async_waits = s->async_wait_ns = 0;
     }
     s->batches_last = s->batches;
     s->exec_ns_last = s->exec_ns;
@@ -904,7 +947,8 @@ static bool d3dpt_vga_gfx_update(void *opaque)
         s->full_update = true;
     }
     if (s->lin_on && !s->resurface && s->shadow && m.offset != s->lin.offset &&
-        m.w == s->lin.w && m.h == s->lin.h && m.bpp == s->lin.bpp && m.pitch == s->lin.pitch) {
+        m.w == s->lin.w && m.h == s->lin.h && m.bpp == s->lin.bpp && m.pitch == s->lin.pitch &&
+        m.rgb == s->lin.rgb) {
         /* a page flip the push did not take: the same shadow, the new page;
          * from its ring slot if one holds it (M26), its copy not finished
          * yet left to the next refresh */
@@ -1104,10 +1148,347 @@ static bool d3d_load(D3dptVgaState *s)
     s->lib->set_vram(s->exec, memory_region_get_ram_ptr(&s->vga.vram), s->cmd_offset);
     s->lib->attach(s->exec, 1);
     /* register set v10: Direct3D 11 when the executor opens it (M25) */
-    s->d3d11 = s->lib->features && (s->lib->features(s->exec) & D3DPT_EXEC_FEAT_D3D11);
-    info_report("d3dpt-vga: Direct3D executor ready, window at %u MiB%s", s->cmd_offset >> 20,
-                s->d3d11 ? ", Direct3D 11 too" : "");
+    uint32_t feat = s->lib->features ? s->lib->features(s->exec) : 0;
+    s->d3d11 = (feat & D3DPT_EXEC_FEAT_D3D11) != 0;
+    s->msaa = s->d3d11 ? ((feat & D3DPT_EXEC_FEAT_MSAA_MASK) >> D3DPT_EXEC_FEAT_MSAA_SHIFT) & s->msaa_mask : 0;
+    info_report("d3dpt-vga: Direct3D executor ready, window at %u MiB%s (multisampling 0x%02x)", s->cmd_offset >> 20,
+                s->d3d11 ? ", Direct3D 11 too" : "", s->msaa);
     return true;
+}
+
+/* ------------------------------------------------- async (register set v15)
+ *
+ * ASYNC_KICK takes the window's batch with the submission's fence and
+ * returns at once: the batch is copied into one of three host buffers,
+ * the window starts empty again for the guest's next submission, and a
+ * worker thread runs the batches in order under exec_lock, then makes
+ * FENCE_DONE the fence (never lower) and raises IRQ_DMA through a bottom
+ * half. The guest's GPU scheduler no longer waits for the host inside
+ * every submission (Heaven: the doorbell was ~35% of that thread, track
+ * M25). Anything that must see the host done first drains: a synchronous
+ * doorbell, ASYNC_DRAIN (the driver writes it before every submission it
+ * does not kick, and at a preemption), a reset. */
+/* the records of a batch put together in `out` (D3DPT_CMD_SIZE at most):
+ * the window's own records `win` (bytes, count) with the appended chunks
+ * at their places, each read from guest RAM now. Returns the bytes, and
+ * the count in *count; a chunk that is no longer RAM ends it (the
+ * executor then refuses the count) */
+static uint32_t d3d_assemble(D3dptVgaState *s, uint8_t *out, const uint8_t *win, uint32_t win_bytes,
+                             const struct D3dChunk *c, unsigned n, uint32_t *count)
+{
+    uint32_t o = 0, w = 0;
+    unsigned i;
+
+    for (i = 0; i <= n; i++) {
+        uint32_t upto = i < n ? MIN(c[i].at, win_bytes) : win_bytes;
+
+        if (upto > w) {
+            if (o + (upto - w) > D3DPT_CMD_SIZE) {
+                break;
+            }
+            memcpy(out + o, win + w, upto - w);
+            o += upto - w;
+            w = upto;
+        }
+        if (i == n) {
+            break;
+        }
+        {
+            RCU_READ_LOCK_GUARD();
+            hwaddr xlat, len = c[i].bytes;
+            MemoryRegion *mr = address_space_translate(pci_get_address_space(&s->dev), c[i].gpa, &xlat, &len, false,
+                                                       MEMTXATTRS_UNSPECIFIED);
+
+            if (!memory_region_is_ram(mr) || memory_region_is_ram_device(mr) || len < c[i].bytes ||
+                o + c[i].bytes > D3DPT_CMD_SIZE) {
+                break;
+            }
+            memcpy(out + o, qemu_map_ram_ptr(mr->ram_block, xlat), c[i].bytes);
+            o += c[i].bytes;
+            *count += c[i].count;
+        }
+    }
+    return o;
+}
+
+/* a doorbell's batch: the pending appends copied into the window at their
+ * places (the window ends up as DMA_APPEND would have left it) */
+static void d3d_materialize(D3dptVgaState *s)
+{
+    uint8_t *win = memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset;
+    d3dpt_shm_hdr *h = (d3dpt_shm_hdr *)win;
+    struct D3dChunk c[64];
+    unsigned n;
+    uint32_t wb, count, bytes;
+    uint8_t *tmp;
+
+    qemu_mutex_lock(&s->pend_lock);
+    n = s->pend_n;
+    memcpy(c, s->pend, n * sizeof(c[0]));
+    s->pend_n = 0;
+    s->pend_bytes = s->pend_count = 0;
+    qemu_mutex_unlock(&s->pend_lock);
+    if (!n) {
+        return;
+    }
+    wb = MIN(qatomic_read(&h->cmd_bytes), D3DPT_CMD_SIZE);
+    count = qatomic_read(&h->cmd_count);
+    tmp = g_malloc(D3DPT_CMD_SIZE);
+    bytes = d3d_assemble(s, tmp, win + D3DPT_CMD_OFFSET, wb, c, n, &count);
+    memcpy(win + D3DPT_CMD_OFFSET, tmp, bytes);
+    g_free(tmp);
+    h->cmd_bytes = bytes;
+    h->cmd_count = count;
+}
+
+static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val, unsigned size);
+
+/* a fence done by the device: FENCE_DONE only grows */
+static void d3d_async_fence(D3dptVgaState *s, uint32_t fence)
+{
+    uint32_t cur = qatomic_read(&s->fence_done);
+
+    while ((int32_t)(fence - cur) > 0) {
+        uint32_t was = qatomic_cmpxchg(&s->fence_done, cur, fence);
+        if (was == cur) {
+            break;
+        }
+        cur = was;
+    }
+}
+
+static void d3d_async_bh(void *opaque)
+{
+    D3dptVgaState *s = opaque;
+    uint64_t flip;
+    uint32_t fence;
+
+    /* a kicked flip (ASYNC_FLIP): OFFSET as the driver's write would set
+     * it, under the BQL, and only then its fence */
+    qemu_mutex_lock(&s->pend_lock);
+    flip = s->bh_flip;
+    fence = s->bh_fence;
+    s->bh_flip = 0;
+    qemu_mutex_unlock(&s->pend_lock);
+    if (flip) {
+        d3dpt_vga_regs_write(s, D3DPT_FB_REG_OFFSET, flip - 1, 4);
+        d3d_async_fence(s, fence);
+    }
+    /* latched even while the driver has IRQ_DMA off (its first batches
+     * run before it enables the interrupt): the line rises once it does */
+    s->irq_status |= D3DPT_FB_IRQ_DMA;
+    fb_irq_update(s);
+}
+
+static void *d3d_async_worker(void *opaque)
+{
+    D3dptVgaState *s = opaque;
+
+    qemu_mutex_lock(&s->async_lock);
+    for (;;) {
+        unsigned slot;
+        uint32_t fence, err;
+        int64_t t0;
+
+        while (!s->async_n) {
+            qemu_cond_wait(&s->async_cond, &s->async_lock);
+        }
+        slot = s->async_head;
+        fence = s->async_fence[slot];
+        s->async_busy = true;
+        qemu_mutex_unlock(&s->async_lock);
+
+        if (s->slot_nchunk[slot]) {
+            /* the appends, read from guest RAM here: their DMA buffers stay
+             * the submission's until its fence is done. The window's own
+             * records were kept in the slot's return area */
+            uint8_t *b = s->async_buf[slot];
+            d3dpt_shm_hdr *bh = (d3dpt_shm_hdr *)b;
+            uint32_t count = s->slot_win_count[slot];
+
+            bh->cmd_bytes = d3d_assemble(s, b + D3DPT_CMD_OFFSET, b + D3DPT_RET_OFFSET, s->slot_win_bytes[slot],
+                                         s->slot_chunk[slot], s->slot_nchunk[slot], &count);
+            bh->cmd_count = count;
+        }
+        t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        qemu_mutex_lock(&s->exec_lock);
+        if (s->exec) {
+            if (s->ring_n && s->lib->ring_held && qemu_scanout_ring() && qemu_scanout_ring()->held) {
+                s->lib->ring_held(s->exec, qemu_scanout_ring()->held(s->vga.con));
+            }
+            err = s->lib->submit(s->exec, s->async_buf[slot], D3DPT_SHM_SIZE);
+            if (err && s->batches <= 8) {
+                info_report("d3dpt-vga: async batch: error %u", err);
+            }
+        }
+        qemu_mutex_unlock(&s->exec_lock);
+        qatomic_add(&s->exec_ns, qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - t0);
+
+        /* FENCE_DONE only grows (a fence written meanwhile by the driver
+         * is later: it drains before writing one); a flipping batch's is
+         * the bottom half's, after the flip (a newer flip there replaces
+         * an older one not yet shown: only the newest page matters) */
+        if (s->slot_flip[slot]) {
+            qemu_mutex_lock(&s->pend_lock);
+            s->bh_flip = s->slot_flip[slot];
+            s->bh_fence = fence;
+            qemu_mutex_unlock(&s->pend_lock);
+        } else {
+            d3d_async_fence(s, fence);
+        }
+        qemu_bh_schedule(s->async_bh);
+
+        qemu_mutex_lock(&s->async_lock);
+        s->async_head = (s->async_head + 1) % 3;
+        s->async_n--;
+        s->async_busy = false;
+        qemu_cond_broadcast(&s->async_cond);
+    }
+    return NULL;
+}
+
+/* wait until every kicked batch has run (the BQL away meanwhile, as a
+ * batch's: the worker's completions need the main loop) */
+static void d3d_async_drain(D3dptVgaState *s)
+{
+    bool unlock;
+    bool guard;
+
+    if (!s->async_started) {
+        return;
+    }
+    qemu_mutex_lock(&s->async_lock);
+    if (!s->async_n && !s->async_busy) {
+        qemu_mutex_unlock(&s->async_lock);
+        return;
+    }
+    qemu_mutex_unlock(&s->async_lock);
+    unlock = bql_locked();
+    guard = DEVICE(s)->mem_reentrancy_guard.engaged_in_io;
+    if (unlock) {
+        DEVICE(s)->mem_reentrancy_guard.engaged_in_io = false;
+        bql_unlock();
+    }
+    qemu_mutex_lock(&s->async_lock);
+    while (s->async_n || s->async_busy) {
+        qemu_cond_wait(&s->async_cond, &s->async_lock);
+    }
+    qemu_mutex_unlock(&s->async_lock);
+    if (unlock) {
+        bql_lock();
+        DEVICE(s)->mem_reentrancy_guard.engaged_in_io = guard;
+    }
+}
+
+static bool d3d_load(D3dptVgaState *s);
+
+/* ASYNC_KICK: the window's batch to the worker, the fence done after it */
+static void d3d_async_kick(D3dptVgaState *s, uint32_t fence)
+{
+    uint8_t *win = memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset;
+    d3dpt_shm_hdr *h = (d3dpt_shm_hdr *)win;
+    uint32_t bytes = qatomic_read(&h->cmd_bytes), count = qatomic_read(&h->cmd_count);
+    d3dpt_shm_hdr *bh;
+    unsigned slot;
+
+    if (!s->cmd_offset || !s->async || !d3d_load(s)) {
+        /* no executor: done as a doorbell would leave it */
+        qemu_mutex_lock(&s->pend_lock);
+        s->pend_n = 0;
+        s->pend_bytes = s->pend_count = 0;
+        qemu_mutex_unlock(&s->pend_lock);
+        h->cmd_bytes = h->cmd_count = 0;
+        if (s->async_flip_next) {
+            uint64_t f = s->async_flip_next;
+
+            s->async_flip_next = 0;
+            d3dpt_vga_regs_write(s, D3DPT_FB_REG_OFFSET, f - 1, 4);
+        }
+        s->fence_done = fence;
+        d3d_async_bh(s);
+        return;
+    }
+    if (!s->async_started) {
+        int i;
+
+        qemu_mutex_init(&s->async_lock);
+        qemu_cond_init(&s->async_cond);
+        for (i = 0; i < 3; i++) {
+            s->async_buf[i] = g_malloc0(D3DPT_SHM_SIZE);
+        }
+        s->async_bh = qemu_bh_new(d3d_async_bh, s);
+        qemu_thread_create(&s->async_thread, "d3dpt-async", d3d_async_worker, s, QEMU_THREAD_DETACHED);
+        s->async_started = true;
+    }
+    if (bytes > D3DPT_CMD_SIZE || (bytes & 7)) {
+        bytes = count = 0;          /* the executor would refuse it: an empty batch */
+    }
+    /* a free slot (all three queued: wait, the BQL away) */
+    qemu_mutex_lock(&s->async_lock);
+    s->async_kicks++;
+    if (s->async_n == 3) {
+        int64_t w0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        bool unlock = bql_locked();
+        bool guard = DEVICE(s)->mem_reentrancy_guard.engaged_in_io;
+
+        if (unlock) {
+            qemu_mutex_unlock(&s->async_lock);
+            DEVICE(s)->mem_reentrancy_guard.engaged_in_io = false;
+            bql_unlock();
+            qemu_mutex_lock(&s->async_lock);
+        }
+        while (s->async_n == 3) {
+            qemu_cond_wait(&s->async_cond, &s->async_lock);
+        }
+        s->async_waits++;
+        s->async_wait_ns += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - w0;
+        if (unlock) {
+            qemu_mutex_unlock(&s->async_lock);
+            bql_lock();
+            DEVICE(s)->mem_reentrancy_guard.engaged_in_io = guard;
+            qemu_mutex_lock(&s->async_lock);
+        }
+    }
+    slot = (s->async_head + s->async_n) % 3;
+    qemu_mutex_unlock(&s->async_lock);
+
+    /* the slot is the kicker's alone until it is queued */
+    bh = (d3dpt_shm_hdr *)s->async_buf[slot];
+    memset(bh, 0, sizeof(*bh));
+    qemu_mutex_lock(&s->pend_lock);
+    if (s->pend_n && bytes <= D3DPT_RET_SIZE) {
+        /* appends still in guest memory: the worker copies them; the
+         * window's own records wait in the slot's return area */
+        memcpy(s->async_buf[slot] + D3DPT_RET_OFFSET, win + D3DPT_CMD_OFFSET, bytes);
+        memcpy(s->slot_chunk[slot], s->pend, s->pend_n * sizeof(s->pend[0]));
+        s->slot_nchunk[slot] = s->pend_n;
+        s->slot_win_bytes[slot] = bytes;
+        s->slot_win_count[slot] = count;
+        s->pend_n = 0;
+        s->pend_bytes = s->pend_count = 0;
+        qemu_mutex_unlock(&s->pend_lock);
+    } else {
+        qemu_mutex_unlock(&s->pend_lock);
+        d3d_materialize(s);         /* (none pending, or a window too big to keep) */
+        bytes = MIN(qatomic_read(&h->cmd_bytes), D3DPT_CMD_SIZE);
+        count = qatomic_read(&h->cmd_count);
+        s->slot_nchunk[slot] = 0;
+        bh->cmd_bytes = bytes;
+        bh->cmd_count = count;
+        memcpy(s->async_buf[slot] + D3DPT_CMD_OFFSET, win + D3DPT_CMD_OFFSET, bytes);
+    }
+    h->cmd_bytes = 0;
+    h->cmd_count = 0;
+    h->ret_status = 0;
+    s->batches++;
+
+    s->slot_flip[slot] = s->async_flip_next;
+    s->async_flip_next = 0;
+    qemu_mutex_lock(&s->async_lock);
+    s->async_fence[slot] = fence;
+    s->async_n++;
+    qemu_cond_broadcast(&s->async_cond);
+    qemu_mutex_unlock(&s->async_lock);
 }
 
 static void d3d_doorbell(D3dptVgaState *s)
@@ -1118,6 +1499,8 @@ static void d3d_doorbell(D3dptVgaState *s)
     if (!s->cmd_offset) {
         return;
     }
+    d3d_async_drain(s);         /* kicked batches first (register set v15) */
+    d3d_materialize(s);         /* and appends not copied yet, into the window */
     s->batches++;
     if (d3d_load(s)) {
         /* How long the host spends in a batch, against how long the guest
@@ -1199,8 +1582,56 @@ static uint32_t d3d_dma_append(D3dptVgaState *s, uint32_t count)
     if (bytes > D3DPT_CMD_SIZE - cur) {
         return D3DPT_FB_DMA_NO_ROOM;
     }
-    if (pci_dma_read(&s->dev, addr, win + D3DPT_CMD_OFFSET + cur, bytes) != MEMTX_OK) {
-        return D3DPT_FB_DMA_BAD;
+    /* The copy runs without the BQL under a hardware accelerator, as the
+     * doorbell's batch does (track M25): a game's frame appends ~4 MiB in
+     * ~15 submissions, and with the BQL held each waited for the main
+     * loop's display work and held up every other vCPU's exits. The
+     * source is mapped first, with the BQL held and the re-entrancy guard
+     * engaged, so whatever it names (an address that is MMIO, this BAR
+     * included, comes back as a bounce buffer read here) is read under
+     * both. Only a memcpy out of the mapping runs unlocked, which
+     * dispatches nothing; the guard is lowered for it as the doorbell's
+     * is, since another vCPU's register access meanwhile (the interrupt
+     * service's) must not read 0 as re-entrant. A mapping shorter than
+     * the records (a bounce buffer's limit, a range that crosses regions)
+     * is copied the old way, locked. */
+    {
+        dma_addr_t len = bytes;
+        void *src = tcg_enabled() ? NULL : pci_dma_map(&s->dev, addr, &len, DMA_DIRECTION_TO_DEVICE);
+        bool ok;
+
+        if (src && len == bytes) {
+            bool unlock = bql_locked();
+            bool guard = DEVICE(s)->mem_reentrancy_guard.engaged_in_io;
+            int64_t c0;
+
+            if (unlock) {
+                DEVICE(s)->mem_reentrancy_guard.engaged_in_io = false;
+                bql_unlock();
+            }
+            c0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+            memcpy(win + D3DPT_CMD_OFFSET + cur, src, bytes);
+            s->dma_copy_ns += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - c0;
+            if (unlock) {
+                bql_lock();
+                DEVICE(s)->mem_reentrancy_guard.engaged_in_io = guard;
+            }
+            ok = true;
+        } else {
+            ok = pci_dma_read(&s->dev, addr, win + D3DPT_CMD_OFFSET + cur, bytes) == MEMTX_OK;
+        }
+        if (src) {
+            pci_dma_unmap(&s->dev, src, len, DMA_DIRECTION_TO_DEVICE, 0);
+        }
+        if (!ok) {
+            return D3DPT_FB_DMA_BAD;
+        }
+        /* another vCPU may have appended meanwhile: the window is the
+         * guest's own memory and the executor checks every record at the
+         * doorbell, so only the count is re-read, not trusted */
+        if (qatomic_read(&h->cmd_bytes) != cur) {
+            return D3DPT_FB_DMA_BAD;
+        }
     }
     qatomic_set(&h->cmd_bytes, cur + bytes);
     h->cmd_count += count;
@@ -1369,7 +1800,7 @@ static void fb_push_changed(D3dptVgaState *s)
     size_t row = (size_t)s->lin.w * 4;
     int y, ys = -1, ye = 0;
 
-    if (s->lin.bpp != 32 || s->gamma_active || s->full_frames) {
+    if (s->lin.bpp != 32 || s->lin.rgb || s->gamma_active || s->full_frames) {
         fb_update_span(s, 0, s->lin.h);
         return;
     }
@@ -1408,7 +1839,7 @@ static void fb_flip_push(D3dptVgaState *s)
 
     if (!s->flip_push || !s->lin_on || !s->shadow || s->resurface ||
         !fb_get_mode(s, &m) || m.w != s->lin.w || m.h != s->lin.h ||
-        m.bpp != s->lin.bpp || m.pitch != s->lin.pitch) {
+        m.bpp != s->lin.bpp || m.pitch != s->lin.pitch || m.rgb != s->lin.rgb) {
         s->push_tries = 0;
         return;     /* a mode change: the tick switches surfaces */
     }
@@ -1478,7 +1909,11 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return D3DPT_FB_CAP_BPP8 | D3DPT_FB_CAP_BPP16 | D3DPT_FB_CAP_BPP32 |
                D3DPT_FB_CAP_CURSOR | D3DPT_FB_CAP_GAMMA | (s->cmd_offset ? D3DPT_FB_CAP_D3D : 0) |
                (s->irq ? D3DPT_FB_CAP_IRQ : 0) | (s->cmd_offset ? D3DPT_FB_CAP_DMA : 0) | D3DPT_FB_CAP_FILL | D3DPT_FB_CAP_COPY |
-               (s->d3d11 ? D3DPT_FB_CAP_D3D11 : 0) | (s->follow && s->irq ? D3DPT_FB_CAP_FOLLOW : 0);
+               (s->d3d11 ? D3DPT_FB_CAP_D3D11 : 0) | (s->follow && s->irq ? D3DPT_FB_CAP_FOLLOW : 0) |
+               (s->cmd_offset && s->fb_version >= 14u ? D3DPT_FB_CAP_DMA1 : 0) |
+               (s->cmd_offset && s->async && s->irq && s->fb_version >= 15u ? D3DPT_FB_CAP_ASYNC : 0) |
+               (s->d3d11 && s->fb_version >= 16u ? (s->msaa << D3DPT_FB_CAP_MSAA_SHIFT) & D3DPT_FB_CAP_MSAA_MASK : 0) |
+               (s->fb_version >= 17u ? D3DPT_FB_CAP_SCAN_RGB : 0);
     case D3DPT_FB_REG_IRQ_ENABLE:
         return s->irq_enable;
     case D3DPT_FB_REG_IRQ_STATUS:
@@ -1553,6 +1988,8 @@ static uint64_t d3dpt_vga_regs_read(void *opaque, hwaddr addr, unsigned size)
         return s->follow_on ? s->pref_h : 0;
     case D3DPT_FB_REG_BLANK:
         return s->r_blank;
+    case D3DPT_FB_REG_SCAN_RGB:
+        return s->r_scan_rgb;
     case D3DPT_FB_REG_GAMMA_ENABLE:
         return s->gamma_on;
     case D3DPT_FB_REG_MODE_COUNT:
@@ -1775,6 +2212,31 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
     case D3DPT_FB_REG_DMA_APPEND:
         s->dma_status = d3d_dma_append(s, val);
         break;
+    case D3DPT_FB_REG_ASYNC_KICK:
+        d3d_async_kick(s, val);
+        break;
+    case D3DPT_FB_REG_ASYNC_DRAIN:
+        d3d_async_drain(s);
+        break;
+    case D3DPT_FB_REG_ASYNC_FLIP:
+        s->async_flip_next = val + 1;
+        break;
+    case D3DPT_FB_REG_DMA_APPEND1:
+        /* register set v14: the address and bytes from the window's
+         * header, the answer back there (one exit where DMA_APPEND took
+         * five, track M25) */
+        if (s->cmd_offset) {
+            int64_t t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+            d3dpt_shm_hdr *h = (d3dpt_shm_hdr *)(memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset);
+
+            s->dma_lo = qatomic_read(&h->dma_addr_lo);
+            s->dma_hi = qatomic_read(&h->dma_addr_hi);
+            s->dma_bytes = qatomic_read(&h->dma_bytes);
+            s->dma_status = d3d_dma_append(s, val);
+            qatomic_set(&h->dma_status, s->dma_status);
+            s->dma_ns += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - t0;
+        }
+        break;
     case D3DPT_FB_REG_FILL_ADDR:
         s->fill_addr = val;
         break;
@@ -1835,6 +2297,15 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         s->r_blank = val != 0;
         qemu_console_hw_invalidate(s->vga.con);
         break;
+    case D3DPT_FB_REG_SCAN_RGB:
+        /* the mode's channel order (a full-screen R8G8B8A8 swap chain's
+         * mode): the next refresh switches surfaces (the shadow converts) */
+        if (s->fb_version >= 17u && (val != 0) != (s->r_scan_rgb != 0)) {
+            s->r_scan_rgb = val != 0;
+            info_report("d3dpt-vga: 32 bpp pixels are %s", s->r_scan_rgb ? "x8b8g8r8" : "x8r8g8b8");
+            qemu_console_hw_invalidate(s->vga.con);
+        }
+        break;
     case D3DPT_FB_REG_FENCE:
         s->fence_done = val;
         if (s->irq_enable & D3DPT_FB_IRQ_DMA) {
@@ -1855,6 +2326,97 @@ static void d3dpt_vga_regs_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     }
 }
+
+/* DMA_APPEND1 (register set v14) in a region of its own that runs without
+ * the BQL (track M25): under WHPX an exit takes the BQL only to dispatch
+ * to a device, and an append waited ~0.7 ms for it behind the main
+ * loop's display work, where the copy itself took ~50 us. This handler
+ * touches the append's own state alone (the window's header and its
+ * records, the rate line's counters): the source must translate to guest
+ * RAM in one piece, read under RCU, so nothing it names is MMIO and no
+ * device is re-entered (an append from anything else is refused, which
+ * the driver never asks for); and it keeps no re-entrancy guard, a plain
+ * flag another vCPU's access under the BQL would read as set. */
+static void d3dpt_dma1_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+{
+    D3dptVgaState *s = opaque;
+    uint8_t *win;
+    d3dpt_shm_hdr *h;
+    uint32_t bytes, cur, count = (uint32_t)val, st = D3DPT_FB_DMA_BAD;
+    dma_addr_t src;
+    int64_t t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    if (!s->cmd_offset) {
+        return;
+    }
+    win = memory_region_get_ram_ptr(&s->vga.vram) + s->cmd_offset;
+    h = (d3dpt_shm_hdr *)win;
+    src = ((uint64_t)qatomic_read(&h->dma_addr_hi) << 32) | qatomic_read(&h->dma_addr_lo);
+    bytes = qatomic_read(&h->dma_bytes);
+    cur = qatomic_read(&h->cmd_bytes);
+    if (!count || !bytes || (bytes & 7) || cur > D3DPT_CMD_SIZE) {
+        st = D3DPT_FB_DMA_BAD;
+    } else if (s->async) {
+        /* deferred: only where it goes is kept, and the copy is the
+         * worker's (a kicked batch) or the doorbell's. With the copy here
+         * the exit took ~350 us from the guest's side, ~20 us of it the
+         * copy (track M25) */
+        qemu_mutex_lock(&s->pend_lock);
+        if (s->pend_n == 64 || (uint64_t)cur + s->pend_bytes + bytes > D3DPT_CMD_SIZE) {
+            st = D3DPT_FB_DMA_NO_ROOM;
+        } else {
+            struct D3dChunk *c = &s->pend[s->pend_n++];
+
+            c->at = cur;
+            c->bytes = bytes;
+            c->count = count;
+            c->gpa = src;
+            s->pend_bytes += bytes;
+            s->pend_count += count;
+            s->dma_appends++;
+            s->dma_appended += bytes;
+            st = D3DPT_FB_DMA_OK;
+        }
+        qemu_mutex_unlock(&s->pend_lock);
+    } else if (bytes > D3DPT_CMD_SIZE - cur) {
+        st = D3DPT_FB_DMA_NO_ROOM;
+    } else {
+        RCU_READ_LOCK_GUARD();
+        hwaddr xlat, len = bytes;
+        MemoryRegion *mr = address_space_translate(pci_get_address_space(&s->dev), src, &xlat, &len, false,
+                                                   MEMTXATTRS_UNSPECIFIED);
+
+        if (memory_region_is_ram(mr) && !memory_region_is_ram_device(mr) && len >= bytes) {
+            int64_t c0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+            memcpy(win + D3DPT_CMD_OFFSET + cur, qemu_map_ram_ptr(mr->ram_block, xlat), bytes);
+            s->dma_copy_ns += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - c0;
+            /* another vCPU appending meanwhile: refused, not merged (the
+             * executor checks every record at the doorbell anyway) */
+            if (qatomic_cmpxchg(&h->cmd_bytes, cur, cur + bytes) == cur) {
+                qatomic_add(&h->cmd_count, count);
+                s->dma_appends++;
+                s->dma_appended += bytes;
+                st = D3DPT_FB_DMA_OK;
+            }
+        }
+    }
+    qatomic_set(&h->dma_status, st);
+    s->dma_ns += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - t0;
+}
+
+static uint64_t d3dpt_dma1_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return 0;
+}
+
+static const MemoryRegionOps d3dpt_dma1_ops = {
+    .read = d3dpt_dma1_read,
+    .write = d3dpt_dma1_write,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
 
 static const MemoryRegionOps d3dpt_vga_regs_ops = {
     .read = d3dpt_vga_regs_read,
@@ -1915,6 +2477,16 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
 
     memory_region_init_io(&s->regs, OBJECT(dev), &d3dpt_vga_regs_ops, s,
                           "d3dpt-vga.regs", D3DPT_FB_REGS_SIZE);
+    qemu_mutex_init(&s->pend_lock);
+    /* register set v14's DMA_APPEND1 over the registers, BQL-free under a
+     * hardware accelerator (d3dpt_dma1_write); under TCG it stays the
+     * register (d3dpt_vga_regs_write's case) */
+    if (!tcg_enabled()) {
+        memory_region_init_io(&s->dma1, OBJECT(dev), &d3dpt_dma1_ops, s, "d3dpt-vga.dma1", 4);
+        memory_region_enable_lockless_io(&s->dma1);
+        s->dma1.disable_reentrancy_guard = true;
+        memory_region_add_subregion_overlap(&s->regs, D3DPT_FB_REG_DMA_APPEND1, &s->dma1, 1);
+    }
     s->indexed = g_new0(pixman_indexed_t, 1);
     s->indexed->color = true;
 
@@ -1940,6 +2512,13 @@ static void d3dpt_vga_realize(PCIDevice *dev, Error **errp)
      * left below it for the frame buffer and the DirectDraw heap */
     if (vga->vram_size >= 2 * D3DPT_SHM_SIZE) {
         s->cmd_offset = vga->vram_size - D3DPT_SHM_SIZE;
+        /* no display scans the window, and the host writes megabytes a
+         * frame into it (the appended records): an accelerator that tracks
+         * VRAM's dirty pages leaves it out (QEMU patch 99; under WHPX each
+         * host write there cost the hypervisor's tracking, ~0.4 ms an
+         * append, track M25) */
+        vga->vram.dirty_track_skip_offset = s->cmd_offset;
+        vga->vram.dirty_track_skip_size = D3DPT_SHM_SIZE;
     } else {
         warn_report("d3dpt-vga: vgamem_mb=%u leaves no room for the Direct3D window (needs 128)",
                     vga->vram_size_mb);
@@ -1954,6 +2533,7 @@ static void d3dpt_vga_reset(DeviceState *dev)
     s->r_enable = s->r_w = s->r_h = s->r_bpp = s->r_pitch = 0;
     s->r_offset = s->r_hz = s->r_sel = 0;
     s->r_blank = 0;
+    s->r_scan_rgb = 0;
     s->blank_shown = false;
     s->vbl_ns = 0;
     s->cur_flip_hidden = false;
@@ -1975,6 +2555,13 @@ static void d3dpt_vga_reset(DeviceState *dev)
     fb_irq_enable(s, 0);   /* no interrupt until the driver asks again */
     fb_follow(s, false);   /* a rebooted guest's screen is its own until its driver follows */
     s->dma_lo = s->dma_hi = s->dma_bytes = s->dma_status = 0;
+    d3d_async_drain(s);    /* nothing kicked runs into the next boot */
+    qemu_mutex_lock(&s->pend_lock);
+    s->pend_n = 0;
+    s->pend_bytes = s->pend_count = 0;
+    s->bh_flip = 0;
+    qemu_mutex_unlock(&s->pend_lock);
+    s->async_flip_next = 0;
     s->fence_done = 0;
     d3d_reset(s);
 }
@@ -2044,6 +2631,13 @@ static const Property d3dpt_vga_properties[] = {
      * aligned to its size. Only the WDDM driver reads this layout; with
      * an option ROM EDK2 puts the BAR below 4 GiB again (romfile=). */
     DEFINE_PROP_BOOL("bar64", D3dptVgaState, bar64, false),
+    /* with irq: CAP_ASYNC (register set v15), the WDDM driver's batches run
+     * by a worker thread, their fences done by IRQ_DMA (track M25); off,
+     * every batch runs inside its doorbell, the A/B */
+    DEFINE_PROP_BOOL("async", D3dptVgaState, async, true),
+    /* register set v16: the host's multisample counts offered to the guest, ANDed with this (bits 0-3 2x 4x 8x 16x up to
+     * 64-bit formats, 4-7 the 128-bit ones): 0 offers none, 0x33 2x and 4x only (a weaker host's, the A/B) */
+    DEFINE_PROP_UINT32("msaa", D3dptVgaState, msaa_mask, 0xff),
 };
 
 static void d3dpt_vga_class_init(ObjectClass *klass, const void *data)

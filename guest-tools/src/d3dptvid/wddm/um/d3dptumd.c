@@ -250,7 +250,7 @@ static HRESULT APIENTRY umd_get_caps(HANDLE h, CONST D3DDDIARG_GETCAPS *g)
  * in the allocation list and a patch location first, so that a flush in
  * between never splits the two.
  */
-#define UMD_SLACK 4096        /* what the kernel-mode driver puts in front of the records */
+#define UMD_SLACK D3DPT_WDDM_SLACK  /* what the kernel-mode driver puts in front of the records */
 /* and after them, per patch location (its fix-up packet): an entry is
  * three ULONGs and a pointer, 24 bytes on x64, whose kernel driver a
  * 32-bit (WoW64) process talks to as well; 16 overflowed a full buffer

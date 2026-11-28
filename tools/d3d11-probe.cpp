@@ -10,7 +10,15 @@
  * into a staging texture. Then the scene at 10_1 with shader model 4.1
  * (Gather) on ours and on WARP, and through Direct3D 10's API on ours
  * (d3d10.dll, and d3d10_1.dll at 10_1 and 10_0: the driver's 10.0 and 10.1
- * interfaces) against WARP's 10_0 frame. With "present" also a windowed swap chain's
+ * interfaces) against WARP's 10_0 frame. At feature level 11_0, when our
+ * adapter offers it (D3D11FL11 lists the program while 11_0 is built), the
+ * compute pipeline and unordered access against WARP's: a dispatch with a
+ * structured SRV and UAV, atomics on a raw buffer, an append buffer and
+ * CopyStructureCount, DispatchIndirect, a typed texture UAV with both
+ * UAV clears, and a pixel shader's UAV at the output merger through Draw
+ * and DrawInstancedIndirect; and tessellation, a quad patch through hull
+ * and domain shaders with uneven factors, its frame against WARP's. With
+ * "present" also a windowed swap chain's
  * frames, read off the screen (a third argument: how many milliseconds
  * each window stays up before that, 1000 by default). With "flags", for
  * each D3D11_CREATE_DEVICE flag the level our adapter gives and the
@@ -526,6 +534,372 @@ done:
     return ok;
 }
 
+/* ------------------------------------------------ feature level 11_0's compute
+ * (track M25, "Feature level 11_0" step 1): the same work on ours and on
+ * WARP, each answer compared. */
+static const char cs_src[] =
+    "cbuffer C : register(b0) { uint base; uint3 pad; };\n"
+    "StructuredBuffer<float> inb : register(t0);\n"
+    "RWStructuredBuffer<uint> outb : register(u0);\n"
+    "RWByteAddressBuffer counter : register(u1);\n"
+    "RWTexture2D<float4> img : register(u2);\n"
+    "AppendStructuredBuffer<uint> app : register(u3);\n"
+    "[numthreads(64, 1, 1)] void cs_main(uint3 id : SV_DispatchThreadID) {\n"
+    "  uint i = id.x, old;\n"
+    "  outb[i] = i * i + base + (uint)(inb[i] * 2.0);\n"
+    "  counter.InterlockedAdd(0, 1, old);\n"
+    "  if ((i & 3) == 0) app.Append(i);\n"
+    "}\n"
+    "[numthreads(8, 8, 1)] void cs_img(uint3 id : SV_DispatchThreadID) {\n"
+    "  img[id.xy] = float4(id.x / 63.0, id.y / 63.0, (id.x ^ id.y) / 63.0, 1);\n"
+    "}\n"
+    "RWByteAddressBuffer pcount : register(u1);\n"
+    "float4 vs_tri(uint v : SV_VertexID) : SV_Position {\n"
+    "  float2 uv = float2((v << 1) & 2, v & 2); return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1); }\n"
+    "float4 ps_uav(float4 p : SV_Position) : SV_Target { uint o; pcount.InterlockedAdd(0, 1, o); return float4(1, 0, 0, 1); }\n";
+
+struct CsOut {
+    unsigned outb[256];
+    unsigned counter, appended, append_sum, pixels;
+    unsigned img[64 * 64];
+};
+
+static ID3DBlob *compile_cs(const char *entry, const char *target)
+{
+    ID3DBlob *code = NULL, *err = NULL;
+    if (FAILED(D3DCompile(cs_src, strlen(cs_src), "probe-cs", NULL, NULL, entry, target, 0, 0, &code, &err))) {
+        P("  compile %s: %s\n", entry, err ? (const char *)err->GetBufferPointer() : "?");
+        return NULL;
+    }
+    return code;
+}
+
+/* a GPU resource's bytes, through a staging copy */
+static bool read_back(ID3D11Device *dev, ID3D11DeviceContext *c, ID3D11Resource *src, void *dst, UINT bytes, UINT row = 0, UINT rows = 1)
+{
+    ID3D11Resource *stg = NULL;
+    ID3D11Buffer *sb = NULL;
+    ID3D11Texture2D *st = NULL;
+    D3D11_RESOURCE_DIMENSION dim;
+    src->GetType(&dim);
+    if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
+        D3D11_BUFFER_DESC d;
+        ((ID3D11Buffer *)src)->GetDesc(&d);
+        d.Usage = D3D11_USAGE_STAGING; d.BindFlags = 0; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ; d.MiscFlags = 0; d.StructureByteStride = 0;
+        if (FAILED(dev->CreateBuffer(&d, NULL, &sb))) return false;
+        stg = sb;
+    } else {
+        D3D11_TEXTURE2D_DESC d;
+        ((ID3D11Texture2D *)src)->GetDesc(&d);
+        d.Usage = D3D11_USAGE_STAGING; d.BindFlags = 0; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ; d.MiscFlags = 0;
+        if (FAILED(dev->CreateTexture2D(&d, NULL, &st))) return false;
+        stg = st;
+    }
+    c->CopyResource(stg, src);
+    D3D11_MAPPED_SUBRESOURCE m;
+    bool ok = SUCCEEDED(c->Map(stg, 0, D3D11_MAP_READ, 0, &m));
+    if (ok) {
+        for (UINT y = 0; y < rows; y++)
+            memcpy((BYTE *)dst + (size_t)y * (row ? row : bytes), (const BYTE *)m.pData + (size_t)y * m.RowPitch, row ? row : bytes);
+        c->Unmap(stg, 0);
+    }
+    stg->Release();
+    return ok;
+}
+
+static bool compute(ID3D11Device *dev, ID3D11DeviceContext *c, CsOut *o)
+{
+    memset(o, 0, sizeof(*o));
+    ID3DBlob *bm = compile_cs("cs_main", "cs_5_0"), *bi = compile_cs("cs_img", "cs_5_0"), *bv = compile_cs("vs_tri", "vs_5_0"),
+             *bp = compile_cs("ps_uav", "ps_5_0");
+    if (!bm || !bi || !bv || !bp) return false;
+    ID3D11ComputeShader *csm = NULL, *csi = NULL;
+    ID3D11VertexShader *vs = NULL;
+    ID3D11PixelShader *ps = NULL;
+    HRESULT hr = dev->CreateComputeShader(bm->GetBufferPointer(), bm->GetBufferSize(), NULL, &csm);
+    if (SUCCEEDED(hr)) hr = dev->CreateComputeShader(bi->GetBufferPointer(), bi->GetBufferSize(), NULL, &csi);
+    if (SUCCEEDED(hr)) hr = dev->CreateVertexShader(bv->GetBufferPointer(), bv->GetBufferSize(), NULL, &vs);
+    if (SUCCEEDED(hr)) hr = dev->CreatePixelShader(bp->GetBufferPointer(), bp->GetBufferSize(), NULL, &ps);
+    if (FAILED(hr)) { P("  compute: shaders 0x%08lx\n", (unsigned long)hr); return false; }
+
+    /* the input (an SRV of a structured buffer), the constants */
+    float in[256];
+    for (int i = 0; i < 256; i++) in[i] = (float)(i % 17);
+    D3D11_BUFFER_DESC bd = { sizeof(in), D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, 0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 4 };
+    D3D11_SUBRESOURCE_DATA sd = { in, 0, 0 };
+    ID3D11Buffer *inb = NULL, *cb = NULL, *outb = NULL, *cnt = NULL, *app = NULL, *args = NULL, *count_dst = NULL, *dargs = NULL,
+                 *cnt_save = NULL;
+    hr = dev->CreateBuffer(&bd, &sd, &inb);
+    unsigned cbv[4] = { 1000, 0, 0, 0 };
+    D3D11_BUFFER_DESC cd = { 16, D3D11_USAGE_IMMUTABLE, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 };
+    D3D11_SUBRESOURCE_DATA cs = { cbv, 0, 0 };
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&cd, &cs, &cb);
+    /* the outputs: a structured buffer, a raw counter, an append buffer */
+    D3D11_BUFFER_DESC od = { 256 * 4, D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 4 };
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&od, NULL, &outb);
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&od, NULL, &app);
+    D3D11_BUFFER_DESC rd = { 16, D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0, D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS, 0 };
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&rd, NULL, &cnt);
+    D3D11_BUFFER_DESC kd = { 16, D3D11_USAGE_DEFAULT, 0, 0, 0, 0 };
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&kd, NULL, &count_dst);
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&kd, NULL, &cnt_save);
+    /* DispatchIndirect's and DrawInstancedIndirect's arguments */
+    unsigned av[4] = { 4, 1, 1, 0 }, dv[4] = { 3, 2, 0, 0 };
+    D3D11_BUFFER_DESC ad = { 16, D3D11_USAGE_DEFAULT, 0, 0, D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS, 0 };
+    D3D11_SUBRESOURCE_DATA as = { av, 0, 0 }, ds = { dv, 0, 0 };
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&ad, &as, &args);
+    if (SUCCEEDED(hr)) hr = dev->CreateBuffer(&ad, &ds, &dargs);
+    /* a 64x64 RGBA8 image written by a compute shader, and a target */
+    D3D11_TEXTURE2D_DESC td = { 64, 64, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, { 1, 0 }, D3D11_USAGE_DEFAULT,
+                                D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, 0, 0 };
+    ID3D11Texture2D *img = NULL, *rt = NULL;
+    if (SUCCEEDED(hr)) hr = dev->CreateTexture2D(&td, NULL, &img);
+    td.BindFlags = D3D11_BIND_RENDER_TARGET;
+    if (SUCCEEDED(hr)) hr = dev->CreateTexture2D(&td, NULL, &rt);
+    if (FAILED(hr)) { P("  compute: resources 0x%08lx\n", (unsigned long)hr); return false; }
+
+    ID3D11ShaderResourceView *srv = NULL;
+    ID3D11UnorderedAccessView *u_out = NULL, *u_cnt = NULL, *u_img = NULL, *u_app = NULL;
+    ID3D11RenderTargetView *rtv = NULL;
+    hr = dev->CreateShaderResourceView(inb, NULL, &srv);
+    if (SUCCEEDED(hr)) hr = dev->CreateUnorderedAccessView(outb, NULL, &u_out);
+    D3D11_UNORDERED_ACCESS_VIEW_DESC raw = {};
+    raw.Format = DXGI_FORMAT_R32_TYPELESS; raw.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    raw.Buffer.NumElements = 4; raw.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+    if (SUCCEEDED(hr)) hr = dev->CreateUnorderedAccessView(cnt, &raw, &u_cnt);
+    if (SUCCEEDED(hr)) hr = dev->CreateUnorderedAccessView(img, NULL, &u_img);
+    D3D11_UNORDERED_ACCESS_VIEW_DESC ap = {};
+    ap.Format = DXGI_FORMAT_UNKNOWN; ap.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    ap.Buffer.NumElements = 256; ap.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_APPEND;
+    if (SUCCEEDED(hr)) hr = dev->CreateUnorderedAccessView(app, &ap, &u_app);
+    if (SUCCEEDED(hr)) hr = dev->CreateRenderTargetView(rt, NULL, &rtv);
+    if (FAILED(hr)) { P("  compute: views 0x%08lx\n", (unsigned long)hr); return false; }
+
+    /* ClearUnorderedAccessViewUint on the raw counter, Float on the image
+     * (the compute shader writes its top-left 32x32 only) */
+    const UINT zero[4] = { 0, 0, 0, 0 };
+    const float grey[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+    c->ClearUnorderedAccessViewUint(u_cnt, zero);
+    c->ClearUnorderedAccessViewFloat(u_img, grey);
+    /* Dispatch, then DispatchIndirect (4 x 64 threads each); the append
+     * buffer's count starts at 0 and is kept for the second */
+    ID3D11UnorderedAccessView *uv[4] = { u_out, u_cnt, NULL, u_app };
+    UINT init[4] = { 0, 0, 0, 0 };
+    c->CSSetShader(csm, NULL, 0);
+    c->CSSetConstantBuffers(0, 1, &cb);
+    c->CSSetShaderResources(0, 1, &srv);
+    c->CSSetUnorderedAccessViews(0, 4, uv, init);
+    c->Dispatch(4, 1, 1);
+    UINT keep[4] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
+    c->CSSetUnorderedAccessViews(0, 4, uv, keep);
+    c->DispatchIndirect(args, 0);
+    c->CopyStructureCount(count_dst, 0, u_app);
+    c->CSSetShader(csi, NULL, 0);
+    ID3D11UnorderedAccessView *none[4] = {};
+    c->CSSetUnorderedAccessViews(0, 4, none, NULL);
+    c->CSSetUnorderedAccessViews(2, 1, &u_img, NULL);
+    c->Dispatch(4, 4, 1);
+    c->CSSetUnorderedAccessViews(0, 4, none, NULL);
+    c->CSSetShader(NULL, NULL, 0);
+    c->CopyResource(cnt_save, cnt);             /* the threads' count, before the pixels' */
+
+    /* a pixel shader's UAV at the output merger: a count of the pixels
+     * shaded, one triangle over 64x64, then DrawInstancedIndirect's two
+     * instances of it */
+    c->ClearUnorderedAccessViewUint(u_cnt, zero);
+    D3D11_VIEWPORT vp = { 0, 0, 64, 64, 0, 1 };
+    c->RSSetViewports(1, &vp);
+    c->IASetInputLayout(NULL);
+    c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    c->VSSetShader(vs, NULL, 0);
+    c->PSSetShader(ps, NULL, 0);
+    c->OMSetRenderTargetsAndUnorderedAccessViews(1, &rtv, NULL, 1, 1, &u_cnt, NULL);
+    c->Draw(3, 0);
+    c->DrawInstancedIndirect(dargs, 0);
+    c->OMSetRenderTargetsAndUnorderedAccessViews(0, NULL, NULL, 0, 0, NULL, NULL);
+
+    bool ok = read_back(dev, c, outb, o->outb, sizeof(o->outb));
+    unsigned k[4] = {}, a[256] = {};
+    ok = ok && read_back(dev, c, count_dst, k, 16);
+    o->appended = k[0];
+    ok = ok && read_back(dev, c, app, a, sizeof(a));
+    for (unsigned i = 0; i < o->appended && i < 256; i++) o->append_sum += a[i];
+    ok = ok && read_back(dev, c, cnt, k, 16);
+    o->pixels = k[0];
+    ok = ok && read_back(dev, c, img, o->img, 64 * 4, 64 * 4, 64);
+    ok = ok && read_back(dev, c, cnt_save, k, 16);
+    o->counter = k[0];
+    R(cnt_save); R(srv); R(u_out); R(u_cnt); R(u_img); R(u_app); R(rtv); R(img); R(rt);
+    R(inb); R(cb); R(outb); R(cnt); R(app); R(args); R(count_dst); R(dargs);
+    R(csm); R(csi); R(vs); R(ps); R(bm); R(bi); R(bv); R(bp);
+    return ok;
+}
+
+/* ------------------------------------------- feature level 11_0's tessellation
+ * (step 2): one quad patch, its edges and inside tessellated unevenly
+ * (integer partitioning), displaced and coloured by its domain location in
+ * the domain shader; the colour's sine follows the triangles the
+ * tessellator made, so another pattern shows as other pixels. Patch
+ * constants beside the factors (a TINT) cross from hull to domain. */
+static const char tess_src[] =
+    "struct VSO { float3 p : POS; };\n"
+    "VSO vs_cp(uint id : SV_VertexID) { VSO o; float2 c = float2(id & 1, id >> 1); o.p = float3(c * 1.6 - 0.8, 0); return o; }\n"
+    "struct PC { float e[4] : SV_TessFactor; float i[2] : SV_InsideTessFactor; float tint : TINT; };\n"
+    "PC hs_pc(InputPatch<VSO, 4> ip, uint pid : SV_PrimitiveID) {\n"
+    "  PC o; o.e[0] = 4; o.e[1] = 6; o.e[2] = 8; o.e[3] = 5; o.i[0] = 7; o.i[1] = 3; o.tint = 0.5; return o; }\n"
+    "[domain(\"quad\")] [partitioning(\"integer\")] [outputtopology(\"triangle_cw\")] [outputcontrolpoints(4)]\n"
+    "[patchconstantfunc(\"hs_pc\")] VSO hs_main(InputPatch<VSO, 4> ip, uint i : SV_OutputControlPointID) { return ip[i]; }\n"
+    "struct DSO { float4 pos : SV_Position; float3 col : COL; };\n"
+    "[domain(\"quad\")] DSO ds_main(PC pc, float2 uv : SV_DomainLocation, const OutputPatch<VSO, 4> q) {\n"
+    "  float3 a = lerp(q[0].p, q[1].p, uv.x), b = lerp(q[2].p, q[3].p, uv.x), p = lerp(a, b, uv.y);\n"
+    "  p.z = 0.5; p.xy += 0.05 * sin(uv.yx * 12.0);\n"
+    "  DSO o; o.pos = float4(p, 1); o.col = float3(uv.x, sin(uv.x * 20.0 + uv.y * 9.0) * 0.5 + 0.5, pc.tint); return o; }\n"
+    "float4 ps_tess(DSO i) : SV_Target { return float4(i.col, 1); }\n";
+
+static ID3DBlob *compile_tess(const char *entry, const char *target)
+{
+    ID3DBlob *code = NULL, *err = NULL;
+    if (FAILED(D3DCompile(tess_src, strlen(tess_src), "probe-tess", NULL, NULL, entry, target, 0, 0, &code, &err))) {
+        P("  compile %s: %s\n", entry, err ? (const char *)err->GetBufferPointer() : "?");
+        return NULL;
+    }
+    return code;
+}
+
+/* the frame into px (BGRA as the other scenes read it); the pipeline
+ * statistics' hull and domain invocations into *hs, *ds */
+static bool tess_scene(ID3D11Device *dev, ID3D11DeviceContext *c, unsigned *px, UINT64 *hs, UINT64 *ds)
+{
+    ID3DBlob *bv = compile_tess("vs_cp", "vs_5_0"), *bh = compile_tess("hs_main", "hs_5_0"), *bd = compile_tess("ds_main", "ds_5_0"),
+             *bp = compile_tess("ps_tess", "ps_5_0");
+    if (!bv || !bh || !bd || !bp) return false;
+    ID3D11VertexShader *vs = NULL;
+    ID3D11HullShader *h = NULL;
+    ID3D11DomainShader *d = NULL;
+    ID3D11PixelShader *ps = NULL;
+    HRESULT hr = dev->CreateVertexShader(bv->GetBufferPointer(), bv->GetBufferSize(), NULL, &vs);
+    if (SUCCEEDED(hr)) hr = dev->CreateHullShader(bh->GetBufferPointer(), bh->GetBufferSize(), NULL, &h);
+    if (SUCCEEDED(hr)) hr = dev->CreateDomainShader(bd->GetBufferPointer(), bd->GetBufferSize(), NULL, &d);
+    if (SUCCEEDED(hr)) hr = dev->CreatePixelShader(bp->GetBufferPointer(), bp->GetBufferSize(), NULL, &ps);
+    if (FAILED(hr)) { P("  tessellation: shaders 0x%08lx\n", (unsigned long)hr); return false; }
+    D3D11_TEXTURE2D_DESC td = { W, H, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0 };
+    ID3D11Texture2D *rt = NULL;
+    ID3D11RenderTargetView *rtv = NULL;
+    ID3D11Query *q = NULL;
+    D3D11_QUERY_DESC qd = { D3D11_QUERY_PIPELINE_STATISTICS, 0 };
+    hr = dev->CreateTexture2D(&td, NULL, &rt);
+    if (SUCCEEDED(hr)) hr = dev->CreateRenderTargetView(rt, NULL, &rtv);
+    if (SUCCEEDED(hr)) hr = dev->CreateQuery(&qd, &q);
+    /* no culling: the domain's v runs up the screen, which turns the
+     * tessellator's clockwise triangles around (with the default state
+     * every one was culled, on ours and WARP alike: a clear frame each) */
+    D3D11_RASTERIZER_DESC rd = {};
+    rd.FillMode = D3D11_FILL_SOLID;
+    rd.CullMode = D3D11_CULL_NONE;
+    rd.DepthClipEnable = TRUE;
+    ID3D11RasterizerState *rs = NULL;
+    if (SUCCEEDED(hr)) hr = dev->CreateRasterizerState(&rd, &rs);
+    if (FAILED(hr)) { P("  tessellation: target 0x%08lx\n", (unsigned long)hr); return false; }
+    c->RSSetState(rs);
+    const float clear[4] = { 0.1f, 0.2f, 0.3f, 1.0f };
+    c->ClearRenderTargetView(rtv, clear);
+    D3D11_VIEWPORT vp = { 0, 0, (float)W, (float)H, 0, 1 };
+    c->RSSetViewports(1, &vp);
+    c->OMSetRenderTargets(1, &rtv, NULL);
+    c->IASetInputLayout(NULL);
+    c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+    c->VSSetShader(vs, NULL, 0);
+    c->HSSetShader(h, NULL, 0);
+    c->DSSetShader(d, NULL, 0);
+    c->PSSetShader(ps, NULL, 0);
+    c->Begin(q);
+    c->Draw(4, 0);
+    c->End(q);
+    c->HSSetShader(NULL, NULL, 0);
+    c->DSSetShader(NULL, NULL, 0);
+    c->RSSetState(NULL);
+    D3D11_QUERY_DATA_PIPELINE_STATISTICS st = {};
+    for (int i = 0; i < 2000 && c->GetData(q, &st, sizeof(st), 0) == S_FALSE; i++) Sleep(1);
+    *hs = st.HSInvocations;
+    *ds = st.DSInvocations;
+    bool ok = read_back(dev, c, rt, px, W * 4, W * 4, H);
+    R(rs); R(q); R(rtv); R(rt); R(vs); R(h); R(d); R(ps); R(bv); R(bh); R(bd); R(bp);
+    return ok;
+}
+
+/* -------------------------------------------------------- multisampling
+ * (2026-11-27): two slanted triangles into a 4x target with a 4x depth
+ * buffer, the second half behind the first, resolved and read back. The
+ * edges' coverage is the samples' (the standard 4x pattern on every
+ * implementation), so a missing sample count or resolve shows. */
+static const char msaa_src[] =
+    "struct V { float4 p : SV_Position; float3 c : COL; };\n"
+    "V vs_ms(uint id : SV_VertexID) {\n"
+    "  static const float2 P[6] = { float2(-0.9, -0.7), float2(0.1, 0.9), float2(0.8, -0.85),\n"
+    "                               float2(-0.6, 0.8), float2(0.95, 0.3), float2(-0.2, -0.95) };\n"
+    "  V o; o.p = float4(P[id], id < 3 ? 0.3 : 0.6, 1); o.c = id < 3 ? float3(1, 0.5, 0.1) : float3(0.1, 0.6, 1); return o; }\n"
+    "float4 ps_ms(V i) : SV_Target { return float4(i.c, 1); }\n";
+
+static bool msaa_scene(ID3D11Device *dev, ID3D11DeviceContext *c, unsigned *px)
+{
+    ID3DBlob *bv = NULL, *bp = NULL, *err = NULL;
+    if (FAILED(D3DCompile(msaa_src, strlen(msaa_src), "probe-ms", NULL, NULL, "vs_ms", "vs_4_0", 0, 0, &bv, &err)) ||
+        FAILED(D3DCompile(msaa_src, strlen(msaa_src), "probe-ms", NULL, NULL, "ps_ms", "ps_4_0", 0, 0, &bp, &err))) {
+        P("  msaa compile: %s\n", err ? (const char *)err->GetBufferPointer() : "?");
+        return false;
+    }
+    UINT q4 = 0, qd = 0;
+    dev->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, 4, &q4);
+    dev->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, 4, &qd);
+    if (!q4 || !qd) { P("  msaa: 4x not offered (colour %u levels, depth %u)\n", q4, qd); return false; }
+    ID3D11VertexShader *vs = NULL;
+    ID3D11PixelShader *ps = NULL;
+    HRESULT hr = dev->CreateVertexShader(bv->GetBufferPointer(), bv->GetBufferSize(), NULL, &vs);
+    if (SUCCEEDED(hr)) hr = dev->CreatePixelShader(bp->GetBufferPointer(), bp->GetBufferSize(), NULL, &ps);
+    D3D11_TEXTURE2D_DESC td = { W, H, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 4, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0 };
+    ID3D11Texture2D *ms = NULL, *one = NULL, *dt = NULL;
+    ID3D11RenderTargetView *rtv = NULL;
+    ID3D11DepthStencilView *dsv = NULL;
+    ID3D11DepthStencilState *dss = NULL;
+    if (SUCCEEDED(hr)) hr = dev->CreateTexture2D(&td, NULL, &ms);
+    if (SUCCEEDED(hr)) hr = dev->CreateRenderTargetView(ms, NULL, &rtv);
+    td.SampleDesc.Count = 1;
+    if (SUCCEEDED(hr)) hr = dev->CreateTexture2D(&td, NULL, &one);
+    td.SampleDesc.Count = 4;
+    td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    if (SUCCEEDED(hr)) hr = dev->CreateTexture2D(&td, NULL, &dt);
+    if (SUCCEEDED(hr)) hr = dev->CreateDepthStencilView(dt, NULL, &dsv);
+    D3D11_DEPTH_STENCIL_DESC dd = {};
+    dd.DepthEnable = TRUE; dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL; dd.DepthFunc = D3D11_COMPARISON_LESS;
+    if (SUCCEEDED(hr)) hr = dev->CreateDepthStencilState(&dd, &dss);
+    D3D11_RASTERIZER_DESC rd = {};
+    rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE; rd.MultisampleEnable = TRUE;
+    ID3D11RasterizerState *rs = NULL;
+    if (SUCCEEDED(hr)) hr = dev->CreateRasterizerState(&rd, &rs);
+    if (FAILED(hr)) { P("  msaa: objects 0x%08lx\n", (unsigned long)hr); return false; }
+    const float clear[4] = { 0.1f, 0.1f, 0.15f, 1.0f };
+    c->ClearRenderTargetView(rtv, clear);
+    c->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
+    D3D11_VIEWPORT vp = { 0, 0, (float)W, (float)H, 0, 1 };
+    c->RSSetViewports(1, &vp);
+    c->RSSetState(rs);
+    c->OMSetRenderTargets(1, &rtv, dsv);
+    c->OMSetDepthStencilState(dss, 0);
+    c->IASetInputLayout(NULL);
+    c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    c->VSSetShader(vs, NULL, 0);
+    c->PSSetShader(ps, NULL, 0);
+    c->Draw(6, 0);
+    c->OMSetRenderTargets(0, NULL, NULL);
+    c->OMSetDepthStencilState(NULL, 0);
+    c->RSSetState(NULL);
+    c->ResolveSubresource(one, 0, ms, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
+    bool ok = read_back(dev, c, one, px, W * 4, W * 4, H);
+    R(rs); R(dss); R(dsv); R(dt); R(rtv); R(one); R(ms); R(vs); R(ps); R(bv); R(bp);
+    return ok;
+}
+
 static void ppm(const char *name, const unsigned *px)
 {
     char path[MAX_PATH];
@@ -633,6 +1007,40 @@ int main(int argc, char **argv)
             ppm("d3d11-ours.ppm", ours);
             ppm("d3d11-warp.ppm", warp);
         }
+        /* multisampling: 4x, resolved, on the 10_0 devices (2026-11-27) */
+        if (a_ok && b_ok) {
+            static unsigned mo[W * H], mw[W * H];
+            bool om = msaa_scene(dev, c, mo), wm = msaa_scene(wdev, wc, mw);
+            if (!om || !wm) {
+                P("msaa 4x: ours %s, WARP %s\n", om ? "drawn" : "failed", wm ? "drawn" : "failed");
+                pass = false;
+            } else {
+                /* the three flat colours (clear, the two triangles) are the
+                 * three most common; the rest are edge blends, a few
+                 * hundred with antialiasing and none without */
+                unsigned maxd, off = diff(mo, mw, &maxd), blended = 0, col[16] = {}, cnt[16] = {}, ncol = 0;
+                for (int i = 0; i < W * H; i++) {
+                    unsigned p = mo[i] & 0xffffff, k = 0;
+                    while (k < ncol && col[k] != p) k++;
+                    if (k == ncol && ncol < 16) col[ncol++] = p;
+                    if (k < 16) cnt[k]++;
+                }
+                unsigned big[3] = {};                   /* the three largest counts */
+                for (unsigned k = 0; k < ncol; k++) {
+                    unsigned v = cnt[k];
+                    for (int t = 0; t < 3; t++)
+                        if (v > big[t]) { unsigned s = big[t]; big[t] = v; v = s; }
+                }
+                blended = W * H - big[0] - big[1] - big[2];
+                P("msaa 4x: %u of %u pixels differ by more than 8 (largest %u), %u edge pixels blended in %u colours\n", off, W * H,
+                  maxd, blended, ncol);
+                pass = pass && off < 200 && blended > 200 && blended < 5000;
+                if (argc > 1) {
+                    ppm("d3d11-msaa-ours.ppm", mo);
+                    ppm("d3d11-msaa-warp.ppm", mw);
+                }
+            }
+        }
         /* feature level 10_1: the scene with shader model 4.1 (Gather) */
         {
             static const D3D_FEATURE_LEVEL ten1[] = { D3D_FEATURE_LEVEL_10_1 };
@@ -654,6 +1062,67 @@ int main(int argc, char **argv)
             }
             if (argc > 1) ppm("d3d11-ours-10_1.ppm", ours41);
             R(c41); R(d41); R(wc41); R(w41);
+        }
+        /* feature level 11_0: the compute pipeline and unordered access
+         * against WARP (offered while D3D11FL11 lists this program; none
+         * offered is no failure yet) */
+        {
+            static const D3D_FEATURE_LEVEL eleven[] = { D3D_FEATURE_LEVEL_11_0 };
+            static CsOut co, cw;
+            ID3D11Device *d11 = NULL, *w11 = NULL;
+            ID3D11DeviceContext *c11 = NULL, *wc11 = NULL;
+            hr = D3D11CreateDevice(mine, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, eleven, 1, D3D11_SDK_VERSION, &d11, NULL, &c11);
+            P("compute on ours (11_0): device 0x%08lx\n", (unsigned long)hr);
+            if (SUCCEEDED(hr)) {
+                bool oc = compute(d11, c11, &co);
+                hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, 0, eleven, 1, D3D11_SDK_VERSION, &w11, NULL, &wc11);
+                bool wcok = SUCCEEDED(hr) && compute(w11, wc11, &cw);
+                if (!oc || !wcok) {
+                    P("compute: ours %s, WARP %s\n", oc ? "ran" : "failed", wcok ? "ran" : "failed");
+                    pass = false;
+                } else {
+                    unsigned bad = 0, maxd = 0, ioff = 0;
+                    for (int i = 0; i < 256; i++) bad += co.outb[i] != cw.outb[i];
+                    for (int i = 0; i < 64 * 64; i++) {
+                        unsigned d = 0;
+                        for (int k = 0; k < 32; k += 8) {
+                            int x = (int)((co.img[i] >> k) & 255) - (int)((cw.img[i] >> k) & 255);
+                            d = d > (unsigned)abs(x) ? d : (unsigned)abs(x);
+                        }
+                        maxd = maxd > d ? maxd : d;
+                        ioff += d > 1;
+                    }
+                    P("compute: structured output %u of 256 differ (ours [255] %u, WARP %u)\n", bad, co.outb[255], cw.outb[255]);
+                    P("compute: atomic counter ours %u WARP %u; appended ours %u (sum %u) WARP %u (sum %u)\n", co.counter, cw.counter,
+                      co.appended, co.append_sum, cw.appended, cw.append_sum);
+                    P("compute: pixel shader UAV count ours %u WARP %u\n", co.pixels, cw.pixels);
+                    P("compute: image %u of 4096 pixels differ by more than 1 (largest %u); (0,0) 0x%08x / 0x%08x, (63,63) 0x%08x / 0x%08x\n",
+                      ioff, maxd, co.img[0], cw.img[0], co.img[4095], cw.img[4095]);
+                    pass = pass && !bad && co.counter == cw.counter && co.appended == cw.appended && co.append_sum == cw.append_sum &&
+                           co.pixels == cw.pixels && !ioff;
+                }
+                /* tessellation (step 2) */
+                static unsigned to[W * H], tw[W * H];
+                UINT64 ohs = 0, ods = 0, whs = 0, wds = 0;
+                bool ot = tess_scene(d11, c11, to, &ohs, &ods);
+                bool wt = w11 && tess_scene(w11, wc11, tw, &whs, &wds);
+                if (!ot || !wt) {
+                    P("tessellation: ours %s, WARP %s\n", ot ? "drawn" : "failed", wt ? "drawn" : "failed");
+                    pass = false;
+                } else {
+                    unsigned maxd, off = diff(to, tw, &maxd), drawn = 0;
+                    for (int i = 0; i < W * H; i++) drawn += to[i] != to[0];
+                    P("tessellation: %u of %u pixels differ by more than 8 (largest %u), %u drawn; hull / domain invocations ours %llu / "
+                      "%llu, WARP %llu / %llu\n", off, W * H, maxd, drawn, (unsigned long long)ohs, (unsigned long long)ods,
+                      (unsigned long long)whs, (unsigned long long)wds);
+                    pass = pass && off < 200 && drawn > W * H / 4;   /* the patch covers ~64% of the frame */
+                }
+                if (argc > 1) {
+                    ppm("d3d11-tess-ours.ppm", to);
+                    ppm("d3d11-tess-warp.ppm", tw);
+                }
+                R(c11); R(d11); R(wc11); R(w11);
+            }
         }
         /* Direct3D 10 programs: d3d10.dll's device, and d3d10_1.dll's at
          * 10_1 and at 10_0, against the 10_0 scene on WARP */

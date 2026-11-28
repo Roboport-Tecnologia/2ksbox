@@ -107,7 +107,18 @@ static void sub_box(const D11_RES *r, UINT sub, const D3D10_DDI_BOX *b, UINT box
 /* UpdateSubresource on the host, in tokens of at most tok_max bytes: rows
  * (block rows) of one slice at a time, a buffer's bytes in pieces. src is
  * the region's first byte at the given pitches. */
+static void upload_(D11_DEV *d, D11_RES *r, UINT sub, const BYTE *src, UINT row_pitch, UINT depth_pitch, const D3D10_DDI_BOX *b);
+
 static void upload(D11_DEV *d, D11_RES *r, UINT sub, const BYTE *src, UINT row_pitch, UINT depth_pitch, const D3D10_DDI_BOX *b)
+{
+    ULONG64 t0 = D11_PROF_T0();
+    UINT before = d->used;
+
+    upload_(d, r, sub, src, row_pitch, depth_pitch, b);
+    D11_PROF_ADD(D11P_UPLOAD, t0, d->used > before ? d->used - before : 0);
+}
+
+static void upload_(D11_DEV *d, D11_RES *r, UINT sub, const BYTE *src, UINT row_pitch, UINT depth_pitch, const D3D10_DDI_BOX *b)
 {
     UINT box[6], block, bpe = fmt_bytes(r->r.format, &block), max = tok_max(d), z;
 
@@ -120,7 +131,7 @@ static void upload(D11_DEV *d, D11_RES *r, UINT sub, const BYTE *src, UINT row_p
 
         for (x = box[0]; x < box[3];) {
             UINT n = box[3] - x < max ? box[3] - x : max;
-            d3dpt_d11_update *u = (d3dpt_d11_update *)tok(d, D3DPT_D11_RES_UPDATE, sizeof(*u) + n, 1);
+            d3dpt_d11_update *u = (d3dpt_d11_update *)tok_z(d, D3DPT_D11_RES_UPDATE, sizeof(*u) + n, sizeof(*u), 1);
 
             if (!u) {
                 return;
@@ -153,7 +164,7 @@ static void upload(D11_DEV *d, D11_RES *r, UINT sub, const BYTE *src, UINT row_p
 
             for (y = 0; y < rows; y += per) {
                 UINT n = rows - y < per ? rows - y : per, i;
-                d3dpt_d11_update *u = (d3dpt_d11_update *)tok(d, D3DPT_D11_RES_UPDATE, sizeof(*u) + n * row_bytes, 1);
+                d3dpt_d11_update *u = (d3dpt_d11_update *)tok_z(d, D3DPT_D11_RES_UPDATE, sizeof(*u) + n * row_bytes, sizeof(*u), 1);
                 BYTE *out;
 
                 if (!u) {
@@ -331,14 +342,22 @@ static void APIENTRY d11_create_resource(D3D10DDI_HDEVICE h, const D3D11DDIARG_C
         return;
     }
     if (c->Usage == D3D10_DDI_USAGE_DYNAMIC) {
-        /* the CPU's copy, and the host's as last sent (Unmap sends what changed) */
+        /* the CPU's copy, and the host's as last sent (Unmap sends what
+         * changed). Map hands the copy out, so it is aligned as a GPU
+         * mapping is: Unigine Heaven fills its buffers with movaps, which
+         * faults on the 8-byte alignment a 32-bit process's heap gives
+         * (an access violation every other run in Direct3D 11) */
+        UINT padded;
+
         r->shadow_bytes = bytes ? bytes : 16;
-        r->shadow = (BYTE *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, r->shadow_bytes * 2);
-        r->sent = r->shadow ? r->shadow + r->shadow_bytes : NULL;
-        if (!r->shadow) {
+        padded = (r->shadow_bytes + 63) & ~63u;
+        r->shadow_mem = (BYTE *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, padded * 2 + 63);
+        if (!r->shadow_mem) {
             set_error(d, E_OUTOFMEMORY);
             return;
         }
+        r->shadow = (BYTE *)(((ULONG_PTR)r->shadow_mem + 63) & ~(ULONG_PTR)63);
+        r->sent = r->shadow + padded;
     }
     res_create_tok(d, r);
     if (c->pInitialDataUP) {
@@ -449,10 +468,10 @@ static void APIENTRY d11_destroy_resource(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE
         da.HandleList = &r->kmt;
         d->kt->pfnDeallocateCb(d->rt.handle, &da);
     }
-    if (r->shadow) {
-        HeapFree(GetProcessHeap(), 0, r->shadow);
+    if (r->shadow_mem) {
+        HeapFree(GetProcessHeap(), 0, r->shadow_mem);
     }
-    r->shadow = r->sent = NULL;
+    r->shadow = r->sent = r->shadow_mem = NULL;
     r->kmt = 0;
 }
 
@@ -488,6 +507,7 @@ static void APIENTRY d11_map(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE hr_, UINT su
     const D11_SUB *u;
     BYTE *base;
     HRESULT hr;
+    ULONG64 t0 = D11_PROF_T0();
 
     if (sub >= r->nsub) {
         set_error(d, E_INVALIDARG);
@@ -508,8 +528,7 @@ static void APIENTRY d11_map(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE hr_, UINT su
             r->host_newer = FALSE;
         }
         /* the lock waits for what is submitted: what names it goes first */
-        for (i = 0; i < d->al_n && d->al[i].hAllocation != r->kmt; i++) {
-        }
+        i = al_find(d, r->kmt);
         if (i < d->al_n) {
             cmd_flush(d);
         }
@@ -533,6 +552,67 @@ static void APIENTRY d11_map(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE hr_, UINT su
     out->pData = base + u->offset;
     out->RowPitch = u->row_pitch;
     out->DepthPitch = u->depth_pitch;
+    D11_PROF_ADD(D11P_MAP, t0, 0);
+    if (g_d11_verbose) {
+        umd_log("d3d11: Map dim %u fmt %u %ux%ux%u usage %u sub %u type %u flags 0x%x -> %p row %u depth %u (%s %u bytes at %p)",
+                r->r.dim, r->r.format, r->r.width, r->r.height, r->r.depth, r->r.usage, sub, type, flags, out->pData,
+                u->row_pitch, u->depth_pitch, r->shadow ? "shadow" : "vram", r->shadow ? r->shadow_bytes : r->a.size, base);
+    }
+}
+
+static void d11_unmap_(D11_DEV *d, D11_RES *r, UINT sub);
+
+/* 16 bytes alike? (SSE2 on x86 / x64; words elsewhere). a and b are
+ * 16-byte aligned at every use */
+#if (defined(_M_IX86) || defined(_M_X64)) && !defined(_M_ARM64EC)
+#include <emmintrin.h>
+static __inline BOOL same16(const BYTE *a, const BYTE *b)
+{
+    return _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_load_si128((const __m128i *)a), _mm_load_si128((const __m128i *)b))) == 0xffff;
+}
+#else
+static __inline BOOL same16(const BYTE *a, const BYTE *b)
+{
+    return ((const UINT64 *)a)[0] == ((const UINT64 *)b)[0] && ((const UINT64 *)a)[1] == ((const UINT64 *)b)[1];
+}
+#endif
+
+/* where a and b (64-byte aligned, n bytes) first differ (n: nowhere):
+ * 64 bytes a step while alike (an unrolled SSE2 compare: the byte-wise
+ * memcmp MSVC inlines here was slower than words) */
+static UINT diff_first(const BYTE *a, const BYTE *b, UINT n)
+{
+    UINT i = 0;
+
+    while (n - i >= 64 && same16(a + i, b + i) && same16(a + i + 16, b + i + 16) && same16(a + i + 32, b + i + 32) &&
+           same16(a + i + 48, b + i + 48)) {
+        i += 64;
+    }
+    while (i < n && a[i] == b[i]) {
+        i++;
+    }
+    return i;
+}
+
+/* the end of their last difference, which is after `first` (one) */
+static UINT diff_last(const BYTE *a, const BYTE *b, UINT first, UINT n)
+{
+    UINT e = n;
+
+    while (e > first && (e & 63)) {
+        if (a[e - 1] != b[e - 1]) {
+            return e;
+        }
+        e--;
+    }
+    while (e - first >= 64 && same16(a + e - 64, b + e - 64) && same16(a + e - 48, b + e - 48) &&
+           same16(a + e - 32, b + e - 32) && same16(a + e - 16, b + e - 16)) {
+        e -= 64;
+    }
+    while (e > first && a[e - 1] == b[e - 1]) {
+        e--;
+    }
+    return e;
 }
 
 /* Unmap: a dynamic resource sends what changed since the host last had it
@@ -542,11 +622,18 @@ static void APIENTRY d11_unmap(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE hr_, UINT 
 { D11_TRACE("d11_unmap");
     D11_DEV *d = DEV(h);
     D11_RES *r = RES(hr_);
+    ULONG64 t0 = D11_PROF_T0();
 
     if (!r->mapped) {
         return;
     }
     r->mapped = 0;
+    d11_unmap_(d, r, sub);
+    D11_PROF_ADD(D11P_UNMAP, t0, 0);
+}
+
+static void d11_unmap_(D11_DEV *d, D11_RES *r, UINT sub)
+{
     if (r->shadow) {
         const D11_SUB *u = &r->sub[sub];
 
@@ -554,12 +641,14 @@ static void APIENTRY d11_unmap(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE hr_, UINT 
             UINT n = r->shadow_bytes, first = 0, last;
             D3D10_DDI_BOX b;
 
-            while (first < n && r->shadow[first] == r->sent[first]) first++;
+            /* the changed range (diff_first / diff_last: 4 KB blocks by
+             * memcmp, then words, then bytes; this was a third of the
+             * driver's time in Heaven, ~25 maps of 128 KB buffers a frame) */
+            first = diff_first(r->shadow, r->sent, n);
             if (first == n) {
                 return;
             }
-            last = n;
-            while (last > first && r->shadow[last - 1] == r->sent[last - 1]) last--;
+            last = diff_last(r->shadow, r->sent, first, n);
             b.left = first; b.right = last;
             b.top = b.front = 0; b.bottom = b.back = 1;
             upload(d, r, 0, r->shadow + first, last - first, last - first, &b);

@@ -1,0 +1,47 @@
+slirp_add_unix() and the guest forward it makes (each guest connection to
+an address:port becomes a new connection to a host Unix socket) build on
+Windows as well. Windows 10 1803 and later have AF_UNIX stream sockets
+(afunix.h), and the rest of the path is ordinary Winsock: connect, a
+non-blocking socket handed to the poll callbacks like any other. The
+2ksbox player serves the machine's shared folder on one (track M23,
+QEMU patch 79's guestfwd=...-unix:<path>). open_unix's socket becomes a
+slirp_os_socket, Winsock's 64-bit SOCKET.
+
+diff --git a/src/misc.c b/src/misc.c
+index e5e2164..f732e48 100644
+--- a/src/misc.c
++++ b/src/misc.c
+@@ -6,6 +6,8 @@
+ #include "slirp.h"
+ #ifdef G_OS_UNIX
+ #include <sys/un.h>
++#elif defined(_WIN32)
++#include <afunix.h>
+ #endif
+ 
+ void slirp_insque(void *a, void *b)
+@@ -257,9 +259,9 @@ int fork_exec(struct socket *so, const char *ex)
+ 
+ int open_unix(struct socket *so, const char *unixpath)
+ {
+-#ifdef G_OS_UNIX
++#if defined(G_OS_UNIX) || defined(_WIN32)
+     struct sockaddr_un sa;
+-    int s;
++    slirp_os_socket s;
+ 
+     DEBUG_CALL("open_unix");
+     DEBUG_ARG("so = %p", so);
+diff --git a/src/slirp.c b/src/slirp.c
+index 0fc51a9..8908d54 100644
+--- a/src/slirp.c
++++ b/src/slirp.c
+@@ -1614,7 +1614,7 @@ int slirp_add_exec(Slirp *slirp, const char *cmdline,
+ int slirp_add_unix(Slirp *slirp, const char *unixsock,
+                    struct in_addr *guest_addr, int guest_port)
+ {
+-#ifdef G_OS_UNIX
++#if defined(G_OS_UNIX) || defined(_WIN32)
+     if (!check_guestfwd(slirp, guest_addr, guest_port)) {
+         return -1;
+     }

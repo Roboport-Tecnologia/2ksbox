@@ -126,8 +126,16 @@ enum {
 #define D3DPT_UMD_OP_RETURN 0x8000u
 
 /* the allocation list's entries per submission (the context's
- * AllocationListSize, and what the user-mode driver tracks) */
-#define D3DPT_WDDM_MAX_LIST 64
+ * AllocationListSize, and what the user-mode driver tracks). 64 split a
+ * Direct3D 11 game's frame into ~45 submissions, each a round of
+ * dxgkrnl's scheduling and the device's exits (Unigine Heaven: ~1,850
+ * draws a frame, one buffer each; track M25) */
+#define D3DPT_WDDM_MAX_LIST 512
+
+/* what the kernel driver puts in front of a submission's records (its
+ * registration packet, an entry of 24 bytes on x64 per allocation, and
+ * the packets' headers): the user-mode drivers keep it free */
+#define D3DPT_WDDM_SLACK (4096 + D3DPT_WDDM_MAX_LIST * 24)
 
 /* The command buffer: one header, then records. The kernel driver turns
  * each Render into one DMA buffer: its registration packet, then the

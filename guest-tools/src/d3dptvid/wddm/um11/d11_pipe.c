@@ -48,6 +48,13 @@ static SIZE_T obj_size(void)
 /* a view keeps what made it, in the device's list */
 static void view_keep(D11_DEV *d, D11_OBJ *o, UINT op, const d3dpt_d11_view *t)
 {
+    if (!o->res || !o->res->vram) {
+        /* only a swap chain's buffers and opened surfaces rotate, and they
+         * are in VRAM: a game's thousands of texture views walked at every
+         * flip were ~5% of its driver time (track M25) */
+        o->vop = 0;
+        return;
+    }
     o->vop = op;
     o->view = *t;
     o->vprev = NULL;
@@ -461,7 +468,40 @@ typedef struct SIGS {
     const void *in, *out;
     UINT nin, nout;
     BOOL v11_1;
+    const void *pc;                               /* v35: a hull or domain shader's patch constants */
+    UINT npc;
 } SIGS;
+
+static SIGS sigs_tess(const D3D11DDIARG_TESSELLATION_IO_SIGNATURES *s)
+{
+    SIGS g = { 0 };
+
+    if (s) {
+        g.in = s->pInputSignature;
+        g.out = s->pOutputSignature;
+        g.pc = s->pPatchConstantSignature;
+        g.nin = s->NumInputSignatureEntries;
+        g.nout = s->NumOutputSignatureEntries;
+        g.npc = s->NumPatchConstantSignatureEntries;
+    }
+    return g;
+}
+
+static SIGS sigs_tess1(const D3D11_1DDIARG_TESSELLATION_IO_SIGNATURES *s)
+{
+    SIGS g = { 0 };
+
+    if (s) {
+        g.in = s->pInputSignature;
+        g.out = s->pOutputSignature;
+        g.pc = s->pPatchConstantSignature;
+        g.nin = s->NumInputSignatureEntries;
+        g.nout = s->NumOutputSignatureEntries;
+        g.npc = s->NumPatchConstantSignatureEntries;
+        g.v11_1 = TRUE;
+    }
+    return g;
+}
 
 static SIGS sigs10(const D3D10DDIARG_STAGE_IO_SIGNATURES *s)
 {
@@ -518,6 +558,10 @@ static void shader(D11_DEV *d, D11_OBJ *o, UINT stage, const UINT *code, SIGS sg
     const SIGS *s = &sg;
     UINT dw = code[1], nin = s->nin, nout = s->nout;
     UINT nso = so ? so->NumEntries : 0, i;
+    /* v35: a hull or domain shader's patch-constant signature, counted in
+     * nso, as d3dpt_d11_sig entries where stream output would be */
+    BOOL tess = stage == D3DPT_D11S_HS || stage == D3DPT_D11S_DS;
+    UINT npc = tess ? s->npc : 0;
     d3dpt_d11_shader *t;
     d3dpt_d11_sig *g;
     d3dpt_d11_so *e;
@@ -525,7 +569,7 @@ static void shader(D11_DEV *d, D11_OBJ *o, UINT stage, const UINT *code, SIGS sg
     new_obj(d, o, D3DPT_D11K_SHADER);
     o->extra = stage;
     t = (d3dpt_d11_shader *)tok(d, D3DPT_D11_SHADER_CREATE,
-                                sizeof(*t) + dw * 4 + (nin + nout) * sizeof(*g) + nso * sizeof(*e), 0);
+                                sizeof(*t) + dw * 4 + (nin + nout + npc) * sizeof(*g) + nso * sizeof(*e), 0);
     if (!t) {
         umd_log("d3d11: a shader of %u dwords dropped", dw);
         return;
@@ -547,6 +591,13 @@ static void shader(D11_DEV *d, D11_OBJ *o, UINT stage, const UINT *code, SIGS sg
     }
     for (i = 0; i < nout; i++, g++) {
         sig_put(g, s, s->out, i);
+    }
+    if (tess) {
+        t->nso = npc;
+        for (i = 0; i < npc; i++, g++) {
+            sig_put(g, s, s->pc, i);
+        }
+        return;
     }
     e = (d3dpt_d11_so *)g;
     for (i = 0; i < nso; i++, e++) {
@@ -585,28 +636,30 @@ static void APIENTRY create_gs_so(D3D10DDI_HDEVICE h, const D3D11DDIARG_CREATEGE
     shader(DEV(h), OBJ(hs), D3DPT_D11S_GS, c->pShaderCode, sigs10(s), c);
 }
 
-/* hull, domain and compute shaders come with feature level 11_0 (step 5) */
+/* hull and domain shaders (feature level 11_0, protocol v35): their
+ * control-point signatures and the patch constants between them */
 static void APIENTRY create_hs(D3D10DDI_HDEVICE h, const UINT *code, D3D10DDI_HSHADER hs, D3D10DDI_HRTSHADER rt,
                                const D3D11DDIARG_TESSELLATION_IO_SIGNATURES *s)
 { D11_TRACE("create_hs");
-    (void)code; (void)rt; (void)s;
-    new_obj(DEV(h), OBJ(hs), D3DPT_D11K_SHADER);
-    D11_TODO("CreateHullShader");
+    (void)rt;
+    shader(DEV(h), OBJ(hs), D3DPT_D11S_HS, code, sigs_tess(s), NULL);
 }
 
 static void APIENTRY create_ds(D3D10DDI_HDEVICE h, const UINT *code, D3D10DDI_HSHADER hs, D3D10DDI_HRTSHADER rt,
                                const D3D11DDIARG_TESSELLATION_IO_SIGNATURES *s)
 { D11_TRACE("create_ds");
-    (void)code; (void)rt; (void)s;
-    new_obj(DEV(h), OBJ(hs), D3DPT_D11K_SHADER);
-    D11_TODO("CreateDomainShader");
+    (void)rt;
+    shader(DEV(h), OBJ(hs), D3DPT_D11S_DS, code, sigs_tess(s), NULL);
 }
 
+/* v34: no signatures */
 static void APIENTRY create_cs(D3D10DDI_HDEVICE h, const UINT *code, D3D10DDI_HSHADER hs, D3D10DDI_HRTSHADER rt)
 { D11_TRACE("create_cs");
-    (void)code; (void)rt;
-    new_obj(DEV(h), OBJ(hs), D3DPT_D11K_SHADER);
-    D11_TODO("CreateComputeShader");
+    SIGS none;
+
+    (void)rt;
+    ZeroMemory(&none, sizeof(none));
+    shader(DEV(h), OBJ(hs), D3DPT_D11S_CS, code, none, NULL);
 }
 
 static void APIENTRY destroy_shader(D3D10DDI_HDEVICE h, D3D10DDI_HSHADER s) { D11_TRACE("destroy_shader"); destroy_obj(DEV(h), OBJ(s)); }
@@ -646,9 +699,22 @@ static void APIENTRY destroy_layout(D3D10DDI_HDEVICE h, D3D10DDI_HELEMENTLAYOUT 
 
 /* -------------------------------------------------------------- queries */
 
+/* the most a query's answer takes (Direct3D 11's pipeline statistics,
+ * 88 bytes), fetched whatever size GetData names */
+#define D11_QUERY_BYTES 96
+
 typedef struct D11_QUERY {
     D11_OBJ o;
     UINT type;                                    /* the API's D3D11_QUERY */
+    /* GetData without waiting (track M25): the host's answer goes into
+     * this query's own result page; a lock that does not wait reads it
+     * once the submission that fetched it has run */
+    D11_RES *res;                                 /* the result page, made at the first GetData */
+    UINT seq;                                     /* Ends so far */
+    UINT get_seq;                                 /* the End the fetch in flight answers */
+    BOOL pending;                                 /* a fetch in flight */
+    BOOL have;                                    /* data holds the answer to End seq */
+    BYTE data[D11_QUERY_BYTES];
 } D11_QUERY;
 
 static SIZE_T APIENTRY calc_query(D3D10DDI_HDEVICE h, const D3D10DDIARG_CREATEQUERY *c) { D11_TRACE("calc_query"); (void)h; (void)c; return sizeof(D11_QUERY); }
@@ -672,12 +738,16 @@ static void APIENTRY create_query(D3D10DDI_HDEVICE h, const D3D10DDIARG_CREATEQU
     d3dpt_d11_query *t;
 
     (void)rt;
+    ZeroMemory(q, sizeof(*q));                    /* the runtime's storage comes as it was left */
     new_obj(d, &q->o, D3DPT_D11K_QUERY);
     q->type = query_api((UINT)c->Query);
     if (q->type == ~0u) {
         umd_log("d3d11: CreateQuery %u (a counter): refused", c->Query);
         set_error(d, E_INVALIDARG);
         return;
+    }
+    if (g_d11_verbose) {
+        umd_log("d3d11: CreateQuery %u (API %u) misc 0x%x -> id %u", c->Query, q->type, c->MiscFlags, q->o.id);
     }
     t = (d3dpt_d11_query *)tok(d, D3DPT_D11_QUERY_CREATE, sizeof(*t), 0);
     if (t) {
@@ -687,7 +757,24 @@ static void APIENTRY create_query(D3D10DDI_HDEVICE h, const D3D10DDIARG_CREATEQU
     }
 }
 
-static void APIENTRY destroy_query(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY q) { D11_TRACE("destroy_query"); destroy_obj(DEV(h), OBJ(q)); }
+static void APIENTRY destroy_query(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY hq)
+{ D11_TRACE("destroy_query");
+    D11_DEV *d = DEV(h);
+    D11_QUERY *q = (D11_QUERY *)hq.pDrvPrivate;
+
+    destroy_obj(d, &q->o);
+    if (q->res) {
+        D3DDDICB_DEALLOCATE da;
+
+        cmd_flush(d);                             /* nothing queued may name its page once it is gone */
+        ZeroMemory(&da, sizeof(da));
+        da.NumAllocations = 1;
+        da.HandleList = &q->res->kmt;
+        d->kt->pfnDeallocateCb(d->rt.handle, &da);
+        HeapFree(GetProcessHeap(), 0, q->res);
+        q->res = NULL;
+    }
+}
 
 static void query_tok(D11_DEV *d, UINT op, D3D10DDI_HQUERY q)
 {
@@ -699,21 +786,25 @@ static void query_tok(D11_DEV *d, UINT op, D3D10DDI_HQUERY q)
 }
 
 static void APIENTRY query_begin(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY q) { D11_TRACE("query_begin"); query_tok(DEV(h), D3DPT_D11_QUERY_BEGIN, q); }
-static void APIENTRY query_end(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY q) { D11_TRACE("query_end"); query_tok(DEV(h), D3DPT_D11_QUERY_END, q); }
+static void APIENTRY query_end(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY q)
+{ D11_TRACE("query_end");
+    D11_QUERY *x = (D11_QUERY *)q.pDrvPrivate;
+
+    x->seq++;                                     /* an answer fetched before is no longer the one */
+    x->have = FALSE;
+    query_tok(DEV(h), D3DPT_D11_QUERY_END, q);
+}
 
 #define D11_RESULT_BYTES 4096
 
-/* the result page, made at the first query read: the kernel driver copies
- * a record's result into it (D3DPT_UMD_OP_RETURN), the lock reads it */
+/* a result page: the kernel driver copies a record's result into it
+ * (D3DPT_UMD_OP_RETURN), the lock reads it */
 static D11_RES *result_res(D11_DEV *d)
 {
     D3DDDICB_ALLOCATE al;
     D3DDDI_ALLOCATIONINFO ai;
     D11_RES *r;
 
-    if (d->qres) {
-        return d->qres;
-    }
     r = (D11_RES *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*r));
     if (!r) {
         return NULL;
@@ -734,76 +825,118 @@ static D11_RES *result_res(D11_DEV *d)
         return NULL;
     }
     r->kmt = ai.hAllocation;
-    d->qres = r;
     return r;
 }
 
-/* GetData: the host's answer, without waiting for it (S_FALSE: not yet,
- * the runtime's WASSTILLDRAWING). The RETURN record has the kernel driver
- * copy the next record's result into the result page; that record holds
- * the GET token alone. */
+/* the fetch: a RETURN record, then the GET token alone in its D11 record
+ * (the kernel driver runs it by itself and copies its answer to the page) */
+static BOOL query_fetch(D11_DEV *d, D11_QUERY *q)
+{
+    d3dpt_u32x2 *ret;
+    d3dpt_d11_ref *t;
+    D3DDDI_PATCHLOCATIONLIST *pl;
+    UINT i;
+
+    /* the RETURN and its record in one buffer, which need not be a
+     * fresh one (a flush per fetch was half of Heaven's submissions) */
+    cmd_reserve(d, D3DPT_ALIGN8((UINT)sizeof(d3dpt_cmd) + (UINT)sizeof(*ret)) + (UINT)sizeof(d3dpt_cmd) + (UINT)sizeof(d3dpt_d11) +
+                       (UINT)sizeof(d3dpt_d11_tok) + (UINT)sizeof(*t) + 16, 1);
+    ret = (d3dpt_u32x2 *)cmd_rec(d, D3DPT_UMD_OP_RETURN, sizeof(*ret), 1);
+    /* the result page's VRAM offset, as the RETURN record wants it */
+    i = al_slot(d, q->res->kmt);
+    d->al[i].WriteOperation = 1;
+    pl = &d->pl[d->pl_n++];
+    ZeroMemory(pl, sizeof(*pl));
+    pl->AllocationIndex = i;
+    pl->DriverId = D3DPT_PATCH_OFFSET;
+    pl->PatchOffset = (UINT)((BYTE *)&ret->a - d->buf);
+    ret->b = D11_QUERY_BYTES;
+    t = (d3dpt_d11_ref *)tok(d, D3DPT_D11_QUERY_GET, sizeof(*t), 0);
+    if (!t) {
+        return FALSE;
+    }
+    t->a = q->o.id;
+    t->b = D11_QUERY_BYTES;
+    rec_close(d);
+    q->pending = TRUE;
+    q->get_seq = q->seq;
+    return TRUE;
+}
+
+/* GetData, never waiting (S_FALSE: not yet, the runtime's
+ * WASSTILLDRAWING). It waited before, for the submission that fetched the
+ * answer and so for everything queued ahead of it: Unigine Heaven reads
+ * two pipeline-statistics queries ~3 times a frame, and each read drained
+ * the queue, the game and the GPU taking turns (track M25). Now a fetch
+ * goes out, later calls look whether its submission has run (a lock that
+ * does not wait), and the answer is kept until the next End. */
 static void APIENTRY query_get(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY hq, VOID *data, UINT size, UINT flags)
 { D11_TRACE("query_get");
     D11_DEV *d = DEV(h);
-    D11_RES *res = result_res(d);
-    d3dpt_u32x2 *ret;
-    d3dpt_d11_ref *t;
-    const d3dpt_ret *r;
-    BYTE *mem;
-    HRESULT hr = E_FAIL;
+    D11_QUERY *q = (D11_QUERY *)hq.pDrvPrivate;
+    HRESULT hr = S_FALSE;
+    ULONG64 t0 = D11_PROF_T0();
 
-    (void)flags;
-    if (!res || size > D11_RESULT_BYTES - sizeof(d3dpt_ret)) {
-        set_error(d, E_OUTOFMEMORY);
+    if (size > D11_QUERY_BYTES) {
+        set_error(d, E_INVALIDARG);
         return;
     }
-    cmd_flush(d);                                 /* the RETURN and its record in one buffer */
-    ret = (d3dpt_u32x2 *)cmd_rec(d, D3DPT_UMD_OP_RETURN, sizeof(*ret), 1);
-    {
-        /* the result page's VRAM offset, as the RETURN record wants it */
-        D3DDDI_PATCHLOCATIONLIST *pl;
-        UINT i;
+    if (!q->res) {
+        q->res = result_res(d);
+        if (!q->res) {
+            set_error(d, E_OUTOFMEMORY);
+            return;
+        }
+    }
+    if (q->pending) {
+        if (al_find(d, q->res->kmt) < d->al_n) {
+            /* the fetch is still in the unsubmitted buffer (a DONOTFLUSH
+             * call queued it): a lock now would read the page as it was */
+            if (!(flags & D3D10_DDI_GET_DATA_DO_NOT_FLUSH)) {
+                cmd_flush(d);
+            }
+        } else {
+            HRESULT lk;
+            BYTE *mem = res_lock(d, q->res, TRUE, &lk);
 
-        for (i = 0; i < d->al_n && d->al[i].hAllocation != res->kmt; i++) {
-        }
-        if (i == d->al_n) {
-            ZeroMemory(&d->al[i], sizeof(d->al[i]));
-            d->al[i].hAllocation = res->kmt;
-            d->al[i].WriteOperation = 1;
-            d->al_n++;
-        }
-        pl = &d->pl[d->pl_n++];
-        ZeroMemory(pl, sizeof(*pl));
-        pl->AllocationIndex = i;
-        pl->DriverId = D3DPT_PATCH_OFFSET;
-        pl->PatchOffset = (UINT)((BYTE *)&ret->a - d->buf);
-    }
-    ret->b = size;
-    t = (d3dpt_d11_ref *)tok(d, D3DPT_D11_QUERY_GET, sizeof(*t), 0);
-    if (!t) {
-        set_error(d, E_FAIL);
-        return;
-    }
-    t->a = OBJ(hq)->id;
-    t->b = size;
-    cmd_flush(d);
-    mem = res_lock(d, res, FALSE, &hr);
-    if (mem) {
-        r = (const d3dpt_ret *)mem;
-        hr = (HRESULT)r->hr;
-        if (hr == S_OK && data && size) {
-            CopyMemory(data, r + 1, size);
-        }
-        res_unlock(d, res);
-    }
-    if (hr == S_FALSE) {
-        set_error(d, DXGI_DDI_ERR_WASSTILLDRAWING_);
-    } else if (FAILED(hr)) {
-        static ULONG logged;
+            if (mem) {
+                const d3dpt_ret *r = (const d3dpt_ret *)mem;
+                HRESULT got = (HRESULT)r->hr;
 
-        if (logged++ < 8) {
-            umd_log("d3d11: a query's GetData: the host answered 0x%08x", hr);
+                if (got == S_OK && q->get_seq == q->seq) {
+                    CopyMemory(q->data, r + 1, D11_QUERY_BYTES);
+                    q->have = TRUE;
+                } else if (FAILED(got)) {
+                    static ULONG logged;
+
+                    if (logged++ < 8) {
+                        umd_log("d3d11: a query's GetData: the host answered 0x%08x", got);
+                    }
+                }
+                res_unlock(d, q->res);
+                q->pending = FALSE;
+            } else if (lk != D3DDDIERR_WASSTILLDRAWING) {
+                q->pending = FALSE;               /* fetched again below */
+            }
         }
+    }
+    if (q->have) {
+        hr = S_OK;
+        if (data && size) {
+            CopyMemory(data, q->data, size);
+        }
+    } else if (!q->pending) {
+        /* not answered yet (or the host said not yet): ask, in the buffer
+         * as it is; the frame's own flush sends it, or the next poll does
+         * (above), so a caller that spins still gets its answer */
+        query_fetch(d, q);
+    }
+    if (g_d11_verbose) {
+        umd_log("d3d11: GetData id %u type %u size %u flags 0x%x -> 0x%08x%s", q->o.id, q->type, size, flags, hr,
+                q->pending ? " (fetching)" : "");
+    }
+    D11_PROF_ADD(D11P_QUERY, t0, 0);
+    if (hr != S_OK) {
         set_error(d, DXGI_DDI_ERR_WASSTILLDRAWING_);
     }
 }
@@ -821,16 +954,7 @@ static void APIENTRY set_predication(D3D10DDI_HDEVICE h, D3D10DDI_HQUERY q, BOOL
 
 void d11_pipe_destroy(D11_DEV *d)
 {
-    if (d->qres) {
-        D3DDDICB_DEALLOCATE da;
-
-        ZeroMemory(&da, sizeof(da));
-        da.NumAllocations = 1;
-        da.HandleList = &d->qres->kmt;
-        d->kt->pfnDeallocateCb(d->rt.handle, &da);
-        HeapFree(GetProcessHeap(), 0, d->qres);
-        d->qres = NULL;
-    }
+    (void)d;                                      /* each query frees its own result page */
 }
 
 /* ------------------------------------------------------------- bindings */
@@ -975,9 +1099,63 @@ static void APIENTRY set_targets(D3D10DDI_HDEVICE h, const D3D10DDI_HRENDERTARGE
     d3dpt_d11_list *t;
     UINT i, *ids;
 
-    (void)clear; (void)uav; (void)counts; (void)uav_start; (void)uav_first; (void)uav_size;
-    if (nuav) {
-        D11_TODO("unordered access views at the output merger");
+    (void)clear;
+    if (nuav || uav_size || d->om_uav_any) {
+        /* v34: the slots the runtime names (UAVRangeStart / Size) are set
+         * from its array (UAVStartSlot on) or cleared; the host's API takes
+         * every bound slot in one call, so the shadow's whole bound range
+         * goes, with the initial counts the runtime gave for its own
+         * (~0, kept, for the others) */
+        UINT first = 64, last = 0, newc[64], any = 0;
+        d3dpt_d11_targets *u;
+        UINT *rids, *uids, *cnt;
+
+        for (i = 0; i < 64; i++) {
+            newc[i] = ~0u;
+        }
+        for (i = uav_first; i < uav_first + uav_size && i < 64; i++) {
+            d->om_uav[i] = 0;
+        }
+        for (i = 0; i < nuav && uav_start + i < 64; i++) {
+            d->om_uav[uav_start + i] = obj_id(uav[i].pDrvPrivate);
+            newc[uav_start + i] = counts ? counts[i] : ~0u;
+        }
+        for (i = 0; i < 64; i++) {
+            if (d->om_uav[i]) {
+                first = first < i ? first : i;
+                last = i + 1;
+                any = 1;
+            }
+        }
+        d->om_uav_any = any;
+        if (!any) {
+            first = last = n;                       /* none: every slot unbound */
+        }
+        if (first < n) {
+            first = n;                              /* the API's rule: UAVs after the targets */
+        }
+        if (last < first) {
+            last = first;
+        }
+        u = (d3dpt_d11_targets *)tok(d, D3DPT_D11_SET_TARGETS_UAV, sizeof(*u) + n * 4 + (last - first) * 8, 0);
+        if (!u) {
+            return;
+        }
+        u->dsv = obj_id(dsv.pDrvPrivate);
+        u->nrtv = n;
+        u->uav_start = first;
+        u->nuav = last - first;
+        rids = (UINT *)(u + 1);
+        uids = rids + n;
+        cnt = uids + (last - first);
+        for (i = 0; i < n; i++) {
+            rids[i] = obj_id(rtv[i].pDrvPrivate);
+        }
+        for (i = first; i < last; i++) {
+            uids[i - first] = d->om_uav[i];
+            cnt[i - first] = newc[i];
+        }
+        return;
     }
     t = (d3dpt_d11_list *)tok(d, D3DPT_D11_SET_TARGETS, sizeof(*t) + n * 4, 0);
     if (!t) {
@@ -1106,12 +1284,6 @@ static void APIENTRY draw_auto(D3D10DDI_HDEVICE h)
     tok(DEV(h), D3DPT_D11_DRAW_AUTO, 0, 0);
 }
 
-static void APIENTRY draw_indirect(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT offset)
-{ D11_TRACE("draw_indirect");
-    (void)h; (void)b; (void)offset;
-    D11_TODO("DrawInstancedIndirect");
-}
-
 static void APIENTRY clear_rtv(D3D10DDI_HDEVICE h, D3D10DDI_HRENDERTARGETVIEW v, FLOAT c[4])
 { D11_TRACE("clear_rtv");
     UINT *t = (UINT *)tok(DEV(h), D3DPT_D11_CLEAR_RTV, 20, 0);
@@ -1134,22 +1306,166 @@ static void APIENTRY clear_dsv(D3D10DDI_HDEVICE h, D3D10DDI_HDEPTHSTENCILVIEW v,
     }
 }
 
-/* the compute pipeline and unordered access come with 11_0 (step 5) */
+/* ------------------------------------- the compute pipeline, unordered access
+ * (feature level 11_0, protocol v34) */
+
 static SIZE_T APIENTRY calc_uav(D3D10DDI_HDEVICE h, const D3D11DDIARG_CREATEUNORDEREDACCESSVIEW *c) { D11_TRACE("calc_uav"); (void)h; (void)c; return obj_size(); }
-static void APIENTRY create_uav(D3D10DDI_HDEVICE h, const D3D11DDIARG_CREATEUNORDEREDACCESSVIEW *c, D3D11DDI_HUNORDEREDACCESSVIEW v,
+
+/* the API's UAV dimension and union: a buffer's first element, count and
+ * flags (the DDI's flags are the API's), a texture's mip and slices */
+static void APIENTRY create_uav(D3D10DDI_HDEVICE h, const D3D11DDIARG_CREATEUNORDEREDACCESSVIEW *c, D3D11DDI_HUNORDEREDACCESSVIEW hv,
                                 D3D11DDI_HRTUNORDEREDACCESSVIEW rt)
 { D11_TRACE("create_uav");
-    (void)c; (void)rt;
-    new_obj(DEV(h), OBJ(v), 0);
-    D11_TODO("CreateUnorderedAccessView");
+    D11_DEV *d = DEV(h);
+    D11_OBJ *o = OBJ(hv);
+    D11_RES *r = RES(c->hDrvResource);
+    d3dpt_d11_view *t;
+
+    (void)rt;
+    new_obj(d, o, D3DPT_D11K_UAV);
+    o->res = r;
+    t = (d3dpt_d11_view *)tok(d, D3DPT_D11_UAV_CREATE, sizeof(*t), 1);
+    if (!t) {
+        return;
+    }
+    t->id = o->id;
+    patch_res(d, &t->res, r);
+    t->format = (UINT)c->Format;
+    switch (c->ResourceDimension) {
+    case D3D10DDIRESOURCE_BUFFER:
+    case D3D11DDIRESOURCE_BUFFEREX:
+        t->dim = 1;                                                  /* BUFFER */
+        t->u[0] = c->Buffer.FirstElement;
+        t->u[1] = c->Buffer.NumElements;
+        t->u[2] = c->Buffer.Flags;
+        break;
+    case D3D10DDIRESOURCE_TEXTURE1D:
+        t->u[0] = c->Tex1D.MipSlice;
+        if (c->Tex1D.ArraySize > 1 || c->Tex1D.FirstArraySlice || r->r.array > 1) {
+            t->dim = 3;                                              /* TEXTURE1DARRAY */
+            t->u[1] = c->Tex1D.FirstArraySlice;
+            t->u[2] = c->Tex1D.ArraySize;
+        } else {
+            t->dim = 2;
+        }
+        break;
+    case D3D10DDIRESOURCE_TEXTURE2D:
+        t->u[0] = c->Tex2D.MipSlice;
+        if (c->Tex2D.ArraySize > 1 || c->Tex2D.FirstArraySlice || r->r.array > 1) {
+            t->dim = 5;                                              /* TEXTURE2DARRAY */
+            t->u[1] = c->Tex2D.FirstArraySlice;
+            t->u[2] = c->Tex2D.ArraySize;
+        } else {
+            t->dim = 4;
+        }
+        break;
+    case D3D10DDIRESOURCE_TEXTURE3D:
+        t->dim = 8;                                                  /* TEXTURE3D */
+        t->u[0] = c->Tex3D.MipSlice;
+        t->u[1] = c->Tex3D.FirstW;
+        t->u[2] = c->Tex3D.WSize;
+        break;
+    default:
+        umd_log("d3d11: an unordered access view of dimension %u", c->ResourceDimension);
+        break;
+    }
+    view_keep(d, o, D3DPT_D11_UAV_CREATE, t);
 }
-static void APIENTRY destroy_uav(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v) { D11_TRACE("destroy_uav"); (void)h; (void)v; }
-static void APIENTRY clear_uav_uint(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v, const UINT c[4]) { D11_TRACE("clear_uav_uint"); (void)h; (void)v; (void)c; D11_TODO("ClearUnorderedAccessViewUint"); }
-static void APIENTRY clear_uav_float(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v, const FLOAT c[4]) { D11_TRACE("clear_uav_float"); (void)h; (void)v; (void)c; D11_TODO("ClearUnorderedAccessViewFloat"); }
-static void APIENTRY cs_set_uav(D3D10DDI_HDEVICE h, UINT s, UINT n, const D3D11DDI_HUNORDEREDACCESSVIEW *v, const UINT *c) { D11_TRACE("cs_set_uav"); (void)h; (void)s; (void)n; (void)v; (void)c; }
-static void APIENTRY dispatch(D3D10DDI_HDEVICE h, UINT x, UINT y, UINT z) { D11_TRACE("dispatch"); (void)h; (void)x; (void)y; (void)z; D11_TODO("Dispatch"); }
-static void APIENTRY dispatch_indirect(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT o) { D11_TRACE("dispatch_indirect"); (void)h; (void)b; (void)o; D11_TODO("DispatchIndirect"); }
-static void APIENTRY copy_structure_count(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT o, D3D11DDI_HUNORDEREDACCESSVIEW v) { D11_TRACE("copy_structure_count"); (void)h; (void)b; (void)o; (void)v; D11_TODO("CopyStructureCount"); }
+
+static void APIENTRY destroy_uav(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v)
+{ D11_TRACE("destroy_uav");
+    D11_DEV *d = DEV(h);
+    UINT i;
+
+    for (i = 0; i < 64; i++) {
+        if (OBJ(v)->id && d->om_uav[i] == OBJ(v)->id) {
+            d->om_uav[i] = 0;
+        }
+    }
+    view_drop(d, OBJ(v));
+    destroy_obj(d, OBJ(v));
+}
+
+static void clear_uav(D11_DEV *d, D3D11DDI_HUNORDEREDACCESSVIEW v, const void *c, UINT is_float)
+{
+    d3dpt_d11_clear_uav *t = (d3dpt_d11_clear_uav *)tok(d, D3DPT_D11_CLEAR_UAV, sizeof(*t), 0);
+
+    if (t) {
+        t->id = obj_id(v.pDrvPrivate);
+        t->is_float = is_float;
+        CopyMemory(t->v, c, 16);
+    }
+}
+
+static void APIENTRY clear_uav_uint(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v, const UINT c[4]) { D11_TRACE("clear_uav_uint"); clear_uav(DEV(h), v, c, 0); }
+static void APIENTRY clear_uav_float(D3D10DDI_HDEVICE h, D3D11DDI_HUNORDEREDACCESSVIEW v, const FLOAT c[4]) { D11_TRACE("clear_uav_float"); clear_uav(DEV(h), v, c, 1); }
+
+/* the compute stage's UAVs and their initial counts (~0: kept) */
+static void APIENTRY cs_set_uav(D3D10DDI_HDEVICE h, UINT s, UINT n, const D3D11DDI_HUNORDEREDACCESSVIEW *v, const UINT *c)
+{ D11_TRACE("cs_set_uav");
+    d3dpt_d11_bind *t = (d3dpt_d11_bind *)tok(DEV(h), D3DPT_D11_SET_UAV, sizeof(*t) + n * 8, 0);
+    UINT i, *ids;
+
+    if (!t) {
+        return;
+    }
+    t->stage = D3DPT_D11S_CS;
+    t->start = s;
+    t->n = n;
+    ids = (UINT *)(t + 1);
+    for (i = 0; i < n; i++) {
+        ids[i] = obj_id(v[i].pDrvPrivate);
+        ids[n + i] = c ? c[i] : ~0u;
+    }
+}
+
+static void APIENTRY dispatch(D3D10DDI_HDEVICE h, UINT x, UINT y, UINT z)
+{ D11_TRACE("dispatch");
+    UINT *t = (UINT *)tok(DEV(h), D3DPT_D11_DISPATCH, 12, 0);
+
+    if (t) {
+        t[0] = x;
+        t[1] = y;
+        t[2] = z;
+    }
+}
+
+static void APIENTRY dispatch_indirect(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT o)
+{ D11_TRACE("dispatch_indirect");
+    D11_DEV *d = DEV(h);
+    d3dpt_d11_ref *t = (d3dpt_d11_ref *)tok(d, D3DPT_D11_DISPATCH_INDIRECT, sizeof(*t), 1);
+
+    if (t) {
+        patch_res(d, &t->a, RES(b));
+        t->b = o;
+    }
+}
+
+static void indirect(D11_DEV *d, D3D10DDI_HRESOURCE b, UINT o, UINT indexed)
+{
+    UINT *t = (UINT *)tok(d, D3DPT_D11_DRAW_INDIRECT, 12, 1);
+
+    if (t) {
+        patch_res(d, &t[0], RES(b));
+        t[1] = o;
+        t[2] = indexed;
+    }
+}
+
+static void APIENTRY draw_indirect(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT offset) { D11_TRACE("draw_indirect"); indirect(DEV(h), b, offset, 0); }
+static void APIENTRY draw_indexed_indirect(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT offset) { D11_TRACE("draw_indexed_indirect"); indirect(DEV(h), b, offset, 1); }
+
+static void APIENTRY copy_structure_count(D3D10DDI_HDEVICE h, D3D10DDI_HRESOURCE b, UINT o, D3D11DDI_HUNORDEREDACCESSVIEW v)
+{ D11_TRACE("copy_structure_count");
+    D11_DEV *d = DEV(h);
+    UINT *t = (UINT *)tok(d, D3DPT_D11_COPY_STRUCTURE_COUNT, 12, 1);
+
+    if (t) {
+        patch_res(d, &t[0], RES(b));
+        t[1] = o;
+        t[2] = obj_id(v.pDrvPrivate);
+    }
+}
 
 void d11_pipe_funcs(D3D11DDI_DEVICEFUNCS *f)
 {
@@ -1248,7 +1564,7 @@ void d11_pipe_funcs(D3D11DDI_DEVICEFUNCS *f)
     f->pfnDrawIndexedInstanced = draw_indexed_instanced;
     f->pfnDrawAuto = draw_auto;
     f->pfnDrawInstancedIndirect = draw_indirect;
-    f->pfnDrawIndexedInstancedIndirect = draw_indirect;
+    f->pfnDrawIndexedInstancedIndirect = draw_indexed_indirect;
     f->pfnClearRenderTargetView = clear_rtv;
     f->pfnClearDepthStencilView = clear_dsv;
 
@@ -1369,17 +1685,15 @@ static void APIENTRY create_gs_so1(D3D10DDI_HDEVICE h, const D3D11DDIARG_CREATEG
 static void APIENTRY create_hs1(D3D10DDI_HDEVICE h, const UINT *code, D3D10DDI_HSHADER hs, D3D10DDI_HRTSHADER rt,
                                 const D3D11_1DDIARG_TESSELLATION_IO_SIGNATURES *s)
 { D11_TRACE("create_hs1");
-    (void)code; (void)rt; (void)s;
-    new_obj(DEV(h), OBJ(hs), D3DPT_D11K_SHADER);
-    D11_TODO("CreateHullShader");
+    (void)rt;
+    shader(DEV(h), OBJ(hs), D3DPT_D11S_HS, code, sigs_tess1(s), NULL);
 }
 
 static void APIENTRY create_ds1(D3D10DDI_HDEVICE h, const UINT *code, D3D10DDI_HSHADER hs, D3D10DDI_HRTSHADER rt,
                                 const D3D11_1DDIARG_TESSELLATION_IO_SIGNATURES *s)
 { D11_TRACE("create_ds1");
-    (void)code; (void)rt; (void)s;
-    new_obj(DEV(h), OBJ(hs), D3DPT_D11K_SHADER);
-    D11_TODO("CreateDomainShader");
+    (void)rt;
+    shader(DEV(h), OBJ(hs), D3DPT_D11S_DS, code, sigs_tess1(s), NULL);
 }
 
 /* constant buffers with a window into each (first constant and count, in

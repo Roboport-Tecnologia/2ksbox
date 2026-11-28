@@ -204,6 +204,7 @@ void exec_ddi_device_reset(Exec &x);
 bool exec_d11_op(Batch &b, const d3dpt_cmd *c);
 bool exec_d11_gdi(Batch &b, const d3dpt_cmd *c);   /* v27's GDI record */
 bool exec_d11_available(Exec &x);
+uint32_t exec_d11_msaa(Exec &x);         /* D3DPT_EXEC_FEAT_MSAA's bits, unshifted */
 void exec_d11_sync(Exec &x, uint32_t handle);
 /* the flips' readbacks still owed to VRAM (RES_SCANOUT): those the GPU is
  * done with (wait false: at each batch), or all (the display) */

@@ -340,6 +340,25 @@ overlay) to its desktop, `PLAYER_DUMP` frame #3000 after 53 s, the mingw
 DLL's run 52 s with the same frame. Not done yet: a real speed
 comparison.
 
+**Iterating on the device alone.** A change to `d3dpt/hw/` (or
+`d3dpt_proto.h` / `d3dpt_fb.h`) moves `build.sh`'s prepare stamp, and a
+prepare restores every patched file, so the next `qemu-msvc` stage
+recompiles most of QEMU (~20 min on the PC). While iterating, in
+MINGW64, do what prepare's overlay step does and let ninja take only
+what changed (seconds):
+
+```sh
+rsync -rc --delete --exclude d3dpt_proto.h --exclude d3dpt_fb.h --exclude d3dpt_exec.h d3dpt/hw/ qemu/hw/d3dpt/
+rsync -c d3dpt/d3dpt_proto.h d3dpt/d3dpt_fb.h d3dpt/exec/d3dpt_exec.h qemu/hw/d3dpt/
+ninja -C build/win/qemu-msvc -j 4 qemu-system-i386.exe qemu-img.exe qemu-io.exe \
+  libqemu-embed-i386.dll libqemu-embed-x86_64.dll
+```
+
+The player picks the new embed DLL up from `build/win/qemu-msvc` (it
+imports it by name). The stamp still says a prepare is owed, so the next
+`build.sh` / `build-windows.sh` does the full one; a `D3DPT_PROTO_VERSION`
+bump also needs the `exec` stage (M25, 2026-11-27).
+
 ## OpenGL for a Win98 guest
 
 A Win98 guest's 3D is qemu-3dfx's Mesa pass-through, which needs a GL

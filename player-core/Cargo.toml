@@ -53,8 +53,9 @@ x11rb = { version = "0.13", features = ["randr"] }
 [target.'cfg(windows)'.dependencies]
 # Win32_Graphics_Gdi, Win32_Devices_Display and Wdk_Graphics_Direct3D: the
 # window's screen's refresh and vertical blank, Win32_Graphics_Dwm DWM's
-# composition when that blank is refused (screen.rs)
-windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Devices_Display", "Wdk_Graphics_Direct3D"] }
+# composition when that blank is refused (screen.rs); Win32_Networking_WinSock
+# the shared folder's AF_UNIX listener (share.rs)
+windows-sys = { version = "0.52", features = ["Win32_Media", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Devices_Display", "Wdk_Graphics_Direct3D", "Win32_Networking_WinSock"] }
 # the scanout ring's shared Direct3D 12 resources (d3d12ring.rs, track
 # M26): the version wgpu-hal's Direct3D 12 backend links, so its device
 # and our resources are the same types

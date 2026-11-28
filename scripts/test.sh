@@ -852,7 +852,14 @@ sharing_check() { # Windows 11's clipboard and shared folder, from the form to t
     -qmp stdio -serial none $(printf '%s\n' $a | awk 'p && /^(qemu-vdagent|virtio-serial-pci|virtserialport)/ { print p; print } { p = ($0 == "-chardev" || $0 == "-device") ? $0 : "" }') \
     >"$dir/qemu.out" 2>&1 || { echo "QEMU refused the clipboard channel:"; tail -3 "$dir/qemu.out"; return 1; }
   grep -q '"return"' "$dir/qemu.out" || { echo "QEMU did not answer"; tail -3 "$dir/qemu.out"; return 1; }
-  echo "sharing: the form, the player's options and a real $(basename "$q") agree"
+  # the shared folder's forward to the player's Unix socket (QEMU patch 79;
+  # on Windows libslirp's 03-windows-unix-guestfwd, which it refused before)
+  local sock="$dir/smb.sock"; [ "$OS" = Windows ] && sock="$(cygpath -m "$sock")"
+  printf '{"execute":"qmp_capabilities"}\n{"execute":"quit"}\n' | timeout 30 $qrun -machine $board -m 128 -display none -S \
+    -qmp stdio -serial none -netdev "user,id=n0,guestfwd=tcp:10.0.2.4:445-unix:$sock" \
+    >"$dir/qemu-fwd.out" 2>&1 || { echo "QEMU refused the shared folder's forward:"; tail -3 "$dir/qemu-fwd.out"; return 1; }
+  grep -q '"return"' "$dir/qemu-fwd.out" || { echo "QEMU did not answer with the forward"; tail -3 "$dir/qemu-fwd.out"; return 1; }
+  echo "sharing: the form, the player's options and a real $(basename "$q") agree (clipboard channel, folder forward)"
 }
 win11snap_check() { # a Windows 11 machine's offline snapshot holds its firmware variables and TPM (M20)
   local rc=0 dir="$OUT/win11snap" img=$QIMG bundle bdir vars tpm copy

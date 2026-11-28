@@ -182,6 +182,7 @@ fi
 [ -x "$QEMU" ] || { echo "no QEMU at $QEMU (QEMU_BIN= to point elsewhere)"; exit 1; }
 [ -n "${GUEST_CMD:-}" ] || { echo "GUEST_CMD= is required (the RUN.BAT body)"; exit 1; }
 rm -rf "$OUT"; mkdir -p "$OUT/shots" "$OUT/frames" "$(dirname "$SOCK")" "$(dirname "$RAW")"
+echo "$SOCK" > "$OUT/qmp.addr"   # for a driver script beside this one (w98-3dmark2001.sh): Windows' port is per run
 
 if [ ! -f "$RAW" ] || [ "${FRESH:-0}" = 1 ]; then
   echo "==> raw copy of $IMG (the user's image is never written)"

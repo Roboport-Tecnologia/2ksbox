@@ -476,6 +476,14 @@ beside that d3d9.
   `RES_UPDATE`, which is the guest's UpdateSubresource and its dynamic
   resources' maps alike, and a map is never predicated. Found by
   `d3dgame11 -compare` (its red marker drew).
+- **A windowed RGBA game's present is a copy on the host** (protocol
+  v32, track M25, 2026-11-27). A blt-model window presents into a
+  STAGING surface Windows then copies into the window's bitmap with the
+  CPU; the host's GDI copy reads an A8B8G8R8 / X8B8G8R8 source (an
+  R8G8B8A8 swap chain's buffer) through an RGBA staging texture and
+  swaps red and blue, so the surface gets BGRA. Before it the kernel
+  driver read such a frame back and copied it through the BAR, red for
+  blue. Only as a copy's source and only into VRAM.
 - **One process cannot name another's objects** (protocol v31, the
   review pass, 2026-10-25). Every guest process shares the host's one
   device and its handle tables, so the WDDM kernel driver keeps them

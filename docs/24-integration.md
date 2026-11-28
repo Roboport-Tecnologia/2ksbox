@@ -64,12 +64,17 @@ guest SMB client ─TCP→ 10.0.2.4:445 (slirp) ─AF_UNIX→ <runtime dir>/smb.
   connection holds at most 512 opens (each is a host descriptor) and 128
   change notifications (`STATUS_INSUFFICIENT_RESOURCES` past them), an RPC pipe buffers at most
   1 MiB either way, and the share's own folder cannot be deleted.
-- `slirp_add_unix` is `G_OS_UNIX` only. Windows 10 and later have
-  `AF_UNIX` (`afunix.h`), so Windows hosts need a `patches/deps/libslirp`
-  patch that turns it on there. That patch is not written yet (M23 step
-  7); the shared folder works on macOS and Linux hosts.
+- `slirp_add_unix` is `G_OS_UNIX` only upstream. Windows 10 1803 and
+  later have `AF_UNIX` stream sockets (`afunix.h`), and
+  `patches/deps/libslirp/03-windows-unix-guestfwd` turns it on there
+  (M23 step 7, 2026-11-27). `std` has no Unix-socket listener on
+  Windows, so `share.rs` binds and accepts through Winsock and reads and
+  writes each connection as a `TcpStream` (`recv` / `send` are any
+  stream socket's).
 - **The socket is the security boundary.** It sits in a per-run
-  directory only the user can open (mode 0700), and slirp exposes it
+  directory only the user can open (mode 0700 on Unix; on Windows the
+  user's own temporary folder's ACL, which the new folder inherits and
+  an `AF_UNIX` connect checks), and slirp exposes it
   only at 10.0.2.4 on the guest's NAT. So the credentials can be a fixed
   pair (`2ksbox` / `2ksbox`). They exist because Windows 11 refuses guest
   logons, not to keep anyone out.

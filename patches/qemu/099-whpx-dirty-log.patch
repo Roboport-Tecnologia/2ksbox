@@ -9,11 +9,18 @@ map it again with or without the flag, and log_sync takes the pages the
 guest wrote from WHvQueryGpaRangeDirtyBitmap (which clears them) into
 QEMU's bitmap. A hypervisor without the call, or an unaligned section,
 keeps the old whole-section answer; WHPX_DIRTY_TRACK=0 is the A/B.
+A region may name one range to leave untracked (MemoryRegion's
+dirty_track_skip_offset / size, set by a device; reported always dirty):
+d3dpt-vga's command window, which no display scans and into which the
+host appends megabytes of records a frame. Tracked, every host write
+there cost the hypervisor's tracking (an append ~0.4 ms, ~0.16 ms with
+WHPX_DIRTY_TRACK=0; track M25). The section is mapped and queried in up
+to three pieces.
 Applies after patch 89, the other whpx-common.c one.
 Drop when upstream WHPX tracks dirty pages.
 
 diff --git a/accel/whpx/whpx-common.c b/accel/whpx/whpx-common.c
-index e75efac..a6066b9 100644
+index e75efac..c582a81 100644
 --- a/accel/whpx/whpx-common.c
 +++ b/accel/whpx/whpx-common.c
 @@ -14,6 +14,7 @@
@@ -24,7 +31,7 @@ index e75efac..a6066b9 100644
  #include "system/whpx.h"
  #include "system/cpus.h"
  #include "system/runstate.h"
-@@ -285,6 +286,27 @@ void whpx_vcpu_kick(CPUState *cpu)
+@@ -285,6 +286,82 @@ void whpx_vcpu_kick(CPUState *cpu)
   * Memory support.
   */
  
@@ -49,27 +56,79 @@ index e75efac..a6066b9 100644
 +           (memory_region_get_dirty_log_mask(mr) & ~(1 << DIRTY_MEMORY_CODE));
 +}
 +
++/*
++ * 2ksbox: the pieces of a section, in region offsets, tracked or not: the
++ * region's dirty_track_skip range (a device's command window) is left
++ * untracked. Returns how many (1 to 3).
++ */
++typedef struct WhpxPiece {
++    uint64_t start, end;
++    bool track;
++} WhpxPiece;
++
++static int whpx_pieces(MemoryRegion *mr, uint64_t off, uint64_t size, WhpxPiece *p)
++{
++    uint64_t s0 = MAX(mr->dirty_track_skip_offset, off);
++    uint64_t s1 = MIN(mr->dirty_track_skip_offset + mr->dirty_track_skip_size, off + size);
++    int n = 0;
++
++    if (!mr->dirty_track_skip_size || s1 <= s0) {
++        p[0] = (WhpxPiece){ off, off + size, true };
++        return 1;
++    }
++    if (s0 > off) {
++        p[n++] = (WhpxPiece){ off, s0, true };
++    }
++    p[n++] = (WhpxPiece){ s0, s1, false };
++    if (s1 < off + size) {
++        p[n++] = (WhpxPiece){ s1, off + size, true };
++    }
++    return n;
++}
++
++/* a tracked section mapped piece by piece; false (nothing left mapped) if
++ * the hypervisor refuses tracking */
++static bool whpx_map_tracked(MemoryRegionSection *section, void *mem, uint64_t gva,
++                             uint64_t size, WHV_MAP_GPA_RANGE_FLAGS flags)
++{
++    struct whpx_state *whpx = &whpx_global;
++    uint64_t off = section->offset_within_region;
++    WhpxPiece p[3];
++    int n = whpx_pieces(section->mr, off, size, p), i;
++
++    for (i = 0; i < n; i++) {
++        HRESULT hr = whp_dispatch.WHvMapGpaRange(whpx->partition, (uint8_t *)mem + (p[i].start - off),
++                                                 gva + (p[i].start - off), p[i].end - p[i].start,
++                                                 flags | (p[i].track ? WHvMapGpaRangeFlagTrackDirtyPages : 0));
++        if (FAILED(hr)) {
++            while (i-- > 0) {
++                whp_dispatch.WHvUnmapGpaRange(whpx->partition, gva + (p[i].start - off), p[i].end - p[i].start);
++            }
++            warn_report_once("WHPX: no dirty page tracking (0x%08lx)", (unsigned long)hr);
++            return false;
++        }
++    }
++    return true;
++}
++
  static void whpx_set_phys_mem(MemoryRegionSection *section, bool add)
  {
      struct whpx_state *whpx = &whpx_global;
-@@ -330,6 +352,16 @@ static void whpx_set_phys_mem(MemoryRegionSection *section, bool add)
+@@ -330,6 +407,13 @@ static void whpx_set_phys_mem(MemoryRegionSection *section, bool add)
       | (writable ? WHvMapGpaRangeFlagWrite : 0);
      mem = memory_region_get_ram_ptr(area) + section->offset_within_region;
  
 +    if (whpx_dirty_track(area, writable)) {
-+        hr = whp_dispatch.WHvMapGpaRange(whpx->partition, mem, gva, size,
-+                                         flags | WHvMapGpaRangeFlagTrackDirtyPages);
-+        if (SUCCEEDED(hr)) {
++        if (whpx_map_tracked(section, mem, gva, size, flags)) {
 +            return;
 +        }
 +        /* a hypervisor without it: log_sync's query then fails, and the
 +         * whole section is dirty at every sync, as before */
-+        warn_report_once("WHPX: no dirty page tracking (0x%08lx)", (unsigned long)hr);
 +    }
      hr = whp_dispatch.WHvMapGpaRange(whpx->partition,
           mem, gva, size, flags);
      if (FAILED(hr)) {
-@@ -392,16 +424,66 @@ static void whpx_transaction_commit(MemoryListener *listener)
+@@ -392,16 +476,81 @@ static void whpx_transaction_commit(MemoryListener *listener)
  {
  }
  
@@ -117,17 +176,32 @@ index e75efac..a6066b9 100644
 +    if (whp_dispatch.WHvQueryGpaRangeDirtyBitmap &&
 +        QEMU_IS_ALIGNED(size, page_size) && QEMU_IS_ALIGNED(gpa, page_size)) {
 +        /* the pages written since the last query, which clears them: one
-+         * bit a page, little endian in 64-bit words as QEMU's lebitmap */
-+        uint64_t pages = size / page_size;
-+        UINT32 bytes = DIV_ROUND_UP(pages, 64) * 8;
-+        g_autofree uint64_t *bitmap = g_malloc0(bytes);
++         * bit a page, little endian in 64-bit words as QEMU's lebitmap;
++         * a piece left untracked (whpx_pieces) is all dirty */
++        uint64_t off = section->offset_within_region;
++        WhpxPiece p[3];
++        int n = whpx_pieces(mr, off, size, p), i;
++        bool ok = true;
 +
-+        if (SUCCEEDED(whp_dispatch.WHvQueryGpaRangeDirtyBitmap(
-+                whpx->partition, gpa, size, bitmap, bytes))) {
-+            physical_memory_set_dirty_lebitmap(
-+                (unsigned long *)bitmap,
-+                memory_region_get_ram_addr(mr) + section->offset_within_region,
-+                pages);
++        for (i = 0; i < n && ok; i++) {
++            uint64_t psize = p[i].end - p[i].start, pages = psize / page_size;
++            UINT32 bytes = DIV_ROUND_UP(pages, 64) * 8;
++            g_autofree uint64_t *bitmap = NULL;
++
++            if (!p[i].track) {
++                memory_region_set_dirty(mr, p[i].start, psize);
++                continue;
++            }
++            bitmap = g_malloc0(bytes);
++            ok = SUCCEEDED(whp_dispatch.WHvQueryGpaRangeDirtyBitmap(
++                     whpx->partition, gpa + (p[i].start - off), psize, bitmap, bytes));
++            if (ok) {
++                physical_memory_set_dirty_lebitmap(
++                    (unsigned long *)bitmap,
++                    memory_region_get_ram_addr(mr) + p[i].start, pages);
++            }
++        }
++        if (ok) {
 +            return;
 +        }
 +    }
@@ -137,7 +211,7 @@ index e75efac..a6066b9 100644
  }
  
  static MemoryListener whpx_memory_listener = {
-@@ -410,6 +492,8 @@ static MemoryListener whpx_memory_listener = {
+@@ -410,6 +559,8 @@ static MemoryListener whpx_memory_listener = {
      .commit = whpx_transaction_commit,
      .region_add = whpx_region_add,
      .region_del = whpx_region_del,
@@ -145,6 +219,25 @@ index e75efac..a6066b9 100644
 +    .log_stop = whpx_log_stop,
      .log_sync = whpx_log_sync,
      .priority = MEMORY_LISTENER_PRIORITY_ACCEL,
+ };
+diff --git a/include/system/memory.h b/include/system/memory.h
+index 2192fc9..b3ba4ba 100644
+--- a/include/system/memory.h
++++ b/include/system/memory.h
+@@ -604,6 +604,14 @@ struct MemoryRegion {
+ 
+     /* For devices designed to perform re-entrant IO into their own IO MRs */
+     bool disable_reentrancy_guard;
++    /*
++     * 2ksbox (patch 99): a range of this RAM region (offsets, page aligned)
++     * an accelerator that tracks dirty pages may leave untracked and report
++     * as always dirty. WHPX honours it: d3dpt-vga's command window, which
++     * no display scans and the host writes megabytes a frame into, cost
++     * every host write the hypervisor's tracking.
++     */
++    uint64_t dirty_track_skip_offset, dirty_track_skip_size;
+     /* RAM device region that does not require IOMMU mapping for P2P */
+     bool ram_device_skip_iommu_map;
  };
 diff --git a/include/system/whpx-internal.h b/include/system/whpx-internal.h
 index c295c5a..926e9bb 100644

@@ -30,6 +30,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #include "d3dpt_exec_int.h"
+#include "d3dpt_blt.h"   /* the converting Blt's shaders (d3dpt_blt.hlsl) */
 #include <d3d11_1.h>
 #include <dxgi.h>
 #ifdef D3DPT_RING
@@ -126,6 +127,9 @@ struct D11Ctx {
     ID3DDeviceContextState *state = nullptr;
     std::unordered_map<uint32_t, D11Obj> objs;
     uint32_t rtv[8] = {}, nrtv = 0, dsv = 0;    /* the bound targets (ids), whose resources a draw marks newer */
+    /* v34: the UAVs bound (ids) at the output merger, which a draw marks
+     * newer too, and at the compute stage, which a dispatch marks */
+    uint32_t om_uav[D3D11_1_UAV_SLOT_COUNT] = {}, cs_uav[D3D11_1_UAV_SLOT_COUNT] = {};
     bool pred_skip = false;                     /* the predicate set holds: predicated operations are skipped (SET_PREDICATION) */
     void release() {
         for (auto &kv : objs) if (kv.second.p) kv.second.p->Release();
@@ -141,6 +145,21 @@ struct D11 {
     ID3D11DeviceContext1 *ctx = nullptr;
     ID3DDeviceContextState *idle = nullptr;     /* the state while no guest context is in */
     uint32_t cur = 0;                           /* the guest context whose state is in */
+    /* the converting / scaling Blt (blt_draw): its own context state, so
+     * the guest context's bindings are never touched, its shaders
+     * (d3dpt_blt.hlsl), and a source and target texture kept for the last
+     * size and format asked */
+    struct BltKit {
+        bool tried = false, ok = false;
+        ID3DDeviceContextState *state = nullptr;
+        ID3D11VertexShader *vs = nullptr;
+        ID3D11PixelShader *ps = nullptr;
+        ID3D11SamplerState *point = nullptr, *linear = nullptr;
+        ID3D11Texture2D *src = nullptr, *dst = nullptr;
+        ID3D11ShaderResourceView *srv = nullptr;
+        ID3D11RenderTargetView *rtv = nullptr;
+        uint32_t src_w = 0, src_h = 0, src_fmt = 0, dst_w = 0, dst_h = 0, dst_fmt = 0;
+    } bk;
     std::unordered_map<uint32_t, D11Res> res;
     std::unordered_map<uint32_t, D11Ctx> ctxs;
     uint64_t res_bytes = 0;                     /* every resource's host memory, against D11_RES_BUDGET */
@@ -149,17 +168,23 @@ struct D11 {
      * operations, grown to the largest rectangle read (in steps of 64),
      * one per role, so one operation reads its destination, source and
      * coverage at once; and the copy an overlapping scroll goes through */
-    enum { GDI_D, GDI_S, GDI_A, GDI_TMP, GDI_N };
+    enum { GDI_D, GDI_S, GDI_A, GDI_TMP, GDI_SRGBA, GDI_N };   /* GDI_SRGBA: an RGBA source's staging (v32) */
     struct GdiTex { ID3D11Texture2D *tex = nullptr; uint32_t w = 0, h = 0; } gdi_tex[GDI_N];
     std::unordered_map<uint32_t, int> warned;
     bool warn(uint32_t key) { return warned[key]++ == 0; }
+    uint32_t layout_fails = 0;                  /* input layouts refused and logged in full */
     /* D3DPT_D11_PROF set: each token kind's count and time, logged every 5 s;
      * 64 + op the GDI records (v27: COPY, FILL, REFRESH, SYNC); 72 and up
      * are parts of one (not in the total): 72 a readback's wait for its
      * staging copy (the GPU), 73 its copy into VRAM */
     bool prof = false;
+    /* each record's commands go to the GPU when the record ends, so the
+     * frame renders while the guest builds the rest of it rather than
+     * from the present's readback on (D3DPT_D11_FLUSH=0 leaves it to
+     * DXVK's own heuristics) */
+    bool flush_each = true;
     std::chrono::steady_clock::time_point prof_t0;
-    uint64_t prof_ns[128] = {}, prof_n[128] = {};
+    uint64_t prof_ns[128] = {}, prof_n[128] = {}, prof_bytes[128] = {};
     /* v28: flips' readbacks copied to staging and not yet into VRAM
      * (RES_SCANOUT): an allocation's subresources first..last-1 */
     struct Owed { uint32_t h, first, last; };
@@ -390,6 +415,21 @@ std::vector<SigEntry> sig_entries(const d3dpt_d11_sig *s, uint32_t n, bool vs_in
             x.name = "SV_Target";
             x.index = s[i].reg;
             x.sv = 64;
+        } else if (x.sv >= 11 && x.sv <= 22) {
+            /* v35: the tessellation factors, which the DDI names as the
+             * bytecode does (one name per edge, D3D11_SB_NAME 11-22) and the
+             * container by kind and index (D3D_NAME 11-16) */
+            static const struct { uint8_t name, index; bool inside; } tf[12] = {
+                { 11, 0, false }, { 11, 1, false }, { 11, 2, false }, { 11, 3, false },   /* quad edges U0 V0 U1 V1 */
+                { 12, 0, true }, { 12, 1, true },                                         /* quad inside U V */
+                { 13, 0, false }, { 13, 1, false }, { 13, 2, false },                     /* triangle edges U V W */
+                { 14, 0, true },                                                          /* triangle inside */
+                { 15, 1, false }, { 16, 0, false },                                       /* line detail, density */
+            };
+            const auto &f = tf[x.sv - 11];
+            x.name = f.inside ? "SV_InsideTessFactor" : "SV_TessFactor";
+            x.index = f.index;
+            x.sv = f.name;
         } else if (x.sv && x.sv < sizeof(sv_names) / sizeof(*sv_names)) {
             x.name = sv_names[x.sv];
             x.index = x.sv == 2 ? clip++ : x.sv == 3 ? cull++ : 0;
@@ -510,6 +550,7 @@ bool d11_open(Exec &x, D11 &d)
     d.ctx->SwapDeviceContextState(d.idle, nullptr);
     x.log("d11: Direct3D 11 device (%s), feature level 0x%x", where.c_str(), (unsigned)got);
     d.prof = env("D3DPT_D11_PROF") != nullptr;
+    if (const char *e = env("D3DPT_D11_FLUSH")) d.flush_each = atoi(e) != 0;
     d.prof_t0 = std::chrono::steady_clock::now();
     return true;
 }
@@ -742,19 +783,27 @@ void scans_forget(D11 &d, uint32_t h)
         it = it->second.h == h ? d.scans.erase(it) : std::next(it);
 }
 
+bool blt_draw_res(Exec &x, D11 &d, ID3D11Resource *src_res, uint32_t src_fmt, uint32_t src_sub, uint32_t sw, uint32_t sh,
+                  ID3D11Resource *dst_res, uint32_t dst_fmt, uint32_t dst_sub, uint32_t left, uint32_t top, uint32_t w, uint32_t h);
+
 /* A flip's frame into the scanout ring's next slot, on the GPU, instead of
  * a readback (M26): a 2D BGRA8 texture of the ring's size, one sample,
  * whose first subresource is the page the flip shows. VRAM keeps its
  * older pixels and the resource stays `newer`, so whatever reads that
  * VRAM later reads it back first (exec_d11_sync, d3dpt_exec_scanout_vram).
+ * An RGBA8 frame (a full-screen R8G8B8A8 swap chain's, flipping in a mode
+ * of its own format since register set v17) is drawn into the slot in the
+ * slot's order (blt_draw_res); a plain copy moved its bytes as they were.
  * False: not one for the ring, read back as before. */
 bool ring_take(Exec &x, D11 &d, uint32_t h, D11Res &r)
 {
     uint32_t off;
+    const bool bgra = r.d.format == 87 || r.d.format == 91;   /* B8G8R8A8_UNORM (_SRGB) */
+    const bool rgba = r.d.format == 28 || r.d.format == 29;   /* R8G8B8A8_UNORM (_SRGB) */
     /* the offset only: vram_of syncs, and the last frame of this buffer
      * would come back into VRAM (a 33 MB readback at 3840x2160 a flip) */
     if (d.ring.empty() || r.d.dim != 3 || r.d.width != d.ring_w || r.d.height != d.ring_h ||
-        r.d.samples > 1 || (r.d.format != 87 && r.d.format != 91) || r.layout.empty() || !r.res ||
+        r.d.samples > 1 || (!bgra && !rgba) || r.layout.empty() || !r.res ||
         !exec_ddi_vram_offset(x, h, &off))
         return false;
     /* the next slot the player does not hold (all held: read back), one
@@ -780,7 +829,19 @@ bool ring_take(Exec &x, D11 &d, uint32_t h, D11Res &r)
         auto er = d.res.find(e);
         if (er != d.res.end() && er->second.newer && er->second.res) res_readback(x, d, e, er->second, ~0u, true, false);
     }
-    d.ctx->CopySubresourceRegion(s.tex, 0, 0, 0, 0, r.res, 0, nullptr);
+    if (bgra) {
+        d.ctx->CopySubresourceRegion(s.tex, 0, 0, 0, 0, r.res, 0, nullptr);
+    } else {
+        D3D11_TEXTURE2D_DESC sd;
+        s.tex->GetDesc(&sd);
+        if (!blt_draw_res(x, d, r.res, r.d.format, 0, r.d.width, r.d.height, s.tex, (uint32_t)sd.Format, 0, 0, 0, r.d.width,
+                          r.d.height)) {
+            if (d.warn(0x64000000u | (r.d.format & 0xff)))
+                x.log("d11: an RGBA frame (format %u) could not be drawn into the scanout ring: read back instead", r.d.format);
+            d.ring_next = k;                    /* the slot was not used */
+            return false;
+        }
+    }
     d.ctx->End(s.done);
     d.ctx->Flush();                             /* submitted now: the display polls it */
     d.scans[page] = { h, k };
@@ -827,6 +888,9 @@ bool stage_to_vram(Exec &x, D11 &d, uint32_t h, D11Res &r, uint32_t first, uint3
         uint32_t w, ht, depth, rows, row_bytes;
         sub_dims(r, i, w, ht, depth, rows, row_bytes);
         uint32_t row = std::min(row_bytes, l.row_pitch);
+        if (row_bytes > l.row_pitch && d.warn(0x63000000u | (r.d.format & 0xff)))
+            x.log("d11: resource %u (%ux%u format %u) read back into a layout of %u-byte rows, %u rows: cropped (said once per format)", h,
+                  r.d.width, r.d.height, r.d.format, l.row_pitch, rows);
         if ((uint64_t)l.offset + (uint64_t)l.depth_pitch * (depth - 1) + (uint64_t)l.row_pitch * (rows - 1) + row <= bytes) {
             for (uint32_t z = 0; z < depth; z++)
                 for (uint32_t y = 0; y < rows; y++)
@@ -982,6 +1046,16 @@ void mark(Run &r, uint32_t h)
     if (x && !x->layout.empty()) x->newer = true;
 }
 
+/* v34: what the UAVs bound in a set of slots can write */
+void mark_uavs(Run &r, const uint32_t *ids)
+{
+    for (uint32_t i = 0; i < D3D11_1_UAV_SLOT_COUNT; i++) {
+        if (!ids[i]) continue;
+        auto it = r.c.objs.find(ids[i]);
+        if (it != r.c.objs.end()) mark(r, it->second.res);
+    }
+}
+
 void mark_targets(Run &r)
 {
     for (uint32_t i = 0; i < r.c.nrtv; i++) {
@@ -990,6 +1064,7 @@ void mark_targets(Run &r)
     }
     auto it = r.c.objs.find(r.c.dsv);
     if (r.c.dsv && it != r.c.objs.end()) mark(r, it->second.res);
+    mark_uavs(r, r.c.om_uav);
 }
 
 ID3D11Resource *res_ref(Run &r, uint32_t h)
@@ -1008,9 +1083,14 @@ void create_shader(Run &r, const d3dpt_d11_shader *s, uint32_t size)
 {
     /* the API's limits first (32 signature registers a side, a few entries
      * per register; 64 stream output entries), then sizes in 64 bits */
-    if (s->nin > 128 || s->nout > 128 || s->nso > 64) { r.fail(E_INVALIDARG); return; }
+    /* v35: a hull or domain shader's nso counts its patch-constant
+     * signature entries, which follow the output signature */
+    const bool tess = s->stage == D3DPT_D11S_HS || s->stage == D3DPT_D11S_DS;
+    const uint32_t npc = tess ? s->nso : 0, nso = tess ? 0 : s->nso;
+    if (s->nin > 128 || s->nout > 128 || npc > 128 || nso > 64) { r.fail(E_INVALIDARG); return; }
     uint64_t need = sizeof(*s) + (uint64_t)s->code_dwords * 4 + (uint64_t)s->nin * sizeof(d3dpt_d11_sig) +
-                    (uint64_t)s->nout * sizeof(d3dpt_d11_sig) + (uint64_t)s->nso * sizeof(d3dpt_d11_so);
+                    (uint64_t)s->nout * sizeof(d3dpt_d11_sig) + (uint64_t)npc * sizeof(d3dpt_d11_sig) +
+                    (uint64_t)nso * sizeof(d3dpt_d11_so);
     if (need > size || s->code_dwords < 2 || s->stage >= D3DPT_D11S_COUNT) { r.fail(E_INVALIDARG); return; }
     const uint32_t *code = (const uint32_t *)(s + 1);
     if (code[1] != s->code_dwords) { r.fail(E_INVALIDARG); return; }    /* the program's own length (dword 1) */
@@ -1020,12 +1100,21 @@ void create_shader(Run &r, const d3dpt_d11_shader *s, uint32_t size)
     std::vector<uint8_t> shex((const uint8_t *)code, (const uint8_t *)(code + s->code_dwords));
     auto isgn = sig_entries(in, s->nin, s->stage == D3DPT_D11S_VS, false, true);
     auto osgn = sig_entries(out, s->nout, false, s->stage == D3DPT_D11S_PS, false);
-    auto blob = dxbc({ { "ISGN", sig_chunk(isgn) }, { "OSGN", sig_chunk(osgn) }, { major >= 5 ? "SHEX" : "SHDR", shex } });
+    /* v35: the patch constants, a hull shader's outputs and a domain
+     * shader's inputs, in their own chunk */
+    std::vector<std::pair<const char *, std::vector<uint8_t>>> chunks = { { "ISGN", sig_chunk(isgn) }, { "OSGN", sig_chunk(osgn) } };
+    if (tess) chunks.push_back({ "PCSG", sig_chunk(sig_entries(out + s->nout, npc, false, false, s->stage == D3DPT_D11S_DS)) });
+    chunks.push_back({ major >= 5 ? "SHEX" : "SHDR", shex });
+    auto blob = dxbc(chunks);
     HRESULT hr = E_INVALIDARG;
     IUnknown *p = nullptr;
     switch (s->stage) {
+    case D3DPT_D11S_HS: { ID3D11HullShader *v = nullptr; hr = r.d.dev->CreateHullShader(blob.data(), blob.size(), nullptr, &v); p = v; break; }
+    case D3DPT_D11S_DS: { ID3D11DomainShader *v = nullptr; hr = r.d.dev->CreateDomainShader(blob.data(), blob.size(), nullptr, &v); p = v; break; }
     case D3DPT_D11S_VS: { ID3D11VertexShader *v = nullptr; hr = r.d.dev->CreateVertexShader(blob.data(), blob.size(), nullptr, &v); p = v; break; }
     case D3DPT_D11S_PS: { ID3D11PixelShader *v = nullptr; hr = r.d.dev->CreatePixelShader(blob.data(), blob.size(), nullptr, &v); p = v; break; }
+    /* v34: no signatures (empty chunks) */
+    case D3DPT_D11S_CS: { ID3D11ComputeShader *v = nullptr; hr = r.d.dev->CreateComputeShader(blob.data(), blob.size(), nullptr, &v); p = v; break; }
     case D3DPT_D11S_GS: {
         ID3D11GeometryShader *v = nullptr;
         if (!s->nso) {
@@ -1090,7 +1179,21 @@ void create_layout(Run &r, const d3dpt_d11_list *l, uint32_t size)
     /* an input signature of the same names (the vertex shader's are D3DPT<register>) */
     auto blob = dxbc({ { "ISGN", sig_chunk(sig_entries(regs.data(), (uint32_t)regs.size(), true, false, true)) } });
     ID3D11InputLayout *p = nullptr;
-    HRESULT hr = r.d.dev->CreateInputLayout(el.data(), (UINT)el.size(), blob.data(), blob.size(), &p);
+    /* A layout of no elements is Direct3D 11's own (a vertex shader that
+     * makes its vertices from SV_VertexID, The Witcher 3's distant
+     * terrain): an empty vector's data() is null, which DXVK refuses
+     * (E_INVALIDARG), and every draw with it went missing */
+    static const D3D11_INPUT_ELEMENT_DESC none = {};
+    HRESULT hr = r.d.dev->CreateInputLayout(el.empty() ? &none : el.data(), (UINT)el.size(), blob.data(), blob.size(), &p);
+    if (FAILED(hr) && r.d.layout_fails < 16) {
+        /* every element of the first ones refused, which put_obj says only
+         * once (The Witcher 3's distant terrain, track M25) */
+        r.d.layout_fails++;
+        r.x.log("d11: input layout %u refused (0x%08x), %u elements:", l->id, (unsigned)hr, l->n);
+        for (uint32_t i = 0; i < l->n; i++)
+            r.x.log("d11:   reg %u format %u slot %u offset %u %s step %u", e[i].reg, e[i].format, e[i].slot, e[i].offset,
+                    e[i].per_instance ? "instance" : "vertex", e[i].step);
+    }
     put_obj(r, l->id, D3DPT_D11K_LAYOUT, p, hr);
 }
 
@@ -1108,6 +1211,16 @@ void create_view(Run &r, uint32_t op, const d3dpt_d11_view *v)
         ID3D11ShaderResourceView *p = nullptr;
         hr = r.d.dev->CreateShaderResourceView(res, &d, &p);
         put_obj(r, v->id, D3DPT_D11K_SRV, p, hr);
+    } else if (op == D3DPT_D11_UAV_CREATE) {
+        /* v34: the union in the API's order (a buffer's first element,
+         * count and flags; a texture's mip, then its slice range) */
+        D3D11_UNORDERED_ACCESS_VIEW_DESC d = {};
+        d.Format = (DXGI_FORMAT)v->format;
+        d.ViewDimension = (D3D11_UAV_DIMENSION)v->dim;
+        memcpy(&d.Buffer, v->u, std::min(sizeof(v->u), sizeof(d) - offsetof(D3D11_UNORDERED_ACCESS_VIEW_DESC, Buffer)));
+        ID3D11UnorderedAccessView *p = nullptr;
+        hr = r.d.dev->CreateUnorderedAccessView(res, &d, &p);
+        put_obj(r, v->id, D3DPT_D11K_UAV, p, hr);
     } else if (op == D3DPT_D11_RTV_CREATE) {
         D3D11_RENDER_TARGET_VIEW_DESC d = {};
         d.Format = (DXGI_FORMAT)v->format;
@@ -1138,13 +1251,120 @@ void create_view(Run &r, uint32_t op, const d3dpt_d11_view *v)
         if (bound) {
             ID3D11RenderTargetView *t[8];
             for (uint32_t i = 0; i < r.c.nrtv; i++) t[i] = obj<ID3D11RenderTargetView>(r, r.c.rtv[i], D3DPT_D11K_RTV);
-            r.d.ctx->OMSetRenderTargets(r.c.nrtv, t, obj<ID3D11DepthStencilView>(r, r.c.dsv, D3DPT_D11K_DSV));
+            r.d.ctx->OMSetRenderTargetsAndUnorderedAccessViews(r.c.nrtv, t, obj<ID3D11DepthStencilView>(r, r.c.dsv, D3DPT_D11K_DSV), 0,
+                                                               D3D11_KEEP_UNORDERED_ACCESS_VIEWS, nullptr, nullptr);
         }
     }
 }
 
-/* a DXGI present's copy: the same size a copy on the host; into a
- * Direct3D 9 surface (DWM's) through VRAM */
+/* The 8-bit four-channel formats a Blt converts between: the typed view
+ * of each family (UNORM, never sRGB, so the values pass as they are and
+ * only the channels' order changes), 0 for any other */
+static uint32_t blt_view_fmt(uint32_t f)
+{
+    switch (f) {
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS: case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS: case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8X8_TYPELESS: case DXGI_FORMAT_B8G8R8X8_UNORM: case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        return DXGI_FORMAT_B8G8R8X8_UNORM;
+    default:
+        return 0;
+    }
+}
+
+static bool blt_kit(Exec &x, D11 &d)
+{
+    D11::BltKit &k = d.bk;
+    if (k.tried) return k.ok;
+    k.tried = true;
+    const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+    HRESULT hr = d.dev->CreateDeviceContextState(0, &fl, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device), nullptr, &k.state);
+    if (SUCCEEDED(hr)) hr = d.dev->CreateVertexShader(d3dpt_blt_vs, sizeof d3dpt_blt_vs, nullptr, &k.vs);
+    if (SUCCEEDED(hr)) hr = d.dev->CreatePixelShader(d3dpt_blt_ps, sizeof d3dpt_blt_ps, nullptr, &k.ps);
+    D3D11_SAMPLER_DESC s = {};
+    s.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    s.MaxLOD = D3D11_FLOAT32_MAX;
+    if (SUCCEEDED(hr)) hr = d.dev->CreateSamplerState(&s, &k.point);
+    s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if (SUCCEEDED(hr)) hr = d.dev->CreateSamplerState(&s, &k.linear);
+    k.ok = SUCCEEDED(hr);
+    if (!k.ok) x.log("d11: the converting Blt's state or shaders: 0x%08x (Blts between formats or sizes are not done)", (unsigned)hr);
+    return k.ok;
+}
+
+/* A Blt the GPU must convert (R8G8B8A8 into B8G8R8A8: a DXGI full-screen
+ * swap chain whose buffers are not the mode's format, Heaven's) or scale:
+ * the source copied into a texture it can sample, drawn into one of the
+ * destination's format at the rectangle's size, that copied into place.
+ * In its own context state, so the guest context's bindings stay as
+ * they were. false: not a pair it does (another format, multisampled) */
+/* blt_draw's work on bare resources (a ring slot is one): both 2D, one
+ * sample, the caller has checked */
+bool blt_draw_res(Exec &x, D11 &d, ID3D11Resource *src_res, uint32_t src_fmt, uint32_t src_sub, uint32_t sw, uint32_t sh,
+                  ID3D11Resource *dst_res, uint32_t dst_fmt, uint32_t dst_sub, uint32_t left, uint32_t top, uint32_t w, uint32_t h)
+{
+    D11::BltKit &k = d.bk;
+    const uint32_t sf = blt_view_fmt(src_fmt), df = blt_view_fmt(dst_fmt);
+    if (!sf || !df || !blt_kit(x, d)) return false;
+    if (!k.src || k.src_w != sw || k.src_h != sh || k.src_fmt != sf) {
+        if (k.srv) k.srv->Release();
+        if (k.src) k.src->Release();
+        k.srv = nullptr;
+        k.src = nullptr;
+        D3D11_TEXTURE2D_DESC t = { sw, sh, 1, 1, (DXGI_FORMAT)sf, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0 };
+        if (FAILED(d.dev->CreateTexture2D(&t, nullptr, &k.src)) || FAILED(d.dev->CreateShaderResourceView(k.src, nullptr, &k.srv))) {
+            k.src_w = 0;
+            return false;
+        }
+        k.src_w = sw, k.src_h = sh, k.src_fmt = sf;
+    }
+    if (!k.dst || k.dst_w != w || k.dst_h != h || k.dst_fmt != df) {
+        if (k.rtv) k.rtv->Release();
+        if (k.dst) k.dst->Release();
+        k.rtv = nullptr;
+        k.dst = nullptr;
+        D3D11_TEXTURE2D_DESC t = { w, h, 1, 1, (DXGI_FORMAT)df, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0 };
+        if (FAILED(d.dev->CreateTexture2D(&t, nullptr, &k.dst)) || FAILED(d.dev->CreateRenderTargetView(k.dst, nullptr, &k.rtv))) {
+            k.dst_w = 0;
+            return false;
+        }
+        k.dst_w = w, k.dst_h = h, k.dst_fmt = df;
+    }
+    d.ctx->CopySubresourceRegion(k.src, 0, 0, 0, 0, src_res, src_sub, nullptr);
+    ID3DDeviceContextState *prev = nullptr;
+    d.ctx->SwapDeviceContextState(k.state, &prev);
+    d.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    d.ctx->IASetInputLayout(nullptr);
+    d.ctx->VSSetShader(k.vs, nullptr, 0);
+    d.ctx->PSSetShader(k.ps, nullptr, 0);
+    d.ctx->PSSetShaderResources(0, 1, &k.srv);
+    d.ctx->PSSetSamplers(0, 1, sw == w && sh == h ? &k.point : &k.linear);
+    const D3D11_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
+    d.ctx->RSSetViewports(1, &vp);
+    d.ctx->OMSetRenderTargets(1, &k.rtv, nullptr);
+    d.ctx->Draw(3, 0);
+    ID3D11ShaderResourceView *none = nullptr;
+    d.ctx->PSSetShaderResources(0, 1, &none);
+    d.ctx->OMSetRenderTargets(0, nullptr, nullptr);
+    d.ctx->SwapDeviceContextState(prev, nullptr);
+    if (prev) prev->Release();
+    d.ctx->CopySubresourceRegion(dst_res, dst_sub, left, top, 0, k.dst, 0, nullptr);
+    return true;
+}
+
+static bool blt_draw(Run &r, D11Res &src, uint32_t src_sub, uint32_t sw, uint32_t sh, D11Res &dst, uint32_t dst_sub,
+                     uint32_t left, uint32_t top, uint32_t w, uint32_t h)
+{
+    if (src.d.dim != 3 || dst.d.dim != 3 || src.d.samples > 1 || dst.d.samples > 1) return false;
+    return blt_draw_res(r.x, r.d, src.res, src.d.format, src_sub, sw, sh, dst.res, dst.d.format, dst_sub, left, top, w, h);
+}
+
+/* a DXGI present's copy: the same size and channel order a copy on the
+ * host, another size or order drawn (blt_draw); into a Direct3D 9
+ * surface (DWM's) through VRAM */
 void blt(Run &r, const d3dpt_d11_blt *b)
 {
     if (!r.x.named(b->src) || !r.x.named(b->dst)) { r.fail(E_INVALIDARG); return; }
@@ -1156,11 +1376,15 @@ void blt(Run &r, const d3dpt_d11_blt *b)
         if (!box_ok(*dst, b->dst_sub, box)) { r.fail(E_INVALIDARG); return; }
         uint32_t sw, sh, sd, rows, rb;
         sub_dims(*src, b->src_sub, sw, sh, sd, rows, rb);
-        if (sw == w && sh == h) {
+        const bool same_order = blt_view_fmt(src->d.format) == blt_view_fmt(dst->d.format) || src->d.format == dst->d.format;
+        if (sw == w && sh == h && same_order) {
             mark(r, b->dst);
             r.d.ctx->CopySubresourceRegion(dst->res, b->dst_sub, b->left, b->top, 0, src->res, b->src_sub, nullptr);
-        } else if (r.d.warn(0x60000000u)) {
-            r.x.log("d11: a scaled Blt (%ux%u into %ux%u) is not done yet", sw, sh, w, h);
+        } else if (blt_draw(r, *src, b->src_sub, sw, sh, *dst, b->dst_sub, b->left, b->top, w, h)) {
+            mark(r, b->dst);
+        } else if (r.d.warn(0x60000000u | (src->d.format & 0xff) << 8 | (dst->d.format & 0xff))) {
+            r.x.log("d11: a Blt from %ux%u format %u into %ux%u format %u is not done (said once per pair)", sw, sh, src->d.format, w, h,
+                    dst->d.format);
         }
         return;
     }
@@ -1302,7 +1526,7 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
         return;
     }
     case D3DPT_D11_BLT: { NEED(d3dpt_d11_blt); blt(r, a); return; }
-    case D3DPT_D11_SRV_CREATE: case D3DPT_D11_RTV_CREATE: case D3DPT_D11_DSV_CREATE: {
+    case D3DPT_D11_SRV_CREATE: case D3DPT_D11_RTV_CREATE: case D3DPT_D11_DSV_CREATE: case D3DPT_D11_UAV_CREATE: {
         NEED(d3dpt_d11_view);
         create_view(r, t->op, a);
         return;
@@ -1489,6 +1713,92 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
         r.c.nrtv = a->n;
         r.c.dsv = a->id;
         ctx->OMSetRenderTargets(a->n, v, obj<ID3D11DepthStencilView>(r, a->id, D3DPT_D11K_DSV));
+        memset(r.c.om_uav, 0, sizeof r.c.om_uav);   /* the guest sends this only with none bound (SET_TARGETS_UAV) */
+        return;
+    }
+    /* v34: the compute pipeline and unordered access */
+    case D3DPT_D11_SET_TARGETS_UAV: {
+        NEED(d3dpt_d11_targets);
+        const bool keep = a->uav_start == ~0u;
+        if (a->nrtv > 8 || (keep && a->nuav) ||
+            (!keep && (a->uav_start < a->nrtv || (uint64_t)a->uav_start + a->nuav > D3D11_1_UAV_SLOT_COUNT)) ||
+            sizeof(*a) + (uint64_t)a->nrtv * 4 + (uint64_t)a->nuav * 8 > size) {
+            r.fail(E_INVALIDARG);
+            return;
+        }
+        const uint32_t *ids = (const uint32_t *)(a + 1), *uids = ids + a->nrtv, *counts = uids + a->nuav;
+        ID3D11RenderTargetView *v[8];
+        ID3D11UnorderedAccessView *u[D3D11_1_UAV_SLOT_COUNT];
+        for (uint32_t i = 0; i < a->nrtv; i++) v[i] = obj<ID3D11RenderTargetView>(r, ids[i], D3DPT_D11K_RTV);
+        for (uint32_t i = 0; i < a->nuav; i++) u[i] = obj<ID3D11UnorderedAccessView>(r, uids[i], D3DPT_D11K_UAV);
+        memcpy(r.c.rtv, ids, a->nrtv * 4);
+        r.c.nrtv = a->nrtv;
+        r.c.dsv = a->dsv;
+        if (!keep) {
+            /* the slots set, every other one unbound (the API's rule) */
+            memset(r.c.om_uav, 0, sizeof r.c.om_uav);
+            memcpy(r.c.om_uav + a->uav_start, uids, a->nuav * 4);
+        }
+        ctx->OMSetRenderTargetsAndUnorderedAccessViews(a->nrtv, v, obj<ID3D11DepthStencilView>(r, a->dsv, D3DPT_D11K_DSV),
+                                                       keep ? 0 : a->uav_start, keep ? D3D11_KEEP_UNORDERED_ACCESS_VIEWS : a->nuav,
+                                                       keep ? nullptr : u, keep ? nullptr : counts);
+        return;
+    }
+    case D3DPT_D11_SET_UAV: {
+        NEED(d3dpt_d11_bind);
+        if (a->stage != D3DPT_D11S_CS || (uint64_t)a->start + a->n > D3D11_1_UAV_SLOT_COUNT || sizeof(*a) + (uint64_t)a->n * 8 > size) {
+            r.fail(E_INVALIDARG);
+            return;
+        }
+        const uint32_t *ids = (const uint32_t *)(a + 1), *counts = ids + a->n;
+        ID3D11UnorderedAccessView *u[D3D11_1_UAV_SLOT_COUNT];
+        for (uint32_t i = 0; i < a->n; i++) u[i] = obj<ID3D11UnorderedAccessView>(r, ids[i], D3DPT_D11K_UAV);
+        memcpy(r.c.cs_uav + a->start, ids, a->n * 4);
+        ctx->CSSetUnorderedAccessViews(a->start, a->n, u, counts);
+        return;
+    }
+    case D3DPT_D11_DISPATCH: {
+        NEED_N(12);
+        const uint32_t *v = (const uint32_t *)body;
+        mark_uavs(r, r.c.cs_uav);
+        ctx->Dispatch(v[0], v[1], v[2]);
+        return;
+    }
+    case D3DPT_D11_DISPATCH_INDIRECT: {
+        NEED(d3dpt_d11_ref);
+        ID3D11Buffer *b = buf_ref(r, a->a);
+        if (!b || a->b % 4) { r.fail(E_INVALIDARG); return; }
+        mark_uavs(r, r.c.cs_uav);
+        ctx->DispatchIndirect(b, a->b);
+        return;
+    }
+    case D3DPT_D11_DRAW_INDIRECT: {
+        NEED_N(12);
+        const uint32_t *v = (const uint32_t *)body;
+        ID3D11Buffer *b = buf_ref(r, v[0]);
+        if (!b || v[1] % 4) { r.fail(E_INVALIDARG); return; }
+        mark_targets(r);
+        if (v[2]) ctx->DrawIndexedInstancedIndirect(b, v[1]);
+        else ctx->DrawInstancedIndirect(b, v[1]);
+        return;
+    }
+    case D3DPT_D11_CLEAR_UAV: {
+        NEED(d3dpt_d11_clear_uav);
+        auto *u = obj<ID3D11UnorderedAccessView>(r, a->id, D3DPT_D11K_UAV);
+        if (!u) return;
+        mark(r, r.c.objs[a->id].res);
+        if (a->is_float) ctx->ClearUnorderedAccessViewFloat(u, (const float *)a->v);
+        else ctx->ClearUnorderedAccessViewUint(u, a->v);
+        return;
+    }
+    case D3DPT_D11_COPY_STRUCTURE_COUNT: {
+        NEED_N(12);
+        const uint32_t *v = (const uint32_t *)body;
+        ID3D11Buffer *b = buf_ref(r, v[0]);
+        auto *u = obj<ID3D11UnorderedAccessView>(r, v[2], D3DPT_D11K_UAV);
+        if (!b || !u || v[1] % 4) { r.fail(E_INVALIDARG); return; }
+        mark(r, v[0]);
+        ctx->CopyStructureCount(b, v[1], u);
         return;
     }
     case D3DPT_D11_SET_BLEND: {
@@ -1619,25 +1929,27 @@ void run_tok(Run &r, const d3dpt_d11_tok *t)
 #undef NEED_N
 }
 
-void prof_tok(Exec &x, D11 &d, uint32_t op, std::chrono::steady_clock::time_point t0)
+void prof_tok(Exec &x, D11 &d, uint32_t op, std::chrono::steady_clock::time_point t0, uint32_t bytes)
 {
+    d.prof_bytes[op & 127] += bytes;
     auto now = std::chrono::steady_clock::now();
     d.prof_ns[op & 127] += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(now - t0).count();
     d.prof_n[op & 127]++;
     auto span = std::chrono::duration_cast<std::chrono::milliseconds>(now - d.prof_t0).count();
     if (span < 5000) return;
     char line[1024];
-    size_t n = (size_t)snprintf(line, sizeof line, "d11: prof %lld ms: token count us", (long long)span);
+    size_t n = (size_t)snprintf(line, sizeof line, "d11: prof %lld ms: token count us KiB", (long long)span);
     uint64_t total = 0;
     for (uint32_t i = 0; i < 128; i++) {
         if (i != 72 && i != 73) total += d.prof_ns[i];      /* a readback's parts are in its token's */
         if (d.prof_ns[i] >= 1000000 && n < sizeof line - 40)
-            n += (size_t)snprintf(line + n, sizeof line - n, " %u:%llu:%llu", i, (unsigned long long)d.prof_n[i],
-                                  (unsigned long long)(d.prof_ns[i] / 1000));
+            n += (size_t)snprintf(line + n, sizeof line - n, " %u:%llu:%llu:%lluK", i, (unsigned long long)d.prof_n[i],
+                                  (unsigned long long)(d.prof_ns[i] / 1000), (unsigned long long)(d.prof_bytes[i] >> 10));
     }
     x.log("%s; all %llu us", line, (unsigned long long)(total / 1000));
     memset(d.prof_ns, 0, sizeof d.prof_ns);
     memset(d.prof_n, 0, sizeof d.prof_n);
+    memset(d.prof_bytes, 0, sizeof d.prof_bytes);
     d.prof_t0 = now;
 }
 
@@ -1649,6 +1961,7 @@ struct GdiSide {
     D11Res *obj = nullptr;
     uint8_t *mem = nullptr, *vram = nullptr;
     uint32_t pitch = 0, w = 0, h = 0, handle = 0;
+    bool rgba = false;                          /* A8B8G8R8 / X8B8G8R8: read with red and blue swapped (v32) */
 };
 
 /* a redirection bitmap's object, made at its first use (GDI may draw into
@@ -1672,10 +1985,15 @@ D11Res *gdi_object(Exec &x, D11 &d, const d3dpt_gdi_side &s)
 
 void gdi_refresh(D11 &d, const GdiSide &s);
 
-bool gdi_side(Exec &x, D11 &d, const d3dpt_gdi_side &s, GdiSide &o)
+/* rgba_ok: a copy's source, which may be A8B8G8R8 / X8B8G8R8 (an R8G8B8A8
+ * swap chain's buffer presented into a blt-model window, v32: through
+ * the guest's CPU it was a readback into VRAM and a copy over the BAR,
+ * ~3 ms of a frame, with red and blue swapped) */
+bool gdi_side(Exec &x, D11 &d, const d3dpt_gdi_side &s, GdiSide &o, bool rgba_ok = false)
 {
-    /* 32 bits a pixel: D3DDDIFMT_A8R8G8B8, X8R8G8B8 */
-    if ((s.format != 21 && s.format != 22) || !s.width || !s.height || s.width > 16384 || s.height > 16384) return false;
+    /* 32 bits a pixel: D3DDDIFMT_A8R8G8B8, X8R8G8B8 (A8B8G8R8, X8B8G8R8) */
+    o.rgba = rgba_ok && (s.format == 32 || s.format == 33);
+    if ((s.format != 21 && s.format != 22 && !o.rgba) || !s.width || !s.height || s.width > 16384 || s.height > 16384) return false;
     o.w = s.width;
     o.h = s.height;
     o.handle = s.handle;
@@ -1687,9 +2005,11 @@ bool gdi_side(Exec &x, D11 &d, const d3dpt_gdi_side &s, GdiSide &o)
     if (s.handle && !(s.flags & D3DPT_GDI_VRAM)) {
         D11Res *r = res_of(d, s.handle);
         if (!r && (s.flags & D3DPT_GDI_TEXTURE)) r = gdi_object(x, d, s);
-        if (r && r->res && r->d.dim == 3 && r->d.samples <= 1 && r->d.width >= s.width && r->d.height >= s.height &&
-            (r->d.format == DXGI_FORMAT_B8G8R8A8_UNORM || r->d.format == DXGI_FORMAT_B8G8R8X8_UNORM ||
-             r->d.format == DXGI_FORMAT_B8G8R8A8_TYPELESS)) {
+        const bool fmt_ok = o.rgba ? r && (r->d.format == DXGI_FORMAT_R8G8B8A8_UNORM || r->d.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+                                           r->d.format == DXGI_FORMAT_R8G8B8A8_TYPELESS)
+                                   : r && (r->d.format == DXGI_FORMAT_B8G8R8A8_UNORM || r->d.format == DXGI_FORMAT_B8G8R8X8_UNORM ||
+                                           r->d.format == DXGI_FORMAT_B8G8R8A8_TYPELESS);
+        if (r && r->res && r->d.dim == 3 && r->d.samples <= 1 && r->d.width >= s.width && r->d.height >= s.height && fmt_ok) {
             o.obj = r;
             /* a bitmap's first touch: what the CPU drew so far comes over
              * and the shadow starts, before the host writes anything */
@@ -1820,7 +2140,8 @@ ID3D11Texture2D *gdi_tex(D11 &d, int role, uint32_t w, uint32_t h)
     if (t.tex && t.w >= w && t.h >= h) return t.tex;
     const uint32_t nw = std::max(t.w, (w + 63) & ~63u), nh = std::max(t.h, (h + 63) & ~63u);
     const bool stage = role != D11::GDI_TMP;
-    D3D11_TEXTURE2D_DESC desc = { nw, nh, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, { 1, 0 }, stage ? D3D11_USAGE_STAGING : D3D11_USAGE_DEFAULT, 0,
+    const DXGI_FORMAT fmt = role == D11::GDI_SRGBA ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+    D3D11_TEXTURE2D_DESC desc = { nw, nh, 1, 1, fmt, { 1, 0 }, stage ? D3D11_USAGE_STAGING : D3D11_USAGE_DEFAULT, 0,
                                   stage ? (UINT)D3D11_CPU_ACCESS_READ : 0u, 0 };
     ID3D11Texture2D *n = nullptr;
     if (FAILED(d.dev->CreateTexture2D(&desc, nullptr, &n)) || !n) return nullptr;
@@ -1838,8 +2159,18 @@ struct GdiPx {
     std::vector<uint32_t> p;
     int32_t x0 = 0, y0 = 0, w = 0, h = 0;
     ID3D11Texture2D *stg = nullptr;             /* copied there, not read yet (gdi_read_end) */
+    bool rgba = false;                          /* the side's red and blue to swap once read */
     uint32_t &at(int32_t x, int32_t y) { return p[(size_t)(y - y0) * (size_t)w + (size_t)(x - x0)]; }
 };
+
+/* an RGBA side's pixels as BGRA */
+void gdi_swap_rb(uint32_t *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        uint32_t v = p[i];
+        p[i] = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
+    }
+}
 
 /* The read's first half: VRAM is read now, an object's rectangle copied
  * into staging. gdi_read_end reads that, so an operation copies all its
@@ -1853,8 +2184,9 @@ bool gdi_read(D11 &d, const GdiSide &s, int32_t x0, int32_t y0, int32_t x1, int3
     o.h = y1 - y0;
     o.p.assign((size_t)o.w * (size_t)o.h, 0);
     o.stg = nullptr;
+    o.rgba = s.rgba;
     if (s.obj) {
-        ID3D11Texture2D *stg = gdi_tex(d, role, (uint32_t)o.w, (uint32_t)o.h);
+        ID3D11Texture2D *stg = gdi_tex(d, s.rgba ? D11::GDI_SRGBA : role, (uint32_t)o.w, (uint32_t)o.h);
         if (!stg) return false;
         D3D11_BOX box = { (UINT)x0, (UINT)y0, 0, (UINT)x1, (UINT)y1, 1 };
         d.ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, s.obj->res, 0, &box);
@@ -1864,6 +2196,7 @@ bool gdi_read(D11 &d, const GdiSide &s, int32_t x0, int32_t y0, int32_t x1, int3
     if (!s.mem) return false;
     for (int32_t y = 0; y < o.h; y++)
         memcpy(&o.p[(size_t)y * o.w], s.mem + (uint64_t)(y0 + y) * s.pitch + (uint64_t)x0 * 4, (size_t)o.w * 4);
+    if (o.rgba) gdi_swap_rb(o.p.data(), o.p.size());
     return true;
 }
 
@@ -1876,6 +2209,7 @@ bool gdi_read_end(D11 &d, GdiPx &o)
         for (int32_t y = 0; y < o.h; y++)
             memcpy(&o.p[(size_t)y * o.w], (const uint8_t *)m.pData + (uint64_t)y * m.RowPitch, (size_t)o.w * 4);
         d.ctx->Unmap(o.stg, 0);
+        if (o.rgba) gdi_swap_rb(o.p.data(), o.p.size());
     }
     o.stg = nullptr;
     return ok;
@@ -1887,7 +2221,13 @@ void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
      * one wait for the GPU (writing the destination's VRAM changes no
      * object, so the source reads the same before as between) */
     GdiPx back;
-    if (src.obj && !dst.obj) {
+    if (src.rgba && dst.obj) {
+        /* into an object it would be a conversion on the GPU: the kernel
+         * driver sends an RGBA source only into VRAM */
+        if (d.warn(0x67000000u)) x.log("d11: a GDI copy from an RGBA source into an object: not done");
+        return;
+    }
+    if ((src.obj || src.rgba) && !dst.obj) {
         int32_t x0 = INT32_MAX, y0 = INT32_MAX, x1 = INT32_MIN, y1 = INT32_MIN;
         for (uint32_t i = 0; i < g.n; i++) {
             const d3dpt_gdi_rect &r = rc[i];
@@ -1935,8 +2275,9 @@ void gdi_copy(Exec &x, D11 &d, const d3dpt_gdi &g, const d3dpt_gdi_rect *rc, con
                 }
                 shadow_take(dst.obj, dst, (uint32_t)r.l, (uint32_t)r.t, (uint32_t)r.r, (uint32_t)r.b);
             }
-        } else if (src.obj) {
-            /* a readback: from the copy read above */
+        } else if (src.obj || src.rgba) {
+            /* a readback: from the copy read above (an RGBA source's
+             * swapped there) */
             for (uint32_t y = 0; y < h; y++)
                 memcpy(dst.mem + (uint64_t)(r.t + y) * dst.pitch + (uint64_t)r.l * 4, &back.at(r.sx, r.sy + (int32_t)y), w * 4);
             gdi_mem_written(x, d, dst, r);
@@ -2149,7 +2490,7 @@ bool exec_d11_gdi(Batch &b, const d3dpt_cmd *c)
      * and 75, past a readback's 72 / 73) */
     struct Prof {
         Exec &x; D11 &d; uint32_t op; std::chrono::steady_clock::time_point t0;
-        ~Prof() { if (d.prof) prof_tok(x, d, op < 8 ? 64 + op : 74 + ((op - 8) & 1), t0); }
+        ~Prof() { if (d.prof) prof_tok(x, d, op < 8 ? 64 + op : 74 + ((op - 8) & 1), t0, 0); }
     } prof{ x, *d, g->op, d->prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point() };
     if (g->op == D3DPT_GDI_SYNC) {
         exec_d11_sync(x, g->dst.handle);       /* nothing if VRAM has it already */
@@ -2179,7 +2520,7 @@ bool exec_d11_gdi(Batch &b, const d3dpt_cmd *c)
         gdi_fill(x, *d, *g, rc, dst);
         break;
     case D3DPT_GDI_COPY:
-        if (!gdi_side(x, *d, g->src, src)) {
+        if (!gdi_side(x, *d, g->src, src, true)) {
             if (d->warn(0x64000000u)) x.log("d11: a GDI copy from format %u, %ux%u: not done", g->src.format, g->src.width, g->src.height);
             return true;
         }
@@ -2217,10 +2558,15 @@ bool exec_d11_op(Batch &b, const d3dpt_cmd *c)
         HRESULT before = r.hr;
         auto t0 = d->prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
         run_tok(r, t);
-        if (d->prof) prof_tok(x, *d, t->op, t0);
+        if (d->prof) prof_tok(x, *d, t->op, t0, t->size);
         if (FAILED(r.hr) && SUCCEEDED(before) && d->warn(0x7f000000u | t->op))
             x.log("d11: context 0x%08x token %u: 0x%08x (said once per kind)", a->ctx, t->op, (unsigned)r.hr);
         p += t->size;
+    }
+    if (d->flush_each) {
+        auto t0 = d->prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+        d->ctx->Flush();
+        if (d->prof) prof_tok(x, *d, 0, t0, 0);   /* token 0: these flushes */
     }
     if (r.get) {
         d3dpt_ret *ret = b.slot(a->ret_off, (uint32_t)r.ret.size());
@@ -2237,6 +2583,48 @@ bool exec_d11_op(Batch &b, const d3dpt_cmd *c)
 bool exec_d11_available(Exec &x)
 {
     return d11(x) != nullptr;
+}
+
+/* The host's multisampling, for the guest's claims (D3DPT_EXEC_FEAT_MSAA,
+ * 2026-11-27): for each count, whether every format the guest driver calls
+ * a multisampled target (fmt_support's MULTISAMPLE_RENDERTARGET formats in
+ * guest-tools/src/d3dptvid/wddm/um11/d3dpt11.c; keep the two lists the
+ * same) has a quality level at it here. Bits 0-3: 2x, 4x, 8x, 16x for those
+ * of up to 64 bits a pixel; 4-7 the same for the 128-bit ones. A format
+ * that holds a count back is logged once. */
+uint32_t exec_d11_msaa(Exec &x)
+{
+    D11 *d = d11(x);
+    if (!d) return 0;
+    static const uint32_t up64[] = {   /* not "small": windows.h defines it */ 10, 11, 12, 13, 14, 16, 17, 18, 20, 24, 25, 26, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38,
+                                      40, 41, 42, 43, 45, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59, 61, 62, 63, 64, 65, 85, 86,
+                                      87, 88, 91, 93 };     /* not 115, B4G4R4A4: the guest claims none for it */
+    static const uint32_t b128[] = { 2, 3, 4 };
+    const struct { const uint32_t *f; size_t n; } sets[2] = { { up64, sizeof up64 / 4 }, { b128, sizeof b128 / 4 } };
+    uint32_t bits = 0;
+    std::string held;
+    for (int s = 0; s < 2; s++) {
+        for (int k = 0; k < 4; k++) {
+            const UINT count = 2u << k;
+            bool all = true;
+            for (size_t i = 0; i < sets[s].n; i++) {
+                UINT q = 0;
+                if (FAILED(d->dev->CheckMultisampleQualityLevels((DXGI_FORMAT)sets[s].f[i], count, &q)) || !q) {
+                    if (all && count <= 8) held += " " + std::to_string(sets[s].f[i]) + "@" + std::to_string(count) + "x";
+                    all = false;
+                }
+            }
+            if (all) bits |= 1u << (s * 4 + k);
+        }
+    }
+    static bool said;
+    if (!said) {
+        said = true;
+        x.log("d11: multisampling for the guest: up to 64-bit formats%s%s%s%s, 128-bit%s%s%s%s%s%s", bits & 1 ? " 2x" : "",
+              bits & 2 ? " 4x" : "", bits & 4 ? " 8x" : "", bits & 8 ? " 16x" : "", bits & 16 ? " 2x" : "", bits & 32 ? " 4x" : "",
+              bits & 64 ? " 8x" : "", bits & 128 ? " 16x" : "", held.empty() ? "" : "; held back by", held.c_str());
+    }
+    return bits;
 }
 
 /* Direct3D 9 code is about to use the allocation (d3dpt_exec_ddi.cpp's
@@ -2566,6 +2954,11 @@ void exec_d11_release(Exec &x)
     for (auto &kv : d->ctxs) kv.second.release();
     for (auto &kv : d->res) kv.second.release();
     for (D11::GdiTex &t : d->gdi_tex) if (t.tex) t.tex->Release();
+    {
+        D11::BltKit &k = d->bk;
+        IUnknown *all[] = { k.state, k.vs, k.ps, k.point, k.linear, k.src, k.dst, k.srv, k.rtv };
+        for (IUnknown *u : all) if (u) u->Release();
+    }
     if (d->idle) d->idle->Release();
     if (d->ctx) d->ctx->Release();
     if (d->dev) d->dev->Release();

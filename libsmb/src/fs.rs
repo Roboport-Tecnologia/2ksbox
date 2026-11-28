@@ -264,6 +264,19 @@ pub fn space(root: &Path) -> (u64, u64) {
             return (s.f_blocks as u64 * f, s.f_bavail as u64 * f);
         }
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetDiskFreeSpaceExW(dir: *const u16, avail: *mut u64, total: *mut u64, free: *mut u64) -> i32;
+        }
+        let w: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+        let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+        if unsafe { GetDiskFreeSpaceExW(w.as_ptr(), &mut avail, &mut total, &mut free) } != 0 {
+            return (total, avail);
+        }
+    }
     let _ = root;
     (1 << 40, 1 << 39)
 }

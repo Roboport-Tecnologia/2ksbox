@@ -55,9 +55,12 @@
  * driver's packets (the command stream, below). The user-mode driver's
  * command buffer is as large, and it leaves 4 KiB of it unused for the
  * registration packet Render puts in front of its records. */
-#define D3DPT_DMA_SIZE (256 * 1024)
+/* a submission's DMA buffer and lists: 1 MiB and 16384 patches since a
+ * Direct3D 11 game's frame (~4 MiB of records, ~3,000 resources named) cost
+ * ~45 submissions at 256 KiB and 4096 (track M25) */
+#define D3DPT_DMA_SIZE (1024 * 1024)
 #define D3DPT_ALLOC_LIST D3DPT_WDDM_MAX_LIST
-#define D3DPT_PATCH_LIST 4096
+#define D3DPT_PATCH_LIST 16384
 
 /* Segment 2, the aperture: system memory the "GPU" reaches through a page
  * table dxgkrnl fills (MAP_APERTURE_SEGMENT), here kernel mappings of the
@@ -131,6 +134,11 @@ typedef struct D3DPT_ADAPTER {
      * records to the window from the DMA buffer (dma), and a submission's
      * fence is the device's DMA interrupt (fence_irq, with CAP_IRQ) */
     BOOLEAN dma, fence_irq;
+    BOOLEAN dma1;                     /* register set v14: DMA_APPEND1, one exit an append */
+    BOOLEAN async;                    /* register set v15: render batches kicked, their fences the device's */
+    BOOLEAN sub_kick;                 /* the submission being run is kicked (run() rings no doorbell) */
+    BOOLEAN kick_flip;                /* ... and flips at once, to kick_flip_addr, after its batch (ASYNC_FLIP) */
+    ULONG kick_flip_addr;
     BOOLEAN fill;                     /* register set v9 (CAP_FILL): the device fills VRAM */
     /* register set v9 (CAP_COPY): the device copies between VRAM and guest
      * pages, which a transfer lists here (contiguous, nonpaged) */
@@ -138,6 +146,7 @@ typedef struct D3DPT_ADAPTER {
     PHYSICAL_ADDRESS copy_list_pa;
     PUCHAR sub_va;                    /* the DMA buffer of the submission being run: system VA */
     PHYSICAL_ADDRESS sub_pa;          /* and its physical address (contiguous) */
+    const struct PKT_REG_T *sub_reg;  /* its registration table in the private data (Render's), or NULL */
     ULONG dma_errors;                 /* appends the device refused, the first few logged */
     KTIMER vsync_timer;
     KDPC vsync_dpc;
@@ -206,6 +215,13 @@ typedef struct D3DPT_DEVICE {
     HANDLE dxgk_device;
     volatile LONG nctx;
     ULONG host_ctx[D3DPT_DEVICE_CTX];
+    /* Render builds a submission here and copies it into the DMA buffer
+     * in one pass: the DMA buffer is write-combined, and the patches and
+     * registrations written into it one by one cost a Direct3D 11 game
+     * ~0.7 ms a submission (track M25) */
+    PUCHAR scratch;
+    ULONG scratch_size;
+    FAST_MUTEX scratch_lock;
 } D3DPT_DEVICE;
 
 typedef struct D3DPT_CONTEXT {
@@ -234,6 +250,7 @@ typedef struct D3DPT_ALLOC {
  * moves the pixels itself, and the frame rates are the same (track M25,
  * "GDI-compatible textures"). */
 static ULONG g_gdi_accel = 0;
+static BOOLEAN g_async = TRUE;          /* the service key's Async (default 1): kick render batches (register set v15) */
 /* The service key's Trace = 1: the routine lines (allocations, devices,
  * contexts, submissions, presents, VidPn negotiation, the 5 s packet and
  * RenderKm tallies). 0, the default: only the device's start and stop,
@@ -738,14 +755,16 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     }
     RtlZeroMemory(a->ap_va, D3DPT_AP_PAGES * sizeof(*a->ap_va));
     RtlZeroMemory(a->ap_map, D3DPT_AP_PAGES * sizeof(*a->ap_map));
-    a->fence_done = a->fence_notify = a->preempt_fence = 0;
+    a->fence_done = a->fence_notify = a->preempt_fence = a->fence_submitted = 0;
     a->vsync_on = 0;
     a->scan_addr = 0;
     a->shown_pa = 0;
     a->vsync_irq = version >= 6u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_IRQ);
     a->vsync_isr = 0;
     a->dma = a->d3d && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->dma1 = a->dma && version >= 14u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA1);
     a->fence_irq = a->vsync_irq && version >= 7u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_DMA);
+    a->async = g_async && a->dma && a->fence_irq && version >= 15u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_ASYNC);
     a->fill = version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_FILL);
     if (version >= 9u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_COPY) && !a->copy_list) {
         PHYSICAL_ADDRESS hi;
@@ -780,6 +799,18 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
         KeInitializeDpc(&a->follow_dpc, follow_tick, a);
         a->irq_mask |= D3DPT_FB_IRQ_DISPLAY;
     }
+    if (a->dma) {
+        /* a start that follows a stop (a driver update, the adapter
+         * disabled and enabled) finds the device as the last instance left
+         * it: its batches run out and its fence back to 0 before any
+         * interrupt can report the old one (bugcheck 0x119, subtype 1: a
+         * fence ahead of every submission, 2026-11-27) */
+        if (a->async) {
+            a->regs[D3DPT_FB_REG_ASYNC_DRAIN / 4] = 1;
+        }
+        a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = 0;
+        a->regs[D3DPT_FB_REG_FENCE / 4] = 0;
+    }
     if (a->vsync_irq) {
         a->regs[D3DPT_FB_REG_IRQ_STATUS / 4] = ~0u;
         a->regs[D3DPT_FB_REG_IRQ_ENABLE / 4] = a->irq_mask;   /* the vertical blank when dxgkrnl enables it */
@@ -787,6 +818,8 @@ static NTSTATUS d3dpt_start_device(IN_CONST_PVOID ctx, IN_PDXGK_START_INFO start
     a->follow_on = FALSE;
     dbg_line(a->vsync_irq ? "vertical blank: the device's interrupt" : "vertical blank: a timer (no CAP_IRQ)");
     dbg_line(a->fence_irq ? "fences: the device's interrupt" : "fences: reported at submit (no CAP_DMA / CAP_IRQ)");
+    dbg_line(a->async ? "render batches: kicked to the device's thread (register set v15)"
+                      : "render batches: run inside their doorbell");
     dbg_line(a->dma ? "records: appended by the device from the DMA buffer" : "records: copied into the window by the CPU");
     KeInitializeTimer(&a->vsync_timer);
     KeInitializeDpc(&a->vsync_dpc, vsync_tick, a);
@@ -1141,14 +1174,25 @@ static BOOLEAN d3dpt_interrupt(IN_CONST_PVOID ctx, IN_ULONG msg)
     if (st & D3DPT_FB_IRQ_DMA) {
         DXGKARGCB_NOTIFY_INTERRUPT_DATA n;
 
-        /* the last fence written is done, and with it every earlier one */
-        a->fence_notify = (LONG)a->regs[D3DPT_FB_REG_FENCE_DONE / 4];
-        RtlZeroMemory(&n, sizeof(n));
-        n.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
-        n.DmaCompleted.SubmissionFenceId = (UINT)a->fence_notify;
-        a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
-        if (!(st & D3DPT_FB_IRQ_VBLANK) || !a->vsync_on) {
-            a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+        /* the last fence written is done, and with it every earlier one
+         * (register set v15: or the last batch the device's thread ran).
+         * Never one this start has not submitted: dxgkrnl bugchecks on it
+         * (0x119, subtype 1), and a latched IRQ_DMA from before a stop
+         * brings the last instance's */
+        LONG f = (LONG)a->regs[D3DPT_FB_REG_FENCE_DONE / 4];
+
+        if (f != 0 && f - a->fence_submitted <= 0) {
+            a->fence_notify = f;
+            if (a->fence_notify - a->fence_done > 0) {
+                a->fence_done = a->fence_notify;
+            }
+            RtlZeroMemory(&n, sizeof(n));
+            n.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
+            n.DmaCompleted.SubmissionFenceId = (UINT)a->fence_notify;
+            a->dxgk.DxgkCbNotifyInterrupt(a->dxgk.DeviceHandle, &n);
+            if (!(st & D3DPT_FB_IRQ_VBLANK) || !a->vsync_on) {
+                a->dxgk.DxgkCbQueueDpc(a->dxgk.DeviceHandle);
+            }
         }
     }
     if ((st & D3DPT_FB_IRQ_VBLANK) && a->vsync_on) {
@@ -1610,6 +1654,8 @@ static NTSTATUS APIENTRY d3dpt_set_pointer_position(IN_CONST_HANDLE h, IN_CONST_
 
 /* ------------------------------------------------- devices and contexts */
 
+static ULONG reg_priv_size(void);
+
 static DXGKDDI_CREATEDEVICE d3dpt_create_device;
 static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_CREATEDEVICE c)
 {
@@ -1622,6 +1668,7 @@ static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_C
     d->magic = D3DPT_DEVICE_MAGIC;
     d->a = (D3DPT_ADAPTER *)h;
     d->dxgk_device = c->hDevice;
+    ExInitializeFastMutex(&d->scratch_lock);
     c->hDevice = d;
     /* Flags and pInfo share their storage, and Windows 7 hands a pointer
      * there (0x81e6a050 and the like, a kernel address): the device's DMA
@@ -1629,7 +1676,7 @@ static NTSTATUS APIENTRY d3dpt_create_device(IN_CONST_HANDLE h, INOUT_PDXGKARG_C
     if ((ULONG_PTR)c->pInfo >= (ULONG_PTR)MM_SYSTEM_RANGE_START && MmIsAddressValid(c->pInfo)) {
         c->pInfo->DmaBufferSize = D3DPT_DMA_SIZE;
         c->pInfo->DmaBufferSegmentSet = 0;
-        c->pInfo->DmaBufferPrivateDataSize = 0;
+        c->pInfo->DmaBufferPrivateDataSize = reg_priv_size();
         c->pInfo->AllocationListSize = D3DPT_ALLOC_LIST;
         c->pInfo->PatchLocationListSize = D3DPT_PATCH_LIST;
         c->pInfo->Flags.Value = 0;
@@ -1665,6 +1712,9 @@ static NTSTATUS APIENTRY d3dpt_destroy_device(IN_CONST_HANDLE h)
         }
     }
     d->magic = 0;
+    if (d->scratch) {
+        ExFreePoolWithTag(d->scratch, D3DPT_TAG);
+    }
     ExFreePoolWithTag((PVOID)h, D3DPT_TAG);
     return STATUS_SUCCESS;
 }
@@ -1727,7 +1777,7 @@ static NTSTATUS APIENTRY d3dpt_create_context(IN_CONST_HANDLE h, INOUT_PDXGKARG_
     c->hContext = x;
     c->ContextInfo.DmaBufferSize = D3DPT_DMA_SIZE;
     c->ContextInfo.DmaBufferSegmentSet = 0;
-    c->ContextInfo.DmaBufferPrivateDataSize = 0;
+    c->ContextInfo.DmaBufferPrivateDataSize = reg_priv_size();
     c->ContextInfo.AllocationListSize = D3DPT_ALLOC_LIST;
     c->ContextInfo.PatchLocationListSize = D3DPT_PATCH_LIST;
     if (g_trace) {
@@ -2166,6 +2216,31 @@ typedef struct PKT_MAP_T { PKT_HDR h; ULONG first, n; PMDL mdl; ULONG mdl_off, c
  * are. */
 typedef struct PKT_REG_E { ULONG index, seg, addr; struct D3DPT_ALLOC *al; } PKT_REG_E;
 typedef struct PKT_REG_T { PKT_HDR h; ULONG n; PKT_REG_E e[1]; } PKT_REG_T;
+
+/* A Render's registration table is also written to its DMA buffer's
+ * private data, which is cached kernel memory: Patch updates it there and
+ * the submission reads it there. The DMA buffer is write-combined, so
+ * every entry read or written in it was an uncached access (~0.2 ms a
+ * submission of a Direct3D 11 game at ~290 allocations, track M25). The
+ * copy in the DMA buffer stays for a buffer whose private data carries no
+ * table (presents and paging buffers leave it empty). */
+static ULONG reg_priv_size(void)
+{
+    return FIELD_OFFSET(PKT_REG_T, e) + D3DPT_WDDM_MAX_LIST * sizeof(PKT_REG_E);
+}
+
+/* the table in a private data range, if it holds one */
+static PKT_REG_T *reg_priv(PVOID priv, ULONG start, ULONG end)
+{
+    PKT_REG_T *g = (PKT_REG_T *)((PUCHAR)priv + start);
+
+    if (!priv || end < start || end - start < (ULONG)FIELD_OFFSET(PKT_REG_T, e) || g->h.magic != D3DPT_PKT_MAGIC ||
+        g->h.op != PKT_REG || g->h.size != end - start || g->n > D3DPT_WDDM_MAX_LIST ||
+        (ULONG)FIELD_OFFSET(PKT_REG_T, e) + g->n * sizeof(PKT_REG_E) > end - start) {
+        return NULL;
+    }
+    return g;
+}
 typedef struct PKT_D3D_T { PKT_HDR h; ULONG count; } PKT_D3D_T;
 /* The records' own patches (D3DPT_PATCH_*). A host handle never changes,
  * so Render writes it; a VRAM offset is written at Patch. Neither relies
@@ -2673,6 +2748,8 @@ static void run_reg(D3DPT_ADAPTER *a, const PKT_REG_T *p)
  * whole and a multiple of 8 bytes, checked at Render): appended by the
  * device from the buffer's physical address (register set v7), which is
  * the host's copy instead of the vCPU's, else copied here. */
+static void pkt_time(ULONG op, LARGE_INTEGER t0);
+
 static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG count)
 {
     ULONG i;
@@ -2688,11 +2765,34 @@ static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG coun
             d3dpt_enc_flush(&a->enc);
         }
         pa.QuadPart += from - a->sub_va;
-        a->regs[D3DPT_FB_REG_DMA_ADDR_LO / 4] = pa.LowPart;
-        a->regs[D3DPT_FB_REG_DMA_ADDR_HI / 4] = (ULONG)pa.HighPart;
-        a->regs[D3DPT_FB_REG_DMA_BYTES / 4] = bytes;
-        a->regs[D3DPT_FB_REG_DMA_APPEND / 4] = count;
-        st = a->regs[D3DPT_FB_REG_DMA_APPEND / 4];
+        if (a->dma1) {
+            /* register set v14: the append's address and size in the
+             * window's header (memory), one register write, the answer
+             * back in the header: one exit, where the five below were
+             * ~0.5 ms of a submission under WHPX (track M25) */
+            volatile d3dpt_shm_hdr *h = (volatile d3dpt_shm_hdr *)d3dpt_enc_hdr(&a->enc);
+
+            h->dma_addr_lo = pa.LowPart;
+            h->dma_addr_hi = (ULONG)pa.HighPart;
+            h->dma_bytes = bytes;
+            h->dma_status = D3DPT_FB_DMA_BAD;
+            KeMemoryBarrier();
+            {
+                LARGE_INTEGER t0;
+
+                t0.QuadPart = g_trace ? KeQueryPerformanceCounter(NULL).QuadPart : 0;
+                a->regs[D3DPT_FB_REG_DMA_APPEND1 / 4] = count;
+                pkt_time(13, t0);   /* the append's one exit (traced timings' op 13) */
+                KeMemoryBarrier();
+                st = h->dma_status;
+            }
+        } else {
+            a->regs[D3DPT_FB_REG_DMA_ADDR_LO / 4] = pa.LowPart;
+            a->regs[D3DPT_FB_REG_DMA_ADDR_HI / 4] = (ULONG)pa.HighPart;
+            a->regs[D3DPT_FB_REG_DMA_BYTES / 4] = bytes;
+            a->regs[D3DPT_FB_REG_DMA_APPEND / 4] = count;
+            st = a->regs[D3DPT_FB_REG_DMA_APPEND / 4];
+        }
         if (st == D3DPT_FB_DMA_OK) {
             return;
         }
@@ -2726,13 +2826,17 @@ static void d3d_put(D3DPT_ADAPTER *a, const UCHAR *from, ULONG bytes, ULONG coun
 static void d3d_scope(D3DPT_ADAPTER *a, BOOLEAN open)
 {
     ULONG n = open ? a->scope_n : 0;
-    d3dpt_u32x2 *s = d3dpt_enc_cmd(&a->enc, D3DPT_OP_SCOPE, sizeof(*s), n * sizeof(ULONG));
+    LARGE_INTEGER t0;
+    d3dpt_u32x2 *s;
 
+    t0.QuadPart = g_trace ? KeQueryPerformanceCounter(NULL).QuadPart : 0;
+    s = d3dpt_enc_cmd(&a->enc, D3DPT_OP_SCOPE, sizeof(*s), n * sizeof(ULONG));
     if (s) {
         s->a = n;
         s->b = open ? 1 : 0;
         RtlCopyMemory(s + 1, a->scope_h, n * sizeof(ULONG));
     }
+    pkt_time(0, t0);                /* traced timings' op 0, not logged */
 }
 
 static void run_d3d(D3DPT_ADAPTER *a, const PKT_D3D_T *p)
@@ -2930,6 +3034,19 @@ static BOOLEAN gdi_record2(D3DPT_ADAPTER *a, const PKT_GDI2_T *p)
  * bitmap with the CPU): the host reads the frame straight into the staging
  * surface's VRAM, where the buffer's own VRAM and a copy by this CPU
  * through the BAR went before (track M25) */
+/* a Direct3D 11 buffer's present into a STAGING surface: the host's copy
+ * (gdi_present's first branch, and what makes such a present kickable) */
+static BOOLEAN present_on_host(const PKT_BLT_T *p)
+{
+    const D3DPT_ALLOC *s = p->src.al, *d = p->dst.al;
+
+    return p->h.op == PKT_BLT && d && d->d.kind == D3DPT_ALLOC_STAGING && s && s->d.kind == D3DPT_ALLOC_D3D &&
+           (s->d.caps & D3DPT_VS_D3D11) && s->handle && s->d.w && s->d.h &&
+           (d->d.format == D3DDDIFMT_A8R8G8B8 || d->d.format == D3DDDIFMT_X8R8G8B8) &&
+           (s->d.format == D3DDDIFMT_A8R8G8B8 || s->d.format == D3DDDIFMT_X8R8G8B8 || s->d.format == D3DDDIFMT_A8B8G8R8 ||
+            s->d.format == D3DDDIFMT_X8B8G8R8);
+}
+
 static BOOLEAN gdi_present(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
 {
     const D3DPT_ALLOC *s = p->src.al, *d = p->dst.al;
@@ -2937,13 +3054,18 @@ static BOOLEAN gdi_present(D3DPT_ADAPTER *a, const PKT_BLT_T *p)
     if (!a->d3d || p->h.op != PKT_BLT || !d) {
         return FALSE;
     }
-    if (d->d.kind == D3DPT_ALLOC_STAGING && s && s->d.kind == D3DPT_ALLOC_D3D && (s->d.caps & D3DPT_VS_D3D11) &&
-        s->handle && s->d.w && s->d.h && (s->d.format == D3DDDIFMT_A8R8G8B8 || s->d.format == D3DDDIFMT_X8R8G8B8)) {
-        /* (the host's GDI copies are 32 bits a pixel, BGRA) */
+    if (present_on_host(p)) {
+        /* (the host's GDI copies are 32 bits a pixel, BGRA; an RGBA source,
+         * an R8G8B8A8 swap chain's, it reads swapped (protocol v32): copied
+         * here through the BAR it came out red for blue, Unigine Heaven's
+         * dragon blue, and cost ~3 ms of each frame) */
         return gdi_record(a, D3DPT_GDI_COPY, 0, p->src.al, p->dst.al, p->r, p->n);
     }
     if (d->d.kind != D3DPT_ALLOC_GDI || d->d.source != D3DPT_GDISURF_TEXTURE) {
         return FALSE;
+    }
+    if (s && s->d.format != D3DDDIFMT_A8R8G8B8 && s->d.format != D3DDDIFMT_X8R8G8B8) {
+        return FALSE;               /* into an object only from BGRA: the host converts nothing on its GPU */
     }
     return gdi_record(a, D3DPT_GDI_COPY, 0, p->src.al, p->dst.al, p->r, p->n);
 }
@@ -3097,7 +3219,13 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
                 a->defer_addr = ((const PKT_FLIP_T *)hd)->src.addr;    /* finish_submission queues it */
                 a->defer_set = TRUE;
             } else if (((const PKT_FLIP_T *)hd)->src.seg == 1) {
-                a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
+                if (a->sub_kick) {
+                    /* the device flips after the kicked batch (ASYNC_FLIP) */
+                    a->kick_flip = TRUE;
+                    a->kick_flip_addr = ((const PKT_FLIP_T *)hd)->src.addr;
+                } else {
+                    a->regs[D3DPT_FB_REG_OFFSET / 4] = ((const PKT_FLIP_T *)hd)->src.addr;
+                }
                 a->scan_addr = ((const PKT_FLIP_T *)hd)->src.addr;
                 a->shown_pa = a->scan_addr;
             }
@@ -3110,7 +3238,7 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
             break;
         case PKT_REG:
             if (a->d3d) {
-                run_reg(a, (const PKT_REG_T *)hd);
+                run_reg(a, a->sub_reg ? a->sub_reg : (const PKT_REG_T *)hd);
             }
             break;
         case PKT_FIX: {             /* the records' VRAM offsets, where their allocations are now */
@@ -3135,7 +3263,7 @@ static void run(D3DPT_ADAPTER *a, PUCHAR p, ULONG len)
         pkt_time(hd->op, t0);
         off += hd->size;
     }
-    if (a->d3d) {                   /* one doorbell per submission */
+    if (a->d3d && !a->sub_kick) {   /* one doorbell per submission (a kicked one's is ASYNC_KICK) */
         LARGE_INTEGER t0;
 
         t0.QuadPart = g_trace ? KeQueryPerformanceCounter(NULL).QuadPart : 0;
@@ -4029,16 +4157,92 @@ static ULONG op_owned(ULONG op)
     }
 }
 
+static NTSTATUS d3dpt_render_body(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r, PUCHAR base);
+
+/* Render's own time, traced only (g_trace): the user-mode driver's
+ * RenderCb took ~1.2 ms a submission in a Direct3D 11 game, and this
+ * splits ours from dxgkrnl's (track M25) */
+static LONGLONG g_render_us, g_render_t0;
+static ULONG g_render_n, g_render_al, g_render_pl, g_render_kib, g_render_logs;
+/* its phases: the copy, the records' check, the registration, the patches */
+static LONGLONG g_render_ph[4], g_render_last;
+#define RENDER_PHASE(k) do { if (g_trace) { LONGLONG now_ = KeQueryPerformanceCounter(NULL).QuadPart; \
+    g_render_ph[k] += now_ - g_render_last; g_render_last = now_; } } while (0)
+
+/* Render into the device's scratch (cached) memory, then the DMA buffer */
+static NTSTATUS d3dpt_render_scratch(D3DPT_DEVICE *dev, IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r)
+{
+    NTSTATUS st;
+
+    if (!dev) {
+        return d3dpt_render_body(h, r, (PUCHAR)r->pDmaBuffer);
+    }
+    ExAcquireFastMutex(&dev->scratch_lock);
+    if (dev->scratch_size < r->DmaSize) {
+        if (dev->scratch) {
+            ExFreePoolWithTag(dev->scratch, D3DPT_TAG);
+        }
+        dev->scratch = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, r->DmaSize, D3DPT_TAG);
+        dev->scratch_size = dev->scratch ? r->DmaSize : 0;
+    }
+    st = d3dpt_render_body(h, r, dev->scratch ? dev->scratch : (PUCHAR)r->pDmaBuffer);
+    ExReleaseFastMutex(&dev->scratch_lock);
+    return st;
+}
+
 static DXGKDDI_RENDER d3dpt_render;
 static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r)
 {
+    LARGE_INTEGER t0, t1, f;
+    NTSTATUS st;
+    D3DPT_DEVICE *dev = h && ((D3DPT_DEVICE *)h)->magic == D3DPT_DEVICE_MAGIC ? (D3DPT_DEVICE *)h : NULL;
+
+    if (!g_trace) {
+        return d3dpt_render_scratch(dev, h, r);
+    }
+    t0 = KeQueryPerformanceCounter(&f);
+    g_render_last = t0.QuadPart;
+    g_render_al += r->AllocationListSize;
+    g_render_pl += r->PatchLocationListInSize;
+    g_render_kib += r->CommandLength >> 10;
+    st = d3dpt_render_scratch(dev, h, r);
+    t1 = KeQueryPerformanceCounter(NULL);
+    g_render_us += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
+    g_render_n++;
+    if (!g_render_t0) {
+        g_render_t0 = t1.QuadPart;
+    }
+    if (t1.QuadPart - g_render_t0 >= 5 * f.QuadPart) {
+        if (g_render_logs < 24) {
+            g_render_logs++;
+            dbg_hex("d3dptkmd: Render in 5 s: n ", g_render_n);
+            dbg_hex(" us ", (ULONG)g_render_us);
+            dbg_hex(" allocations ", g_render_al);
+            dbg_hex(" patches ", g_render_pl);
+            dbg_hex(" KiB ", g_render_kib);
+            dbg_hex(" copy ", (ULONG)(g_render_ph[0] * 1000000 / f.QuadPart));
+            dbg_hex(" check ", (ULONG)(g_render_ph[1] * 1000000 / f.QuadPart));
+            dbg_hex(" reg ", (ULONG)(g_render_ph[2] * 1000000 / f.QuadPart));
+            dbg_hex(" patch ", (ULONG)(g_render_ph[3] * 1000000 / f.QuadPart));
+            dbg_puts("\n");
+        }
+        RtlZeroMemory(g_render_ph, sizeof(g_render_ph));
+        g_render_us = 0;
+        g_render_n = g_render_al = g_render_pl = g_render_kib = 0;
+        g_render_t0 = t1.QuadPart;
+    }
+    return st;
+}
+
+static NTSTATUS d3dpt_render_body(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r, PUCHAR base)
+{
     static ULONG logged;
-    PKT_REG_T *reg = (PKT_REG_T *)r->pDmaBuffer;
+    PKT_REG_T *reg = (PKT_REG_T *)base;
     PKT_D3D_T *d3d;
     PKT_FIX_T *fix;
     D3DDDI_PATCHLOCATIONLIST *out = r->pPatchLocationListOut;
     ULONG nal = r->AllocationListSize, npl = r->PatchLocationListInSize, reg_size, fix_size, rec_bytes, i, off, count;
-    ULONG rstart, rend;
+    ULONG rstart, rend, nfix = 0;
     D3DPT_UMD_CMD hdr;
     PUCHAR rec;
     /* the device (not MultiEngineAware: no context is ever made here) */
@@ -4059,7 +4263,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         dbg_puts("\n");
         return STATUS_INVALID_PARAMETER;
     }
-    fix = (PKT_FIX_T *)((PUCHAR)r->pDmaBuffer + reg_size);
+    fix = (PKT_FIX_T *)(base + reg_size);
     d3d = (PKT_D3D_T *)((PUCHAR)fix + fix_size);
     rec = (PUCHAR)(d3d + 1);
     __try {
@@ -4068,6 +4272,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return STATUS_INVALID_PARAMETER;
     }
+    RENDER_PHASE(0);
     if (hdr.magic != D3DPT_UMD_CMD_MAGIC) {
         dbg_hex("d3dptkmd: Render: not a command buffer of ours, magic ", hdr.magic);
         dbg_puts("\n");
@@ -4133,6 +4338,7 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         dbg_puts("\n");
         return STATUS_INVALID_PARAMETER;
     }
+    RENDER_PHASE(1);
 
     pkt_hdr(&reg->h, PKT_REG, reg_size);
     reg->n = nal;
@@ -4145,18 +4351,19 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         e->al = (D3DPT_ALLOC *)r->pAllocationList[i].hDeviceSpecificAllocation;
         RtlZeroMemory(out, sizeof(*out));
         out->AllocationIndex = i;
-        out->PatchOffset = (UINT)((PUCHAR)&e->seg - (PUCHAR)r->pDmaBuffer);
+        out->PatchOffset = (UINT)((PUCHAR)&e->seg - base);
         out++;
     }
     pkt_hdr(&d3d->h, PKT_D3D, sizeof(*d3d) + rec_bytes);
     d3d->count = count;
     pkt_hdr(&fix->h, PKT_FIX, fix_size);
-    fix->n = npl;
+    fix->n = 0;                     /* the offset patches, counted below */
     /* a patch lands wholly inside one record's body, never on a header:
      * the records were checked above, and a patch on a `size` would
      * rewrite it after the check. The user-mode drivers patch as they
      * write, so the walk only moves forward; a patch before the current
      * record starts it again. */
+    RENDER_PHASE(2);
     rstart = 0;
     rend = rec_bytes ? ((const d3dpt_cmd *)rec)->size : 0;
     for (i = 0; i < npl; i++) {
@@ -4185,14 +4392,25 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
             dbg_puts("\n");
             return STATUS_INVALID_PARAMETER;
         }
-        fix->e[i].al = (D3DPT_ALLOC *)r->pAllocationList[in.AllocationIndex].hDeviceSpecificAllocation;
-        fix->e[i].kind = in.DriverId;
-        fix->e[i].add = in.AllocationOffset;
-        fix->e[i].off = (ULONG)(rec - (PUCHAR)r->pDmaBuffer) + in.PatchOffset - sizeof(hdr);
-        if (in.DriverId == D3DPT_PATCH_HANDLE) {
-            *(ULONG *)((PUCHAR)r->pDmaBuffer + fix->e[i].off) = fix->e[i].al ? fix->e[i].al->handle : 0;
+        {
+            D3DPT_ALLOC *al = (D3DPT_ALLOC *)r->pAllocationList[in.AllocationIndex].hDeviceSpecificAllocation;
+            ULONG at_dma = (ULONG)(rec - base) + in.PatchOffset - sizeof(hdr);
+
+            if (in.DriverId == D3DPT_PATCH_HANDLE) {
+                /* a handle is known now: patched here, and not in the FIX
+                 * packet, which the submission walks again (a Direct3D 11
+                 * game names ~3,000 resources a frame, all handles) */
+                *(ULONG *)(base + at_dma) = al ? al->handle : 0;
+                continue;
+            }
+            fix->e[nfix].al = al;
+            fix->e[nfix].kind = in.DriverId;
+            fix->e[nfix].add = in.AllocationOffset;
+            fix->e[nfix].off = at_dma;
+            nfix++;
         }
     }
+    fix->n = nfix;
     if (g_trace && logged < 8) {
         logged++;
         dbg_hex("d3dptkmd: Render records ", count);
@@ -4201,7 +4419,17 @@ static NTSTATUS APIENTRY d3dpt_render(IN_CONST_HANDLE h, INOUT_PDXGKARG_RENDER r
         dbg_hex(" patches ", r->PatchLocationListInSize);
         dbg_puts("\n");
     }
-    r->pDmaBuffer = rec + rec_bytes;
+    RENDER_PHASE(3);
+    if (base != (PUCHAR)r->pDmaBuffer) {
+        RtlCopyMemory(r->pDmaBuffer, base, (SIZE_T)(rec + rec_bytes - base));    /* one pass into write-combined memory */
+    }
+    /* the registration table in the private data too (reg_priv): Patch
+     * and the submission use that copy */
+    if (r->pDmaBufferPrivateData && r->DmaBufferPrivateDataSize >= reg_size) {
+        RtlCopyMemory(r->pDmaBufferPrivateData, reg, reg_size);
+        r->pDmaBufferPrivateData = (PUCHAR)r->pDmaBufferPrivateData + reg_size;
+    }
+    r->pDmaBuffer = (PUCHAR)r->pDmaBuffer + (rec + rec_bytes - base);
     r->pPatchLocationListOut = out;
     return STATUS_SUCCESS;
 }
@@ -4257,7 +4485,13 @@ static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH 
             }
         } else if (hd->op == PKT_REG) {
             PKT_REG_T *g = (PKT_REG_T *)hd;
+            PKT_REG_T *pg = reg_priv(p->pDmaBufferPrivateData, p->DmaBufferPrivateDataSubmissionStartOffset,
+                                     p->DmaBufferPrivateDataSubmissionEndOffset);
             ULONG i;
+
+            if (pg) {
+                g = pg;             /* the submission reads this one */
+            }
 
             for (i = 0; i < g->n; i++) {
                 PKT_REG_E *e = &g->e[i];
@@ -4284,6 +4518,29 @@ static NTSTATUS APIENTRY d3dpt_patch(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PATCH 
  * physical address gives it back in system space. Run it, then report the
  * fence done: through the device's DMA interrupt (register set v7, the
  * FENCE register), else as an interrupt would, from here. */
+/* a submission of a user-mode driver's records alone (its registration,
+ * fix-ups and records) or a flip that does not wait for the vertical
+ * blank (the caller checks), which the device may run on its own thread:
+ * the flip's OFFSET is the device's to write after the batch. A window's
+ * present (a BLT into its STAGING surface) is not: kicked, Windows moved
+ * the surface on before the host's copy was in it (a dimmed, slower
+ * frame, 2026-11-27) */
+static BOOLEAN kickable(PUCHAR p, ULONG len)
+{
+    ULONG off = 0;
+
+    while (off + sizeof(PKT_HDR) <= len) {
+        const PKT_HDR *hd = (const PKT_HDR *)(p + off);
+
+        if (hd->magic != D3DPT_PKT_MAGIC || hd->size < sizeof(*hd) || hd->size > len - off ||
+            (hd->op != PKT_REG && hd->op != PKT_FIX && hd->op != PKT_D3D && hd->op != PKT_FLIP)) {
+            return FALSE;
+        }
+        off += hd->size;
+    }
+    return off > 0;
+}
+
 static DXGKDDI_SUBMITCOMMAND d3dpt_submit_command;
 static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_SUBMITCOMMAND s)
 {
@@ -4308,10 +4565,24 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
         pa.QuadPart += s->DmaBufferSubmissionStartOffset;
         va = s->DmaBufferSegmentId == 0 ? (PUCHAR)MmGetVirtualForPhysical(pa) : NULL;
         if (va) {
+            ULONG len = s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset;
+
             a->sub_va = va;
             a->sub_pa = pa;
-            run(a, va, s->DmaBufferSubmissionEndOffset - s->DmaBufferSubmissionStartOffset);
+            a->sub_reg = reg_priv(s->pDmaBufferPrivateData, s->DmaBufferPrivateDataSubmissionStartOffset,
+                                  s->DmaBufferPrivateDataSubmissionEndOffset);
+            /* register set v15: a user-mode driver's render batch runs on
+             * the device's thread and its fence comes by IRQ_DMA; anything
+             * else (paging, presents, GDI, a flip) waits for the kicked
+             * batches first, and so does every fence while a flip is held
+             * for the vertical blank */
+            a->sub_kick = a->async && a->d3d && !a->flip_defer && !a->fence_held && kickable(va, len);
+            if (a->async && !a->sub_kick) {
+                a->regs[D3DPT_FB_REG_ASYNC_DRAIN / 4] = 1;
+            }
+            run(a, va, len);
             a->sub_va = NULL;
+            a->sub_reg = NULL;
         } else {
             dbg_hex("d3dptkmd: SubmitCommand: no system address for the DMA buffer, segment ",
                     s->DmaBufferSegmentId);
@@ -4322,7 +4593,17 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
         InterlockedIncrement(&g_flips_submitted);
     }
     a->fence_submitted = (LONG)s->SubmissionFenceId;
-    complete_fence(a, s->SubmissionFenceId, a->flip_defer);
+    if (a->sub_kick) {
+        /* the batch to the device's thread: the fence is done when it ran */
+        a->sub_kick = FALSE;
+        if (a->kick_flip) {
+            a->kick_flip = FALSE;
+            a->regs[D3DPT_FB_REG_ASYNC_FLIP / 4] = a->kick_flip_addr;
+        }
+        a->regs[D3DPT_FB_REG_ASYNC_KICK / 4] = (ULONG)s->SubmissionFenceId;
+    } else {
+        complete_fence(a, s->SubmissionFenceId, a->flip_defer);
+    }
     a->flip_defer = FALSE;
     a->defer_set = FALSE;
     return STATUS_SUCCESS;
@@ -4331,6 +4612,19 @@ static NTSTATUS APIENTRY d3dpt_submit_command(IN_CONST_HANDLE h, IN_CONST_PDXGKA
 /* Nothing is ever in flight but a flip held for the vertical blank, which
  * notify_preempted releases: a preemption is answered at once with every
  * fence done. */
+/* FENCE_DONE into fence_done, under the interrupt's lock (after a drain) */
+static KSYNCHRONIZE_ROUTINE sync_fence_done;
+static BOOLEAN sync_fence_done(PVOID ctx)
+{
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)ctx;
+    LONG f = (LONG)a->regs[D3DPT_FB_REG_FENCE_DONE / 4];
+
+    if (f - a->fence_done > 0) {
+        a->fence_done = f;
+    }
+    return TRUE;
+}
+
 static DXGKDDI_PREEMPTCOMMAND d3dpt_preempt_command;
 static NTSTATUS APIENTRY d3dpt_preempt_command(IN_CONST_HANDLE h, IN_CONST_PDXGKARG_PREEMPTCOMMAND p)
 {
@@ -4338,6 +4632,12 @@ static NTSTATUS APIENTRY d3dpt_preempt_command(IN_CONST_HANDLE h, IN_CONST_PDXGK
     BOOLEAN ret;
 
     a->preempt_fence = (LONG)p->PreemptionFenceId;
+    if (a->async) {
+        /* nothing kicked is in flight once this returns, and what ran is
+         * done: a batch preempted while it ran would run twice */
+        a->regs[D3DPT_FB_REG_ASYNC_DRAIN / 4] = 1;
+        a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, sync_fence_done, a, 0, &ret);
+    }
     a->dxgk.DxgkCbSynchronizeExecution(a->dxgk.DeviceHandle, notify_preempted, a, 0, &ret);
     return STATUS_SUCCESS;
 }
@@ -4345,7 +4645,19 @@ static NTSTATUS APIENTRY d3dpt_preempt_command(IN_CONST_HANDLE h, IN_CONST_PDXGK
 static DXGKDDI_QUERYCURRENTFENCE d3dpt_query_current_fence;
 static NTSTATUS APIENTRY d3dpt_query_current_fence(IN_CONST_HANDLE h, INOUT_PDXGKARG_QUERYCURRENTFENCE q)
 {
-    q->CurrentFence = (UINT)((D3DPT_ADAPTER *)h)->fence_done;
+    D3DPT_ADAPTER *a = (D3DPT_ADAPTER *)h;
+    LONG f = a->fence_done;
+
+    /* register set v15: a kicked batch's fence is the device's until its
+     * interrupt is serviced (and before the interrupt is enabled at all) */
+    if (a->async && a->regs) {
+        LONG d = (LONG)a->regs[D3DPT_FB_REG_FENCE_DONE / 4];
+
+        if (d - f > 0 && d - a->fence_submitted <= 0) {
+            f = d;
+        }
+    }
+    q->CurrentFence = (UINT)f;
     return STATUS_SUCCESS;
 }
 
@@ -4503,6 +4815,13 @@ static NTSTATUS APIENTRY d3dpt_recommend_monitor_modes(IN_CONST_HANDLE h,
     return STATUS_SUCCESS;
 }
 
+/* The device shows a 32 bpp page in either channel order (SCAN_RGB,
+ * register set v17) */
+static BOOLEAN scan_rgb(const D3DPT_ADAPTER *a)
+{
+    return a->regs[D3DPT_FB_REG_VERSION / 4] >= 17u && (a->regs[D3DPT_FB_REG_CAPS / 4] & D3DPT_FB_CAP_SCAN_RGB);
+}
+
 /* Every mode of the table on a source, or only the one whose size the
  * target has pinned. */
 static NTSTATUS fill_source_modes(const D3DPT_ADAPTER *a, const DXGK_VIDPN_INTERFACE *vi,
@@ -4519,28 +4838,38 @@ static NTSTATUS fill_source_modes(const D3DPT_ADAPTER *a, const DXGK_VIDPN_INTER
         return st;
     }
     for (i = 0; i < a->nmodes; i++) {
-        D3DKMDT_VIDPN_SOURCE_MODE *m;
-        ULONG w = a->modes[i].w, ht = a->modes[i].h;
+        /* A8R8G8B8, the format cdd.dll creates the primary in (with X8R8G8B8
+         * here the primary was refused and the desktop never shown), first;
+         * then A8B8G8R8, DXGI's R8G8B8A8_UNORM: DXGI lists a format's modes
+         * only from source modes of that format, and a game that asks for
+         * R8G8B8A8 (The Witcher 3) found none, so no resolutions and no
+         * full screen. Only on a device that shows such a page in its own
+         * channel order (SCAN_RGB, register set v17; CommitVidPn sets it) */
+        static const D3DDDIFORMAT fmts[] = { D3DDDIFMT_A8R8G8B8, D3DDDIFMT_A8B8G8R8 };
+        ULONG nf = scan_rgb(a) ? 2 : 1;
+        ULONG w = a->modes[i].w, ht = a->modes[i].h, k;
 
         if (pinned_target && (pinned_target->VideoSignalInfo.ActiveSize.cx != w ||
                               pinned_target->VideoSignalInfo.ActiveSize.cy != ht)) {
             continue;
         }
-        if (!NT_SUCCESS(si->pfnCreateNewModeInfo(hset, &m))) {
-            break;
-        }
-        m->Type = D3DKMDT_RMT_GRAPHICS;
-        m->Format.Graphics.PrimSurfSize.cx = w;
-        m->Format.Graphics.PrimSurfSize.cy = ht;
-        m->Format.Graphics.VisibleRegionSize = m->Format.Graphics.PrimSurfSize;
-        m->Format.Graphics.Stride = w * 4;
-        /* A8R8G8B8, the format cdd.dll creates the primary in (with X8R8G8B8
-         * here the primary was refused and the desktop never shown) */
-        m->Format.Graphics.PixelFormat = D3DDDIFMT_A8R8G8B8;
-        m->Format.Graphics.ColorBasis = D3DKMDT_CB_SRGB;
-        m->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
-        if (!NT_SUCCESS(si->pfnAddMode(hset, m))) {   /* two refresh rates, one size */
-            si->pfnReleaseModeInfo(hset, m);
+        for (k = 0; k < nf; k++) {
+            D3DKMDT_VIDPN_SOURCE_MODE *m;
+
+            if (!NT_SUCCESS(si->pfnCreateNewModeInfo(hset, &m))) {
+                break;
+            }
+            m->Type = D3DKMDT_RMT_GRAPHICS;
+            m->Format.Graphics.PrimSurfSize.cx = w;
+            m->Format.Graphics.PrimSurfSize.cy = ht;
+            m->Format.Graphics.VisibleRegionSize = m->Format.Graphics.PrimSurfSize;
+            m->Format.Graphics.Stride = w * 4;
+            m->Format.Graphics.PixelFormat = fmts[k];
+            m->Format.Graphics.ColorBasis = D3DKMDT_CB_SRGB;
+            m->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
+            if (!NT_SUCCESS(si->pfnAddMode(hset, m))) {   /* two refresh rates, one size */
+                si->pfnReleaseModeInfo(hset, m);
+            }
         }
     }
     st = vi->pfnAssignSourceModeSet(hvidpn, src, hset);
@@ -4778,10 +5107,16 @@ static NTSTATUS APIENTRY d3dpt_commit_vidpn(IN_CONST_HANDLE h, IN_CONST_PDXGKARG
         a->regs[D3DPT_FB_REG_BPP / 4] = 32;
         a->regs[D3DPT_FB_REG_PITCH / 4] = a->cur_pitch;
         a->regs[D3DPT_FB_REG_HZ / 4] = (a->cur_mhz + 500) / 1000;  /* the device's own timer's */
-        if (g_trace) {
+        /* an A8B8G8R8 mode (DXGI's R8G8B8A8: a full-screen swap chain
+         * flipping its own buffers) is shown red from the low byte */
+        if (scan_rgb(a)) {
+            a->regs[D3DPT_FB_REG_SCAN_RGB / 4] = m->Format.Graphics.PixelFormat == D3DDDIFMT_A8B8G8R8;
+        }
+        if (g_trace || m->Format.Graphics.PixelFormat != D3DDDIFMT_A8R8G8B8) {
             dbg_hex("d3dptkmd: CommitVidPn ", w);
             dbg_hex(" x ", ht);
             dbg_hex(" pitch ", a->cur_pitch);
+            dbg_hex(" format ", (ULONG)m->Format.Graphics.PixelFormat);
             dbg_puts("\n");
         }
         si->pfnReleaseModeInfo(hsrc, m);
@@ -5048,9 +5383,9 @@ static void note_init_status(PUNICODE_STRING reg, ULONG st)
  * and Cached (default 1) (REG_DWORD, 0: off), read once */
 static void read_settings(PUNICODE_STRING reg)
 {
-    RTL_QUERY_REGISTRY_TABLE q[5];
+    RTL_QUERY_REGISTRY_TABLE q[6];
     WCHAR path[260];
-    ULONG v = 0, cv = 1, ca = 1, tr = 0, def = 1, def0 = 0, n = reg && reg->Buffer ? reg->Length / sizeof(WCHAR) : 0;
+    ULONG v = 0, cv = 1, ca = 1, tr = 0, as = 1, def = 1, def0 = 0, n = reg && reg->Buffer ? reg->Length / sizeof(WCHAR) : 0;
 
     if (!n || n >= RTL_NUMBER_OF(path)) {
         return;
@@ -5074,11 +5409,15 @@ static void read_settings(PUNICODE_STRING reg)
     q[3] = q[0];
     q[3].Name = L"Trace";
     q[3].EntryContext = &tr;
+    q[4] = q[1];
+    q[4].Name = L"Async";
+    q[4].EntryContext = &as;
     if (NT_SUCCESS(RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE, path, q, NULL, NULL))) {
         g_gdi_accel = v != 0;
         g_gdi_cpu_visible = cv != 0;
         g_cached = ca != 0;
         g_trace = tr != 0;
+        g_async = as != 0;
     }
 }
 

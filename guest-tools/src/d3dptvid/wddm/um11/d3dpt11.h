@@ -39,8 +39,31 @@
  * nothing at all elsewhere (one flag read): a line is a register write a
  * character, a VM exit each, and a dozen of Windows 11's processes open
  * the adapter */
+#include <intrin.h>
+/* the profile's clock: the TSC on x86 / x64, the performance counter on Arm */
+static __inline ULONG64 d11_ticks(void)
+{
+#if (defined(_M_IX86) || defined(_M_X64)) && !defined(_M_ARM64EC)
+    return __rdtsc();
+#else
+    LARGE_INTEGER q;
+
+    QueryPerformanceCounter(&q);
+    return (ULONG64)q.QuadPart;
+#endif
+}
 extern BOOL g_d11_verbose;
-#define D11_TRACE(fn) do { if (g_d11_verbose) umd_log("d3d11: > %s", fn); } while (0)
+extern BOOL g_d11_msaa;                           /* multisampling offered to this process (d3dpt11.c) */
+UINT fmt_msaa_counts(UINT f);                     /* the counts a format may claim: bit 0 2x .. bit 3 16x (d3dpt11.c) */
+/* D3D11Prof (track M25): where this driver's time goes in the process,
+ * in TSC cycles per kind, logged every 5 s at a present (d11_prof_tick) */
+enum { D11P_RENDER, D11P_UPLOAD, D11P_MAP, D11P_UNMAP, D11P_QUERY, D11P_PRESENT, D11P_N };
+extern BOOL g_d11_prof;
+extern ULONG64 g_d11_prof_cyc[D11P_N], g_d11_prof_n[D11P_N], g_d11_prof_bytes[D11P_N], g_d11_calls;
+#define D11_PROF_T0() (g_d11_prof ? d11_ticks() : 0)
+#define D11_PROF_ADD(k, t0, b) do { if (g_d11_prof) { g_d11_prof_cyc[k] += d11_ticks() - (t0); g_d11_prof_n[k]++; g_d11_prof_bytes[k] += (b); } } while (0)
+void d11_prof_tick(void);
+#define D11_TRACE(fn) do { g_d11_calls++; if (g_d11_verbose) umd_log("d3d11: > %s", fn); } while (0)
 /* a query asked by the thousand (formats, multisample counts): its first
  * calls only, even traced, or it spends the log's lines */
 #define D11_TRACE_FEW(fn) do { static LONG n_; if (g_d11_verbose && InterlockedIncrement(&n_) <= 2) umd_log("d3d11: > %s", fn); } while (0)
@@ -64,6 +87,7 @@ typedef struct D11_RES {
     BOOL shared, opened, vram;                    /* vram: the layout is the allocation's */
     BOOL d3d9;                                    /* described to the host as a Direct3D 9 surface too */
     BYTE *shadow, *sent;                          /* a dynamic resource: the CPU's copy, and what the host has */
+    BYTE *shadow_mem;                             /* their heap block (shadow is it aligned to 64) */
     UINT shadow_bytes;
     UINT mapped;                                  /* subresource mapped + 1, 0: none */
     BOOL map_write;
@@ -103,9 +127,17 @@ typedef struct D11_DEV {
     UINT al_size, al_n;
     D3DDDI_PATCHLOCATIONLIST *pl;
     UINT pl_size, pl_n;
+    /* each allocation's slot in the list, by a hash of its handle: valid
+     * while gen is the buffer's al_gen (a linear walk of up to 512 slots
+     * per patch cost a game's frame ~3,000 walks) */
+    UINT al_gen;
+    struct { UINT gen, idx; } al_hash[1024];
     UINT rec_off;                                 /* the open D11 record (0: none) */
-    D11_RES *qres;                                /* the queries' result page (d11_pipe.c) */
     D11_OBJ *views;                               /* every view of this device (d11_pipe.c) */
+    /* the output merger's UAV slots (ids; v34): the DDI names the slots it
+     * changes, the host's API takes every bound one at once */
+    UINT om_uav[64];
+    BOOL om_uav_any;
     ULONG errors;
     BOOL v11_1;                                   /* made with the 11.1 interface (Windows 8 on) */
 } D11_DEV;
@@ -123,8 +155,12 @@ void cmd_reset(D11_DEV *d);
 HRESULT cmd_flush(D11_DEV *d);
 void rec_close(D11_DEV *d);
 void *cmd_rec(D11_DEV *d, UINT op, UINT body, UINT nal);
+void cmd_reserve(D11_DEV *d, UINT bytes, UINT nal);
 void *tok(D11_DEV *d, UINT op, UINT body, UINT nal);
+void *tok_z(D11_DEV *d, UINT op, UINT body, UINT zero, UINT nal);
 UINT tok_max(D11_DEV *d);
+UINT al_find(D11_DEV *d, D3DKMT_HANDLE kmt);
+UINT al_slot(D11_DEV *d, D3DKMT_HANDLE kmt);
 void patch(D11_DEV *d, void *p, D3DKMT_HANDLE kmt);
 void patch_rw(D11_DEV *d, void *p, D3DKMT_HANDLE kmt, BOOL write);
 void patch_res(D11_DEV *d, void *p, const D11_RES *r);

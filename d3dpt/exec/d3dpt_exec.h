@@ -73,6 +73,13 @@ D3DPT_EXEC_API int d3dpt_exec_probe(void);
  * Direct3D 9 records, D3DPT_EXEC_FEAT_*; asking opens what it names (M25:
  * the Direct3D 11 device). The adapter turns it into its CAP bits. */
 #define D3DPT_EXEC_FEAT_D3D11 0x1u
+/* The host's Direct3D 11 multisampling (2026-11-27, track M25): bits
+ * 8-11 the counts 2x, 4x, 8x, 16x every guest multisample format of up to
+ * 64 bits a pixel can be a target at, bits 12-15 the same for the 128-bit
+ * ones. The adapter passes them to the guest (CAPS bits 16-23), whose
+ * driver claims those counts and no others. */
+#define D3DPT_EXEC_FEAT_MSAA_SHIFT 8
+#define D3DPT_EXEC_FEAT_MSAA_MASK  0xff00u
 D3DPT_EXEC_API uint32_t d3dpt_exec_features(d3dpt_exec_t *x);
 /* Optional too (v28): finish what the executor still owes VRAM (a flip's
  * readback, D3DPT_D11_RES_SCANOUT) before the display reads it. Called
