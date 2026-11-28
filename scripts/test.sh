@@ -259,11 +259,15 @@ exec_wine_check() ( # the host test through the remote executor, its frame again
   python3 tools/bmpdiff.py "$OUT/dp2-test.bmp" "$OUT/dp2-wine.bmp" --tolerance 8 || rc=1
   return $rc
 )
+ffmpeg_vorbis() { # an ffmpeg with libvorbis for the OGG files (the Air's has only ffmpeg's experimental vorbis)
+  command -v ffmpeg >/dev/null && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q ' libvorbis '
+}
 cueaudio_check() { # a cue sheet's audio tracks as OGG, FLAC and MP3 files, decoded as read (libdisc audio.rs)
   # GOG's CD games ship each music track as an .ogg beside a .bin, with a
   # cue sheet written for DOSBox. ffmpeg makes the tracks (needed only
   # here); `discx audio` reads them back in order and in a scrambled order.
   command -v ffmpeg >/dev/null || { echo "needs ffmpeg"; return 77; }
+  ffmpeg_vorbis || { echo "needs an ffmpeg with libvorbis"; return 77; }
   local d="$OUT/cueaudio" rc=0 fmt t
   rm -rf "$d"; mkdir -p "$d"
   head -c $((2048 * 300)) /dev/zero >"$d/data.iso"
@@ -3232,9 +3236,9 @@ guest_stage() {
       if [ "$OS" = Linux ]; then
         run_check atapi-read-error atapi-read-error.log env ATAPI_READ_ERROR=1 python3 tools/atapi-guest-test.py || true
       else skip atapi-read-error "Linux only (an LD_PRELOAD over glibc's pread64)"; fi
-      if command -v ffmpeg >/dev/null; then
+      if ffmpeg_vorbis; then
         run_check atapi-cueaudio atapi-cueaudio.log env ATAPI_AUDIO=ogg python3 tools/atapi-guest-test.py || true
-      else skip atapi-cueaudio "needs ffmpeg"; fi
+      else skip atapi-cueaudio "needs an ffmpeg with libvorbis"; fi
       run_check midi-guest midi-guest.log python3 tools/midi-guest-test.py || true
       run_check pit-guest pit-guest.log python3 tools/pit-guest-test.py || true
       run_check voodoo-guest voodoo-guest.log python3 tools/voodoo-guest-test.py || true
