@@ -186,7 +186,11 @@ live in its track doc; fixed things leave this list.
   failed there too, on `build/` being a symlink, until `package-linux.sh`
   took its stage's real path on 2026-10-04; `companions-env` and
   `mode-sweep` on `NoCompositor`, until `mitsuami_check` stopped leaking its
-  Broadway `XDG_RUNTIME_DIR` on 2026-10-09.) The Mac's host stage is green
+  Broadway `XDG_RUNTIME_DIR` on 2026-10-09; `mitsuami` on its `play:` step,
+  whose player panicked with no GPU surface on Broadway before QEMU ran,
+  until it got a private headless sway on 2026-11-27; since then a player
+  with no GPU for its window exits with "Couldn't draw the window: …",
+  which the launcher shows, rather than aborting.) The Mac's host stage is green
   (with no Vulkan loader, DXVK segfaulted in the native harnesses until
   DXVK patch 17 on 2026-10-09; `dxvk-no-loader` checks it).
 

@@ -448,7 +448,8 @@ pub fn import_legacy_discs(entries: &[library::LibraryEntry], library_path: &Pat
 /// ended as it should (exit 0: the guest shut down, or the user closed
 /// it). QEMU's own complaint, read from this run's part of the player
 /// log, says why a machine didn't start (a disc image that isn't there,
-/// a disk another program holds); without one, a crash says so, and
+/// a disk another program holds), and so does the player's own (no GPU
+/// for its window); without one, a crash says so, and
 /// anything else gives the exit code. A launcher run from a terminal
 /// leaves the player's output there, not in the log, so it is the crash
 /// or the code then (`console::inherits_output`).
@@ -457,7 +458,7 @@ fn stopped_notice(name: &str, status: std::process::ExitStatus, log_from: Option
         return None;
     }
     let log = log_from.and_then(run_log);
-    if let Some(reason) = log.as_deref().and_then(qemu_error) {
+    if let Some(reason) = log.as_deref().and_then(|l| qemu_error(l).or_else(|| player_error(l))) {
         return Some((Machines::start_failed(name), reason));
     }
     if let Some(crash) = crash(status) {
@@ -501,6 +502,15 @@ fn qemu_error(log: &str) -> Option<String> {
         let message = message.trim();
         (!message.is_empty()).then(|| message.to_string())
     })
+}
+
+/// The player's own reason it couldn't run (`player::ERROR_PREFIX`):
+/// "Couldn't draw the window: no GPU surface on this display (…)."
+fn player_error(log: &str) -> Option<String> {
+    log.lines()
+        .find_map(|line| line.strip_prefix(player::ERROR_PREFIX))
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
 }
 
 /// A Rust panic's message: the line after "panicked at <place>:".

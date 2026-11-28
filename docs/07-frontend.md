@@ -36,7 +36,10 @@ commands `docs/development.md` and `docs/build-macos.md` /
   (`Machines::take_stopped`, from `reap`): exit 0 is a normal end;
   otherwise QEMU's first error in this run's part of `player.log` (read
   from where the file ended at the spawn) gives "Couldn't start “X”" and
-  the reason, else a Windows exception or a Unix signal gives "“X”
+  the reason, and so does the player's own line (`player::ERROR_PREFIX`,
+  "2ksbox-player: Couldn't draw the window: …" when wgpu has no surface,
+  adapter or device for the window: the player exits 1 rather than
+  panicking inside the toolkit's callback, which aborts), else a Windows exception or a Unix signal gives "“X”
   crashed", else "“X” stopped unexpectedly" with the code (and a panic's
   message). Every launcher with no terminal keeps the player's output in
   `player.log` (started from the desktop, Finder, a Flatpak, or a

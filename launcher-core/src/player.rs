@@ -11,6 +11,12 @@ use crate::shader_profile::ShaderProfile;
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 
+/// What starts the player's own reason for ending, a line in its
+/// output (so in `player.log`) that `machines` hands the user, as QEMU's
+/// program-prefixed errors are: "2ksbox-player: Couldn't draw the window:
+/// …". The player writes it and exits non-zero.
+pub const ERROR_PREFIX: &str = "2ksbox-player: ";
+
 /// The `player` binary: `bin/2ksbox-player` in an installed tree
 /// (`paths.rs`). In a checkout, the mitsuami player (track M22),
 /// `player-mitsuami/target/<profile>`. `LAUNCHER_PLAYER_BIN` overrides

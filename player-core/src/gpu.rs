@@ -95,8 +95,9 @@ pub struct Gpu {
 
 impl Gpu {
     /// A device for `target`'s surface, configured at `size` (physical
-    /// pixels).
-    pub fn new(target: impl Into<wgpu::SurfaceTarget<'static>>, size: (u32, u32)) -> Self {
+    /// pixels), or why there is none: a display wgpu can't make a surface
+    /// on (Broadway), no adapter that presents to it, no device.
+    pub fn new(target: impl Into<wgpu::SurfaceTarget<'static>>, size: (u32, u32)) -> Result<Self, String> {
         Self::with_backends(target, size, None)
     }
 
@@ -108,19 +109,21 @@ impl Gpu {
         target: impl Into<wgpu::SurfaceTarget<'static>>,
         size: (u32, u32),
         backends: Option<wgpu::Backends>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         if let (Some(backends), None) = (backends, std::env::var_os("WGPU_BACKEND")) {
             instance_desc.backends = backends;
         }
         let instance = wgpu::Instance::new(instance_desc);
-        let surface = instance.create_surface(target).expect("create surface");
+        let surface = instance
+            .create_surface(target)
+            .map_err(|e| format!("no GPU surface on this display ({e})"))?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             ..Default::default()
         }))
-        .expect("no suitable GPU adapter");
+        .map_err(|e| format!("no GPU that can draw on this display ({e})"))?;
         let desc = wgpu::DeviceDescriptor {
             label: Some("player"),
             // What the CRT chain needs of this adapter: clamp-to-border
@@ -140,7 +143,8 @@ impl Gpu {
         let (device, queue, zero_copy) = match opened {
             Some(t) => t,
             None => {
-                let (d, q) = pollster::block_on(adapter.request_device(&desc)).expect("request device");
+                let (d, q) = pollster::block_on(adapter.request_device(&desc))
+                    .map_err(|e| format!("the GPU didn't open ({e})"))?;
                 // macOS: IOSurface-backed Metal textures need no extensions
                 (d, q, cfg!(target_os = "macos"))
             }
@@ -176,7 +180,7 @@ impl Gpu {
 
         let mut config = surface
             .get_default_config(&adapter, size.0.max(1), size.1.max(1))
-            .expect("surface unsupported by adapter");
+            .ok_or("the GPU can't draw on this display's surface")?;
         let caps = surface.get_capabilities(&adapter);
         if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
             config.present_mode = wgpu::PresentMode::Mailbox;
@@ -258,7 +262,7 @@ impl Gpu {
         let cursor_pipeline = make_pipeline("cursor", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::ALPHA_BLENDING));
 
         let adapter_info = adapter.get_info();
-        Self {
+        Ok(Self {
             surface,
             device,
             queue,
@@ -290,7 +294,7 @@ impl Gpu {
             follows_window: false,
             min_size_changed: false,
             fixed_scale: None,
-        }
+        })
     }
 
     pub fn load_shader(&mut self, path: &std::path::Path, params: &[(String, f32)]) {
