@@ -1135,9 +1135,11 @@ impl Form {
             (true, Family::Other) => &[
                 "The host pointer moves straight into the guest. No grab, no hotkey. The guest gets a USB tablet, which reports absolute positions.",
                 "Whether it works depends on the guest: BeOS and an old XFree86 need setting up for an absolute pointer. Turn this off if the cursor doesn't move.",
+                "Ctrl+Alt+M in the player turns it off and on while the machine runs.",
             ],
             (true, _) => &[
                 "The host pointer moves straight into the guest. No grab, no hotkey. The guest gets a USB tablet, which reports absolute positions.",
+                "If a game's view sticks instead of turning, Ctrl+Alt+M in the player turns it off while the machine runs.",
             ],
             (false, _) => &[
                 "PS/2 mouse only. Click the window to take the pointer, Ctrl+Alt+G to release it.",

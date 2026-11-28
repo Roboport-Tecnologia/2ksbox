@@ -11,6 +11,7 @@ tables below is ⌥⌘ (Option+Command).
 | Keys | What |
 |---|---|
 | Ctrl+Alt+G | Release the mouse. Click in the window to take it again |
+| Ctrl+Alt+M | Seamless mouse on and off while the machine runs |
 | Ctrl+Alt+K | Send shortcuts like the Windows key and Alt+Tab to the machine, or back to your computer |
 | Ctrl+Alt+Shift+D | Ctrl+Alt+Del in the machine |
 | Ctrl+Alt+Shift+P | Pause and resume |
@@ -45,9 +46,14 @@ Windows machines start with **Seamless mouse** on. Your pointer is the
 machine's pointer, and it moves in and out of the window freely.
 
 Some games want a real PS/2 mouse that the window holds on to. Turn
-**Seamless mouse** off on the machine's **Input** page. Then a click
-takes the pointer into the window, and Ctrl+Alt+G gives it back. The
-title bar reminds you while the window holds the pointer.
+**Seamless mouse** off with *Machine* > **Seamless Mouse** (Ctrl+Alt+M)
+while the machine runs. Then a click takes the pointer into the window,
+and Ctrl+Alt+G gives it back. The title bar reminds you while the
+window holds the pointer. Ctrl+Alt+M again turns seamless mouse back on.
+
+The switch lasts until the player closes. To start a machine with
+seamless mouse off every time, turn it off on the machine's **Input**
+page.
 
 ## The window title
 

@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr;
 
-pub const API_VERSION: u32 = 18;
+pub const API_VERSION: u32 = 19;
 
 /// The system emulator this build links (`qemu-x86_64` feature: Windows
 /// 11, `qemu-aarch64`: Windows 11 on Arm; track M20), and so QEMU's own
@@ -102,6 +102,8 @@ extern "C" {
     fn qemu_embed_mouse_abs(e: *mut qemu_embed_t, x: c_int, y: c_int, w: c_int, h: c_int);
     fn qemu_embed_mouse_btn(e: *mut qemu_embed_t, button: u32, down: bool);
     fn qemu_embed_mouse_is_absolute(e: *mut qemu_embed_t) -> bool;
+    fn qemu_embed_mouse_can_switch(e: *mut qemu_embed_t) -> bool;
+    fn qemu_embed_mouse_set_relative(e: *mut qemu_embed_t, relative: bool);
     fn qemu_embed_pad_state(e: *mut qemu_embed_t, axes: *const u8, hat: u32, buttons: u32);
     fn qemu_embed_pad_present(e: *mut qemu_embed_t) -> bool;
     fn qemu_embed_input_flush(e: *mut qemu_embed_t);
@@ -257,6 +259,17 @@ impl Qemu {
     }
     pub fn mouse_is_absolute(&self) -> bool {
         unsafe { qemu_embed_mouse_is_absolute(self.0) }
+    }
+    /// Whether the machine has both the USB tablet and a relative mouse
+    /// (v19), so [`Self::mouse_set_relative`] has something to switch.
+    pub fn mouse_can_switch(&self) -> bool {
+        unsafe { qemu_embed_mouse_can_switch(self.0) }
+    }
+    /// The pointer switch (v19): true sets the tablet aside for the
+    /// relative mouse, and [`Self::mouse_is_absolute`] says false, until
+    /// it is called with false. Any thread.
+    pub fn mouse_set_relative(&self, relative: bool) {
+        unsafe { qemu_embed_mouse_set_relative(self.0, relative) }
     }
     /// The whole gamepad at once (v8, M13 path A). Four axes (X, Y, Z,
     /// Rz, `0x80` centred), a hat of 0..7 clockwise from north (8 =

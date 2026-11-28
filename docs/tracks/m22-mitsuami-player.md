@@ -85,7 +85,7 @@ embed library, into a target dir of its own:
    `wake.rs` waking the UI thread after each draw), and the menus: Machine (Send
    Ctrl+Alt+Del, its Ctrl+Alt+Shift+D shown and a tap where the window
    takes it, held while D is held where the surface does, user
-   2026-10-08; Send Shortcuts to Guest, Release Mouse, Pause, Reset,
+   2026-10-08; Send Shortcuts to Guest, Seamless Mouse (2026-11-27, embed v19), Release Mouse, Pause, Reset,
    Power Button, Close as the platform's Quit) and View (Full Screen, left
    out on macOS for AppKit's own Enter Full Screen, which `w.full`
    follows; Scale, a submenu of Largest That Fits and 1x to 4x, and Fit

@@ -15,6 +15,7 @@
 #include "ui/surface.h"
 #include "ui/input.h"
 #include "ui/clipboard.h"
+#include "qapi/qapi-commands-ui.h"
 #include "qemu-main.h"
 #include "libqemu_embed.h"
 #include "embedfx.h"
@@ -86,6 +87,11 @@ struct qemu_embed {
     unsigned in_n;
     bool in_bh_pending;
     in_stats in_st;
+
+    /* v19: the pointer switch (qemu_embed_mouse_set_relative) */
+    bool mouse_both;        /* the machine has a relative and an absolute mouse */
+    bool mouse_rel;         /* the frontend wants the relative one (atomic) */
+    bool abs_parked;        /* main loop: an absolute mouse was current and was set aside */
 
     int argc;
     char **argv;
@@ -558,6 +564,21 @@ bool qemu_embed_setenv(const char *name, const char *value)
     return name && value && g_setenv(name, value, TRUE);
 }
 
+/* The handler id of a mouse of one kind, or -1. Under the BQL. */
+static int find_mouse(bool absolute)
+{
+    MouseInfoList *mice = qmp_query_mice(NULL);
+    int index = -1;
+
+    for (MouseInfoList *m = mice; m; m = m->next) {
+        if (m->value->absolute == absolute) {
+            index = m->value->index;    /* the list is backwards: the last is QEMU's first */
+        }
+    }
+    qapi_free_MouseInfoList(mice);
+    return index;
+}
+
 qemu_embed_t *qemu_embed_new(int argc, char **argv,
                              const qemu_embed_display_cb *cb, void *ud)
 {
@@ -586,6 +607,7 @@ qemu_embed_t *qemu_embed_new(int argc, char **argv,
     qemu_init(e->argc, e->argv);
 
     e->con = qemu_console_lookup_default();
+    e->mouse_both = find_mouse(false) >= 0 && find_mouse(true) >= 0;
     e->ui_supported = qemu_console_ui_info_supported(e->con);
     /* Fires on_switch/on_update/on_cursor synchronously before returning. */
     qemu_console_register_listener(e->con, &e->dcl, &embed_dcl_ops);
@@ -823,7 +845,64 @@ void qemu_embed_mouse_btn(qemu_embed_t *e, uint32_t button, bool down)
 
 bool qemu_embed_mouse_is_absolute(qemu_embed_t *e)
 {
+    /* while the relative mouse is wanted, also in the moment before the
+     * main loop has set the tablet aside again (a guest reset makes the
+     * USB tablet take over at its first poll, hid_pointer_activate) */
+    if (e->mouse_both && qatomic_read(&e->mouse_rel)) {
+        return false;
+    }
     return qemu_input_is_absolute(e->con);
+}
+
+/*
+ * v19: the pointer switch, the HMP's `mouse_set` for the frontend. A
+ * machine with the USB tablet keeps its PS/2 mouse too, and QEMU sends
+ * motion and buttons to whichever is current; the tablet makes itself
+ * current at the guest's first poll. Wanting the relative mouse sets the
+ * tablet aside (a game's mouselook against an absolute device sticks at
+ * the screen's edge), and wanting it no more makes the tablet current
+ * again, but only if it was: a guest that has not loaded its USB driver
+ * yet keeps the PS/2 mouse.
+ *
+ * Runs on the main loop under BQL: when asked, and before every input
+ * drain, so a tablet that took over again after a guest reset goes back.
+ */
+static void apply_mouse_switch(qemu_embed_t *e)
+{
+    if (!e->mouse_both) {
+        return;
+    }
+    if (qatomic_read(&e->mouse_rel)) {
+        int rel;
+
+        if (qemu_input_is_absolute(e->con) && (rel = find_mouse(false)) >= 0 &&
+            qemu_mouse_set(rel, NULL)) {
+            e->abs_parked = true;
+        }
+    } else if (e->abs_parked) {
+        int abs = find_mouse(true);
+
+        e->abs_parked = false;
+        if (abs >= 0) {
+            qemu_mouse_set(abs, NULL);
+        }
+    }
+}
+
+static void bh_mouse_switch(void *opaque)
+{
+    apply_mouse_switch(opaque);
+}
+
+bool qemu_embed_mouse_can_switch(qemu_embed_t *e)
+{
+    return e->mouse_both;
+}
+
+void qemu_embed_mouse_set_relative(qemu_embed_t *e, bool relative)
+{
+    qatomic_set(&e->mouse_rel, relative);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), bh_mouse_switch, e);
 }
 
 /*
@@ -905,6 +984,7 @@ static void bh_input_drain(void *opaque)
         st->max_lat = 0;
     }
 
+    apply_mouse_switch(e);
     bool pointer = false;
     for (unsigned i = 0; i < n; i++) {
         in_event *ev = &batch[i];

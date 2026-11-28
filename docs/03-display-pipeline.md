@@ -304,7 +304,10 @@ grabs and the guest's hardware cursor is the host cursor (one of the
 guest's standard cursors the host's own, doc 15 "Player"); without it a
 click takes the pointer and Ctrl+Alt+G gives it back. The player follows
 the guest (`mouse_is_absolute`), so a machine can be switched without
-touching the player.
+touching the player. And while it runs: Machine > Seamless Mouse
+(Ctrl+Alt+M, 2026-11-27) sets a tablet machine's tablet aside for its
+PS/2 mouse (embed v19's `mouse_set_relative`), for one game's
+mouselook, without the settings; the bundle's setting stays the start.
 
 **Keyboard.** A key goes to the guest by **where it sits** (winit's
 physical key), since the guest has a layout of its own. The exception is
