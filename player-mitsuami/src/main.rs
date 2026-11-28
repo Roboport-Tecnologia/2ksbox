@@ -333,7 +333,17 @@ fn content(w: Window_) -> impl View {
         // frames Vulkan presents there never show (acquired and presented
         // without an error, the window empty); Direct3D 12's do.
         let backends = cfg!(windows).then_some(player_core::wgpu::Backends::DX12);
-        let mut gpu = Gpu::with_backends(handle.clone(), (size.width.max(1), size.height.max(1)), backends);
+        // No GPU for this window is the end of the run, said in a line the
+        // launcher reads back from player.log (`machines::player_error`).
+        // QEMU hasn't started, so exiting here races nothing; a panic
+        // would abort inside the toolkit's callback and read as a crash.
+        let mut gpu = match Gpu::with_backends(handle.clone(), (size.width.max(1), size.height.max(1)), backends) {
+            Ok(gpu) => gpu,
+            Err(why) => {
+                eprintln!("{}Couldn't draw the window: {why}.", launcher_core::player::ERROR_PREFIX);
+                std::process::exit(1);
+            }
+        };
         let shared = render::Shared::new(wake.notifier());
         with(|p| {
             p.input = Input::new(p.args.pad_mode);
